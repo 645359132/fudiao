@@ -18,6 +18,8 @@ import { flagInt, flagString, parseArgs, type Args } from './args';
 import { estimateCalls, estimateCost, formatUsd, type CostEstimate } from './cost';
 import { buildPort, loadExperiment, runConfig, taskModel, type Experiment, type ExperimentTask } from './experiment';
 import { loadSceneFile, type SceneFile } from './scene-file';
+import { buildViewerData } from './viewer/data';
+import { renderViewerHtml } from './viewer/html';
 
 export type Console = {
   out(text: string): void;
@@ -369,6 +371,34 @@ export async function narrateCommand(args: Args, deps: CliDeps): Promise<number>
   return 0;
 }
 
+// —— view ——
+
+/** 由运行记录生成静态查看页（单个 HTML 文件）。只读事件记录，不调用模型。 */
+export async function viewCommand(args: Args, deps: CliDeps): Promise<number> {
+  const runId = args.positionals[0];
+  if (runId === undefined) {
+    deps.console.err('用法：pnpm m0 view <运行标识>');
+    return 1;
+  }
+  const outDir = path(deps, flagString(args, 'out') ?? DEFAULT_OUT);
+  const summaryFile = join(outDir, runId, 'summary.json');
+  if (!existsSync(summaryFile)) {
+    deps.console.err(`找不到运行 ${runId} 的摘要`);
+    return 1;
+  }
+  const { scene: scenePath } = JSON.parse(readFileSync(summaryFile, 'utf8')) as { scene: string };
+  const sceneFile = loadSceneFile(readFileSync(scenePath, 'utf8'));
+  if (!sceneFile.ok) {
+    deps.console.err(`场景文件有误：${JSON.stringify(sceneFile.error)}`);
+    return 1;
+  }
+  const events = (await jsonlEventStore(outDir).read(runId)).map((e) => e.payload as RunEvent);
+  const file = join(outDir, runId, 'view.html');
+  writeFileSync(file, renderViewerHtml(buildViewerData(sceneFile.value.scene, runId, events)));
+  deps.console.out(`已生成查看页：${file}`);
+  return 0;
+}
+
 // —— motive-check ——
 
 export async function motiveCommand(args: Args, deps: CliDeps): Promise<number> {
@@ -431,6 +461,8 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
       return narrateCommand(args, deps);
     case 'motive-check':
       return motiveCommand(args, deps);
+    case 'view':
+      return viewCommand(args, deps);
     case 'report':
       deps.console.err('report 在 M0-12 实现。');
       return 1;
@@ -454,6 +486,7 @@ export const USAGE = [
   '  baseline <场景.yaml>       单次提示词对照组  [--runs N] [--length 字数] [--yes]',
   '  narrate <运行标识>         由推演记录生成节拍表与候选稿  --pov <角色> [--style 文风] [--yes]',
   '  motive-check <场景.yaml>   动机可达性检验  --actor <角色> --expect <行动>[:对象] [--samples N] [--yes]',
+  '  view <运行标识>           生成静态查看页：时间线、全局局面与角色所见',
   '  report                     生成评估材料（M0-12）',
   '',
   '真实调用前会显示预计费用并请你确认；--yes 跳过确认。API Key 从实验配置指定的环境变量读取。',

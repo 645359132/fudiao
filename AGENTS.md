@@ -26,6 +26,7 @@
 - M0-11 已完成：`m0/scenes/` 下的三个实验场景（仓库争夺密信、当铺谈判、雨夜道歉）与场景文件加载（`apps/m0-cli/src/scene-file.ts`）。
 - M0-06、M0-08 已完成：`packages/engine` 的回合状态机、两种回合协议、交互与自动模式、暂停停止与预算、作者介入与分支、证据链提示、恢复与幂等；`packages/store` 的事件存储（内存版与 JSONL 文件版）与 JSONL 调用记录。故障注入、录制回放端到端与引擎金丝雀测试均已就绪。
 - M0-09 已完成：`pnpm m0` 的 run、baseline、narrate、motive-check；实验配置 `m0/experiments/default.yaml`；运行前费用估算与确认。report 在 M0-12。
+- M0-10 已完成：`pnpm m0 view <运行标识>` 由运行记录生成单个 HTML 查看页（时间线、全局局面、角色所见），只读事件、不调用模型。
 - 下一步是 M0-07（僵局分类、导演提议、批量推演），属于推演引擎，先给出方案并获得确认。
 
 ## 工作方式
@@ -117,6 +118,10 @@ pnpm m0 run m0/scenes/warehouse.yaml --runs 1
 
 ```bash
 pnpm m0 narrate <运行标识> --pov shen_yan
+```
+
+```bash
+pnpm m0 view <运行标识>
 ```
 
 运行记录写在 `m0/runs/`（不入库）。

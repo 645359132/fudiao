@@ -147,6 +147,14 @@ describe('命令（测试模型）', () => {
     expect(beatsCall?.text).not.toContain('城南王家丢了一块相似的玉佩');
   });
 
+  it('view 生成单个 HTML 查看页', async () => {
+    const { d, lines } = deps();
+    expect(await main(['view', 'TESTRUN0000', '--out', out], d)).toBe(0);
+    const html = readFileSync(join(out, 'TESTRUN0000', 'view.html'), 'utf8');
+    expect(html).toContain('当铺夜谈');
+    expect(lines.at(-1)).toContain('view.html');
+  });
+
   it('baseline 写出对照组正文', async () => {
     const { d } = deps({ port: model.port, newId: () => 'BASE0001' });
     expect(await main(['baseline', 'm0/scenes/rainy-night.yaml', '--out', out, '--runs', '1'], d)).toBe(0);
