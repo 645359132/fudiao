@@ -9,5 +9,9 @@ coverage/
 *.log
 # 真实模型调用记录与运行产物不入库（硬性规则 18）
 m0/runs/
+# 评估包由真实模型输出生成，答案键也在其中
+m0/packets/
+m0/evaluation/round*.yaml
+!m0/evaluation/*.example.yaml
 .DS_Store
 Thumbs.db

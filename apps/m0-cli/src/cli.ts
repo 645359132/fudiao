@@ -1,23 +1,28 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { buildCharacterView, initialState, type ActorId, type KnowledgeId, type Scene } from '@novel-writer/domain';
+import { buildCharacterView, initialState, type ActorId, type KnowledgeId, type Occurrence, type Scene } from '@novel-writer/domain';
 import { createEngine, reduceRun, type RunEvent, type RunStatus } from '@novel-writer/engine';
-import { BudgetGuard, structured, type LlmPort, type LlmRequest, type LlmResult } from '@novel-writer/llm';
+import { BudgetGuard, costOf, structured, type LlmPort, type LlmRequest, type LlmResult, type Prices } from '@novel-writer/llm';
 import {
   ActionProposal,
+  BaselineOutput,
   BeatSheetOutput,
+  SynopsisOutput,
   renderBaseline,
   renderBeatSheet,
   renderCandidateText,
   renderCharacterAction,
+  renderRunSynopsis,
   renderStructuredRepair,
   type RenderedPrompt,
 } from '@novel-writer/prompts';
+import type { StoredEvent } from '@novel-writer/store';
 import { jsonlCallLog, jsonlEventStore } from '@novel-writer/store/node';
 import { flagInt, flagString, parseArgs, type Args } from './args';
 import { estimateCalls, estimateCost, formatUsd, type CostEstimate } from './cost';
 import { buildPort, loadExperiment, runConfig, taskModel, type Experiment, type ExperimentTask } from './experiment';
 import { loadSceneFile, type SceneFile } from './scene-file';
+import { analyze, loadManifest, loadSamples, writePackets } from './report/report';
 import { buildViewerData } from './viewer/data';
 import { renderViewerHtml } from './viewer/html';
 
@@ -118,9 +123,12 @@ type Summary = {
   readonly unknownCostCalls: number;
   readonly needsReview: number;
   readonly evidenceGaps: number;
+  /** 从开始到结束的墙钟时间（含作者确认的等待），毫秒。 */
+  readonly waitMs: number;
 };
 
-function summarize(outDir: string, scenePath: string, status: RunStatus, events: readonly RunEvent[]): Summary {
+function summarize(outDir: string, scenePath: string, status: RunStatus, stored: readonly StoredEvent[]): Summary {
+  const events = stored.map((e) => e.payload as RunEvent);
   const callsFile = join(outDir, status.runId, 'calls.jsonl');
   const records = existsSync(callsFile)
     ? readFileSync(callsFile, 'utf8')
@@ -140,6 +148,7 @@ function summarize(outDir: string, scenePath: string, status: RunStatus, events:
     unknownCostCalls: records.filter((r) => r.cost === null && r.status !== 'error').length,
     needsReview: status.state.needsReview.length,
     evidenceGaps: events.filter((e) => e.type === 'EvidenceGapFlagged').length,
+    waitMs: stored.length > 0 ? Date.parse(stored.at(-1)?.at ?? '') - Date.parse(stored[0]?.at ?? '') : 0,
   };
 }
 
@@ -225,8 +234,7 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
     }
     const final = await engine.status(runId, scene);
     if (!final.ok) return 1;
-    const events = (await jsonlEventStore(outDir).read(runId)).map((e) => e.payload as RunEvent);
-    const summary = summarize(outDir, scenePath, final.value, events);
+    const summary = summarize(outDir, scenePath, final.value, await jsonlEventStore(outDir).read(runId));
     writeFileSync(join(outDir, runId, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
     deps.console.out(
       `运行 ${runId}：${summary.phase}${summary.endReason ? `（${summary.endReason}）` : ''}${summary.pause ? `（暂停：${summary.pause}）` : ''}，` +
@@ -264,27 +272,48 @@ export async function baselineCommand(args: Args, deps: CliDeps): Promise<number
     return 1;
   }
   const prompt = unwrap(renderBaseline(sceneFile.scene, { targetLength: length }));
+  const model = taskModel(experiment, 'baseline');
   for (let i = 0; i < runs; i++) {
     const id = deps.newId();
-    const result = await llm.complete(request(experiment, 'baseline', prompt, `baseline:${id}`));
-    if (!result.ok || result.value.outcome !== 'completed') {
-      deps.console.err(`对照组 ${id} 失败：${result.ok ? result.value.outcome : result.error.code}`);
+    const startedAt = deps.now();
+    const result = await structured(llm, BaselineOutput, request(experiment, 'baseline', prompt, `baseline:${id}`), {
+      maxRepairs: experiment.run.maxRepairs,
+      repairMessage,
+    });
+    if (!result.ok) {
+      deps.console.err(`对照组 ${id} 失败：${result.error.code}`);
       continue;
     }
-    writeOutput(join(outDir, `baseline-${id}`), result.value, scenePath, prompt);
-    deps.console.out(`对照组 ${id}：${result.value.text.length} 字。`);
+    writeSample(join(outDir, `baseline-${id}`), {
+      text: result.value.value.text,
+      synopsis: result.value.value.synopsis,
+      meta: {
+        kind: 'baseline',
+        scene: scenePath,
+        template: prompt.template,
+        costUsd: attemptsCost(result.value.attempts, model.profile.prices),
+        waitMs: Date.parse(deps.now()) - Date.parse(startedAt),
+        servedModel: result.value.attempts.at(-1)?.servedModel ?? null,
+      },
+    });
+    deps.console.out(`对照组 ${id}：${result.value.value.text.length} 字，梗概 ${result.value.value.synopsis.length} 条。`);
   }
   return 0;
 }
 
-function writeOutput(dir: string, result: LlmResult, scenePath: string, prompt: RenderedPrompt, extra: object = {}) {
+/** 一份评估样本：正文、事件梗概与费用等元信息。评估包只取正文与梗概，元信息只进答案键。 */
+function writeSample(dir: string, sample: { text: string; synopsis: readonly string[]; meta: object }) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'text.md'), `${result.text}\n`);
-  writeFileSync(
-    join(dir, 'meta.json'),
-    `${JSON.stringify({ scene: scenePath, template: prompt.template, outcome: result.outcome, usage: result.usage, servedModel: result.servedModel, ...extra }, null, 2)}\n`,
-  );
+  writeFileSync(join(dir, 'text.md'), `${sample.text.trim()}\n`);
+  writeFileSync(join(dir, 'synopsis.md'), `${sample.synopsis.map((s) => `- ${s}`).join('\n')}\n`);
+  writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(sample.meta, null, 2)}\n`);
 }
+
+const attemptsCost = (attempts: readonly LlmResult[], prices: Prices | undefined): number | null =>
+  attempts.reduce<number | null>((sum, a) => {
+    const c = costOf(a.usage, prices);
+    return sum === null || c === null ? null : sum + c;
+  }, 0);
 
 // —— narrate ——
 
@@ -332,7 +361,7 @@ export async function narrateCommand(args: Args, deps: CliDeps): Promise<number>
 
   const estimate = estimateCost([
     { model: taskModel(experiment, 'beat_sheet'), calls: 1 },
-    { model: taskModel(experiment, 'candidate_text'), calls: 1 },
+    { model: taskModel(experiment, 'candidate_text'), calls: 2 },
   ]);
   if (!(await confirmCost(deps, args, estimate))) {
     deps.console.out('已取消。');
@@ -344,6 +373,7 @@ export async function narrateCommand(args: Args, deps: CliDeps): Promise<number>
     return 1;
   }
   const style = flagString(args, 'style');
+  const startedAt = deps.now();
   const sheetPrompt = unwrap(renderBeatSheet(view, { materials, thoughts, ...(style !== undefined && { authorNotes: style }) }));
   const sheet = await structured(llm, BeatSheetOutput, request(experiment, 'beat_sheet', sheetPrompt, `narrate:${runId}:${pov}:beats`), {
     maxRepairs: experiment.run.maxRepairs,
@@ -365,8 +395,44 @@ export async function narrateCommand(args: Args, deps: CliDeps): Promise<number>
     deps.console.err(`正文失败：${text.ok ? text.value.outcome : text.error.code}`);
     return 1;
   }
+  // 事件梗概：由同一模型读全局事件记录写出，与对照组的梗概可比（分层比较）。
+  const rounds = new Map<number, Occurrence[]>();
+  for (const e of stored.map((s) => s.payload as RunEvent)) {
+    if (e.type === 'StateChanged') rounds.set(e.round, [...(rounds.get(e.round) ?? []), ...e.occurrences]);
+  }
+  const synopsisPrompt = unwrap(
+    renderRunSynopsis(scene, state.value.sim, [...rounds].map(([round, occurrences]) => ({ round, occurrences }))),
+  );
+  const synopsis = await structured(llm, SynopsisOutput, request(experiment, 'candidate_text', synopsisPrompt, `narrate:${runId}:synopsis`), {
+    maxRepairs: experiment.run.maxRepairs,
+    repairMessage,
+  });
+  if (!synopsis.ok) {
+    deps.console.err(`事件梗概失败：${synopsis.error.code}`);
+    return 1;
+  }
+  const runSummary = JSON.parse(readFileSync(summaryFile, 'utf8')) as { costUsd: number; waitMs?: number };
+  const narrationCost = attemptsCost(
+    [...sheet.value.attempts, text.value, ...synopsis.value.attempts],
+    taskModel(experiment, 'candidate_text').profile.prices,
+  );
   const dir = join(outDir, runId, `narration-${pov}`);
-  writeOutput(dir, text.value, scenePath, textPrompt, { beats, beatSheetTemplate: sheetPrompt.template });
+  writeSample(dir, {
+    text: text.value.text,
+    synopsis: synopsis.value.value.synopsis,
+    meta: {
+      kind: 'simulation',
+      runId,
+      pov,
+      scene: scenePath,
+      template: textPrompt.template,
+      beatSheetTemplate: sheetPrompt.template,
+      synopsisTemplate: synopsisPrompt.template,
+      beats,
+      costUsd: narrationCost === null ? null : narrationCost + runSummary.costUsd,
+      waitMs: (runSummary.waitMs ?? 0) + Date.parse(deps.now()) - Date.parse(startedAt),
+    },
+  });
   deps.console.out(`已生成 ${pov} 视角的候选稿：${join(dir, 'text.md')}`);
   return 0;
 }
@@ -396,6 +462,49 @@ export async function viewCommand(args: Args, deps: CliDeps): Promise<number> {
   const file = join(outDir, runId, 'view.html');
   writeFileSync(file, renderViewerHtml(buildViewerData(sceneFile.value.scene, runId, events)));
   deps.console.out(`已生成查看页：${file}`);
+  return 0;
+}
+
+// —— report ——
+
+/**
+ * report <清单.yaml>：生成评估包（按局面与条件均衡分配、隐藏来源、答案键单独存放）。
+ * report analyze --out <评估包目录>：汇总评价者填好的评分表。两者都不调用模型。
+ */
+export function reportCommand(args: Args, deps: CliDeps): number {
+  const [first] = args.positionals;
+  if (first === 'analyze') {
+    const dir = flagString(args, 'out');
+    if (dir === undefined) {
+      deps.console.err('用法：pnpm m0 report analyze --out <评估包目录>');
+      return 1;
+    }
+    const result = analyze(path(deps, dir));
+    if (!result.ok) {
+      deps.console.err(result.error);
+      return 1;
+    }
+    writeFileSync(join(path(deps, dir), '_key', 'analysis.md'), result.value);
+    deps.console.out(result.value);
+    return 0;
+  }
+  if (first === undefined || !existsSync(path(deps, first))) {
+    deps.console.err('用法：pnpm m0 report <清单.yaml> [--out 评估包目录]');
+    return 1;
+  }
+  const manifest = loadManifest(readFileSync(path(deps, first), 'utf8'));
+  if (!manifest.ok) {
+    deps.console.err(`清单有误：${manifest.error}`);
+    return 1;
+  }
+  const samples = loadSamples(manifest.value, (p) => path(deps, p));
+  if (!samples.ok) {
+    deps.console.err(samples.error);
+    return 1;
+  }
+  const outDir = path(deps, flagString(args, 'out') ?? `m0/packets/${manifest.value.id}`);
+  const key = writePackets(outDir, manifest.value, samples.value);
+  deps.console.out(`已为 ${Object.keys(key.assignments).length} 位评价者生成评估包：${outDir}（答案键在 _key/，不要分发）`);
   return 0;
 }
 
@@ -464,8 +573,7 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     case 'view':
       return viewCommand(args, deps);
     case 'report':
-      deps.console.err('report 在 M0-12 实现。');
-      return 1;
+      return reportCommand(args, deps);
     case undefined:
     case 'help':
     case '--help':
@@ -487,7 +595,8 @@ export const USAGE = [
   '  narrate <运行标识>         由推演记录生成节拍表与候选稿  --pov <角色> [--style 文风] [--yes]',
   '  motive-check <场景.yaml>   动机可达性检验  --actor <角色> --expect <行动>[:对象] [--samples N] [--yes]',
   '  view <运行标识>           生成静态查看页：时间线、全局局面与角色所见',
-  '  report                     生成评估材料（M0-12）',
+  '  report <清单.yaml>         生成评估包：均衡分配、隐藏来源、答案键单独存放  [--out 目录]',
+  '  report analyze --out <目录> 汇总评价者填好的评分表',
   '',
   '真实调用前会显示预计费用并请你确认；--yes 跳过确认。API Key 从实验配置指定的环境变量读取。',
 ].join('\n');

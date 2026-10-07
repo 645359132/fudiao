@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -159,6 +159,35 @@ describe('命令（测试模型）', () => {
     const { d } = deps({ port: model.port, newId: () => 'BASE0001' });
     expect(await main(['baseline', 'm0/scenes/rainy-night.yaml', '--out', out, '--runs', '1'], d)).toBe(0);
     expect(readFileSync(join(out, 'baseline-BASE0001', 'text.md'), 'utf8')).toContain('雨下得更紧了');
+  });
+
+  it('baseline 与 narrate 都写出事件梗概，供分层比较', () => {
+    expect(readFileSync(join(out, 'baseline-BASE0001', 'synopsis.md'), 'utf8')).toContain('- 两人在雨夜对峙');
+    expect(readFileSync(join(out, 'TESTRUN0000', 'narration-lin_zhou', 'synopsis.md'), 'utf8')).toContain('- 两人试探');
+    const meta = JSON.parse(readFileSync(join(out, 'TESTRUN0000', 'narration-lin_zhou', 'meta.json'), 'utf8')) as { costUsd: number };
+    expect(meta.costUsd).toBeGreaterThan(0);
+  });
+
+  it('report 由清单生成评估包，report analyze 汇总评分', async () => {
+    const manifest = join(out, 'round-test.yaml');
+    writeFileSync(
+      manifest,
+      [
+        'id: round-test',
+        'evaluators: [e1, e2]',
+        'perEvaluator: 2',
+        'samples:',
+        `  - { scene: rainy, condition: baseline, dir: ${JSON.stringify(join(out, 'baseline-BASE0001'))} }`,
+        `  - { scene: pawnshop, condition: simulation, dir: ${JSON.stringify(join(out, 'TESTRUN0000', 'narration-lin_zhou'))} }`,
+      ].join('\n'),
+    );
+    const { d, lines } = deps();
+    expect(await main(['report', manifest, '--out', join(out, 'packets')], d)).toBe(0);
+    expect(lines.at(-1)).toContain('已为 2 位评价者生成评估包');
+    expect(readdirSync(join(out, 'packets', 'e1')).filter((f) => f.endsWith('.md'))).toHaveLength(3);
+    const analyzed = deps();
+    expect(await main(['report', 'analyze', '--out', join(out, 'packets')], analyzed.d)).toBe(0);
+    expect(analyzed.lines.join('\n')).toContain('# 评分汇总：round-test');
   });
 
   it('motive-check 统计采样中选择指定行动的比例', async () => {

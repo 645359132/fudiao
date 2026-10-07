@@ -5,6 +5,7 @@ import type {
   CharacterView,
   KnowledgeId,
   Observation,
+  Occurrence,
   RuleViolation,
   RulingRequest,
   Scene,
@@ -21,11 +22,13 @@ import { modelJsonSchema } from './json-schema';
 import { flag, knowledgeModel, namesOf, observationModel, violationModel, viewModel } from './models';
 import {
   ActionProposal,
+  BaselineOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
   EvidenceJudgementOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
+  SynopsisOutput,
 } from './schemas';
 
 export type TemplateId = keyof typeof TEMPLATE_SOURCES;
@@ -41,6 +44,8 @@ export type RenderedPrompt = {
 
 const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   ActionProposal,
+  BaselineOutput,
+  SynopsisOutput,
   SemanticRulingOutput,
   BeliefUpdateOutput,
   EvidenceJudgementOutput,
@@ -330,6 +335,44 @@ export function renderBaseline(scene: Scene, options: { readonly targetLength: n
     hasSecrets: scene.secrets.length > 0,
     rules: scene.rules.narrativeRules,
     hasRules: scene.rules.narrativeRules.length > 0,
+  });
+}
+
+/**
+ * 推演运行的事件梗概（M0 评估的分层比较）。作者侧提示词：读全局事件记录，
+ * 与对照组的梗概由同一模型写出，评价时不暴露来源。
+ */
+export function renderRunSynopsis(
+  scene: Scene,
+  final: SimState,
+  rounds: readonly { readonly round: number; readonly occurrences: readonly Occurrence[] }[],
+): Result<RenderedPrompt, string> {
+  const names = namesOf([...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]);
+  const asObservation = (o: Occurrence): Observation => ({
+    occurrence: o.id,
+    channel: 'participant',
+    kind: o.kind,
+    zones: o.zones,
+    ...(o.actor && { actor: o.actor }),
+    ...(o.item && { item: o.item }),
+    ...(o.target && { target: o.target }),
+    ...(o.mechanism && { mechanism: o.mechanism }),
+    ...(o.attempted && { attempted: o.attempted }),
+    ...(o.kind === 'failed_attempt' && { failed: true as const }),
+    ...(o.speech && { speech: { clarity: 'full', sentences: o.speech.sentences, volume: o.speech.volume } }),
+    ...(o.description && { description: o.description }),
+  });
+  return renderTemplate('run_synopsis', {
+    actors: scene.actors.map((a) => ({ name: a.name })),
+    rounds: rounds.map((r) => ({
+      round: r.round,
+      // 只听自己说话的“观察”“等待”之类不进入梗概。
+      events: r.occurrences.filter((o) => o.kind !== 'observe' && o.kind !== 'discovered').map((o) => observationModel(asObservation(o), names, null)),
+    })),
+    final: scene.actors.map((a) => {
+      const s = final.world.actors[a.id];
+      return { name: a.name, zone: names(s?.zone) ?? '', injury: flag(s?.injury ?? 'none'), withdrawn: s?.status === 'withdrawn' };
+    }),
   });
 }
 

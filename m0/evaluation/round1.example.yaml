@@ -1,0 +1,18 @@
+# 评估清单示例。复制为 round1.yaml，把 dir 换成实际的样本目录后运行：
+#   pnpm m0 report m0/evaluation/round1.yaml
+# 每个样本目录含 text.md（正文）、synopsis.md（事件梗概）与 meta.json（费用与等待，只进答案键）。
+# condition：baseline（单次提示词对照组）、simulation（角色推演）、
+#            director（角色推演 + 导演提议）、batch_pick（批量推演后由作者挑选）。
+
+id: round1
+seed: 20261007
+evaluators: [评价者A, 评价者B, 评价者C, 评价者D, 评价者E]
+# 每位评价者阅读的样本数：控制阅读量。
+perEvaluator: 6
+samples:
+  - { scene: warehouse, condition: baseline, dir: m0/runs/baseline-<标识> }
+  - { scene: warehouse, condition: simulation, dir: m0/runs/<运行标识>/narration-shen_yan }
+  - { scene: pawnshop, condition: baseline, dir: m0/runs/baseline-<标识> }
+  - { scene: pawnshop, condition: simulation, dir: m0/runs/<运行标识>/narration-lin_zhou }
+  - { scene: rainy-night, condition: baseline, dir: m0/runs/baseline-<标识> }
+  - { scene: rainy-night, condition: simulation, dir: m0/runs/<运行标识>/narration-a_qing }

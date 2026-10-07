@@ -186,3 +186,11 @@ export const SceneDraftOutput = z.object({
   narrativeRules: z.array(z.string()),
 });
 export type SceneDraftOutput = z.infer<typeof SceneDraftOutput>;
+
+/** 事件梗概：按发生顺序的若干条，每条一两句。 */
+export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
+export type SynopsisOutput = z.infer<typeof SynopsisOutput>;
+
+/** 单次提示词对照组：同时给出事件梗概与正文，用于分层比较（M0 评估）。 */
+export const BaselineOutput = z.object({ synopsis: z.array(z.string()), text: z.string() });
+export type BaselineOutput = z.infer<typeof BaselineOutput>;

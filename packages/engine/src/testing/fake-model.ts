@@ -88,8 +88,13 @@ export function fakeModel(policy: Policy = {}, options: { delay?: (ctx: CallCont
       const delay = options.delay?.(ctx) ?? 0;
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       const p = { ...defaults, ...policy };
+      // 评估用的两种结构化输出按输出 schema 区分，其余按任务种类。
       const output =
-        request.task === 'character_action'
+        request.output?.name === 'BaselineOutput'
+          ? { synopsis: ['两人在雨夜对峙', '一方先退了一步'], text: p.candidate_text(ctx) }
+          : request.output?.name === 'SynopsisOutput'
+            ? { synopsis: ['两人试探', '局面僵持'] }
+            : request.task === 'character_action'
           ? p.character_action(ctx)
           : request.task === 'semantic_ruling'
             ? p.semantic_ruling(ctx)

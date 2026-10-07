@@ -16,6 +16,7 @@ export {
   renderCandidateText,
   renderCharacterAction,
   renderEvidenceJudgement,
+  renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,
   renderStructuredRepair,
@@ -24,11 +25,13 @@ export {
 export { sceneDraftToSpec } from './scene-draft';
 export {
   ActionProposal,
+  BaselineOutput,
   BeatSheetOutput,
   BeatTreatment,
   BeliefUpdateOutput,
   EvidenceJudgementOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
+  SynopsisOutput,
 } from './schemas';
 export type { RulingEffect } from './schemas';

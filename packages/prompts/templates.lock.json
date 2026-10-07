@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "baseline_scene": {
-    "version": "1",
-    "sha256": "28fa41506d04426360c7488aa3480a26ccf885c259b22ec1755f3ab530da8398"
+    "version": "2",
+    "sha256": "86a1b1b567a37fb155f5007a0f0e0c7bbeee40cbe8739cfc361712c24f179268"
   },
   "beat_sheet": {
     "version": "2",
@@ -26,6 +26,10 @@
   "evidence_judgement": {
     "version": "2",
     "sha256": "64d78d0390a1208463931896e9c8b9ca80f19ea7c94fedd3e1a00c3cebadf7d6"
+  },
+  "run_synopsis": {
+    "version": "1",
+    "sha256": "ad9cfee6162e252c5a1179037f840fb6caa819ee3bfb47550825d5d617a8b9dd"
   },
   "scene_draft": {
     "version": "1",

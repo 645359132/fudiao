@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { modelJsonSchema } from './json-schema';
 import {
   ActionProposal,
+  BaselineOutput,
+  SynopsisOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
   EvidenceJudgementOutput,
@@ -9,7 +11,7 @@ import {
   SemanticRulingOutput,
 } from './schemas';
 
-const all = { ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput };
+const all = { BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput };
 
 function walk(node: unknown, visit: (n: Readonly<Record<string, unknown>>) => void): void {
   if (Array.isArray(node)) node.forEach((n) => walk(n, visit));
