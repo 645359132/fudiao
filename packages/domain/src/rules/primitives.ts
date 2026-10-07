@@ -3,7 +3,8 @@ import type { OnUnmet } from '../scene/schema';
 import type { Scene } from '../scene/validate';
 import { holds, injuryRank } from '../world';
 import { canMove, canSee, edgeBetween } from '../zone-graph';
-import { PASS, type CheckResult, type RuleCheck, type RuleViolation } from './types';
+import type { RuleCheck } from './rule-check';
+import { PASS, type CheckResult, type RuleViolation } from './types';
 
 const reject = (violation: RuleViolation): CheckResult => ({ kind: 'reject', violation });
 const unmet = (mode: OnUnmet, violation: RuleViolation): CheckResult => ({ kind: mode, violation });

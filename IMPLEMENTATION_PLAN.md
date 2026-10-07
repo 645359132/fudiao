@@ -170,21 +170,30 @@ type SimState = {
   round: number;                              // 回合阶段（RoundPhase）属于引擎的运行状态，不在领域状态中
   world: WorldState;                          // 位置、持有、资源、伤势、机关、标记
   knowledge: Record<ActorId, KnowledgeItem[]>;
-  claims: Claim[];                            // 人物说法
+  claims: Record<ClaimId, Claim>;             // 人物说法，标识取台词所属“发生的事”的标识
   rng: RngState;
 };
 
 type KnowledgeItem = {
-  id: KnowledgeId;
+  id: KnowledgeId;                            // `${holder}:${回合}:${序号}`，由事件内容确定
   holder: ActorId;
-  content: string;
+  round: number;                              // 获得时的回合，初始认知为 0
   modality: 'observed' | 'heard' | 'inferred' | 'claimed';
-  confidence: number;                         // 0 到 1
-  about?: SubjectRef;                         // 涉及的人、物或秘密条目
-  order: 1 | 2;                               // 一阶认知，或“对方认为我知道什么”
-  sourceSeq?: number;                         // 引发它的事件序号，用于因果追问
+  confidence: number | null;                  // 0 到 1；人物说法在认知更新评估前为 null
+  order: 1 | 2;                               // 一阶认知，或“concerning 认为我……”
+  concerning?: ActorId;
+  about: string[];                            // 涉及的角色、区域、物品、机关
+  body:                                       // 初始认知与推测为文本；观察由程序按感知生成；说法指向人物说法
+    | { kind: 'text'; text: string }
+    | { kind: 'observation'; observation: Observation }
+    | { kind: 'claim'; claim: ClaimId };
+  status: 'active' | 'retracted';
 };
 ```
+
+观察记录来源“发生的事”的标识与回合，因果追问由此回溯；事件序号由引擎的事件记录给出。模型只能新增推测、修改本人条目的相信程度或撤回本人条目，推测引用的对象必须出现在该角色的视图中（`planBeliefUpdate`）。
+
+角色视图（`buildCharacterView`）包含：本人的位置、伤势、持有物与计数、去掉初始认知的角色卡；公开的区域布局；此刻看得见的角色及其手中未藏匿的物品、可见区域中的物品、未隐藏或本人知道的机关；本人有效的认知条目与听清的人物说法。他人的伤势与物品计数看不见，只能推测。场景标题、题材、探索问题、秘密与他人的角色卡永远不进入视图。
 
 ### 行动提案格式
 
@@ -243,8 +252,8 @@ stateDiagram-v2
 | `ProposalSubmitted` / `ProposalRejected` | 角色、提案或拒绝原因、尝试次数、llm_call 标识 |
 | `AdjudicationProposed` / `AdjudicationConfirmed` | 裁决条目、是否待核实、确认者（作者或自动） |
 | `StateChanged` | 状态差异 |
-| `PerceptionDelivered` | 角色、按感知通道生成的观察 |
-| `BeliefsUpdated` | 角色、认知变更及其来源事件序号 |
+| `PerceptionDelivered` | 角色、按感知通道裁剪后的观察；归约时生成认知条目 |
+| `BeliefsUpdated` | 角色、新增的推测、修改的相信程度、撤回的条目 |
 | `DirectorProposed` / `DirectorApplied` | 导演提议及处理结果（P1） |
 | `AuthorIntervened` | 介入类型、变更前后、原因 |
 | `EvidenceGapFlagged` | 缺少证据链的命中 |
@@ -267,7 +276,7 @@ stateDiagram-v2
 - 声音受众：沿边累计衰减后，响度仍大于零的区域中的角色。
 - 台词：同区域的角色听到全部已说出的句子；邻近区域按响度规则可能只听到“有人在说话”。
 
-只看见的角色收到视觉描述，只听见的角色收到声音描述。例如，主角踢碎瓦片时，货架后的对手只收到“货架另一侧传来碎瓦声”。
+只看见的角色收到视觉描述，只听见的角色收到声音描述。例如，主角踢碎瓦片时，货架后的对手只收到“货架另一侧传来碎瓦声”。只听见时，角色得到声音类别（脚步、物品碰撞、打斗、人声、机关声、噪声）与离自己最近的声源区域，不得到行动者与对象；专门用来发声的物品（如碎瓦）可以从声音认出。当事人得到全部结果，包括失败原因；旁观者只知道尝试失败。
 
 ### 上下文构建
 

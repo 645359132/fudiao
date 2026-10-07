@@ -20,3 +20,13 @@ export type FlagKey = z.infer<typeof FlagKey>;
 
 export const CounterKey = key.brand<'CounterKey'>();
 export type CounterKey = z.infer<typeof CounterKey>;
+
+export const SecretId = key.brand<'SecretId'>();
+export type SecretId = z.infer<typeof SecretId>;
+
+// 以下标识由领域内核按事件内容生成，不出现在场景配置中。
+export const KnowledgeId = z.string().min(1).brand<'KnowledgeId'>();
+export type KnowledgeId = z.infer<typeof KnowledgeId>;
+
+export const ClaimId = z.string().min(1).brand<'ClaimId'>();
+export type ClaimId = z.infer<typeof ClaimId>;

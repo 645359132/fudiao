@@ -42,6 +42,41 @@ describe('parseScene', () => {
     expect(errors).toContainEqual({ code: 'duplicate_edge', path: ['edges', 5], ref: 'center|shelves' });
   });
 
+  it('检查角色卡与秘密的引用', () => {
+    const spec = warehouseSpec();
+    const card = spec.actors[0]!.card!;
+    card.initialKnowledge![0]!.about = ['nowhere'];
+    card.initialKnowledge![2]!.concerning = 'ghost';
+    spec.actors[1]!.card!.initialKnowledge![0]!.order = 2;
+    spec.secrets![0]!.subjects = ['tripwire', 'phantom'];
+    spec.secrets![0]!.knownBy = ['ghost'];
+    spec.secrets!.push({ id: 'tripwire_secret', text: '重复', subjects: ['tripwire'] });
+    expect(errorsOf(spec)).toEqual(
+      expect.arrayContaining([
+        { code: 'unknown_ref', path: ['actors', 0, 'card', 'initialKnowledge', 0, 'about', 0], ref: 'nowhere' },
+        { code: 'unknown_ref', path: ['actors', 0, 'card', 'initialKnowledge', 2, 'concerning'], ref: 'ghost' },
+        { code: 'invalid_order', path: ['actors', 1, 'card', 'initialKnowledge', 0] },
+        { code: 'unknown_ref', path: ['secrets', 0, 'subjects', 1], ref: 'phantom' },
+        { code: 'unknown_ref', path: ['secrets', 0, 'knownBy', 0], ref: 'ghost' },
+        { code: 'duplicate_id', path: ['secrets', 1, 'id'], ref: 'tripwire_secret' },
+      ]),
+    );
+  });
+
+  it('二阶认知不能指向自己', () => {
+    const spec = warehouseSpec();
+    spec.actors[0]!.card!.initialKnowledge![2]!.concerning = 'protagonist';
+    expect(errorsOf(spec)).toContainEqual({ code: 'invalid_order', path: ['actors', 0, 'card', 'initialKnowledge', 2] });
+  });
+
+  it('初始认知最多五条', () => {
+    const spec = warehouseSpec();
+    spec.actors[0]!.card!.initialKnowledge = Array.from({ length: 6 }, (_, i) => ({ text: `第${i}条` }));
+    expect(errorsOf(spec)).toContainEqual(
+      expect.objectContaining({ code: 'schema', path: ['actors', 0, 'card', 'initialKnowledge'] }),
+    );
+  });
+
   it('检出悬空引用', () => {
     const spec = warehouseSpec();
     spec.actors[0]!.zone = 'roof';

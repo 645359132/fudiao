@@ -9,9 +9,11 @@ import {
   references,
   requirements,
 } from './primitives';
-import { PASS, type CheckResult, type RuleCheck } from './types';
+import type { RuleCheck } from './rule-check';
+import { PASS, type CheckResult } from './types';
 
-export type { CheckResult, RuleCheck, RuleViolation, RuleViolationCode } from './types';
+export type { RuleCheck } from './rule-check';
+export type { CheckResult, RuleViolation, RuleViolationCode } from './types';
 
 // 责任链：按顺序检查，第一个不通过的结果即为结论。
 const CHAIN: readonly RuleCheck[] = [

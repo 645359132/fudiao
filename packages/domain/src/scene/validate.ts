@@ -7,7 +7,14 @@ declare const validated: unique symbol;
 export type Scene = SceneSpec & { readonly [validated]: true };
 
 export type SceneError = {
-  readonly code: 'schema' | 'duplicate_id' | 'unknown_ref' | 'self_loop' | 'duplicate_edge';
+  readonly code:
+    | 'schema'
+    | 'duplicate_id'
+    | 'unknown_ref'
+    | 'self_loop'
+    | 'duplicate_edge'
+    /** 二阶认知必须指向另一个角色，一阶认知不能指定 concerning。 */
+    | 'invalid_order';
   readonly path: readonly (string | number)[];
   readonly ref?: string;
 };
@@ -30,7 +37,7 @@ function checkReferences(spec: SceneSpec): SceneError[] {
   const errors: SceneError[] = [];
   const unknown = (path: SceneError['path'], ref: string) => errors.push({ code: 'unknown_ref', path, ref });
 
-  const ids = (section: 'zones' | 'actors' | 'items' | 'mechanisms', list: readonly { id: string }[]) => {
+  const ids = (section: 'zones' | 'actors' | 'items' | 'mechanisms' | 'secrets', list: readonly { id: string }[]) => {
     const seen = new Set<string>();
     list.forEach(({ id }, i) => {
       if (seen.has(id)) errors.push({ code: 'duplicate_id', path: [section, i, 'id'], ref: id });
@@ -42,6 +49,7 @@ function checkReferences(spec: SceneSpec): SceneError[] {
   const actors = ids('actors', spec.actors);
   const items = ids('items', spec.items);
   const mechanisms = ids('mechanisms', spec.mechanisms);
+  ids('secrets', spec.secrets);
   const flags = new Set(Object.keys(spec.flags));
   const anyId = new Set([...zones, ...actors, ...items, ...mechanisms]);
 
@@ -64,6 +72,26 @@ function checkReferences(spec: SceneSpec): SceneError[] {
 
   spec.actors.forEach((a, i) => {
     if (!zones.has(a.zone)) unknown(['actors', i, 'zone'], a.zone);
+    a.card.initialKnowledge.forEach((k, j) => {
+      const path = ['actors', i, 'card', 'initialKnowledge', j] as const;
+      k.about.forEach((ref, n) => {
+        if (!anyId.has(ref)) unknown([...path, 'about', n], ref);
+      });
+      if (k.concerning !== undefined && !actors.has(k.concerning)) {
+        unknown([...path, 'concerning'], k.concerning);
+      } else if (k.order === 2 ? k.concerning === undefined || k.concerning === a.id : k.concerning !== undefined) {
+        errors.push({ code: 'invalid_order', path });
+      }
+    });
+  });
+
+  spec.secrets.forEach((s, i) => {
+    s.subjects.forEach((ref, j) => {
+      if (!anyId.has(ref)) unknown(['secrets', i, 'subjects', j], ref);
+    });
+    s.knownBy.forEach((a, j) => {
+      if (!actors.has(a)) unknown(['secrets', i, 'knownBy', j], a);
+    });
   });
 
   spec.items.forEach((item, i) => {

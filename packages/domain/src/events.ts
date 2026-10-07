@@ -1,8 +1,10 @@
 import { canonicalJson, err, ok, sha256, type Result } from '@novel-writer/shared';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';
+import { claimsFromOccurrences, knowledgeFromObservations } from './cognition/knowledge';
+import type { BeliefsUpdated, Observation } from './cognition/types';
+import { applyBeliefsUpdated, type BeliefUpdateError } from './cognition/update';
 import type { ActorId } from './ids';
 import type { Occurrence } from './occurrence';
-import type { Perception } from './perception';
 import type { Scene } from './scene/validate';
 import { initialState, type SimState } from './world';
 
@@ -22,12 +24,15 @@ export type DomainEvent =
       readonly type: 'PerceptionDelivered';
       readonly round: number;
       readonly actor: ActorId;
-      readonly perceptions: readonly Perception[];
-    };
+      /** 按感知通道裁剪后的观察；归约时直接生成认知条目。 */
+      readonly observations: readonly Observation[];
+    }
+  | BeliefsUpdated;
 
 type StepError =
-  | { readonly code: 'round_mismatch' | 'hash_mismatch' }
-  | { readonly code: 'invariant'; readonly violation: InvariantViolation };
+  | { readonly code: 'round_mismatch' | 'hash_mismatch' | 'unknown_actor' }
+  | { readonly code: 'invariant'; readonly violation: InvariantViolation }
+  | { readonly code: 'invalid_belief_update'; readonly detail: BeliefUpdateError };
 
 /** index 是出错事件在列表中的位置。 */
 export type ReplayError = StepError & { readonly index: number };
@@ -50,11 +55,26 @@ function step(scene: Scene, state: SimState, event: DomainEvent): Result<SimStat
     case 'StateChanged': {
       if (event.round !== state.round) return err({ code: 'round_mismatch' });
       const next = applyEffects(scene, state, event.effects);
-      return next.ok ? next : err({ code: 'invariant', violation: next.error });
+      if (!next.ok) return err({ code: 'invariant', violation: next.error });
+      const claims = { ...next.value.claims };
+      for (const claim of claimsFromOccurrences(scene, event.round, event.occurrences)) claims[claim.id] = claim;
+      return ok({ ...next.value, claims });
     }
-    case 'PerceptionDelivered':
-      // M0-03 起由此更新角色认知。
-      return event.round === state.round ? ok(state) : err({ code: 'round_mismatch' });
+    case 'PerceptionDelivered': {
+      if (event.round !== state.round) return err({ code: 'round_mismatch' });
+      const existing = state.knowledge[event.actor];
+      if (existing === undefined) return err({ code: 'unknown_actor' });
+      const added = knowledgeFromObservations(event.actor, event.round, existing, event.observations);
+      return ok({ ...state, knowledge: { ...state.knowledge, [event.actor]: [...existing, ...added] } });
+    }
+    case 'BeliefsUpdated': {
+      if (event.round !== state.round) return err({ code: 'round_mismatch' });
+      const existing = state.knowledge[event.actor];
+      if (existing === undefined) return err({ code: 'unknown_actor' });
+      const updated = applyBeliefsUpdated(event.actor, existing, event);
+      if (!updated.ok) return err({ code: 'invalid_belief_update', detail: updated.error });
+      return ok({ ...state, knowledge: { ...state.knowledge, [event.actor]: updated.value } });
+    }
   }
 }
 

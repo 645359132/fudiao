@@ -23,12 +23,42 @@ export const warehouseSpec = (): SceneSpecInput => ({
       requiresFlag: 'office_open',
     },
   ],
+  meta: { title: '废仓库夺信', genre: '武侠', questions: ['主角能否发现南门的绊索'] },
   actors: [
-    { id: 'protagonist', name: '主角', zone: 'center', injury: 'light' },
-    { id: 'antagonist', name: '对手', zone: 'south_gate' },
+    {
+      id: 'protagonist',
+      name: '主角',
+      zone: 'center',
+      injury: 'light',
+      card: {
+        goal: '带着密信从南门脱身',
+        traits: ['谨慎'],
+        initialKnowledge: [
+          { text: '左肩有伤，抬臂受限', about: ['protagonist'] },
+          // 错误信念：对手实际还剩一支弩箭。
+          { text: '对手的弩箭已经用完', modality: 'inferred', confidence: 0.7, about: ['crossbow'] },
+          { text: '对手以为我伤得很轻', modality: 'inferred', confidence: 0.6, order: 2, concerning: 'antagonist', about: ['protagonist'] },
+        ],
+      },
+    },
+    {
+      id: 'antagonist',
+      name: '对手',
+      zone: 'south_gate',
+      card: {
+        goal: '夺信且保全自己',
+        initialKnowledge: [
+          { text: '我在南门布了绊索', about: ['tripwire', 'south_gate'] },
+          { text: '弩里只剩最后一支箭', about: ['crossbow'] },
+        ],
+      },
+    },
+  ],
+  secrets: [
+    { id: 'tripwire_secret', text: '对手在南门布置了绊索', subjects: ['tripwire', 'south_gate'], knownBy: ['antagonist'] },
   ],
   items: [
-    { id: 'letter', name: '密信', location: { kind: 'actor', actor: 'protagonist' } },
+    { id: 'letter', name: '密信', location: { kind: 'actor', actor: 'protagonist' }, concealed: true },
     { id: 'dagger', name: '短刀', location: { kind: 'actor', actor: 'protagonist' }, reach: 'melee' },
     {
       id: 'crossbow',

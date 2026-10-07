@@ -1,7 +1,3 @@
-import type { Action } from '../actions';
-import type { Scene } from '../scene/validate';
-import type { SimState } from '../world';
-
 export type RuleViolationCode =
   | 'actor_unknown'
   | 'actor_withdrawn'
@@ -39,7 +35,5 @@ export type CheckResult =
   | { readonly kind: 'pass' }
   | { readonly kind: 'reject'; readonly violation: RuleViolation }
   | { readonly kind: 'fail'; readonly violation: RuleViolation };
-
-export type RuleCheck = (scene: Scene, state: SimState, action: Action) => CheckResult;
 
 export const PASS: CheckResult = { kind: 'pass' };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ActorId, CounterKey, FlagKey, ItemId, MechanismId, ZoneId } from '../ids';
+import { ActorId, CounterKey, FlagKey, ItemId, MechanismId, SecretId, ZoneId } from '../ids';
 
 export const ActionKind = z.enum([
   'observe',
@@ -51,11 +51,43 @@ export const EdgeSpec = z.object({
 });
 export type EdgeSpec = z.infer<typeof EdgeSpec>;
 
+export const Modality = z.enum(['observed', 'heard', 'inferred', 'claimed']);
+export type Modality = z.infer<typeof Modality>;
+
+const Confidence = z.number().min(0).max(1);
+
+/** 角色卡中的初始认知。秘密与错误信念都写成初始认知；人物说法只能来自台词。 */
+export const InitialKnowledge = z.object({
+  text: z.string().min(1),
+  modality: z.enum(['observed', 'heard', 'inferred']).default('observed'),
+  confidence: Confidence.default(1),
+  /** 涉及的角色、区域、物品或机关的键。 */
+  about: z.array(z.string().min(1)).default([]),
+  /** 1 为一阶认知；2 为“concerning 认为我……”的推测。 */
+  order: z.union([z.literal(1), z.literal(2)]).default(1),
+  concerning: ActorId.optional(),
+});
+
+/** 角色卡（B23）。只进入角色本人的视图。 */
+export const CharacterCard = z.object({
+  goal: z.string().optional(),
+  bottomLine: z.string().optional(),
+  traits: z.array(z.string()).default([]),
+  riskPreference: z.string().optional(),
+  emotionThreshold: z.string().optional(),
+  lossOfControl: z.string().optional(),
+  speechStyle: z.string().optional(),
+  // 首版原型每个角色最多五条初始认知（需求 I04“首版原型范围”）。
+  initialKnowledge: z.array(InitialKnowledge).max(5).default([]),
+});
+export type CharacterCard = z.infer<typeof CharacterCard>;
+
 export const ActorSpec = z.object({
   id: ActorId,
   name: z.string().min(1),
   zone: ZoneId,
   injury: InjuryLevel.default('none'),
+  card: CharacterCard.prefault({}),
 });
 
 export const ItemSpec = z.object({
@@ -67,6 +99,25 @@ export const ItemSpec = z.object({
   reach: z.enum(['melee', 'ranged']).optional(),
   /** 使用时由程序直接结算的效果；未配置时 use_item 交给语义裁决。 */
   use: z.object({ loudness: Amount }).optional(),
+  /** 被持有时他人看不见，例如藏在怀里的密信。 */
+  concealed: z.boolean().default(false),
+});
+
+/** 作者标记的秘密。text 只给作者与命中判断使用，永远不进入角色视图。 */
+export const SecretSpec = z.object({
+  id: SecretId,
+  text: z.string().min(1),
+  /** 涉及的对象，用于筛选与秘密相关的推测。 */
+  subjects: z.array(z.string().min(1)).min(1),
+  /** 合法知道该秘密的角色，其推测不需要证据链。 */
+  knownBy: z.array(ActorId).default([]),
+});
+
+/** 场景标题、题材与探索问题只供作者使用，不进入角色视图（B44）。 */
+export const SceneMeta = z.object({
+  title: z.string().optional(),
+  genre: z.string().optional(),
+  questions: z.array(z.string()).default([]),
 });
 
 export const ConsumptionRule = z.object({
@@ -133,11 +184,13 @@ export const LoudnessTable = z.object({
 export type LoudnessTable = z.infer<typeof LoudnessTable>;
 
 export const SceneSpec = z.object({
+  meta: SceneMeta.prefault({}),
   zones: z.array(ZoneSpec).min(1),
   edges: z.array(EdgeSpec).default([]),
   actors: z.array(ActorSpec).min(1),
   items: z.array(ItemSpec).default([]),
   mechanisms: z.array(MechanismSpec).default([]),
+  secrets: z.array(SecretSpec).default([]),
   flags: z.record(FlagKey, z.boolean()).default({}),
   /** 可以撤离的区域；为空时任意区域都可撤离。 */
   exits: z.array(ZoneId).default([]),

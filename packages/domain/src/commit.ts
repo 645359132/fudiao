@@ -1,5 +1,6 @@
 import { err, ok, type Result } from '@novel-writer/shared';
 import type { Adjudication } from './adjudicate';
+import { observe } from './cognition/observation';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';
 import { replayFrom, type DomainEvent } from './events';
 import { triggerOnEntry, type Entry } from './mechanisms';
@@ -78,6 +79,7 @@ export function commitRound(
   const occurrences: Occurrence[] = drafts.map((o, i) => ({ id: `${state.round}:${i}`, ...o }));
   const perceptions = occurrences.flatMap((o) => perceive(scene, state.world, o));
 
+  const byId = new Map(occurrences.map((o) => [o.id, o]));
   const recipients = [...new Set(perceptions.map((p) => p.actor))].sort();
   const events: DomainEvent[] = [
     { type: 'StateChanged', round: state.round, effects, occurrences },
@@ -86,7 +88,13 @@ export function commitRound(
         type: 'PerceptionDelivered',
         round: state.round,
         actor,
-        perceptions: perceptions.filter((p) => p.actor === actor),
+        observations: perceptions
+          .filter((p) => p.actor === actor)
+          .flatMap((p) => {
+            const occurrence = byId.get(p.occurrence);
+            const zone = state.world.actors[actor]?.zone;
+            return occurrence && zone ? [observe(scene, occurrence, p, zone)] : [];
+          }),
       }),
     ),
   ];

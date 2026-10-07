@@ -2,33 +2,18 @@ import { describe, expect, it } from 'vitest';
 import type { Action } from './actions';
 import { adjudicate } from './adjudicate';
 import { commitRound, type RoundCommit } from './commit';
+import { crowded as crowdedScene, run } from './testing/round';
 import { replayFrom } from './events';
 import type { ActorId } from './ids';
 import type { SemanticRuling } from './rulings';
 import type { Scene } from './scene/validate';
 import { withEffects } from './testing/state';
-import { A, P, actor, item, warehouse, zone } from './testing/warehouse';
+import { A, P, actor, item, zone } from './testing/warehouse';
 import { initialState, type SimState } from './world';
 
 const W = actor('watchman');
 
-/** 巡夜人站在仓库中央，用来观察受众与裁决范围。 */
-const crowded = warehouse((s) => {
-  s.actors.push({ id: 'watchman', name: '巡夜人', zone: 'center' });
-});
-
-function run(
-  scene: Scene,
-  state: SimState,
-  actions: readonly Action[],
-  rulings: readonly SemanticRuling[] = [],
-): RoundCommit {
-  const adjudication = adjudicate(scene, state, actions);
-  if (!adjudication.ok) throw new Error(JSON.stringify(adjudication.error));
-  const commit = commitRound(scene, state, adjudication.value, rulings);
-  if (!commit.ok) throw new Error(JSON.stringify(commit.error));
-  return commit.value;
-}
+const crowded = crowdedScene();
 
 const tryCommit = (scene: Scene, state: SimState, actions: readonly Action[], rulings: readonly SemanticRuling[]) => {
   const adjudication = adjudicate(scene, state, actions);

@@ -1,4 +1,6 @@
-import type { ActorId, CounterKey, FlagKey, ItemId, MechanismId, ZoneId } from './ids';
+import { initialKnowledge } from './cognition/knowledge';
+import type { Claim, KnowledgeItem } from './cognition/types';
+import type { ActorId, ClaimId, CounterKey, FlagKey, ItemId, MechanismId, ZoneId } from './ids';
 import { seedRng, type RngState } from './rng';
 import type { InjuryLevel } from './scene/schema';
 import type { Scene } from './scene/validate';
@@ -30,10 +32,14 @@ export type WorldState = {
   readonly flags: Readonly<Record<FlagKey, boolean>>;
 };
 
-/** 领域内核负责的推演状态。认知与人物说法在 M0-03 加入；回合阶段属于引擎。 */
+/** 领域内核负责的推演状态。回合阶段属于引擎的运行状态。 */
 export type SimState = {
   readonly round: number;
   readonly world: WorldState;
+  /** 各角色的认知，可以与世界事实不同。 */
+  readonly knowledge: Readonly<Record<ActorId, readonly KnowledgeItem[]>>;
+  /** 人物说法：说出的内容，不是事实。 */
+  readonly claims: Readonly<Record<ClaimId, Claim>>;
   readonly rng: RngState;
 };
 
@@ -60,7 +66,13 @@ export function initialWorld(scene: Scene): WorldState {
 }
 
 export function initialState(scene: Scene, seed: number): SimState {
-  return { round: 0, world: initialWorld(scene), rng: seedRng(seed) };
+  return {
+    round: 0,
+    world: initialWorld(scene),
+    knowledge: initialKnowledge(scene),
+    claims: {},
+    rng: seedRng(seed),
+  };
 }
 
 /** 物品此刻所在的区域：被持有时取持有者的区域。 */
