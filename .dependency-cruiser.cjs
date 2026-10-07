@@ -1,7 +1,8 @@
 // 依赖边界检查。规则来源：AGENTS.md“仓库结构与依赖方向”、施工文档第三章。
 // 依赖只能向内：apps → engine / context / store / llm → domain → shared。
 
-const TEST_FILE = '\\.test\\.ts$';
+// 测试文件与 src/testing/ 下的测试辅助代码（夹具、随机生成器）。
+const TEST_FILE = '(\\.test\\.ts$|/src/testing/)';
 
 // 领域内核与 shared 可以使用的第三方包。新增前须说明理由与许可证（AGENTS.md“工作方式”）。
 const PURE_NPM_ALLOWLIST = ['zod'];
@@ -67,6 +68,13 @@ module.exports = {
       comment: '产品代码不得导入开发依赖（测试文件除外）。',
       from: { path: '^(packages|apps)/[^/]+/src/', pathNot: TEST_FILE },
       to: { dependencyTypes: ['npm-dev'] },
+    },
+    {
+      name: 'not-to-testing',
+      severity: 'error',
+      comment: '产品代码不得导入 src/testing/ 下的测试辅助代码。',
+      from: { path: '^(packages|apps)/[^/]+/src/', pathNot: TEST_FILE },
+      to: { path: '/src/testing/' },
     },
     {
       name: 'no-undeclared-npm',

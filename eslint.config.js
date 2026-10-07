@@ -25,6 +25,11 @@ export default defineConfig(
     },
   },
   {
+    // Vitest 的非对称匹配器（expect.objectContaining 等）类型为 any。
+    files: ['**/*.test.ts'],
+    rules: { '@typescript-eslint/no-unsafe-assignment': 'off' },
+  },
+  {
     files: ['**/*.js', '**/*.cjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },

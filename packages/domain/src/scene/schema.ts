@@ -1,0 +1,156 @@
+import { z } from 'zod';
+import { ActorId, CounterKey, FlagKey, ItemId, MechanismId, ZoneId } from '../ids';
+
+export const ActionKind = z.enum([
+  'observe',
+  'move',
+  'probe',
+  'attack',
+  'defend',
+  'use_item',
+  'take',
+  'drop',
+  'speak',
+  'withdraw',
+  'wait',
+  'other',
+]);
+export type ActionKind = z.infer<typeof ActionKind>;
+
+export const InjuryLevel = z.enum(['none', 'light', 'severe', 'incapacitated']);
+export type InjuryLevel = z.infer<typeof InjuryLevel>;
+
+export const Volume = z.enum(['whisper', 'normal', 'shout']);
+export type Volume = z.infer<typeof Volume>;
+
+/** 当前尚未达到或无法满足条件时，提案被拒绝（请求修正）还是形成失败尝试。 */
+export const OnUnmet = z.enum(['reject', 'fail']);
+export type OnUnmet = z.infer<typeof OnUnmet>;
+
+const Amount = z.number().int().nonnegative();
+const Counters = z.record(CounterKey, Amount);
+
+export const ItemLocation = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('actor'), actor: ActorId }),
+  z.object({ kind: z.literal('zone'), zone: ZoneId }),
+]);
+export type ItemLocation = z.infer<typeof ItemLocation>;
+
+export const ZoneSpec = z.object({ id: ZoneId, name: z.string().min(1) });
+
+export const EdgeSpec = z.object({
+  between: z.tuple([ZoneId, ZoneId]),
+  /** 可以在一回合内移动通过。 */
+  adjacent: z.boolean(),
+  /** 两区域互相可见。视线不传递。 */
+  visible: z.boolean(),
+  /** 声音经过这条边时的衰减量；null 表示声音无法通过。 */
+  sound: Amount.nullable(),
+  /** 只有该标记为 true 时才能通行，例如锁住的门。 */
+  requiresFlag: FlagKey.optional(),
+});
+export type EdgeSpec = z.infer<typeof EdgeSpec>;
+
+export const ActorSpec = z.object({
+  id: ActorId,
+  name: z.string().min(1),
+  zone: ZoneId,
+  injury: InjuryLevel.default('none'),
+});
+
+export const ItemSpec = z.object({
+  id: ItemId,
+  name: z.string().min(1),
+  location: ItemLocation,
+  counters: Counters.default({}),
+  /** 作为武器时的距离：近战要求同区域，远程要求可见。 */
+  reach: z.enum(['melee', 'ranged']).optional(),
+  /** 使用时由程序直接结算的效果；未配置时 use_item 交给语义裁决。 */
+  use: z.object({ loudness: Amount }).optional(),
+});
+
+export const ConsumptionRule = z.object({
+  item: ItemId,
+  counter: CounterKey,
+  kinds: z.array(ActionKind).min(1),
+  amount: z.number().int().positive(),
+  whenEmpty: OnUnmet,
+});
+
+export const InjuryLimit = z.object({
+  /** 未填写时适用于所有角色。 */
+  actor: ActorId.optional(),
+  atLeast: InjuryLevel,
+  forbidKinds: z.array(ActionKind).default([]),
+  forbidItems: z.array(ItemId).default([]),
+});
+
+export const Requirement = z.object({
+  /** 行动的 target，可以是角色、区域、物品或机关的键。 */
+  target: z.string().min(1),
+  /** 未填写时适用于所有行动种类。 */
+  kinds: z.array(ActionKind).optional(),
+  requiresHolding: ItemId,
+  whenMissing: OnUnmet,
+  onSuccess: z.object({ setFlag: FlagKey, value: z.boolean() }).optional(),
+});
+
+export const MechanismSpec = z.object({
+  id: MechanismId,
+  name: z.string().min(1),
+  zone: ZoneId,
+  trigger: z.literal('enter'),
+  exempt: z.array(ActorId).default([]),
+  /** 隐藏的机关只能由同区域的 observe 发现。 */
+  hidden: z.boolean().default(true),
+  effect: z.object({
+    /** 伤势加重的等级数。 */
+    injury: Amount.default(0),
+    loudness: Amount,
+  }),
+});
+
+export const LoudnessTable = z.object({
+  observe: Amount.default(0),
+  move: Amount.default(1),
+  probe: Amount.default(1),
+  attack: Amount.default(3),
+  defend: Amount.default(0),
+  use_item: Amount.default(1),
+  take: Amount.default(1),
+  drop: Amount.default(1),
+  withdraw: Amount.default(1),
+  other: Amount.default(1),
+  failed: Amount.default(1),
+  speak: z
+    .object({
+      whisper: z.number().int().positive().default(1),
+      normal: z.number().int().positive().default(2),
+      shout: z.number().int().positive().default(4),
+    })
+    .prefault({}),
+});
+export type LoudnessTable = z.infer<typeof LoudnessTable>;
+
+export const SceneSpec = z.object({
+  zones: z.array(ZoneSpec).min(1),
+  edges: z.array(EdgeSpec).default([]),
+  actors: z.array(ActorSpec).min(1),
+  items: z.array(ItemSpec).default([]),
+  mechanisms: z.array(MechanismSpec).default([]),
+  flags: z.record(FlagKey, z.boolean()).default({}),
+  /** 可以撤离的区域；为空时任意区域都可撤离。 */
+  exits: z.array(ZoneId).default([]),
+  rules: z
+    .object({
+      consumption: z.array(ConsumptionRule).default([]),
+      injuryLimits: z.array(InjuryLimit).default([]),
+      requirements: z.array(Requirement).default([]),
+      /** 多人同轮拾取同一物品：draw 用推演状态中的随机数抽取，ruling 交给语义裁决。 */
+      contests: z.object({ take: z.enum(['draw', 'ruling']).default('ruling') }).prefault({}),
+    })
+    .prefault({}),
+  loudness: LoudnessTable.prefault({}),
+});
+export type SceneSpecInput = z.input<typeof SceneSpec>;
+export type SceneSpec = z.infer<typeof SceneSpec>;

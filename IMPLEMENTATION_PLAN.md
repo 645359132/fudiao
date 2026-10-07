@@ -167,8 +167,7 @@ novel-writer/
 ```ts
 // packages/domain —— 示意，非最终定义
 type SimState = {
-  round: number;
-  phase: RoundPhase;
+  round: number;                              // 回合阶段（RoundPhase）属于引擎的运行状态，不在领域状态中
   world: WorldState;                          // 位置、持有、资源、伤势、机关、标记
   knowledge: Record<ActorId, KnowledgeItem[]>;
   claims: Claim[];                            // 人物说法
@@ -191,7 +190,8 @@ type KnowledgeItem = {
 
 ```ts
 const ActionProposal = z.object({
-  kind: z.enum(['observe', 'move', 'probe', 'attack', 'defend', 'use_item', 'speak', 'withdraw', 'wait', 'other']),
+  kind: z.enum(['observe', 'move', 'probe', 'attack', 'defend', 'use_item', 'take', 'drop', 'speak', 'withdraw', 'wait', 'other']),
+  // take 拾取所在区域内无人持有的物品，drop 放下；从他人手中夺取经 attack 或语义裁决
   target: z.string().optional(),
   item: z.string().optional(),
   toZone: z.string().optional(),
@@ -203,6 +203,8 @@ const ActionProposal = z.object({
   inferences: z.array(z.object({ about: z.string(), content: z.string(), confidence: z.number() })),
 });
 ```
+
+该 schema 是模型输出的格式，位于 `packages/prompts`；引擎把它转换为领域层的 `Action`（标识已解析）后交给规则检查与裁决。
 
 内心片段与推测条目在行动提案的同一次调用中返回，不额外请求模型。`beliefRefs` 是因果追问的连接点，提交时校验其引用的条目确实存在于该角色的视图中。
 

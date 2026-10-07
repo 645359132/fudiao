@@ -61,6 +61,11 @@ describe('依赖边界规则', () => {
   it('产品代码不得导入开发依赖，测试文件可以', () => {
     expect(rulesFor('packages/engine/src/imports-dev-dep.ts')).toEqual(['not-to-dev-dep']);
     expect(rulesFor('packages/engine/src/allowed.test.ts')).toEqual([]);
+    expect(rulesFor('packages/domain/src/testing/helper.ts')).toEqual([]);
+  });
+
+  it('产品代码不得导入测试辅助代码', () => {
+    expect(rulesFor('packages/domain/src/imports-testing.ts')).toEqual(['not-to-testing']);
   });
 
   it('检出循环依赖', () => {
