@@ -69,3 +69,5 @@ export type {
 } from './world';
 export { holds, initialState, injuryRank, itemZone } from './world';
 export { canMove, canSee, soundReach } from './zone-graph';
+export type { StoryTime } from './story-time';
+export { compareStoryTime, isStoryTime, withinStoryRange } from './story-time';

@@ -120,18 +120,18 @@ novel-writer/
 
 ### 主要数据表
 
-以下为首版表结构的要点，字段名为示意，具体类型在迁移脚本中确定。
+以下为首版表结构的要点；M1-03 已建的表以 `packages/store/migrations/0001_init.sql` 为准，其余表在各自的任务中加迁移。全部表为 `STRICT`；标识为 ULID 文本，系统时间为 UTC ISO 文本；可变记录带 `version`（乐观并发与来源版本）、`created_at`、`updated_at`。故事时间存为标签与可选排序键两列（见第五章“领域对象”）。表的清单与列由 `packages/store/src/schema.ts` 维护，测试校验它与实际结构一致。
 
 | 表 | 关键字段 | 相关需求 |
 | --- | --- | --- |
-| `project` | id、title、genre、synopsis、outline、goals、schema_version | B01 |
-| `chapter` | id、order_key、title、summary、notes、status（正常、回收站） | B02 |
-| `paragraph` | id、chapter_id、order_key、text、version、source_kind（手写、AI 生成、AI 生成后修改、混合）、source_spans、ai_origin_text | B04、B33 |
-| `chapter_snapshot` | id、chapter_id、reason、created_at、paragraphs（JSON） | B06、B17 |
+| `project` | id、title、genre、synopsis、outline、goals；每个作品库只有一行，结构版本记录在 `schema_migrations` | B01 |
+| `chapter` | id、order_key、title、summary、notes、status（正常、回收站）、trashed_at | B02 |
+| `paragraph` | id、chapter_id、order_key（章内唯一）、text、version、source_kind（手写、AI 生成、AI 生成后修改、混合）、source_spans、ai_origin_text、split_from | B04、B33 |
+| `chapter_snapshot` | id、chapter_id、reason（手动、恢复前、接受候选稿、导入）、title、created_at、paragraphs（JSON） | B06、B17 |
 | `entity` | id、kind（人物、地点、组织、物品、规则）、name、aliases、data、locked、version | B09 |
-| `fact` | id、kind（世界事实、角色认知、人物说法）、holder_id、subject_ids、content、modality（观察、听闻、推测、说法）、confidence、story_time_from、story_time_to、status（候选、已确认、待复核、已驳回）、version | B11 |
+| `fact` | id、kind（世界事实、角色认知、人物说法；后两者必须有持有者）、holder_id、subject_ids、content、modality（观察、听闻、推测、说法）、confidence、适用章节范围（valid_from/to_chapter_id）、适用故事时间范围（valid_from/to 的标签与排序键）、status（候选、已确认、待复核、已驳回）、review_reason、version | B11 |
 | `source_ref` | from_type、from_id、to_type、to_id、to_version、anchor | B12、来源定位 |
-| `story_event` | id、story_time、summary、participants、location_id、perceptions、origin_run_id、origin_seq | B55、I07 |
+| `story_event` | id、故事时间（标签与排序键）、summary、participants、location_id、perceptions、origin_run_id、origin_seq | B55、I07 |
 | `event_paragraph_link` | event_id、paragraph_id、mode（正面叙述、回忆、转述、暗示） | B55 |
 | `sim_scene` | id、chapter_id、config（JSON）、config_version、protocol | B22、B39 至 B41 |
 | `sim_run` | id、scene_id、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、status、end_reason | B28、B48 |
@@ -191,6 +191,8 @@ type KnowledgeItem = {
   status: 'active' | 'retracted';
 };
 ```
+
+故事时间（`packages/domain/src/story-time.ts`）：`{ label, order }`，标签是作者写的说法（“第三年春”“雨夜二更”），只用于显示；可选的数值排序键用于比较与按故事时间筛选，没有排序键的不参与筛选（`compareStoryTime`、`withinStoryRange` 返回不可判断）。故事时间与系统时间不混用。
 
 观察记录来源“发生的事”的标识与回合，因果追问由此回溯；事件序号由引擎的事件记录给出。模型只能新增推测、修改本人条目的相信程度或撤回本人条目，推测引用的对象必须出现在该角色的视图中（`planBeliefUpdate`）。
 

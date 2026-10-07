@@ -233,3 +233,40 @@ fn errors_serialize_like_the_typescript_types() {
         json!({ "schemaVersion": 1, "applied": [{ "version": 1, "name": "create_work" }], "backup": null })
     );
 }
+
+#[test]
+fn embedded_migrations_apply_on_a_fresh_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, report) = open(dir.path(), EMBEDDED, NOW).unwrap();
+    assert_eq!(
+        report.schema_version,
+        EMBEDDED.last().map_or(0, |m| m.version)
+    );
+    let tables = db
+        .query(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            &[],
+        )
+        .unwrap();
+    // 与 packages/store/src/schema.ts 的表清单一致（Node 端的测试逐列校验）。
+    let mut expected = vec![
+        "project",
+        "chapter",
+        "paragraph",
+        "chapter_snapshot",
+        "entity",
+        "fact",
+        "source_ref",
+        "story_event",
+        "event_paragraph_link",
+        "schema_migrations",
+    ];
+    expected.sort();
+    assert_eq!(
+        json!(tables),
+        json!(expected
+            .iter()
+            .map(|n| json!({ "name": n }))
+            .collect::<Vec<_>>())
+    );
+}

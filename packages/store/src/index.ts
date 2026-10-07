@@ -3,3 +3,7 @@ export { completeBatches, envelope } from './event-store';
 export { memoryEventStore } from './memory';
 export type { Migration, OpenError, OpenReport, Row, SqlError, SqlPort, SqlValue, Statement, StatementResult } from './sql';
 export { backupFileName, normalizeMigration, parseMigrationName } from './sql';
+export type { DataError, ExportedData, ExportedRow } from './data-export';
+export { exportData, fromJsonl, importData, toJsonl } from './data-export';
+export type { TableSpec } from './schema';
+export { TABLES } from './schema';
