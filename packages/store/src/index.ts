@@ -1,2 +1,3 @@
-// 本包在后续任务中实现，见施工文档第八章。
-export {};
+export type { AppendConflict, EventStore, StoredEvent } from './event-store';
+export { completeBatches, envelope } from './event-store';
+export { memoryEventStore } from './memory';

@@ -40,6 +40,8 @@ export type SimState = {
   readonly knowledge: Readonly<Record<ActorId, readonly KnowledgeItem[]>>;
   /** 人物说法：说出的内容，不是事实。 */
   readonly claims: Readonly<Record<ClaimId, Claim>>;
+  /** 已记录的“发生的事”的数目，用于分配在整次运行中唯一的标识。 */
+  readonly occurrences: number;
   readonly rng: RngState;
 };
 
@@ -71,6 +73,7 @@ export function initialState(scene: Scene, seed: number): SimState {
     world: initialWorld(scene),
     knowledge: initialKnowledge(scene),
     claims: {},
+    occurrences: 0,
     rng: seedRng(seed),
   };
 }

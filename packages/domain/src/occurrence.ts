@@ -2,14 +2,21 @@ import type { ActorId, ItemId, MechanismId, ZoneId } from './ids';
 import type { RuleViolation } from './rules/types';
 import type { ActionKind, Volume } from './scene/schema';
 
-export type OccurrenceKind = ActionKind | 'failed_attempt' | 'trap_triggered' | 'discovered' | 'ruled';
+export type OccurrenceKind =
+  | ActionKind
+  | 'failed_attempt'
+  | 'trap_triggered'
+  | 'discovered'
+  | 'ruled'
+  /** 作者安排的外部事件或导演提议。 */
+  | 'external';
 
 /**
  * 裁决产生的“发生的事”，是感知分发的单位。全部为结构化数据，不含程序生成的文字；
  * 只有语义裁决附带模型写的描述。
  */
 export type Occurrence = {
-  /** `${回合}:${序号}`，由 commitRound 分配。 */
+  /** `${回合}:${序号}`，序号在整次运行中递增，由提交时分配。 */
   readonly id: string;
   readonly kind: OccurrenceKind;
   readonly actor?: ActorId;

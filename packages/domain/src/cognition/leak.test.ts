@@ -77,9 +77,11 @@ describe('金丝雀泄露测试', () => {
       ...extra,
     });
 
-    it('只有同区域的听者得到台词内容', () => {
-      // 对手在南门喊话：主角与巡夜人在中央，只听到有人在说话。
-      const after = run(scene, start, [say([`${CANARY}-SPEECH-far`])]).nextState;
+    it('余量不足的听者得不到台词内容', () => {
+      // 对手在南门正常说话：主角与巡夜人在中央，余量为 1，只听到有人在说话。
+      const after = run(scene, start, [
+        say([`${CANARY}-SPEECH-far`], { utterance: { sentences: [`${CANARY}-SPEECH-far`], volume: 'normal' } }),
+      ]).nextState;
       expectAbsent(after, P, `${CANARY}-SPEECH-`);
       expectAbsent(after, W, `${CANARY}-SPEECH-`);
       expect(viewText(after, A)).toContain(`${CANARY}-SPEECH-far`);

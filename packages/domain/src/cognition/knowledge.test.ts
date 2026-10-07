@@ -143,17 +143,36 @@ describe('人物说法', () => {
     ]);
   });
 
-  it('邻区只听到有人在说话，不获得说法与句子', () => {
-    // 巡夜人在账房，看不见中央，喊声经一条边衰减后仍可听到。
-    const far = withEffects(scene, together, [
+  // 巡夜人在账房：看不见中央，声音经过衰减 2 的边。
+  const far = withEffects(scene, together, [
+    { type: 'setFlag', flag: 'office_open' as never, value: true },
+    { type: 'moveActor', actor: W, to: zone('office') },
+  ]);
+
+  it('隔墙余量不足时只听到有人在说话，不获得说法与句子', () => {
+    // 正常说话（2）在中央，传到账房后余量为 0，听不到；喊话（4）余量为 2，能听清。用中等音量的场景配置验证听不清的情形。
+    const quiet = warehouse((sp) => {
+      sp.actors.push({ id: 'watchman', name: '巡夜人', zone: 'center' });
+      sp.loudness = { speak: { shout: 3 } };
+    });
+    const s = withEffects(quiet, { ...initialState(quiet, 3), round: 1 }, [
+      { type: 'moveActor', actor: A, to: zone('center') },
       { type: 'setFlag', flag: 'office_open' as never, value: true },
       { type: 'moveActor', actor: W, to: zone('office') },
     ]);
-    const after = run(scene, far, [lie]).nextState;
-    const heard = observations(far, after, W);
+    const after = run(quiet, s, [lie]).nextState;
+    const heard = observations(s, after, W);
     expect(heard).toEqual([expect.objectContaining({ channel: 'sound', sound: 'voice', speech: { clarity: 'muffled' } })]);
-    expect(added(far, after, W).some((k) => k.modality === 'claimed')).toBe(false);
+    expect(added(s, after, W).some((k) => k.modality === 'claimed')).toBe(false);
     expect(canonicalJson(after.knowledge[W] ?? [])).not.toContain('援兵');
+  });
+
+  it('隔墙的喊声余量足够时听得清，但看不见说话的人，不记为某人的说法', () => {
+    const after = run(scene, far, [lie]).nextState;
+    const [heard] = observations(far, after, W);
+    expect(heard).toMatchObject({ channel: 'sound', speech: { clarity: 'full', sentences: ['援兵就在门外。', '你跑不掉的。'] } });
+    expect(heard).not.toHaveProperty('actor');
+    expect(added(far, after, W).some((k) => k.modality === 'claimed')).toBe(false);
   });
 
   it('看得见却听不到时，只知道对方在说话', () => {

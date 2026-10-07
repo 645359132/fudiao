@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 1
+version: 2
 task: character_action
 output: ActionProposal
 ---

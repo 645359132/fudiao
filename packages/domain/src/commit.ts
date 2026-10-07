@@ -6,7 +6,7 @@ import { replayFrom, type DomainEvent } from './events';
 import { triggerOnEntry, type Entry } from './mechanisms';
 import type { Occurrence, OccurrenceDraft } from './occurrence';
 import { perceive, type Perception } from './perception';
-import { checkRulingScope, type RulingScopeViolation, type SemanticRuling } from './rulings';
+import { checkRulingScope, type RuledOccurrence, type RulingScopeViolation, type SemanticRuling } from './rulings';
 import type { Scene } from './scene/validate';
 import type { SimState } from './world';
 
@@ -68,6 +68,49 @@ export function commitRound(
     }
   }
 
+  return finish(scene, state, current, effects, drafts);
+}
+
+export type ExternalEvent = {
+  readonly effects: readonly Effect[];
+  readonly occurrences: readonly RuledOccurrence[];
+};
+
+export type ExternalError =
+  | { readonly code: 'effect_not_allowed' | 'invalid_occurrence'; readonly index: number }
+  | { readonly code: 'invariant'; readonly violation: InvariantViolation };
+
+/**
+ * 注入外部事件：作者介入安排的事件或导演提议。效果按与裁决相同的不变式校验，
+ * 但不限于某个请求的范围；不能推进随机数。感知按规则分发，机关照常触发。
+ */
+export function commitExternal(
+  scene: Scene,
+  state: SimState,
+  external: ExternalEvent,
+): Result<RoundCommit, ExternalError> {
+  const rngIndex = external.effects.findIndex((e) => e.type === 'advanceRng');
+  if (rngIndex >= 0) return err({ code: 'effect_not_allowed', index: rngIndex });
+  const badOccurrence = external.occurrences.findIndex(
+    (o) => o.zones.length === 0 || !Number.isInteger(o.loudness) || o.loudness < 0,
+  );
+  if (badOccurrence >= 0) return err({ code: 'invalid_occurrence', index: badOccurrence });
+
+  const applied = applyEffects(scene, state, external.effects);
+  if (!applied.ok) return err({ code: 'invariant', violation: applied.error });
+  const drafts: OccurrenceDraft[] = external.occurrences.map((o) => ({ kind: 'external', ...o }));
+  const result = finish(scene, state, applied.value, [...external.effects], drafts);
+  return result.ok ? result : err({ code: 'invariant', violation: result.error.violation });
+}
+
+/** 两种提交的共同收尾：触发机关、分配标识、计算感知与观察、生成事件并归约出新状态。 */
+function finish(
+  scene: Scene,
+  state: SimState,
+  current: SimState,
+  effects: Effect[],
+  drafts: OccurrenceDraft[],
+): Result<RoundCommit, { readonly code: 'invariant'; readonly violation: InvariantViolation }> {
   const entries: Entry[] = effects.flatMap((e) =>
     e.type === 'moveActor' ? [{ actor: e.actor, to: e.to }] : [],
   );
@@ -76,7 +119,7 @@ export function commitRound(
   effects.push(...traps.value.effects);
   drafts.push(...traps.value.occurrences);
 
-  const occurrences: Occurrence[] = drafts.map((o, i) => ({ id: `${state.round}:${i}`, ...o }));
+  const occurrences: Occurrence[] = drafts.map((o, i) => ({ id: `${state.round}:${state.occurrences + i}`, ...o }));
   const perceptions = occurrences.flatMap((o) => perceive(scene, state.world, o));
 
   const byId = new Map(occurrences.map((o) => [o.id, o]));

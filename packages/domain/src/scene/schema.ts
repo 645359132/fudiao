@@ -173,6 +173,8 @@ export const LoudnessTable = z.object({
   withdraw: Amount.default(1),
   other: Amount.default(1),
   failed: Amount.default(1),
+  /** 其他区域的听者在声音衰减后的余量不低于此值时能听清台词；同区域总能听清。 */
+  speechClarity: z.number().int().positive().default(2),
   speak: z
     .object({
       whisper: z.number().int().positive().default(1),

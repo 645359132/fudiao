@@ -4,32 +4,32 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "beat_sheet": {
-    "version": "1",
-    "sha256": "81275cd4ce0825be36ae9d23b55feb3db34648d0408980cb79810e1c349f33fc"
+    "version": "2",
+    "sha256": "ed13c80cbd9eaecd64e64ef7cc09a3a7d0680633a8357c27eb6d4644bdf5816a"
   },
   "belief_update": {
-    "version": "1",
-    "sha256": "3d0a78d9834b2184571961ab898788e628d85ad47fbe56ff559c874bc9b879e9"
+    "version": "2",
+    "sha256": "80002cfa3f7a942f75cb9ed097b5fbc20ff5446ff6c673aa749ae96245c60f3e"
   },
   "candidate_text": {
-    "version": "1",
-    "sha256": "e74d066c652b59dccb7208bbfd6955c7885d5bc2168bb83ef19a9c2d7fc16c8b"
+    "version": "2",
+    "sha256": "99cc70999d0e71672ebdecc5b7d44beb6734d465be1b02928eb989536b652285"
   },
   "character_action": {
-    "version": "1",
-    "sha256": "208a4ce7910b34737ad82aa5e56bb670e4e5c9163b2d2663411c6b5cb8ff6448"
+    "version": "2",
+    "sha256": "b9f00c494cc4e1393fa7b9e60d97df682c15b54512f0ebe97a26d0151e68cfa7"
   },
   "evidence_judgement": {
-    "version": "1",
-    "sha256": "91bd05fa87474da4857e2bf7396f26542cd9c1d01c8b923063c0784cf0cadabf"
+    "version": "2",
+    "sha256": "64d78d0390a1208463931896e9c8b9ca80f19ea7c94fedd3e1a00c3cebadf7d6"
   },
   "scene_draft": {
     "version": "1",
     "sha256": "a6b51734e6de4a32e9b3019aa392405bfc0eaeddbfe6874f4937eb80340fe97a"
   },
   "semantic_ruling": {
-    "version": "1",
-    "sha256": "83d40968911813cd08e91621a3fc0551569457403f56c1ec9b96737b2cf2a4db"
+    "version": "2",
+    "sha256": "2bc9a1f1b6a0e02b4302dc6ede4ae7293dabfdaca88d00b1b449a546d70eccf1"
   },
   "structured_repair": {
     "version": "1",

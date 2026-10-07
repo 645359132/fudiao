@@ -12,7 +12,7 @@ export type Perception = {
   readonly participant: boolean;
   readonly saw: boolean;
   readonly heard: boolean;
-  /** 台词：同区域听清已说出的句子；其他区域只听到有人在说话。 */
+  /** 台词：同区域或余量足够时听清已说出的句子；否则只听到有人在说话。 */
   readonly speech?: 'full' | 'muffled';
 };
 
@@ -31,13 +31,14 @@ export function perceive(scene: Scene, roundStart: WorldState, occurrence: Occur
 
     const participant = occurrence.participants.includes(actor);
     const saw = occurrence.visible && occurrence.zones.some((z) => canSee(scene, observer.zone, z));
-    const heard = (reach[observer.zone] ?? 0) > 0;
+    const remaining = reach[observer.zone] ?? 0;
+    const heard = remaining > 0;
     if (!participant && !saw && !heard) continue;
 
     const speech =
       occurrence.speech === undefined
         ? undefined
-        : participant || (heard && observer.zone === origin)
+        : participant || (heard && (observer.zone === origin || remaining >= scene.loudness.speechClarity))
           ? 'full'
           : heard
             ? 'muffled'

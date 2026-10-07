@@ -22,6 +22,7 @@ const SOUND_OF: Readonly<Record<OccurrenceKind, SoundCategory>> = {
   failed_attempt: 'noise',
   discovered: 'noise',
   ruled: 'noise',
+  external: 'noise',
 };
 
 /** 看见时能认出物品的行动：物品被拿在手里、放下或使用。 */

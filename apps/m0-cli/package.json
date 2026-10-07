@@ -9,7 +9,10 @@
   },
   "dependencies": {
     "@novel-writer/domain": "workspace:*",
+    "@novel-writer/engine": "workspace:*",
+    "@novel-writer/llm": "workspace:*",
     "@novel-writer/shared": "workspace:*",
+    "@novel-writer/store": "workspace:*",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   }

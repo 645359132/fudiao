@@ -202,9 +202,18 @@ importers:
       '@novel-writer/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@novel-writer/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@novel-writer/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@novel-writer/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@novel-writer/store':
+        specifier: workspace:*
+        version: link:../../packages/store
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -229,7 +238,30 @@ importers:
 
   packages/editor: {}
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@novel-writer/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@novel-writer/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@novel-writer/prompts':
+        specifier: workspace:*
+        version: link:../prompts
+      '@novel-writer/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@novel-writer/store':
+        specifier: workspace:*
+        version: link:../store
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
 
   packages/llm:
     dependencies:
@@ -264,7 +296,14 @@ importers:
 
   packages/shared: {}
 
-  packages/store: {}
+  packages/store:
+    dependencies:
+      '@novel-writer/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@novel-writer/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

@@ -22,7 +22,8 @@ export function observationModel(o: Observation, names: Names, viewer: string | 
   const speech = o.speech;
   return {
     sound: o.channel === 'sound',
-    ruled: o.kind === 'ruled',
+    // 语义裁决与外部事件只有描述文字。
+    ruled: o.kind === 'ruled' || o.kind === 'external',
     who: o.actor !== undefined && o.actor === viewer ? '你' : (names(o.actor) ?? '有人'),
     kind: o.kind === undefined ? null : flag(o.kind),
     zone: names(o.zones[0]) ?? '',

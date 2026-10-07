@@ -1,6 +1,7 @@
 import { canonicalJson, err, ok, sha256, type Result } from '@novel-writer/shared';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';
 import { claimsFromOccurrences, knowledgeFromObservations } from './cognition/knowledge';
+import { applyKnowledgeEdited, type KnowledgeEdited, type KnowledgeEditError } from './cognition/author-edit';
 import type { BeliefsUpdated, Observation } from './cognition/types';
 import { applyBeliefsUpdated, type BeliefUpdateError } from './cognition/update';
 import type { ActorId } from './ids';
@@ -27,12 +28,14 @@ export type DomainEvent =
       /** 按感知通道裁剪后的观察；归约时直接生成认知条目。 */
       readonly observations: readonly Observation[];
     }
-  | BeliefsUpdated;
+  | BeliefsUpdated
+  | KnowledgeEdited;
 
 type StepError =
   | { readonly code: 'round_mismatch' | 'hash_mismatch' | 'unknown_actor' }
   | { readonly code: 'invariant'; readonly violation: InvariantViolation }
-  | { readonly code: 'invalid_belief_update'; readonly detail: BeliefUpdateError };
+  | { readonly code: 'invalid_belief_update'; readonly detail: BeliefUpdateError }
+  | { readonly code: 'invalid_knowledge_edit'; readonly detail: KnowledgeEditError };
 
 /** index 是出错事件在列表中的位置。 */
 export type ReplayError = StepError & { readonly index: number };
@@ -58,7 +61,7 @@ function step(scene: Scene, state: SimState, event: DomainEvent): Result<SimStat
       if (!next.ok) return err({ code: 'invariant', violation: next.error });
       const claims = { ...next.value.claims };
       for (const claim of claimsFromOccurrences(scene, event.round, event.occurrences)) claims[claim.id] = claim;
-      return ok({ ...next.value, claims });
+      return ok({ ...next.value, claims, occurrences: next.value.occurrences + event.occurrences.length });
     }
     case 'PerceptionDelivered': {
       if (event.round !== state.round) return err({ code: 'round_mismatch' });
@@ -74,6 +77,14 @@ function step(scene: Scene, state: SimState, event: DomainEvent): Result<SimStat
       const updated = applyBeliefsUpdated(event.actor, existing, event);
       if (!updated.ok) return err({ code: 'invalid_belief_update', detail: updated.error });
       return ok({ ...state, knowledge: { ...state.knowledge, [event.actor]: updated.value } });
+    }
+    case 'KnowledgeEdited': {
+      if (event.round !== state.round) return err({ code: 'round_mismatch' });
+      const existing = state.knowledge[event.actor];
+      if (existing === undefined) return err({ code: 'unknown_actor' });
+      const edited = applyKnowledgeEdited(existing, event);
+      if (!edited.ok) return err({ code: 'invalid_knowledge_edit', detail: edited.error });
+      return ok({ ...state, knowledge: { ...state.knowledge, [event.actor]: edited.value } });
     }
   }
 }

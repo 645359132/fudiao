@@ -1,6 +1,6 @@
 ---
 id: beat_sheet
-version: 1
+version: 2
 task: beat_sheet
 output: BeatSheetOutput
 ---

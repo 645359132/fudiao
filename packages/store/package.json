@@ -5,9 +5,14 @@
   "description": "SQL 迁移、仓储、事件存储、投影",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./node": "./src/node/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@novel-writer/llm": "workspace:*",
+    "@novel-writer/shared": "workspace:*"
   }
 }

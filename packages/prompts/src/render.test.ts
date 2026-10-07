@@ -55,7 +55,7 @@ describe('角色行动提案', () => {
     expect(prompt.system[1]?.text).toContain('带着密信从南门脱身');
     expect(prompt.system[1]?.text).toContain('仓库中央[center]');
     expect(prompt.system[2]?.text).toContain('现在是第 1 回合');
-    expect(prompt.template).toEqual({ id: 'character_action', version: '1' });
+    expect(prompt.template).toEqual({ id: 'character_action', version: '2' });
     expect(prompt.output?.name).toBe('ActionProposal');
   });
 

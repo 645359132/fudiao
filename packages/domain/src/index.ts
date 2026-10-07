@@ -1,3 +1,5 @@
+export type { AuthorKnowledge, KnowledgeEdited, KnowledgeEditError } from './cognition/author-edit';
+export { planKnowledgeEdit } from './cognition/author-edit';
 export type { SecretCandidate } from './cognition/evidence';
 export { screenSecretInferences } from './cognition/evidence';
 export type {
@@ -18,8 +20,8 @@ export type { Action, Utterance } from './actions';
 export { deliveredSentences } from './actions';
 export type { AdjudicationError, Adjudication, CheckedAction, RulingRequest } from './adjudicate';
 export { adjudicate } from './adjudicate';
-export type { CommitError, RoundCommit } from './commit';
-export { commitRound } from './commit';
+export type { CommitError, ExternalError, ExternalEvent, RoundCommit } from './commit';
+export { commitExternal, commitRound } from './commit';
 export type { Effect, InvariantViolation, RngDraw } from './effects';
 export { applyEffects } from './effects';
 export type { DomainEvent, ReplayError } from './events';
@@ -43,6 +45,7 @@ export { drawInt, seedRng } from './rng';
 export type { CheckResult, RuleViolation, RuleViolationCode } from './rules/check';
 export { checkAction } from './rules/check';
 export type { RuledOccurrence, RulingScopeViolation, SemanticRuling } from './rulings';
+export { checkRulingScope } from './rulings';
 export {
   ActionKind,
   CharacterCard,
