@@ -296,6 +296,43 @@ export function renderCandidateText(view: CharacterView, input: CandidateTextInp
   });
 }
 
+/**
+ * 单次提示词对照组（M0 评估）：把整个场景交给模型直接写成正文。
+ * 这是作者侧的提示词，可以看到全部设定与秘密，不受角色视图的限制；它不是角色代理的输入。
+ */
+export function renderBaseline(scene: Scene, options: { readonly targetLength: number }): Result<RenderedPrompt, string> {
+  const names = namesOf([...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]);
+  const loose = scene.items.filter((i) => i.location.kind === 'zone');
+  return renderTemplate('baseline_scene', {
+    targetLength: options.targetLength,
+    zones: scene.zones.map((z) => ({ name: z.name })),
+    edges: scene.edges.map((e) => ({ a: names(e.between[0]) ?? '', b: names(e.between[1]) ?? '', adjacent: e.adjacent, visible: e.visible })),
+    actors: scene.actors.map((a) => ({
+      name: a.name,
+      zone: names(a.zone) ?? '',
+      injury: flag(a.injury),
+      card: {
+        goal: a.card.goal ?? null,
+        bottomLine: a.card.bottomLine ?? null,
+        traits: a.card.traits,
+        riskPreference: a.card.riskPreference ?? null,
+        emotionThreshold: a.card.emotionThreshold ?? null,
+        lossOfControl: a.card.lossOfControl ?? null,
+        speechStyle: a.card.speechStyle ?? null,
+      },
+      hasTraits: a.card.traits.length > 0,
+      knowledge: a.card.initialKnowledge.map((k) => k.text),
+      items: scene.items.filter((i) => i.location.kind === 'actor' && i.location.actor === a.id).map((i) => i.name),
+    })),
+    looseItems: loose.map((i) => ({ name: i.name, zone: i.location.kind === 'zone' ? (names(i.location.zone) ?? '') : '' })),
+    hasLoose: loose.length > 0,
+    secrets: scene.secrets.map((s) => s.text),
+    hasSecrets: scene.secrets.length > 0,
+    rules: scene.rules.narrativeRules,
+    hasRules: scene.rules.narrativeRules.length > 0,
+  });
+}
+
 /** 场景配置草稿（B39）。 */
 export function renderSceneDraft(description: string): Result<RenderedPrompt, string> {
   return renderTemplate('scene_draft', { description });

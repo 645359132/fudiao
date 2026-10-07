@@ -10,6 +10,7 @@ export { inspectRequests } from './inspect';
 export type { ReplaySample, SampleSink, SampleSource } from './replay';
 export { memorySamples, RecordingAdapter, ReplayAdapter } from './replay';
 export { requestHash } from './request-hash';
+export { routeByProvider } from './router';
 export type { StructuredError, StructuredOptions, StructuredSuccess } from './structured';
 export { parseModelJson, structured } from './structured';
 export type {

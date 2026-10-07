@@ -1,6 +1,12 @@
 // 测试模型：按请求的步骤键与模板生成合法的 JSON，不访问任何模型服务。仅供测试使用。
 import { requestHash, CONSERVATIVE_CAPABILITIES, type LlmPort, type LlmRequest, type LlmResult, type ModelProfile } from '@novel-writer/llm';
-import type { ActionProposal, BeliefUpdateOutput, EvidenceJudgementOutput, SemanticRulingOutput } from '@novel-writer/prompts';
+import type {
+  ActionProposal,
+  BeatSheetOutput,
+  BeliefUpdateOutput,
+  EvidenceJudgementOutput,
+  SemanticRulingOutput,
+} from '@novel-writer/prompts';
 import { ok } from '@novel-writer/shared';
 import type { RunConfig } from '../config';
 
@@ -19,6 +25,9 @@ export type Policy = {
   readonly semantic_ruling?: (ctx: CallContext) => SemanticRulingOutput;
   readonly belief_update?: (ctx: CallContext) => BeliefUpdateOutput;
   readonly judgement?: (ctx: CallContext) => EvidenceJudgementOutput;
+  readonly beat_sheet?: (ctx: CallContext) => BeatSheetOutput;
+  /** 正文类任务直接返回文字。 */
+  readonly candidate_text?: (ctx: CallContext) => string;
 };
 
 export const waitProposal = (overrides: Partial<ActionProposal> = {}): ActionProposal => ({
@@ -37,6 +46,15 @@ export const waitProposal = (overrides: Partial<ActionProposal> = {}): ActionPro
 });
 
 const defaults: Required<Policy> = {
+  beat_sheet: (ctx) => ({
+    beats: [...new Set([...ctx.text.matchAll(/\[([\w-]+:\d+:\d+)\]/g)].map((m) => m[1] ?? ''))].map((ref) => ({
+      ref,
+      treatment: 'brief' as const,
+      note: '',
+      withhold: false,
+    })),
+  }),
+  candidate_text: () => '雨下得更紧了。他没有回头。',
   character_action: () => waitProposal(),
   semantic_ruling: () => ({ rationale: '按常理推断', effects: [], occurrences: [], uncertainties: [] }),
   belief_update: () => ({ add: [], revise: [], retract: [] }),
@@ -77,10 +95,14 @@ export function fakeModel(policy: Policy = {}, options: { delay?: (ctx: CallCont
             ? p.semantic_ruling(ctx)
             : request.task === 'belief_update'
               ? p.belief_update(ctx)
-              : p.judgement(ctx);
+              : request.task === 'beat_sheet'
+                ? p.beat_sheet(ctx)
+                : request.task === 'candidate_text'
+                  ? p.candidate_text(ctx)
+                  : p.judgement(ctx);
       const result: LlmResult = {
         outcome: 'completed',
-        text: JSON.stringify(output),
+        text: typeof output === 'string' ? output : JSON.stringify(output),
         usage: { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
         provider: request.model.provider,
         servedModel: request.model.model,

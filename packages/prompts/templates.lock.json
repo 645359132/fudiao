@@ -3,6 +3,10 @@
     "version": "1",
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
+  "baseline_scene": {
+    "version": "1",
+    "sha256": "28fa41506d04426360c7488aa3480a26ccf885c259b22ec1755f3ab530da8398"
+  },
   "beat_sheet": {
     "version": "2",
     "sha256": "ed13c80cbd9eaecd64e64ef7cc09a3a7d0680633a8357c27eb6d4644bdf5816a"

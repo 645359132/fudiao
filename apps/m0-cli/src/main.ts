@@ -1,13 +1,25 @@
-import { parseCommand, usage } from './commands';
+import { createInterface } from 'node:readline/promises';
+import { main, type Console } from './cli';
+import { ulid } from './ulid';
 
-const parsed = parseCommand(process.argv.slice(2));
+const terminal: Console = {
+  out: (text) => process.stdout.write(`${text}\n`),
+  err: (text) => process.stderr.write(`${text}\n`),
+  async confirm(question) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      const answer = await rl.question(`${question}（y/N）`);
+      return /^y(es)?$/i.test(answer.trim());
+    } finally {
+      rl.close();
+    }
+  },
+};
 
-if (!parsed.ok) {
-  process.stderr.write(`${parsed.error}\n\n${usage}\n`);
-  process.exitCode = 1;
-} else if (parsed.value === 'help') {
-  process.stdout.write(`${usage}\n`);
-} else {
-  process.stderr.write(`命令 ${parsed.value} 尚未实现（M0-09）。\n`);
-  process.exitCode = 1;
-}
+process.exitCode = await main(process.argv.slice(2), {
+  console: terminal,
+  env: process.env,
+  root: process.cwd(),
+  now: () => new Date().toISOString(),
+  newId: () => ulid(),
+});

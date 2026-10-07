@@ -25,7 +25,8 @@
 - M0-05 已完成：`packages/prompts` 的模板渲染、九个模板（角色行动、规则拒绝、格式修正、认知更新、语义裁决、证据链判断、节拍表、候选稿正文、场景配置草稿）、输出 schema、模板版本锁与提示词金丝雀测试。
 - M0-11 已完成：`m0/scenes/` 下的三个实验场景（仓库争夺密信、当铺谈判、雨夜道歉）与场景文件加载（`apps/m0-cli/src/scene-file.ts`）。
 - M0-06、M0-08 已完成：`packages/engine` 的回合状态机、两种回合协议、交互与自动模式、暂停停止与预算、作者介入与分支、证据链提示、恢复与幂等；`packages/store` 的事件存储（内存版与 JSONL 文件版）与 JSONL 调用记录。故障注入、录制回放端到端与引擎金丝雀测试均已就绪。
-- 下一步是 M0-07（僵局分类、导演提议、批量推演）与 M0-09（命令行）。
+- M0-09 已完成：`pnpm m0` 的 run、baseline、narrate、motive-check；实验配置 `m0/experiments/default.yaml`；运行前费用估算与确认。report 在 M0-12。
+- 下一步是 M0-07（僵局分类、导演提议、批量推演），属于推演引擎，先给出方案并获得确认。
 
 ## 工作方式
 
@@ -104,11 +105,21 @@ pnpm prompts:build
 pnpm check
 ```
 
-M0 命令行：
+M0 命令行（真实调用前会显示预计费用并请你确认；API Key 从实验配置指定的环境变量读取）：
 
 ```bash
 pnpm m0 help
 ```
+
+```bash
+pnpm m0 run m0/scenes/warehouse.yaml --runs 1
+```
+
+```bash
+pnpm m0 narrate <运行标识> --pov shen_yan
+```
+
+运行记录写在 `m0/runs/`（不入库）。
 
 Rust 测试在 M1-01 创建 `apps/desktop` 后启用：
 

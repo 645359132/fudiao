@@ -27,6 +27,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   renderActionRejected,
+  renderBaseline,
   renderBeatSheet,
   renderBeliefUpdate,
   renderCandidateText,
@@ -176,6 +177,17 @@ describe('其他模板', () => {
       expect(text).toContain('【展开】【暂不说明】');
       expect(text).toContain('写出主角的迟疑');
     });
+  });
+
+  it('对照组提示词包含全部设定与秘密，但不含场景标题与探索问题', () => {
+    const text = fullText(unwrap(renderBaseline(scene, { targetLength: 2000 })));
+    expect(text).toContain('约 2000 字');
+    expect(text).toContain('带着密信从南门脱身');
+    expect(text).toContain('我在南门布了绊索');
+    expect(text).toContain('对手在南门布置了绊索');
+    expect(text).toContain('碎瓦（在货架区）');
+    expect(text).not.toContain('废仓库夺信');
+    expect(text).not.toContain('主角能否发现南门的绊索');
   });
 
   it('场景配置草稿包含作者的描述', () => {

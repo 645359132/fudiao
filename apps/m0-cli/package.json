@@ -11,6 +11,7 @@
     "@novel-writer/domain": "workspace:*",
     "@novel-writer/engine": "workspace:*",
     "@novel-writer/llm": "workspace:*",
+    "@novel-writer/prompts": "workspace:*",
     "@novel-writer/shared": "workspace:*",
     "@novel-writer/store": "workspace:*",
     "yaml": "^2.9.1",

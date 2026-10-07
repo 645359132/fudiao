@@ -208,6 +208,9 @@ importers:
       '@novel-writer/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@novel-writer/prompts':
+        specifier: workspace:*
+        version: link:../../packages/prompts
       '@novel-writer/shared':
         specifier: workspace:*
         version: link:../../packages/shared

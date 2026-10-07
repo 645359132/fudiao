@@ -1,0 +1,41 @@
+# M0 默认实验配置：施工文档第六章“推荐的默认配置”（质量优先）。
+# 全部任务使用 Claude Opus 5.5，按任务设定 effort。API Key 从环境变量读取，不写入本文件。
+# 价格（美元 / 百万 Token）：输入 4、输出 20、缓存读取 0.20、缓存写入（5 分钟）5。
+
+providers:
+  anthropic:
+    kind: anthropic
+    apiKeyEnv: ANTHROPIC_API_KEY
+
+models:
+  opus:
+    provider: anthropic
+    model: claude-opus-5-5
+    capabilities:
+      structuredOutput: native
+      promptCaching: true
+      reasoningControl: effort
+      refusalFallback: server_default
+      contextWindow: 1000000
+      maxOutputTokens: 128000
+      selfTestPassed: true
+    prices: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 }
+
+tasks:
+  character_action: { model: opus, effort: medium, maxOutputTokens: 16000 }
+  semantic_ruling: { model: opus, effort: high, maxOutputTokens: 16000 }
+  belief_update: { model: opus, effort: low, maxOutputTokens: 8000 }
+  judgement: { model: opus, effort: low, maxOutputTokens: 8000 }
+  beat_sheet: { model: opus, effort: medium, maxOutputTokens: 16000 }
+  candidate_text: { model: opus, effort: high, maxOutputTokens: 32000 }
+  baseline: { model: opus, effort: high, maxOutputTokens: 32000 }
+
+run:
+  mode: auto
+  runs: 1
+  maxProposalAttempts: 2
+  maxRepairs: 2
+
+budget:
+  # 单次推演的费用上限；施工文档估算单次约 2 至 5 美元。
+  limitUsdPerRun: 6

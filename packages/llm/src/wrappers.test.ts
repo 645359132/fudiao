@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { BudgetGuard, costOf, estimateInputTokens, withBudget } from './budget';
 import { memoryCallLog, withCallLog } from './call-log';
 import { inspectRequests } from './inspect';
+import { routeByProvider } from './router';
 import { memorySamples, RecordingAdapter, ReplayAdapter } from './replay';
 import { parseModelJson, structured } from './structured';
 import { baseRequest, scriptedPort, usage } from './testing/scripted-port';
@@ -201,5 +202,18 @@ describe('请求检查', () => {
     await inspected.complete(baseRequest());
     await expect(inspected.complete(baseRequest({ system: [{ text: 'CANARY-秘密' }] }))).rejects.toThrow('泄露');
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe('按服务分派', () => {
+  it('把请求交给对应服务的适配器，未配置的服务返回错误', async () => {
+    const a = scriptedPort([{ text: 'a' }]);
+    const b = scriptedPort([{ text: 'b' }]);
+    const routed = routeByProvider({ anthropic: a.port, deepseek: b.port });
+    const viaA = await routed.complete(baseRequest());
+    expect(viaA.ok && viaA.value.text).toBe('a');
+    const missing = await routed.complete(baseRequest({ model: { ...baseRequest().model, provider: 'nowhere' } }));
+    expect(missing).toEqual({ ok: false, error: expect.objectContaining({ code: 'bad_request' }) });
+    expect(b.requests).toHaveLength(0);
   });
 });

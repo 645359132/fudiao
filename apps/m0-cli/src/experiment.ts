@@ -1,0 +1,115 @@
+import { ModelProfileSchema, type RunConfig, type TaskModel } from '@novel-writer/engine';
+import { AnthropicAdapter, OpenAIChatAdapter, routeByProvider, type LlmPort } from '@novel-writer/llm';
+import { err, ok, type Result } from '@novel-writer/shared';
+import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
+import type { RunConfig as SceneRun } from './scene-file';
+
+const Provider = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('anthropic'), apiKeyEnv: z.string().min(1), baseURL: z.string().url().optional() }),
+  z.object({ kind: z.literal('openai_compatible'), apiKeyEnv: z.string().min(1), baseURL: z.string().url() }),
+  /** 本地端点（Ollama、LM Studio 等），可免密钥，只允许回环地址。 */
+  z.object({ kind: z.literal('local'), baseURL: z.string().url() }),
+]);
+
+const Task = z.object({
+  model: z.string().min(1),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  maxOutputTokens: z.number().int().positive(),
+});
+
+/** 实验配置：模型服务、模型、各任务使用的模型与参数、预算。模型名称只出现在配置中（硬性规则 13）。 */
+export const Experiment = z.object({
+  providers: z.record(z.string(), Provider),
+  models: z.record(z.string(), ModelProfileSchema.omit({ provider: true }).extend({ provider: z.string().min(1) })),
+  tasks: z.object({
+    character_action: Task,
+    semantic_ruling: Task,
+    belief_update: Task,
+    judgement: Task,
+    beat_sheet: Task,
+    candidate_text: Task,
+    baseline: Task,
+  }),
+  run: z
+    .object({
+      mode: z.enum(['interactive', 'auto']).default('auto'),
+      runs: z.number().int().positive().default(1),
+      maxProposalAttempts: z.number().int().positive().default(2),
+      maxRepairs: z.number().int().nonnegative().default(2),
+    })
+    .prefault({}),
+  budget: z.object({ limitUsdPerRun: z.number().positive() }),
+});
+export type Experiment = z.infer<typeof Experiment>;
+export type ExperimentTask = keyof Experiment['tasks'];
+
+export function loadExperiment(text: string): Result<Experiment, string> {
+  let raw: unknown;
+  try {
+    raw = parseYaml(text);
+  } catch (error) {
+    return err(error instanceof Error ? error.message : String(error));
+  }
+  const parsed = Experiment.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return err(`${issue?.path.join('.') ?? ''}: ${issue?.message ?? ''}`);
+  }
+  for (const [task, t] of Object.entries(parsed.data.tasks)) {
+    const model = parsed.data.models[t.model];
+    if (model === undefined) return err(`tasks.${task}.model: 未定义的模型 ${t.model}`);
+    if (parsed.data.providers[model.provider] === undefined) return err(`models.${t.model}.provider: 未定义的服务 ${model.provider}`);
+  }
+  return ok(parsed.data);
+}
+
+export function taskModel(experiment: Experiment, task: ExperimentTask): TaskModel {
+  const t = experiment.tasks[task];
+  const profile = experiment.models[t.model];
+  if (profile === undefined) throw new Error(`未定义的模型 ${t.model}`);
+  return { profile, maxOutputTokens: t.maxOutputTokens, ...(t.effort !== undefined && { effort: t.effort }) };
+}
+
+export function runConfig(
+  experiment: Experiment,
+  sceneRun: SceneRun,
+  overrides: { readonly seed: number; readonly mode?: 'interactive' | 'auto' },
+): RunConfig {
+  return {
+    protocol: sceneRun.protocol,
+    mode: overrides.mode ?? experiment.run.mode,
+    maxRounds: sceneRun.maxRounds,
+    seed: overrides.seed,
+    ...(sceneRun.firstSpeaker !== undefined && { firstSpeaker: sceneRun.firstSpeaker }),
+    maxProposalAttempts: experiment.run.maxProposalAttempts,
+    maxRepairs: experiment.run.maxRepairs,
+    models: {
+      character_action: taskModel(experiment, 'character_action'),
+      semantic_ruling: taskModel(experiment, 'semantic_ruling'),
+      belief_update: taskModel(experiment, 'belief_update'),
+      judgement: taskModel(experiment, 'judgement'),
+    },
+  };
+}
+
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/** 按配置创建各服务的适配器。API Key 只从环境变量读取，不写入任何记录。 */
+export function buildPort(experiment: Experiment, env: Readonly<Record<string, string | undefined>>): Result<LlmPort, string> {
+  const adapters: Record<string, LlmPort> = {};
+  for (const [id, provider] of Object.entries(experiment.providers)) {
+    if (provider.kind === 'local') {
+      if (!LOOPBACK.has(new URL(provider.baseURL).hostname)) return err(`${id}：本地端点只允许回环地址`);
+      adapters[id] = new OpenAIChatAdapter({ baseURL: provider.baseURL });
+      continue;
+    }
+    const apiKey = env[provider.apiKeyEnv];
+    if (apiKey === undefined || apiKey === '') return err(`${id}：环境变量 ${provider.apiKeyEnv} 未设置`);
+    adapters[id] =
+      provider.kind === 'anthropic'
+        ? new AnthropicAdapter({ apiKey, ...(provider.baseURL !== undefined && { baseURL: provider.baseURL }) })
+        : new OpenAIChatAdapter({ apiKey, baseURL: provider.baseURL });
+  }
+  return ok(routeByProvider(adapters));
+}

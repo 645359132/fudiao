@@ -10,6 +10,7 @@ export type {
 } from './render';
 export {
   renderActionRejected,
+  renderBaseline,
   renderBeatSheet,
   renderBeliefUpdate,
   renderCandidateText,
