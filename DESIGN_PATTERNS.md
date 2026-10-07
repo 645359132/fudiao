@@ -28,8 +28,9 @@
 
 ```ts
 interface LlmPort {
-  start(req: LlmRequest, onEvent: (e: LlmStreamEvent) => void): Promise<LlmCallId>;
-  cancel(id: LlmCallId): Promise<void>;
+  // 取消通过 AbortSignal；已收到的文本与已知用量照常返回，结果为 cancelled。
+  complete(req: LlmRequest, options?: { signal?: AbortSignal; onEvent?: (e: LlmStreamEvent) => void }):
+    Promise<Result<LlmResult, LlmError>>;
 }
 
 // 桌面：TauriLlmAdapter    M0：NodeHttpLlmAdapter    测试：ReplayLlmAdapter
@@ -233,7 +234,9 @@ type ModelCapabilities = {
   structuredOutput: 'native' | 'prompt' | 'none';
   promptCaching: boolean;
   reasoningControl: 'effort' | 'none';
+  refusalFallback: 'server_default' | 'none';   // 拒答时由服务端改用其他模型重试
   contextWindow: number;
+  maxOutputTokens: number;
   selfTestPassed: boolean;
 };
 

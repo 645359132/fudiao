@@ -9,5 +9,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@novel-writer/shared": "workspace:*",
+    "openai": "^7.30.0",
+    "zod": "^4.6.5"
   }
 }
