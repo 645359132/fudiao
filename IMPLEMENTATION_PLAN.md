@@ -1,0 +1,601 @@
+# 施工文档
+
+版本：v0.3  
+更新日期：2026年10月6日  
+对应需求：[REQUIREMENTS.md](REQUIREMENTS.md) v0.7  
+配套文档：[DESIGN_PATTERNS.md](DESIGN_PATTERNS.md)  
+状态：草案。技术选型已按“运行性能与开发效率优先”确定，结论与理由见第十一章；M0 实测后按数据修正模型配置与费用估算。
+
+本文把需求文档转为可执行的工程计划，覆盖 M0 至 M3。文中的需求编号（B、I、C）与验收项均引用需求文档；术语沿用需求文档第三章的术语表。设计模式的动机与写法见配套文档，本文只说明在哪里使用。
+
+## 一 施工原则
+
+1. 先验证风险最高的假设。M0 只做推演核心与实验工具，不做编辑器与存储界面；推演核心按正式代码的标准编写，M3 直接沿用。
+2. 确定性在程序里，判断交给模型。位置、持有、消耗、视线、感知受众由程序计算；模型只提出行动、语义裁决与文字。
+3. 信息隔离靠结构保证。角色请求只能由角色视图构建，测试用金丝雀标记检查泄露，不依赖提示词里的“请忽略你不该知道的信息”。
+4. 记录优先于重算。推演的每一步都写入只追加的事件记录；回放、恢复、因果追问都从记录得到，不再请求模型。
+5. 作者确认是显式状态。候选稿、待核实裁决、推演草案、候选事实都有明确的生命周期，未确认的内容不进入作品。
+6. 外部依赖可替换。模型服务、存储、运行环境（Tauri 或 Node）都通过端口接口接入，同一套引擎可在 M0 命令行、自动化测试与桌面应用中运行。
+
+## 二 技术选型
+
+| 层 | 选型 | 理由 | 备选 |
+| --- | --- | --- | --- |
+| 桌面壳 | Tauri 2 | 需求既定；Windows 上使用 WebView2（Chromium 内核） | — |
+| 前端 | React 19 + React Compiler + TypeScript（strict）+ Vite | 编译期自动记忆化，省去手写 memo；生态与编辑器绑定最完善 | Svelte 5、Solid |
+| 正文编辑器 | TipTap 3（基于 ProseMirror），关闭按事务重渲染 | 以块为基本结构，便于为段落分配稳定标识；Chromium 下中文输入法组合输入成熟；编辑状态不经过 React 渲染 | 直接使用 ProseMirror、CodeMirror 6 |
+| 前端状态 | Zustand | 轻量，便于与应用服务层分离 | Redux Toolkit |
+| 数据校验 | Zod | 同一份定义用于运行时校验、类型推导与生成模型结构化输出所需的 JSON Schema | Valibot |
+| 本地数据库 | SQLite（WAL 模式），每部作品一个数据库文件 | 事务、单文件备份、FTS5 全文检索 | — |
+| 数据库访问 | 桌面端由 Rust（rusqlite）提供查询与事务命令：一个写连接加一个只读连接池（WAL 模式下读写互不阻塞）；Node 端（M0 与测试）用 better-sqlite3；两端共用迁移 SQL 与仓储代码 | 自建命令可保证一次事务在同一连接内完成；全文查找不会阻塞自动保存 | tauri-plugin-sql（需确认其跨调用事务语义） |
+| 全文检索 | FTS5 trigram 分词；1 至 2 字的查询退化为逐章扫描 | 中文无需额外分词器 | Rust 侧 Tantivy 加中文分词 |
+| 模型适配器 | TypeScript：Anthropic 官方 SDK；OpenAI 官方 SDK（OpenAI 用 Responses API，Gemini、兼容接口与本地端点用 Chat Completions） | 三个适配器覆盖五类服务；M0 与桌面端共用同一份代码；直接使用官方 SDK 的结构化输出、流式与错误类型 | 在 Rust 中重写各服务的适配器 |
+| 模型认证 | 用户自填 API Key（本地端点可免密钥） | 各服务通用、合规；不实现订阅账户登录 | 开源后可增加 OpenAI 官方的 Sign in with ChatGPT |
+| 凭据代理 | Rust（reqwest）：为发往模型服务的请求注入凭据、限定目标主机、流式转发、取消、并发上限 | 凭据不进入 WebView；代理只转发字节，不理解各服务协议 | — |
+| 凭据存储 | keyring crate（Windows 凭据管理器） | B15 | — |
+| 文本编码识别 | chardetng 与 encoding_rs（Rust） | TXT 导入常见 GB18030、GBK 与 UTF-8 | — |
+| 标识 | ULID | 可排序、离线生成 | UUIDv7 |
+| 段落与章节排序 | 分数索引（fractional indexing） | 插入与移动不需要重排其他行 | 整数序号加批量重排 |
+| 包管理 | pnpm workspace | 多包单仓库 | — |
+| 测试 | Vitest、fast-check（属性测试）、cargo test；少量 Playwright 冒烟测试 | 引擎以属性测试与录制回放测试为主 | — |
+| 依赖边界检查 | dependency-cruiser | 强制领域层不依赖 IO | ESLint boundaries 插件 |
+
+正文模型暂按“段落化纯文本”设计：每段是一个纯文本节点，首版不支持行内样式。网文正文以纯文本为主，这一选择让段落标识、锚点、来源标记与导出都保持简单。若需求第十一章最终选择富文本，需要调整段落模型与导出。
+
+## 三 系统架构
+
+### 运行时结构
+
+```mermaid
+flowchart TB
+    subgraph WV[WebView 进程]
+        UI[React 界面与 TipTap 编辑器]
+        APP[应用服务层：用例与任务中心]
+        ENG[推演引擎与上下文构建]
+        LLM[模型适配器与结构化输出管线]
+        DOM[领域内核：纯函数]
+        REPO[仓储与事件存储]
+        UI --> APP --> ENG --> DOM
+        ENG --> LLM
+        APP --> REPO
+        ENG --> REPO
+    end
+    subgraph RS[Rust 核心进程]
+        DB[(SQLite 作品库)]
+        GW[凭据代理：注入凭据、主机白名单、流式转发、并发]
+        KR[凭据存储]
+        FS[文件：导入、导出、备份]
+    end
+    REPO -- db_query / db_tx --> DB
+    LLM -- net_fetch / net_cancel 与 Channel --> GW
+    GW --> KR
+    APP -- import / export / backup --> FS
+    GW -. HTTPS .-> P[模型服务或本地端点]
+```
+
+推演引擎运行在 WebView 中。一个回合的程序计算（视图构建、规则检查、裁决、感知分发）在毫秒级，而一次模型调用需要数秒到数十秒，引擎所在的语言对推演速度几乎没有影响；真正决定速度的是模型调用的并行度、提示词缓存与思考深度（见第六章）。确实耗费 CPU 或 IO 的部分放在 Rust：数据库与全文检索、编码识别、备份、网络转发。应用关闭时若有运行中的任务，提示作者；任务状态已写入事件记录，重新打开后可以继续。
+
+### 代码仓库结构
+
+```text
+novel-writer/
+├─ apps/
+│  ├─ desktop/                 Tauri 应用
+│  │  ├─ src/                  React 界面、应用服务层、Tauri 适配器
+│  │  └─ src-tauri/            Rust：db、凭据代理、凭据存储、文件、迁移执行
+│  └─ m0-cli/                  M0 命令行：运行场景、对照组、生成评估材料
+├─ packages/
+│  ├─ shared/                  标识、时间、Result、错误类型、工具函数
+│  ├─ domain/                  领域内核：世界状态、认知、区域图、规则原语、感知、裁决、事件归约（无 IO）
+│  ├─ engine/                  推演编排：回合状态机、运行模式、批量推演、介入、恢复
+│  ├─ context/                 上下文构建：信息权限过滤、预算裁剪、上下文清单
+│  ├─ prompts/                 提示词模板、输出 schema、模板版本
+│  ├─ llm/                     模型端口接口、Anthropic 与 OpenAI 兼容适配器、结构化输出管线、预算守卫、录制回放适配器
+│  ├─ store/                   SQL 迁移、仓储、事件存储、投影、SQL 端口接口
+│  └─ editor/                  TipTap 扩展：段落标识、来源标记、锚点、实体高亮
+├─ m0/                         M0 场景文件、实验配置、评估材料与结论
+├─ docs/                       设计补充文档
+├─ REQUIREMENTS.md
+├─ IMPLEMENTATION_PLAN.md
+└─ DESIGN_PATTERNS.md
+```
+
+依赖方向只能向内：`apps → engine / context / store / llm → domain → shared`。`domain` 不得导入任何 IO 模块，由 dependency-cruiser 在持续集成中检查。
+
+### 端口接口
+
+引擎与应用服务只依赖以下接口，各运行环境提供各自的实现：
+
+| 端口 | 职责 | 桌面实现 | Node 实现（M0 与测试） |
+| --- | --- | --- | --- |
+| `SqlPort` | 执行查询与事务 | Tauri 命令 `db_query`、`db_tx` | better-sqlite3 |
+| `EventStore` | 追加与读取推演事件、快照 | 基于 `SqlPort` | 基于 `SqlPort` 或 JSONL 文件 |
+| `LlmPort` | 发起模型调用、流式接收、取消 | 同一套 TypeScript 适配器，网络请求经 Rust 凭据代理 | 同一套适配器直连 HTTP；录制回放 |
+| `Clock` / `Rng` | 时间与可记录的随机数 | 系统时钟、带种子的随机数 | 固定时钟、固定种子 |
+| `FilePort` | 导入、导出、备份 | Tauri 命令 | Node fs |
+
+## 四 数据模型
+
+每部作品一个项目文件夹，包含 `project.sqlite` 与 `backups/`。应用级配置（模型服务、价格表、界面偏好）保存在应用数据目录，凭据保存在系统凭据管理器。项目文件夹位于 OneDrive 等同步目录时提示风险：同步程序可能在写入过程中复制数据库文件，导致备份不一致。
+
+### 主要数据表
+
+以下为首版表结构的要点，字段名为示意，具体类型在迁移脚本中确定。
+
+| 表 | 关键字段 | 相关需求 |
+| --- | --- | --- |
+| `project` | id、title、genre、synopsis、outline、goals、schema_version | B01 |
+| `chapter` | id、order_key、title、summary、notes、status（正常、回收站） | B02 |
+| `paragraph` | id、chapter_id、order_key、text、version、source_kind（手写、AI 生成、AI 生成后修改、混合）、source_spans、ai_origin_text | B04、B33 |
+| `chapter_snapshot` | id、chapter_id、reason、created_at、paragraphs（JSON） | B06、B17 |
+| `entity` | id、kind（人物、地点、组织、物品、规则）、name、aliases、data、locked、version | B09 |
+| `fact` | id、kind（世界事实、角色认知、人物说法）、holder_id、subject_ids、content、modality（观察、听闻、推测、说法）、confidence、story_time_from、story_time_to、status（候选、已确认、待复核、已驳回）、version | B11 |
+| `source_ref` | from_type、from_id、to_type、to_id、to_version、anchor | B12、来源定位 |
+| `story_event` | id、story_time、summary、participants、location_id、perceptions、origin_run_id、origin_seq | B55、I07 |
+| `event_paragraph_link` | event_id、paragraph_id、mode（正面叙述、回忆、转述、暗示） | B55 |
+| `sim_scene` | id、chapter_id、config（JSON）、config_version、protocol | B22、B39 至 B41 |
+| `sim_run` | id、scene_id、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、status、end_reason | B28、B48 |
+| `sim_event` | run_id、seq、round、phase、type、actor、payload、created_at；主键 (run_id, seq)，只追加 | B28、B30 |
+| `sim_snapshot` | run_id、seq、state（JSON）、state_hash | B30 |
+| `llm_call` | id、step_key、task_kind、provider、model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cost、response、started_at、finished_at | B19、B36 |
+| `candidate` | id、target_type、target_id、base_version、content、status（待处理、已接受、已放弃、过期）、llm_call_id | B17 |
+| `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
+| `evaluation` | id、run_id 或 batch_id、answers（JSON） | B46 |
+| `paragraph_fts` | FTS5 trigram 虚拟表，内容来自 `paragraph.text` | B04 |
+
+### 段落标识与锚点
+
+- 每个段落节点在创建时获得 ULID。段落拆分时，前半段保留原标识，后半段获得新标识，并记录 `split_from`。段落合并时保留前一段的标识，后一段的来源按字符区间写入 `source_spans`。
+- 锚点格式为 `{paragraphId, paragraphVersion, start, end, quote}`。段落版本变化后，先在该段内精确查找 `quote`，再做近似匹配；仍找不到则把依赖它的对象标为待复核。
+- 段落来源：接受候选稿时写入 `ai_origin_text`。每次保存时计算当前文本与生成原文的字符编辑距离，超过阈值即改为“AI 生成后修改”。
+
+### 依赖与待复核
+
+`source_ref` 同时承担来源关系与依赖图。任何被依赖对象的版本递增时，失效任务沿依赖边做广度优先遍历，把依赖者标为待复核，并记录触发原因。首版只处理设定条目、已确认事实与推演初始条件之间的依赖（B12 首版范围）。
+
+### 导出、导入与备份
+
+- 正文导出：TXT 或 Markdown，可按章或全书导出。
+- 完整项目导出：一个 zip 文件，内含 `manifest.json`（schema_version、导出时间）、`chapters/0001-章节名.md`，以及 `data/` 下每张表一个 JSONL 文件。人可以直接阅读，也可以完整导回。
+- 导入：先校验 schema_version，按需执行迁移；导入后与导出前逐表比对，作为“数据迁移”验收的自动测试。
+- 备份：用 SQLite 的 `VACUUM INTO` 生成一致快照，按时间命名，保留策略可配置。
+
+## 五 推演引擎设计
+
+### 领域对象
+
+```ts
+// packages/domain —— 示意，非最终定义
+type SimState = {
+  round: number;
+  phase: RoundPhase;
+  world: WorldState;                          // 位置、持有、资源、伤势、机关、标记
+  knowledge: Record<ActorId, KnowledgeItem[]>;
+  claims: Claim[];                            // 人物说法
+  rng: RngState;
+};
+
+type KnowledgeItem = {
+  id: KnowledgeId;
+  holder: ActorId;
+  content: string;
+  modality: 'observed' | 'heard' | 'inferred' | 'claimed';
+  confidence: number;                         // 0 到 1
+  about?: SubjectRef;                         // 涉及的人、物或秘密条目
+  order: 1 | 2;                               // 一阶认知，或“对方认为我知道什么”
+  sourceSeq?: number;                         // 引发它的事件序号，用于因果追问
+};
+```
+
+### 行动提案格式
+
+```ts
+const ActionProposal = z.object({
+  kind: z.enum(['observe', 'move', 'probe', 'attack', 'defend', 'use_item', 'speak', 'withdraw', 'wait', 'other']),
+  target: z.string().optional(),
+  item: z.string().optional(),
+  toZone: z.string().optional(),
+  utterance: z.array(z.string()).optional(),  // 台词按句切分，用于轮流对话中的打断
+  intent: z.string(),                         // 当前目标
+  rationale: z.string(),                      // 简短决策摘要
+  beliefRefs: z.array(z.string()),            // 依据的认知条目标识
+  innerThought: z.string(),                   // 内心片段，不参与裁决
+  inferences: z.array(z.object({ about: z.string(), content: z.string(), confidence: z.number() })),
+});
+```
+
+内心片段与推测条目在行动提案的同一次调用中返回，不额外请求模型。`beliefRefs` 是因果追问的连接点，提交时校验其引用的条目确实存在于该角色的视图中。
+
+### 回合状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> BuildingViews
+    BuildingViews --> AwaitingProposals
+    AwaitingProposals --> Validating
+    Validating --> AwaitingProposals: 提案非法且未超过修正次数
+    Validating --> Paused: 超过修正次数
+    Validating --> Adjudicating
+    Adjudicating --> AwaitingAuthor: 交互模式且有待核实裁决
+    Adjudicating --> Committing: 无待核实裁决，或自动模式
+    AwaitingAuthor --> Committing: 作者确认或修正
+    Committing --> Distributing
+    Distributing --> UpdatingBeliefs
+    UpdatingBeliefs --> CheckingEnd
+    CheckingEnd --> BuildingViews: 继续下一回合
+    CheckingEnd --> Paused: 命中断点或检测到僵局
+    CheckingEnd --> Ended: 满足结束条件
+    Paused --> BuildingViews: 作者继续
+    Ended --> [*]
+```
+
+每次状态转换都写入一条事件。崩溃恢复时，重放事件得到最后的阶段，从该阶段继续。每个需要模型的步骤都有确定的 `step_key = hash(runId, round, phase, actorId, attempt)`；调用前先查 `llm_call` 中是否已有该键的完成记录，有则直接复用，因此恢复不会重复计费，也不会重复裁决。
+
+### 事件类型
+
+| 事件 | 主要内容 |
+| --- | --- |
+| `RunStarted` | 场景配置哈希、模式、随机种子、模型配置 |
+| `RoundStarted` | 回合号、状态哈希 |
+| `ViewBuilt` | 角色、视图哈希、上下文清单 |
+| `ProposalSubmitted` / `ProposalRejected` | 角色、提案或拒绝原因、尝试次数、llm_call 标识 |
+| `AdjudicationProposed` / `AdjudicationConfirmed` | 裁决条目、是否待核实、确认者（作者或自动） |
+| `StateChanged` | 状态差异 |
+| `PerceptionDelivered` | 角色、按感知通道生成的观察 |
+| `BeliefsUpdated` | 角色、认知变更及其来源事件序号 |
+| `DirectorProposed` / `DirectorApplied` | 导演提议及处理结果（P1） |
+| `AuthorIntervened` | 介入类型、变更前后、原因 |
+| `EvidenceGapFlagged` | 缺少证据链的命中 |
+| `StalemateDetected` / `BreakpointHit` | 僵局类型、命中的条件 |
+| `RoundEnded` / `RunEnded` | 结束原因 |
+
+### 裁决管线
+
+1. 规范化：提案按角色标识排序，与到达顺序无关。
+2. 前提检查：按规则原语逐条检查能力、持有物、位置、资源与伤势限制，产生拒绝或失败尝试。
+3. 冲突处理：同一物品、同一目标的冲突按规则解决；规则声明了随机对抗时，使用记录在状态里的种子随机数。
+4. 语义裁决：程序无法判断的条目，连同依据交给裁决模型；交互模式下进入待核实裁决，自动模式下自动接受并标记待复核。
+5. 生成结果：输出状态差异与事件，每个事件带有视觉与声音两种感知描述。
+
+### 感知分发
+
+区域图是带属性的无向图：边上记录是否相邻、是否可见、声音衰减等级。每个事件带有发生区域、视觉描述、声音描述与响度。受众计算：
+
+- 视觉受众：与事件区域互相可见的区域中的角色。
+- 声音受众：沿边累计衰减后，响度仍大于零的区域中的角色。
+- 台词：同区域的角色听到全部已说出的句子；邻近区域按响度规则可能只听到“有人在说话”。
+
+只看见的角色收到视觉描述，只听见的角色收到声音描述。例如，主角踢碎瓦片时，货架后的对手只收到“货架另一侧传来碎瓦声”。
+
+### 上下文构建
+
+角色请求只能通过 `buildCharacterView(state, actorId)` 得到的角色视图构建。上下文构建管线依次执行：收集候选条目、按信息权限与故事时间过滤、按相关性排序、按预算裁剪、渲染模板。管线同时产出上下文清单，记录纳入与排除的条目及原因。清单同时用于作者查看（B18）与“角色所见”视图。
+
+## 六 模型接入与结构化输出
+
+### 认证方式
+
+所有模型服务统一由用户自填 API Key 接入（需求 B15），首版不实现任何订阅账户登录。不得复用官方命令行工具（Claude Code、Codex CLI、Gemini CLI 等）的登录流程或令牌：这违反各服务条款，会让用户面临封号风险，并可能随服务端识别规则升级而失效。认证在代码中抽象为 `AuthMethod`，首版只有 `ApiKey` 与 `None`（本地端点）两种实现；若日后项目开源并接入 OpenAI 官方的 Sign in with ChatGPT，只需新增一种实现，令牌的保存与刷新放在凭据代理中。
+
+### 服务类型与适配器
+
+| 服务类型 | 适配器 | 接口 | 说明 |
+| --- | --- | --- | --- |
+| Anthropic | `AnthropicAdapter` | Anthropic 官方 TypeScript SDK，Messages API | 原生支持结构化输出、提示词缓存、effort 与拒答信息 |
+| OpenAI | `OpenAIAdapter` | OpenAI 官方 TypeScript SDK，Responses API | OpenAI 新模型的推理控制与结构化输出以 Responses API 为主 |
+| Google Gemini | `OpenAIChatAdapter`（兼容模式） | Gemini 的 OpenAI 兼容端点，用户填写 AI Studio 的 API Key | 先以兼容模式接入；若 M2 实测发现结构化输出或缓存能力不足，再实现原生适配器 |
+| OpenAI 兼容接口 | `OpenAIChatAdapter` | OpenAI 官方 SDK 的 Chat Completions，自定义 baseURL | 覆盖国内模型服务与 OpenRouter 等聚合服务 |
+| 本地端点 | `OpenAIChatAdapter` | 同上，指向本机地址，可免密钥 | Ollama、LM Studio、vLLM |
+
+三个适配器共用同一组内部类型、结构化输出管线、预算守卫与调用记录。服务之间的差异（参数名称、用量字段、错误码、拒答表示）只在适配器内部处理。
+
+### 分工
+
+```text
+packages/llm（TypeScript）                          src-tauri（Rust）
+├─ AnthropicAdapter   ── Anthropic SDK ──┐
+├─ OpenAIAdapter      ── OpenAI SDK ─────┼──► 自定义 fetch ──► net_fetch ──► 凭据代理 ──► 模型服务
+├─ OpenAIChatAdapter  ── OpenAI SDK ─────┤      （桌面端）                 注入凭据、主机白名单
+├─ ReplayAdapter（测试）                   │                                流式转发、取消、并发上限
+└─ 结构化输出管线、预算守卫、调用记录      └──► Node 原生 fetch（M0 与测试，直连）
+```
+
+适配器只写一份。桌面端把官方 SDK 的 `fetch` 选项替换为调用 Rust 的 `net_fetch`，SDK 中的 API Key 填占位值，由凭据代理按服务配置替换为真实凭据；M0 与测试直接使用 Node 的 fetch，从环境变量读取 API Key。
+
+### 服务、模型与任务分配的配置
+
+模型配置属于应用级数据，保存在应用数据目录的 `app.sqlite` 中，不随作品导出；API Key 只保存在系统凭据管理器，数据库中只存凭据引用。
+
+| 表 | 关键字段 | 相关需求 |
+| --- | --- | --- |
+| `provider` | id、kind（anthropic、openai、gemini、openai_compatible、local）、name、base_url、credential_ref、auth_method、concurrency、enabled | B15 |
+| `model_profile` | provider_id、model_id、display_name、capabilities（结构化输出方式、提示词缓存、思考深度控制、上下文长度、最大输出）、prices（输入、输出、缓存读、缓存写）、source（服务返回、内置能力表、用户编辑）、self_test（状态、时间、失败原因） | B56、B57、B19 |
+| `task_routing` | task（角色行动、语义裁决、认知更新、判断、场景配置草稿、节拍表、候选稿正文、选区操作、导演提议、读者代理、动机检验）、model_ref、params（effort 等）、fallback_model_ref | B58 |
+| `routing_preset` | name（质量优先、均衡、省钱）、routes（JSON） | B58 |
+
+- 模型列表（B56）：添加服务后调用该服务的“列出模型”接口；结果与内置能力表合并。内置能力表随应用更新发布，用户可覆盖其中任何字段；没有记录的模型按保守能力处理：结构化输出方式为“提示词约束”、不启用缓存、不传思考深度参数。
+- 能力自检（B57）：对选定模型发送一个固定的结构化输出测试（含嵌套对象、枚举与数组），连续三次通过才标记为可用于结构化任务。自检结果、时间与失败原因写入 `self_test`。
+- 任务分配（B58，P1）：首版只设一个默认模型，所有任务共用；P1 加入按任务分配与三套预设。一个任务只能分配给满足其能力要求的模型：需要结构化输出的任务只列出自检通过的模型。
+- 凭据代理的主机白名单由 `provider.base_url` 推导；本地端点只允许回环地址。删除服务时同时删除凭据管理器中的对应条目。
+
+### Rust 命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `net_fetch(request, channel)` | 转发 HTTP 请求：校验目标主机属于已配置的模型服务，注入凭据，经 Channel 流式回传响应头与响应体字节，返回请求标识 |
+| `net_cancel(requestId)` | 中断转发；已收到的内容照常交给适配器，用于保留部分结果与已知用量 |
+| `credential_set` / `credential_status` / `credential_delete` | 凭据只写入、只查询是否存在，从不把明文返回给 WebView |
+
+### 代理与适配器行为
+
+- 主机白名单：凭据只会附加到该服务配置的主机，防止凭据被发往其他地址。
+- 重试只做一层：由 SDK 或适配器负责（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。
+- 并发：代理按主机设置并发上限，批量推演在同一信号量下排队。
+- 日志：普通日志不记录凭据与请求正文；完整的请求与响应只保存在作品库的 `llm_call` 表中。
+- 用量与费用：读取服务返回的用量，包括缓存读写与思考产生的输出；价格表未配置时费用记为未知（B19）。
+- 连接测试（B15）：发送一个最小请求，显示延迟、模型名称与错误原因。
+
+### Anthropic 接入要点
+
+- 结构化输出使用 `output_config.format` 传入由 Zod 生成的 JSON Schema，再由管线校验。所选的 Claude 模型不支持强制指定工具（`tool_choice` 为 `any` 或 `tool` 会被拒绝），因此不用“强制工具调用”的方式取得 JSON。
+- 思考与深度：所选模型的思考无法关闭，通过 `output_config.effort` 控制深度；每类任务显式设定 effort（见下文“模型配置”），不依赖默认值。
+- 拒答处理（B38）：检查 `stop_reason` 是否为 `refusal`，读取 `stop_details` 中的类别；启用服务端回退（`fallbacks: "default"`，需相应 beta 头），并把拒答记录为任务事件。暴力、黑暗题材的推演需要在 M0 中专门测试拒答率。
+- 提示词缓存：请求按“通用规则与输出格式 → 场景规则与角色卡 → 本回合角色视图”排列，在第二段末尾设置缓存断点。缓存按前缀精确匹配：时间戳、随机标识等易变内容只能放在断点之后。前缀短于模型的最小可缓存长度时不会缓存，以响应中的 `cache_read_input_tokens` 核实命中。
+- 流式：所有推演与生成请求都走流式，界面据此显示进度。
+
+### OpenAI、Gemini 与兼容接口接入要点
+
+- OpenAI：使用 Responses API；结构化输出使用其 JSON Schema 输出能力；推理深度参数按模型能力表传递。
+- Gemini：经 OpenAI 兼容端点接入，结构化输出与缓存能力以 M2 实测为准，结果写入内置能力表。
+- 其他兼容接口：结构化输出优先使用服务端的 JSON Schema 输出（`response_format`）；不支持时退回提示词约束，并完全依赖结构化输出管线的修复与重试。
+- 本地模型：多数未通过结构化输出自检，按 B57 只用于选区改写、续写、摘要等纯文本任务。
+- 各服务的拒答表示不同（专门的停止原因、内容过滤标记或空响应），适配器统一转换为内部的拒答结果，供 B38 使用。
+
+### 结构化输出管线（TypeScript）
+
+```text
+请求（附 JSON Schema）→ 解析 → 修复常见格式错误 → Zod 校验
+    ├─ 通过：返回结果
+    └─ 失败：带错误信息请求模型修正（计入用量）→ 再次校验
+           └─ 超过次数上限：暂停任务并说明原因（B35）
+```
+
+模型输出只能在 `packages/llm` 中解析，其他代码不得对模型输出直接调用 `JSON.parse`。
+
+### 提示词管理
+
+- 模板放在 `packages/prompts/templates/<id>.md`，文件头声明 id、版本、输入字段与输出 schema。
+- 模板输入字段有类型约束。角色提示词模板只接受角色视图与角色卡，不接受世界状态。
+- 修改模板必须提升版本号；每次调用记录模板 id 与版本（B36）；录制回放测试的样本随模板版本更新。
+
+### 推荐的默认配置
+
+以下是 M0 实验使用的配置，也是“质量优先”预设的初始内容。用户可以改用任何已配置的服务与模型。
+
+以质量最高为前提，默认所有任务使用 Claude Opus 5.5（`claude-opus-5-5`，每百万 Token 输入 4 美元、输出 20 美元、缓存读取 0.20 美元），通过 effort 按任务调节深度。只用一个模型有两个好处：只需调一套提示词，且提示词缓存按模型隔离，同一模型的请求可以共享缓存。
+
+| 任务 | 模型 | effort | 说明 |
+| --- | --- | --- | --- |
+| 角色行动提案（含内心片段与推测） | Opus 5.5 | medium | 调用最多的任务；M0 比较 low 与 medium |
+| 语义裁决 | Opus 5.5 | high | 调用少，正确性最重要 |
+| 认知更新、记忆摘要 | Opus 5.5 | low | 抽取型任务，深度需求低 |
+| 证据链命中判断、僵局判断 | Opus 5.5 | low | 判断范围已由程序筛小 |
+| 场景配置草稿（B39） | Opus 5.5 | medium | 每个场景一次 |
+| 节拍表 | Opus 5.5 | medium | 每次采纳一次 |
+| 候选稿正文 | Opus 5.5 | high | 调用少，直接影响作者的采纳率 |
+| 选区改写、续写等（B16） | Opus 5.5 | medium | 交互任务，兼顾等待时间 |
+| 导演提议（P1） | Opus 5.5 | low | 每回合至多一次 |
+
+M0 在默认配置之外设三个对照条件，以数据决定是否引入第二个模型：
+
+| 对照条件 | 目的 |
+| --- | --- |
+| 批量推演改用 Claude Sonnet 5.5（`claude-sonnet-5-5`，输入 2 美元、输出 10 美元）或 Claude Haiku 4.5（`claude-haiku-4-5`，输入 1 美元、输出 5 美元） | 确认便宜模型的走向分布是否与 Opus 5.5 一致，若一致则批量推演改用便宜模型 |
+| 候选稿正文改用 Claude Fable 5.1（`claude-fable-5-1`，输入 10 美元、输出 50 美元） | 正文生成调用少，若作者评价明显更高，可作为“高质量正文”选项；单次请求耗时更长 |
+| 候选稿正文改用一个国内模型（经 OpenAI 兼容接口，版本在 M0 开工时按服务商文档选定） | 比较中文文风与口癖 |
+
+先测“同一模型降低 effort”，再考虑换便宜模型：较低 effort 的强模型往往不差于较高 effort 的弱模型，而且不会丢失缓存共享。
+
+### 费用与速度
+
+以下为单次推演（8 回合、约 45 次调用）的粗略估算，M0 实测后修正：
+
+| 项目 | 估算 |
+| --- | --- |
+| 输入 | 12 万至 30 万 Token，未计缓存时约 0.5 至 1.2 美元；缓存命中可大幅降低这一项 |
+| 输出（含思考） | 思考按输出计费，是主要成本；按每次 1500 至 3500 Token 计，约 1.4 至 3.2 美元 |
+| 合计 | 约 2 至 5 美元一次；批量推演 5 次约 10 至 25 美元 |
+
+降低费用与等待时间的手段，按优先顺序：
+
+1. 提示词缓存：固定前缀命中后，输入费用显著下降，首个 Token 的等待时间也会缩短。
+2. 按任务设定 effort：认知更新、判断类任务用 low，压缩思考产生的输出。
+3. 并行：同一回合双方的行动提案并行发出；批量推演的各次运行并行，受并发上限约束。
+4. 程序优先：感知分发、规则检查、僵局的初步筛选由程序完成，不调用模型。
+5. 离线任务用批处理：I05 动机检验的采样、I06 读者代理逐章阅读不需要即时结果，可使用 Message Batches 接口，费用减半，但结果在异步完成后才返回。
+6. 按数据换模型：只有 M0 证明便宜模型在某类任务上质量相当时，才为该任务换模型。
+
+## 七 编辑器实现要点
+
+- 文档结构为 `doc > paragraph+`。段落节点属性包括 id 与 source，首版不启用行内样式。
+- 自动保存：输入停止约 800 毫秒后，按段落标识与版本比较上次保存的内容，在一个事务中写入变更。输入法组合输入期间（`view.composing`）不保存，也不改动文档。
+- 保存失败时保留编辑器中的内容，状态栏显示失败与重试入口，并提供复制全文与导出当前章节（B05）。
+- 每次只加载一章；章节目录使用虚拟列表，以满足连载规模测试集的切换目标。
+- 实体高亮：按设定的名称与别名构建匹配器，以装饰层显示，不写入文档。
+- 输入法手工测试清单：微软拼音、搜狗拼音、五笔；在段首、段尾、段落之间组合输入；组合中按回车；组合结束后撤销与重做；组合输入时触发自动保存。
+
+## 八 里程碑与任务分解
+
+工期按一名全职开发者粗略估计，仅用于排期参考，M0 结束后按实际进度修正。
+
+| 阶段 | 粗略工期 | 前置条件 |
+| --- | --- | --- |
+| M0 推演验证 | 3 至 4 周 | 准备模型服务账号，确定 M0 实验预算 |
+| M1 本地写作 | 4 至 6 周 | M0 结论为继续或调整 |
+| M2 AI 协作 | 4 至 5 周 | M1 完成 |
+| M3 角色推演原型 | 5 至 7 周 | M2 完成；推演核心沿用 M0 |
+
+M1 与 M0 之间没有代码依赖。若 M0 进行中人力允许，M1 的脚手架与存储部分可以并行开工。
+
+### M0 推演验证
+
+目标：在不搭建工作台的前提下回答需求第八章的 M0 问题，并产出可沿用的推演核心。
+
+| 编号 | 任务 | 产出 | 相关需求 |
+| --- | --- | --- | --- |
+| M0-01 | pnpm 单仓库、TypeScript 严格模式、Vitest、依赖边界检查、持续集成 | 可运行的空包结构 | — |
+| M0-02 | 领域内核：世界状态、区域图、规则原语、感知计算、事件归约 | `packages/domain` 与属性测试 | B26、B27、B41 |
+| M0-03 | 认知模型：认知条目、二阶认知、人物说法、角色视图构建 | 角色视图与泄露测试 | B24、B42、B44 |
+| M0-04 | 模型端口、`AnthropicAdapter` 与 `OpenAIChatAdapter`（M0 的国内模型对照条件使用）、录制回放适配器、结构化输出管线、拒答处理、预算守卫 | `packages/llm` | B35、B36、B38 |
+| M0-05 | 提示词模板：角色行动、语义裁决、认知更新、节拍表、正文、场景配置草稿 | `packages/prompts` | B25、B39、B43、B45 |
+| M0-06 | 回合状态机、两种回合协议、自动与交互模式、恢复与幂等 | `packages/engine` | B28、B40 |
+| M0-07 | 僵局分类、简化导演提议、批量推演 | 实验条件开关 | B47、B48 的简化形式 |
+| M0-08 | 事件存储：JSONL 文件实现，与 SQLite 实现共用 `EventStore` 接口 | 运行记录 | B30 |
+| M0-09 | 命令行：`run`、`baseline`、`narrate`、`motive-check`、`report` | `apps/m0-cli` | — |
+| M0-10 | 静态查看页：读取运行记录，显示时间线、全局局面与角色所见 | 单个 HTML 文件 | 简易查看界面 |
+| M0-11 | 三个实验场景：仓库争夺密信（同时行动）、当铺谈判（轮流对话）、雨夜道歉（轮流对话） | `m0/scenes/*.yaml` | — |
+| M0-12 | 评估材料：按局面与条件均衡抽样，隐藏来源，答案键单独保存 | 评估包与评分表 | M0 评估设计 |
+| M0-13 | 执行实验，汇总结果，写出结论 | `m0/DECISION.md` | 继续、调整或转向 |
+
+命令行示例：
+
+```bash
+pnpm m0 run m0/scenes/warehouse.yaml --mode auto --runs 5 --director off
+```
+
+```bash
+pnpm m0 baseline m0/scenes/warehouse.yaml --runs 5
+```
+
+```bash
+pnpm m0 report --experiment m0/experiments/round1.yaml --out m0/packets/round1
+```
+
+完成条件：需求第八章 I04 原型验收中与引擎相关的各项（私有信息边界、认知与事实分离、感知传播、同轮行动、行动前提、世界状态一致、言语行动、轮流对话、区域感知、证据链提示、停止与恢复、自动模式）均有自动测试并通过；M0 评估完成，结论写入 `m0/DECISION.md`。
+
+### M1 本地写作
+
+| 编号 | 任务 | 相关需求 |
+| --- | --- | --- |
+| M1-01 | Tauri 2 脚手架，接入单仓库与持续集成，生成 Windows 安装包 | — |
+| M1-02 | Rust 数据库命令（单连接、事务、迁移执行），TypeScript `SqlPort` 的桌面实现 | — |
+| M1-03 | 第一版迁移：作品、章节、段落、快照、设定、事实、来源关系、故事事件与事件段落关联 | B55 预留 |
+| M1-04 | 作品管理与章节目录：创建、重命名、排序、回收站、恢复 | B01、B02 |
+| M1-05 | 编辑器：段落标识扩展、输入法安全的自动保存、保存状态与失败处理、撤销重做、字数统计 | B04、B05 |
+| M1-06 | 章节快照：创建、预览、恢复，恢复前自动保存现稿快照 | B06 |
+| M1-07 | 导入导出与备份：编码识别、章节拆分规则、完整项目导出与导回、`VACUUM INTO` 备份 | B06、B07 |
+| M1-08 | 设定管理：别名、锁定设定、正文实体高亮与跳转 | B09 |
+| M1-09 | 事实记录：三类事实的手动录入、故事时间范围、依赖与待复核标记 | B11、B12 首版范围 |
+| M1-10 | 段落来源字段与统计界面（AI 部分在 M2 生效） | B33 |
+| M1-11 | 全文查找：FTS5 trigram 与短查询的退化路径 | B04 |
+| M1-12 | 连载规模测试集生成器与性能基准 | 大作品操作验收 |
+
+完成条件：需求第八章的“中文编辑、保存反馈、意外退出、大作品操作、数据迁移、事件关联、锁定设定”通过；输入法手工测试清单全部通过。
+
+### M2 AI 协作
+
+| 编号 | 任务 | 相关需求 |
+| --- | --- | --- |
+| M2-01 | Rust 凭据代理：`net_fetch` 流式转发、取消、主机白名单、并发上限；适配器接入自定义 fetch；连接测试 | B15 |
+| M2-02 | 凭据存储命令；`app.sqlite` 与服务、模型、任务分配表；服务管理界面（添加、编辑、删除、填写 API Key） | B15 |
+| M2-02a | `OpenAIAdapter`（Responses API）与 Gemini 兼容模式接入；五类服务各一个实例的连接测试 | B15 |
+| M2-02b | 模型列表获取、内置能力与价格表、用户覆盖；结构化输出自检与结果展示 | B56、B57 |
+| M2-03 | 结构化输出管线接入桌面端适配器；调用记录与复现信息；用量与费用 | B19、B35、B36 |
+| M2-04 | 上下文构建与上下文清单界面，可增减上下文、查看超出预算的内容 | B18 |
+| M2-05 | 选区操作：续写、改写、扩写、缩写、润色 | B16 |
+| M2-06 | 候选稿：生命周期、差异预览、接受时生成快照、写入段落来源、基础版本检查 | B17、B33 |
+| M2-07 | 任务中心：后台任务列表、进度、取消、部分结果与已知用量 | B16、B19 |
+
+完成条件：“AI 候选稿、凭据与日志、多模型服务、结构化输出、段落来源、并行编辑”通过；断网时编辑、搜索、备份与导出功能正常。
+
+### M3 角色推演原型
+
+| 编号 | 任务 | 相关需求 |
+| --- | --- | --- |
+| M3-01 | 将 M0 引擎接入桌面端：SQLite 事件存储、桌面模型适配器 | — |
+| M3-02 | 场景编辑：自然语言生成场景配置草稿、表单编辑、角色卡、初始认知与秘密 | B22、B23、B39 |
+| M3-03 | 区域图编辑：区域列表与相邻、可见、声音关系的表格编辑（首版不做画布） | B41 |
+| M3-04 | 推演工作区：时间线、全局局面与角色所见切换、单步、继续、暂停、停止、预算 | B28 |
+| M3-05 | 待核实裁决审阅、作者介入与快照、证据链提示、内心片段查看 | B26、B30、B43、B44 |
+| M3-06 | 回放与中断恢复 | B30 |
+| M3-07 | 节拍表编辑与指定视角生成候选稿 | B29、B45 |
+| M3-08 | 采纳流程：选择事件、正文、事实与认知更新；版本检查；写入段落、来源与事件关联；锁定设定冲突检查 | B29、B55 |
+| M3-09 | 推演评价表 | B46 |
+
+完成条件：需求第八章“I04 原型验收”全部通过，“推演隔离、事实来源、推演等待”通过；作者可在桌面应用中完成一个有限回合场景并把结果写入章节。
+
+## 九 测试策略
+
+| 类型 | 内容 | 对应验收 |
+| --- | --- | --- |
+| 属性测试 | 任意打乱提案到达顺序，裁决结果相同；任意事件序列的重放结果与快照一致；同一物品任何时刻最多一个持有者；资源不为负 | 同轮行动、世界状态一致、介入与回放 |
+| 金丝雀泄露测试 | 测试场景中每个秘密条目嵌入唯一标记；测试用模型适配器检查每个发出的请求，出现无权限的标记即失败 | 私有信息边界、正文视角 |
+| 录制回放测试 | 录制真实模型响应作为样本，持续集成中不联网完整运行推演 | 回放、停止与恢复 |
+| 故障注入 | 在任一阶段抛出异常模拟崩溃，恢复后检查无重复裁决、无重复调用 | 停止与恢复 |
+| 结构化输出 | 构造格式错误、字段缺失、超长响应 | 结构化输出 |
+| 适配器契约测试 | 三个适配器对同一组录制样本（正常、流式、取消、限流、拒答、用量缺失）输出一致的内部结果；凭据代理拒绝白名单以外的主机 | 多模型服务、凭据与日志 |
+| 迁移往返 | 导出后导回，逐表比对 | 数据迁移、段落来源、事件关联 |
+| 性能基准 | 两档测试集上的章节切换、全文查找、保存耗时 | 大作品操作、保存反馈 |
+| 手工清单 | 输入法、意外退出、保存失败（只读磁盘、磁盘满） | 中文编辑、意外退出、保存反馈 |
+
+持续集成不访问任何模型服务。需要真实模型的测试只在本地或手动触发的流水线中运行，并显示预计费用。
+
+## 十 编码约定与完成标准
+
+### 编码约定
+
+- TypeScript 开启 strict，禁止 `any`；领域层只写纯函数与不可变数据。
+- 界面组件不直接调用仓储与模型端口，统一通过应用服务层的用例。
+- 领域层以返回 Result 表达预期错误，异常只在边界处捕获。
+- 标识统一使用 ULID；系统时间使用 UTC ISO 字符串；故事时间是独立的领域类型，不与系统时间混用。
+- 提示词只存在于 `packages/prompts`，其他位置不拼接提示词。
+- 日志不记录凭据；默认不记录提示词与正文。
+- 数据库结构变更必须附带迁移脚本与迁移测试。
+- 提交与合并请求注明相关的需求编号。
+
+### 完成标准
+
+一个任务满足以下条件才算完成：
+
+1. 代码通过类型检查、代码检查、依赖边界检查与全部测试。
+2. 对应的验收项有自动测试；无法自动化的写入手工清单并执行过一次。
+3. 数据结构有变更时，迁移与导出导入往返测试已更新。
+4. 涉及模型调用时，录制回放样本已更新，模板版本已提升。
+5. 需求或设计与实现不一致时，已同步修改文档。
+
+## 十一 选型结论
+
+选型以“运行性能与开发效率优先”为准则。本应用的性能瓶颈在三处：模型调用的等待与费用、长篇作品的数据操作、编辑器的输入响应。界面框架之间的运行差异远小于这三处，因此选型集中解决这三处，其余选开发效率最高的方案。
+
+| 事项 | 结论 | 理由 |
+| --- | --- | --- |
+| 前端框架 | React 19 + React Compiler | Svelte、Solid 的渲染更轻，但本应用的界面压力集中在编辑器，而编辑器状态不经过框架渲染；React 的编辑器绑定、组件库与资料最完善，开发效率最高 |
+| 正文编辑器 | TipTap 3，关闭按事务重渲染 | 块结构原生支持段落标识；输入法组合输入成熟；每次只加载一章，ProseMirror 的性能在单章规模上没有压力。若后续需要更细的控制，可下沉到 ProseMirror 而不更换数据模型 |
+| 推演引擎所在层 | TypeScript；CPU 与 IO 密集部分放在 Rust | 引擎计算在毫秒级，而模型调用以秒计，用 Rust 重写引擎不会让推演变快；TypeScript 让 M0 代码直接进入桌面端，并与界面、Zod 定义共用类型 |
+| 正文格式 | 段落化纯文本 | 保存、比对、全文检索、锚点与导出都最简单、最快；符合网文正文以纯文本为主的习惯 |
+| 模型服务与认证 | Anthropic、OpenAI、Google Gemini、OpenAI 兼容接口与本地端点，全部由用户自填 API Key | 三个适配器覆盖五类服务，在 TypeScript 中只写一份，Rust 只做凭据代理；不实现订阅账户登录，避免违反服务条款与用户封号风险 |
+| M0 实验模型 | 默认全部任务使用 Claude Opus 5.5，按任务设定 effort；对照条件见第六章 | 质量优先；单一模型便于调提示词并共享缓存；是否为批量推演或正文生成换模型，由 M0 数据决定 |
+| 开源与许可证 | M0 结束前保持私有仓库，之后再定 | 不影响技术实现：选用的依赖均为 MIT 或 Apache 等宽松许可证，开源与否都可使用 |
+
+性能相关的配套措施：
+
+- 数据库：WAL 模式，一个写连接加只读连接池，全文查找与自动保存互不阻塞。
+- 编辑器：每次只加载一章；章节目录虚拟列表；输入法组合期间不保存。
+- 模型：同回合并行请求、提示词缓存、按任务设定 effort、离线任务使用批处理接口。
+- 进程间通信：章节整体加载一次；流式数据经 Channel 传输，不轮询。
+
+## 十二 技术风险
+
+| 风险 | 表现 | 应对 |
+| --- | --- | --- |
+| 输入法兼容 | 组合输入时丢字、光标跳动 | 组合期间不保存、不改动文档；手工清单覆盖主流输入法 |
+| 本地模型结构化输出不稳定 | 推演频繁暂停 | 修复管线；能力自检未通过的模型不能用于结构化任务 |
+| 各服务能力与接口差异 | 同一提示词在不同模型上效果不一；某服务接口变更导致调用失败 | 能力表与自检决定可用任务；差异封装在适配器内，契约测试覆盖；提示词按需为不同模型族准备变体 |
+| 用户填错或滥用 API Key | 连接失败、费用失控 | 连接测试给出具体原因；预算守卫与运行前费用估算对所有服务生效 |
+| 推演费用超出预期 | 批量推演费用过高；思考产生的输出是主要成本 | 运行前估算、预算上限、提示词缓存、按任务设定 effort；M0 证明质量相当后再为批量推演换便宜模型 |
+| 题材内容触发拒答 | 暴力、黑暗情节的推演被模型拒绝 | 识别 `refusal` 并记录类别；启用服务端回退；M0 专门测试拒答率；B38 提示作者调整条件或切换模型 |
+| 推演等待过长 | 单回合等待数十秒 | 双方提案并行、流式显示进度、M0 实测后设定目标 |
+| 同步目录损坏数据库 | 作品存放在 OneDrive 等目录 | 检测并提示；备份用 `VACUUM INTO` |
+| WebView2 缺失 | 部分 Windows 10 设备无法启动 | 安装包内置 WebView2 引导程序 |
+| 短词全文查找 | trigram 无法索引 1 至 2 字 | 退化为逐章扫描，并在连载规模测试集上验证耗时 |
+| 提示词修改导致行为漂移 | 回放与比较结果无法解释 | 模板版本化、调用记录、录制回放测试 |
