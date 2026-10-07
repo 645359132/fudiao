@@ -1,0 +1,117 @@
+# M0 实验场景一：仓库争夺密信（同时行动）
+# 对应需求文档 I04“对战示例”。主角携带密信进入废仓库，需要从南门脱身；
+# 对手希望夺信，同时尽量避免受伤。货架影响视线，地面碎瓦可用于制造声响。
+
+run:
+  protocol: simultaneous
+  maxRounds: 8
+
+scene:
+  meta:
+    title: 废仓库夺信
+    genre: 武侠
+    questions:
+      - 主角能否在不知道绊索的情况下脱身
+      - 对手会不会为了保住最后一支箭而错失时机
+
+  zones:
+    - { id: south_gate, name: 南门 }
+    - { id: center, name: 仓库中央 }
+    - { id: shelves, name: 货架区 }
+    - { id: loft, name: 阁楼 }
+    - { id: back_wall, name: 后墙破口 }
+
+  edges:
+    - { between: [south_gate, center], adjacent: true, visible: true, sound: 1 }
+    - { between: [center, shelves], adjacent: true, visible: true, sound: 1 }
+    - { between: [center, loft], adjacent: true, visible: true, sound: 1 }
+    - { between: [shelves, back_wall], adjacent: true, visible: false, sound: 1 }
+    - { between: [shelves, south_gate], adjacent: false, visible: false, sound: 2 }
+    - { between: [loft, shelves], adjacent: false, visible: true, sound: 2 }
+    - { between: [back_wall, center], adjacent: false, visible: false, sound: 2 }
+
+  exits: [south_gate, back_wall]
+
+  actors:
+    - id: shen_yan
+      name: 沈砚
+      zone: center
+      injury: light
+      card:
+        goal: 带着密信脱身，把信送到城东
+        bottomLine: 宁可毁掉密信，也不让它落到对方手里
+        traits: [隐忍, 多疑, 不轻易示弱]
+        riskPreference: 平时谨慎，被逼到绝处时会孤注一掷
+        emotionThreshold: 被嘲笑出身低微时容易失去冷静
+        lossOfControl: 认定对方要置自己于死地时，会放弃周旋直接拼命
+        speechStyle: 话少，句子短，带一点冷嘲
+        initialKnowledge:
+          - { text: 左肩有伤，抬臂受限，拉不开弓，也爬不快, about: [shen_yan] }
+          - { text: 卫七手里有一张弩, about: [wei_qi, crossbow] }
+          - text: 卫七这次来，主要是想杀了我灭口
+            modality: inferred
+            confidence: 0.7
+            about: [wei_qi]
+          - text: 听说后墙有个破口，但不知道还能不能钻过去
+            modality: heard
+            confidence: 0.5
+            about: [back_wall]
+
+    - id: wei_qi
+      name: 卫七
+      zone: south_gate
+      card:
+        goal: 夺下密信，同时尽量不让自己受伤
+        bottomLine: 不在官府眼皮底下杀人
+        traits: [沉得住气, 爱惜性命, 好面子]
+        riskPreference: 不打没把握的仗，宁可等
+        emotionThreshold: 被人当面识破时会恼羞成怒
+        lossOfControl: 弩箭落空之后会慌乱
+        speechStyle: 说话客气，绵里藏针
+        initialKnowledge:
+          - { text: 我在南门门槛下布了绊索，踩上去会被绊倒受伤, about: [tripwire, south_gate] }
+          - { text: 弩里只剩最后一支箭，射空了就再没有了, about: [crossbow] }
+          - { text: 沈砚左肩有旧伤, modality: heard, confidence: 0.6, about: [shen_yan] }
+          - text: 沈砚以为我是来杀他的
+            modality: inferred
+            confidence: 0.5
+            order: 2
+            concerning: shen_yan
+            about: [wei_qi]
+
+  items:
+    - { id: letter, name: 密信, location: { kind: actor, actor: shen_yan }, concealed: true }
+    - { id: dagger, name: 短刀, location: { kind: actor, actor: shen_yan }, reach: melee }
+    - id: crossbow
+      name: 弩
+      location: { kind: actor, actor: wei_qi }
+      counters: { bolts: 1 }
+      reach: ranged
+    - { id: tiles, name: 碎瓦, location: { kind: zone, zone: shelves }, use: { loudness: 5 } }
+    - { id: rope, name: 麻绳, location: { kind: zone, zone: loft } }
+
+  mechanisms:
+    - id: tripwire
+      name: 南门绊索
+      zone: south_gate
+      trigger: enter
+      exempt: [wei_qi]
+      effect: { injury: 1, loudness: 3 }
+
+  secrets:
+    - { id: tripwire_secret, text: 卫七在南门门槛下布了绊索, subjects: [tripwire, south_gate], knownBy: [wei_qi] }
+    - { id: last_bolt, text: 卫七的弩只剩最后一支箭, subjects: [crossbow], knownBy: [wei_qi] }
+
+  rules:
+    consumption:
+      - { item: crossbow, counter: bolts, kinds: [attack], amount: 1, whenEmpty: fail }
+    injuryLimits:
+      - { actor: shen_yan, atLeast: light, forbidItems: [crossbow] }
+      - { atLeast: severe, forbidKinds: [attack] }
+    contests:
+      take: ruling
+    narrativeRules:
+      - 弩在十步以内射向没有防备、没有遮挡的人，大多能命中；对方有防备、在移动或有货架遮挡时，命中困难。
+      - 短刀只能近身使用；双方同处一个区域、一方攻击另一方时，防备的一方大多能躲开第一下。
+      - 后墙破口很窄，带伤的人需要两个回合才能钻过去，期间无法做别的事。
+      - 离开仓库即视为脱身，推演对该角色结束。

@@ -1,0 +1,89 @@
+# M0 实验场景三：雨夜道歉（轮流对话）
+# 对应需求文档“情感冲突”：一人想道歉却害怕被拒绝，另一人想听解释却故意冷淡。
+
+run:
+  protocol: turn_based
+  maxRounds: 10
+  firstSpeaker: a_qing
+
+scene:
+  meta:
+    title: 雨夜叩门
+    genre: 民国言情
+    questions:
+      - 自尊与误读会让冲突升级，还是会出现重新理解对方的机会
+      - 阿青会不会说出当年失约的真正原因
+
+  zones:
+    - { id: gate, name: 院门外 }
+    - { id: eaves, name: 屋檐下 }
+    - { id: courtyard, name: 院子里 }
+    - { id: hall, name: 堂屋 }
+
+  edges:
+    - { between: [gate, courtyard], adjacent: true, visible: true, sound: 1 }
+    - { between: [courtyard, eaves], adjacent: true, visible: true, sound: 0 }
+    - { between: [eaves, hall], adjacent: true, visible: true, sound: 1 }
+    - { between: [gate, eaves], adjacent: false, visible: true, sound: 2 }
+
+  exits: [gate]
+
+  actors:
+    # 周砚开门后，两人隔着门槛站在屋檐下：台词只有同一区域才能听清。
+    - id: a_qing
+      name: 阿青
+      zone: eaves
+      card:
+        goal: 当面道歉，求周砚原谅三年前的失约
+        bottomLine: 不拿家里的病来博同情
+        traits: [要强, 敏感, 嘴硬心软]
+        riskPreference: 不敢把话说满，怕被当面拒绝
+        emotionThreshold: 被说成贪图富贵时会忍不住反驳
+        lossOfControl: 被要求立刻离开时，会把憋了三年的话一口气说出来
+        speechStyle: 说话小心，常常说一半咽一半
+        initialKnowledge:
+          - { text: 三年前失约，是因为母亲病重，不得不随家人连夜回乡, about: [a_qing] }
+          - { text: 身上带着一封当年没寄出去的信, about: [unsent_letter] }
+          - text: 周砚一定恨我，觉得我是为了嫁进富贵人家才走的
+            modality: inferred
+            confidence: 0.7
+            order: 2
+            concerning: zhou_yan
+            about: [a_qing]
+
+    - id: zhou_yan
+      name: 周砚
+      zone: eaves
+      card:
+        goal: 弄清楚她当年为什么不辞而别
+        bottomLine: 不先低头，不让她看出自己还在等
+        traits: [骄傲, 记仇, 心细]
+        riskPreference: 宁可错过，也不愿被再骗一次
+        emotionThreshold: 她又一次含糊其辞时会冷笑着赶人
+        lossOfControl: 听到她提起别的男人的名字时会失态
+        speechStyle: 冷淡，反问多，偶尔刻薄
+        initialKnowledge:
+          - text: 她当年是为了嫁给城北的富商，才不辞而别
+            modality: heard
+            confidence: 0.6
+            about: [a_qing]
+          - { text: 这三年一直留着她送的伞, about: [umbrella] }
+          - text: 她这次来，大概是被富商冷落了，想回头找个依靠
+            modality: inferred
+            confidence: 0.5
+            about: [a_qing]
+
+  items:
+    - { id: unsent_letter, name: 没寄出的信, location: { kind: actor, actor: a_qing }, concealed: true }
+    - { id: umbrella, name: 油纸伞, location: { kind: zone, zone: eaves } }
+
+  secrets:
+    - { id: mother_ill, text: 阿青当年失约是因为母亲病重，被家人连夜带回乡下, subjects: [a_qing, unsent_letter], knownBy: [a_qing] }
+
+  rules:
+    contests:
+      take: ruling
+    narrativeRules:
+      - 院子里没有遮挡，淋雨超过三个回合的人会着凉发抖，说话断续。
+      - 递出去的信，对方接过并读完需要一个回合。
+      - 走出院门即视为离开，谈话结束。

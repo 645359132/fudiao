@@ -1,0 +1,98 @@
+# M0 实验场景二：当铺谈判（轮流对话）
+# 对应需求文档“谈判与试探”：买家想压价，卖家急需钱却表现从容，双方只知道部分底线。
+
+run:
+  protocol: turn_based
+  maxRounds: 10
+  firstSpeaker: lin_zhou
+
+scene:
+  meta:
+    title: 当铺夜谈
+    genre: 古代市井
+    questions:
+      - 掌柜会不会因为怀疑玉佩来路而压价到书生翻脸
+      - 书生会不会在被逼急时说漏急需用钱的原因
+
+  # 隔着柜台说话的两人处在同一区域：台词只有同一区域才能听清。
+  zones:
+    - { id: counter, name: 柜台 }
+    - { id: back_room, name: 后堂 }
+    - { id: doorway, name: 门口 }
+    - { id: street, name: 当铺门外 }
+
+  edges:
+    - { between: [counter, back_room], adjacent: true, visible: false, sound: 1 }
+    - { between: [counter, doorway], adjacent: true, visible: true, sound: 1 }
+    - { between: [doorway, street], adjacent: true, visible: true, sound: 1 }
+
+  exits: [street]
+
+  actors:
+    - id: lin_zhou
+      name: 林舟
+      zone: counter
+      card:
+        goal: 今晚把玉佩当出至少三十两银子
+        bottomLine: 不说出玉佩是从哪里得来的
+        traits: [好面子, 心思细, 读书人的倔]
+        riskPreference: 表面从容，心里随时准备掉头就走
+        emotionThreshold: 被当面怀疑人品时会动气
+        lossOfControl: 被人说成贼的时候，会不顾后果地争辩
+        speechStyle: 文绉绉，喜欢引经据典来掩饰紧张
+        initialKnowledge:
+          - { text: 天亮前必须凑够三十两还赌债，否则妹妹要被债主带走, about: [lin_zhou] }
+          - { text: 玉佩是父亲留下的，成色极好，至少值五十两, about: [jade] }
+          - text: 这家掌柜出了名的压价，但给钱爽快
+            modality: heard
+            confidence: 0.8
+            about: [qian_si]
+          - text: 掌柜一看我穿着寒酸，就会以为我急着用钱
+            modality: inferred
+            confidence: 0.6
+            order: 2
+            concerning: qian_si
+            about: [lin_zhou]
+
+    - id: qian_si
+      name: 钱四
+      zone: counter
+      card:
+        goal: 用二十两以内收下这块玉佩
+        bottomLine: 不收赃物，惹上官司的买卖再便宜也不做
+        traits: [精明, 多疑, 爱占便宜]
+        riskPreference: 宁可错过，不肯吃亏
+        emotionThreshold: 被人看穿压价的心思时会翻脸
+        lossOfControl: 认定对方是贼时会喊伙计报官
+        speechStyle: 慢条斯理，句句带刺，喜欢反问
+        initialKnowledge:
+          - { text: 这块玉佩的成色，转手能卖六十两, about: [jade] }
+          - text: 前日衙门贴出告示，城南王家丢了一块相似的玉佩
+            modality: heard
+            confidence: 0.7
+            about: [jade]
+          - text: 这个书生衣衫单薄，深夜上门，十有八九是急着用钱
+            modality: inferred
+            confidence: 0.7
+            about: [lin_zhou]
+
+  items:
+    - { id: jade, name: 玉佩, location: { kind: actor, actor: lin_zhou } }
+    - id: silver
+      name: 钱匣
+      location: { kind: actor, actor: qian_si }
+      counters: { taels: 45 }
+      concealed: true
+    - { id: notice, name: 失物告示的抄本, location: { kind: zone, zone: back_room } }
+
+  secrets:
+    - { id: gambling_debt, text: 林舟急需三十两是为了还赌债，否则妹妹会被债主带走, subjects: [lin_zhou], knownBy: [lin_zhou] }
+    - { id: not_stolen, text: 玉佩确实是林舟父亲的遗物，不是王家丢的那一块, subjects: [jade], knownBy: [] }
+
+  rules:
+    contests:
+      take: ruling
+    narrativeRules:
+      - 成交需要双方明确同意同一个价钱；成交时钱匣中的银子减少相应数目，玉佩交到掌柜手里。
+      - 掌柜可以去后堂取告示抄本对照，往返需要两个回合。
+      - 任何一方离开当铺，谈判即告结束。
