@@ -38,3 +38,31 @@ jobs:
       - name: 测试
         # 持续集成不访问任何真实模型服务（硬性规则 14）。
         run: pnpm test
+
+  desktop:
+    name: 桌面应用（Windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+      - name: 构建界面
+        # generate_context! 在编译期读取前端产物，cargo test 之前先构建。
+        run: pnpm --filter @novel-writer/desktop build
+      - name: Rust 测试
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: 生成安装包
+        run: pnpm --filter @novel-writer/desktop tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

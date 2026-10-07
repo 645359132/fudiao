@@ -2,7 +2,7 @@
 // 依赖只能向内：apps → engine / context / store / llm → domain → shared。
 
 // 测试文件与 src/testing/ 下的测试辅助代码（夹具、随机生成器）。
-const TEST_FILE = '(\\.test\\.ts$|/src/testing/)';
+const TEST_FILE = '(\\.test\\.tsx?$|/src/testing/)';
 
 // 领域内核与 shared 可以使用的第三方包。新增前须说明理由与许可证（AGENTS.md“工作方式”）。
 const PURE_NPM_ALLOWLIST = ['zod'];
@@ -93,7 +93,7 @@ module.exports = {
     enhancedResolveOptions: {
       exportsFields: ['exports'],
       conditionNames: ['import', 'require', 'node', 'default', 'types'],
-      extensions: ['.ts', '.js', '.json'],
+      extensions: ['.ts', '.tsx', '.js', '.json'],
     },
     reporterOptions: {
       text: { highlightFocused: true },

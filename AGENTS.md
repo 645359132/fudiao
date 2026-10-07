@@ -29,7 +29,8 @@
 - M0-10 已完成：`pnpm m0 view <运行标识>` 由运行记录生成单个 HTML 查看页（时间线、全局局面、角色所见），只读事件、不调用模型。
 - M0-12 已完成：`pnpm m0 report` 按清单生成评估包（均衡分配、隐藏来源、答案键单独存放、分层评分表），`report analyze` 汇总评分；对照组与推演组都输出事件梗概。实验步骤见 `m0/README.md`。
 - M0-07 已完成：僵局分类（程序判定观望与重复，僵局判断区分礼貌化解与目标无法达成）、导演提议（`stalemate` 与 `curve` 两种触发，导演只读全局局面）、`run --runs N --parallel P --director …` 与 `pnpm m0 outcomes` 走向归类。
-- 下一步是 M0-13：用真实模型运行实验、组织评价并写出 `m0/DECISION.md`。需要作者提供 API Key、确认费用并安排评价者，不能由助手单独完成。
+- M1-01 已完成：`apps/desktop` 的 Tauri 2 外壳（React 19 + React Compiler、Vite），持续集成在 Windows 上运行 Rust 测试并生成 NSIS 安装包（内置 WebView2 引导程序）。产品名 `Novel Writer` 与标识 `dev.novelwriter.desktop` 为暂定。
+- M0-13（真实实验与 `m0/DECISION.md`）需要作者提供 API Key、确认费用并安排评价者。按施工文档，M1 的脚手架与存储部分可与 M0 并行；M1 的其余任务在 M0 结论为继续或调整后进行。下一步是 M1-02（Rust 数据库命令与 `SqlPort`），属于事件存储与恢复相关的核心模块，先给出方案并获得确认。
 
 ## 工作方式
 
@@ -39,6 +40,7 @@
 - 实现与文档不一致时，先指出差异；经确认后同步修改文档，不要悄悄偏离文档中的决定。
 - 未经要求，不推送远程仓库，不发布，不新增重量级依赖；新增依赖须说明理由与许可证（只接受 MIT、Apache-2.0、BSD、ISC 等宽松许可证）。
   - 已确认的例外：`lightningcss`（MPL-2.0），Vite 的必需依赖，只在开发与构建时使用，不随产品分发。
+  - 已确认的例外：Tauri 2 的传递依赖 `option-ext`（MPL-2.0，经 `dirs`，随产品分发，未修改，源码见 crates.io），以及 `cssparser`、`selectors`、`dtoa-short`（MPL-2.0，只在 Tauri 的编译期宏与构建脚本中使用，不随产品分发）。
 
 ## 技术栈
 
@@ -132,10 +134,24 @@ pnpm m0 outcomes <运行标识…>
 
 运行记录写在 `m0/runs/`（不入库）。
 
-Rust 测试在 M1-01 创建 `apps/desktop` 后启用：
+Rust 测试（`generate_context!` 在编译期读取前端产物，首次运行前先构建界面）：
+
+```bash
+pnpm --filter @novel-writer/desktop build
+```
 
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+```
+
+桌面应用的开发模式与安装包（需要 Rust 工具链；安装包写在 `apps/desktop/src-tauri/target/release/bundle/nsis/`）：
+
+```bash
+pnpm --filter @novel-writer/desktop tauri dev
+```
+
+```bash
+pnpm --filter @novel-writer/desktop tauri build
 ```
 
 工作区包的命名为 `@novel-writer/<包名>`，以源码形式互相引用（`exports` 指向 `src/index.ts`），不需要构建步骤。

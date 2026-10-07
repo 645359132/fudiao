@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口的权限：只开放核心默认权限，文件、网络等插件按需在后续任务中逐项加入。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

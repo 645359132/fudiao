@@ -5,11 +5,11 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', 'tools/**/fixtures/**'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/src-tauri/target/**', '**/src-tauri/gen/**', 'tools/**/fixtures/**'],
   },
   js.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -28,7 +28,7 @@ export default defineConfig(
   },
   {
     // Vitest 的非对称匹配器（expect.objectContaining 等）类型为 any。
-    files: ['**/*.test.ts'],
+    files: ['**/*.test.ts', '**/*.test.tsx'],
     rules: { '@typescript-eslint/no-unsafe-assignment': 'off' },
   },
   {

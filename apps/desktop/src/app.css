@@ -1,0 +1,56 @@
+:root {
+  --bg: #f7f6f3;
+  --panel: #efede8;
+  --text: #2b2a27;
+  --muted: #7a776f;
+  --border: #dedbd3;
+  font-family: 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1c;
+    --panel: #262624;
+    --text: #e6e3dc;
+    --muted: #9a968d;
+    --border: #3a3936;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+}
+
+.shell-sidebar {
+  padding: 16px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.shell-sidebar h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.shell-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.shell-editor {
+  padding: 48px 64px;
+  overflow: auto;
+}

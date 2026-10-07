@@ -13,5 +13,8 @@ m0/runs/
 m0/packets/
 m0/evaluation/round*.yaml
 !m0/evaluation/*.example.yaml
+# Rust 构建产物与 Tauri 生成的权限 schema
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
 .DS_Store
 Thumbs.db

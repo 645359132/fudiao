@@ -61,6 +61,8 @@ describe('依赖边界规则', () => {
   it('产品代码不得导入开发依赖，测试文件可以', () => {
     expect(rulesFor('packages/engine/src/imports-dev-dep.ts')).toEqual(['not-to-dev-dep']);
     expect(rulesFor('packages/engine/src/allowed.test.ts')).toEqual([]);
+    // 组件测试（.test.tsx）同样算测试文件，且能解析不带扩展名的 .tsx 导入。
+    expect(rulesFor('packages/engine/src/allowed-component.test.tsx')).toEqual([]);
     expect(rulesFor('packages/domain/src/testing/helper.ts')).toEqual([]);
   });
 
