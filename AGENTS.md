@@ -28,7 +28,8 @@
 - M0-09 已完成：`pnpm m0` 的 run、baseline、narrate、motive-check；实验配置 `m0/experiments/default.yaml`；运行前费用估算与确认。report 在 M0-12。
 - M0-10 已完成：`pnpm m0 view <运行标识>` 由运行记录生成单个 HTML 查看页（时间线、全局局面、角色所见），只读事件、不调用模型。
 - M0-12 已完成：`pnpm m0 report` 按清单生成评估包（均衡分配、隐藏来源、答案键单独存放、分层评分表），`report analyze` 汇总评分；对照组与推演组都输出事件梗概。实验步骤见 `m0/README.md`。
-- 下一步是 M0-07（僵局分类、导演提议、批量推演），属于推演引擎，先给出方案并获得确认。
+- M0-07 已完成：僵局分类（程序判定观望与重复，僵局判断区分礼貌化解与目标无法达成）、导演提议（`stalemate` 与 `curve` 两种触发，导演只读全局局面）、`run --runs N --parallel P --director …` 与 `pnpm m0 outcomes` 走向归类。
+- 下一步是 M0-13：用真实模型运行实验、组织评价并写出 `m0/DECISION.md`。需要作者提供 API Key、确认费用并安排评价者，不能由助手单独完成。
 
 ## 工作方式
 
@@ -123,6 +124,10 @@ pnpm m0 narrate <运行标识> --pov shen_yan
 
 ```bash
 pnpm m0 view <运行标识>
+```
+
+```bash
+pnpm m0 outcomes <运行标识…>
 ```
 
 运行记录写在 `m0/runs/`（不入库）。

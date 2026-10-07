@@ -22,6 +22,7 @@ import { flagInt, flagString, parseArgs, type Args } from './args';
 import { estimateCalls, estimateCost, formatUsd, type CostEstimate } from './cost';
 import { buildPort, loadExperiment, runConfig, taskModel, type Experiment, type ExperimentTask } from './experiment';
 import { loadSceneFile, type SceneFile } from './scene-file';
+import { groupOutcomes, renderOutcomes, runOutcome } from './report/outcomes';
 import { analyze, loadManifest, loadSamples, writePackets } from './report/report';
 import { buildViewerData } from './viewer/data';
 import { renderViewerHtml } from './viewer/html';
@@ -97,7 +98,7 @@ function unwrap<T>(r: { ok: true; value: T } | { ok: false; error: string }): T 
 function request(experiment: Experiment, task: ExperimentTask, prompt: RenderedPrompt, stepKey: string): LlmRequest {
   const model = taskModel(experiment, task);
   return {
-    task: task === 'baseline' ? 'candidate_text' : task,
+    task: task === 'baseline' ? 'candidate_text' : task === 'stalemate' ? 'judgement' : task,
     model: model.profile,
     template: prompt.template,
     system: prompt.system,
@@ -125,6 +126,8 @@ type Summary = {
   readonly evidenceGaps: number;
   /** 从开始到结束的墙钟时间（含作者确认的等待），毫秒。 */
   readonly waitMs: number;
+  readonly stalemates: number;
+  readonly directorEvents: number;
 };
 
 function summarize(outDir: string, scenePath: string, status: RunStatus, stored: readonly StoredEvent[]): Summary {
@@ -148,6 +151,8 @@ function summarize(outDir: string, scenePath: string, status: RunStatus, stored:
     unknownCostCalls: records.filter((r) => r.cost === null && r.status !== 'error').length,
     needsReview: status.state.needsReview.length,
     evidenceGaps: events.filter((e) => e.type === 'EvidenceGapFlagged').length,
+    stalemates: events.filter((e) => e.type === 'StalemateDetected').length,
+    directorEvents: events.filter((e) => e.type === 'DirectorDecided' && e.accepted).length,
     waitMs: stored.length > 0 ? Date.parse(stored.at(-1)?.at ?? '') - Date.parse(stored[0]?.at ?? '') : 0,
   };
 }
@@ -187,14 +192,47 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
   }
   const outDir = path(deps, flagString(args, 'out') ?? DEFAULT_OUT);
   const resume = flagString(args, 'resume');
+  const directorFlag = flagString(args, 'director');
+  const curve = flagString(args, 'curve');
+  const parallel = flagInt(args, 'parallel') ?? 1;
+  if (
+    (directorFlag !== undefined && directorFlag !== 'off' && directorFlag !== 'stalemate' && directorFlag !== 'curve') ||
+    parallel === 'invalid' ||
+    parallel === 0
+  ) {
+    deps.console.err('参数有误：--director 为 off、stalemate 或 curve，--parallel 须为正整数');
+    return 1;
+  }
+  if (directorFlag !== undefined && directorFlag !== 'off' && experiment.tasks.director === undefined) {
+    deps.console.err('开启导演时，实验配置中必须有 tasks.director');
+    return 1;
+  }
+  const overrides: { mode?: 'auto' | 'interactive'; director?: 'off' | 'stalemate' | 'curve'; tensionCurve?: string } = {
+    ...(modeFlag !== undefined && { mode: modeFlag }),
+    ...(directorFlag !== undefined && { director: directorFlag }),
+    ...(curve !== undefined && { tensionCurve: curve }),
+  };
 
-  const config0 = runConfig(experiment, sceneFile.run, { seed: seedBase, ...(modeFlag && { mode: modeFlag }) });
+  const config0 = runConfig(experiment, sceneFile.run, { seed: seedBase, ...overrides });
   const counts = estimateCalls(config0.protocol, scene.actors.length, config0.maxRounds);
   const total = resume ? 1 : runs;
+  const rounds = config0.maxRounds;
   const estimate = estimateCost([
     { model: config0.models.character_action, calls: counts.proposals * total },
     { model: config0.models.semantic_ruling, calls: counts.rulings * total },
     { model: config0.models.belief_update, calls: counts.beliefs * total },
+    // 按上限估算：窗口填满后每回合都可能请求僵局判断；导演不在最后一回合之后询问。
+    ...(config0.models.stalemate && config0.stalemate.enabled
+      ? [{ model: config0.models.stalemate, calls: Math.max(0, rounds - config0.stalemate.window + 1) * total }]
+      : []),
+    ...(config0.models.director && config0.director.enabled
+      ? [
+          {
+            model: config0.models.director,
+            calls: (config0.director.trigger === 'curve' ? rounds - 1 : Math.floor(rounds / config0.stalemate.window)) * total,
+          },
+        ]
+      : []),
   ]);
   if (!(await confirmCost(deps, args, estimate, experiment.budget.limitUsdPerRun))) {
     deps.console.out('已取消。');
@@ -206,7 +244,7 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
     return 1;
   }
 
-  for (let i = 0; i < total; i++) {
+  const runOne = async (i: number): Promise<number> => {
     const runId = resume ?? deps.newId();
     const engine = createEngine({
       llm,
@@ -216,7 +254,7 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
       budget: new BudgetGuard({ limitUsd: experiment.budget.limitUsdPerRun }),
     });
     if (resume === undefined) {
-      const started = await engine.start(runId, scene, runConfig(experiment, sceneFile.run, { seed: seedBase + i, ...(modeFlag && { mode: modeFlag }) }));
+      const started = await engine.start(runId, scene, runConfig(experiment, sceneFile.run, { seed: seedBase + i, ...overrides }));
       if (!started.ok) {
         deps.console.err(`无法开始：${JSON.stringify(started.error)}`);
         return 1;
@@ -224,8 +262,25 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
     }
     deps.console.out(`运行 ${runId} 开始。`);
     let status = await engine.run(runId, scene);
-    while (status.ok && status.value.phase === 'AwaitingAuthor') {
-      if (!(await resolveRulings(deps, engine, runId, scene, status.value))) break;
+    while (status.ok) {
+      const s = status.value;
+      if (s.phase === 'AwaitingAuthor' && s.awaitingDirector !== null) {
+        const event = s.awaitingDirector.event;
+        deps.console.out(`导演提议：${s.awaitingDirector.rationale}`);
+        for (const o of event?.occurrences ?? []) deps.console.out(`  ${o.description.visual ?? o.description.sound ?? ''}`);
+        const decided = await engine.decideDirector(runId, scene, await deps.console.confirm('采用这条导演提议？'));
+        if (!decided.ok) {
+          deps.console.err(`导演提议处理失败：${JSON.stringify(decided.error)}`);
+          break;
+        }
+      } else if (s.phase === 'AwaitingAuthor') {
+        if (!(await resolveRulings(deps, engine, runId, scene, s))) break;
+      } else if (s.phase === 'Paused' && s.state.pause?.reason === 'stalemate') {
+        const kind = s.state.pause.detail ?? '';
+        deps.console.out(`检测到僵局：${STALEMATE_LABEL[kind] ?? kind}。`);
+        if (await deps.console.confirm('继续推演？')) await engine.resume(runId, scene);
+        else await engine.stop(runId, scene);
+      } else break;
       status = await engine.run(runId, scene);
     }
     if (!status.ok) {
@@ -240,11 +295,35 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
       `运行 ${runId}：${summary.phase}${summary.endReason ? `（${summary.endReason}）` : ''}${summary.pause ? `（暂停：${summary.pause}）` : ''}，` +
         `${summary.rounds} 回合，${summary.calls} 次调用，费用 $${summary.costUsd.toFixed(4)}` +
         (summary.needsReview > 0 ? `，${summary.needsReview} 条裁决待复核` : '') +
-        (summary.evidenceGaps > 0 ? `，${summary.evidenceGaps} 处缺少证据链的命中` : ''),
+        (summary.evidenceGaps > 0 ? `，${summary.evidenceGaps} 处缺少证据链的命中` : '') +
+        (summary.stalemates > 0 ? `，${summary.stalemates} 次僵局` : '') +
+        (summary.directorEvents > 0 ? `，${summary.directorEvents} 个导演事件` : ''),
     );
-  }
-  return 0;
+    return 0;
+  };
+
+  // 批量推演（B48 简化形式）：并发运行，各次运行独立记录与预算。交互模式要逐条询问作者，只能逐次运行。
+  const width = config0.mode === 'interactive' ? 1 : Math.min(parallel, total);
+  let next = 0;
+  let failed = 0;
+  await Promise.all(
+    Array.from({ length: width }, async () => {
+      while (next < total) {
+        const i = next++;
+        if ((await runOne(i)) !== 0) failed++;
+      }
+    }),
+  );
+  return failed > 0 ? 1 : 0;
 }
+
+/** 僵局类型与给作者的建议（需求第五章“戏剧性与导演层”）。 */
+const STALEMATE_LABEL: Readonly<Record<string, string>> = {
+  standoff: '双方观望，建议注入事件',
+  repetition: '重复相同动作，建议调整目标',
+  polite_resolution: '冲突被礼貌化解，建议提高情绪压力',
+  goal_unreachable: '目标已无法达成，建议结束场景',
+};
 
 // —— baseline ——
 
@@ -465,6 +544,47 @@ export async function viewCommand(args: Args, deps: CliDeps): Promise<number> {
   return 0;
 }
 
+// —— outcomes ——
+
+/** outcomes <运行标识…>：按结局归类批量推演（B48 简化形式），写出归类文件。不调用模型。 */
+export async function outcomesCommand(args: Args, deps: CliDeps): Promise<number> {
+  const runIds = [...args.positionals];
+  if (runIds.length === 0) {
+    deps.console.err('用法：pnpm m0 outcomes <运行标识…>');
+    return 1;
+  }
+  const outDir = path(deps, flagString(args, 'out') ?? DEFAULT_OUT);
+  const store = jsonlEventStore(outDir);
+  const results = [];
+  let scenePath0: string | null = null;
+  let title = '';
+  for (const runId of runIds) {
+    const summaryFile = join(outDir, runId, 'summary.json');
+    if (!existsSync(summaryFile)) {
+      deps.console.err(`找不到运行 ${runId} 的摘要`);
+      return 1;
+    }
+    const { scene: scenePath } = JSON.parse(readFileSync(summaryFile, 'utf8')) as { scene: string };
+    if (scenePath0 !== null && scenePath !== scenePath0) {
+      deps.console.err(`运行 ${runId} 与其他运行不是同一个场景`);
+      return 1;
+    }
+    scenePath0 = scenePath;
+    const sceneFile = loadSceneFile(readFileSync(scenePath, 'utf8'));
+    if (!sceneFile.ok) {
+      deps.console.err(`场景文件有误：${JSON.stringify(sceneFile.error)}`);
+      return 1;
+    }
+    title = sceneFile.value.scene.meta.title ?? scenePath;
+    results.push(runOutcome(sceneFile.value.scene, runId, (await store.read(runId)).map((e) => e.payload as RunEvent)));
+  }
+  const groups = groupOutcomes(results);
+  const file = join(outDir, `outcomes-${[...runIds].sort()[0] ?? ''}.md`);
+  writeFileSync(file, renderOutcomes(title, groups));
+  deps.console.out(`${runIds.length} 次运行，${groups.length} 种结局，已写出 ${file}`);
+  return 0;
+}
+
 // —— report ——
 
 /**
@@ -572,6 +692,8 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
       return motiveCommand(args, deps);
     case 'view':
       return viewCommand(args, deps);
+    case 'outcomes':
+      return outcomesCommand(args, deps);
     case 'report':
       return reportCommand(args, deps);
     case undefined:
@@ -591,10 +713,12 @@ export const USAGE = [
   '',
   '命令：',
   '  run <场景.yaml>            运行推演  [--experiment 配置] [--runs N] [--seed N] [--mode auto|interactive] [--resume 运行标识] [--yes]',
+  '                             [--director off|stalemate|curve] [--curve 张力曲线] [--parallel P]',
   '  baseline <场景.yaml>       单次提示词对照组  [--runs N] [--length 字数] [--yes]',
   '  narrate <运行标识>         由推演记录生成节拍表与候选稿  --pov <角色> [--style 文风] [--yes]',
   '  motive-check <场景.yaml>   动机可达性检验  --actor <角色> --expect <行动>[:对象] [--samples N] [--yes]',
   '  view <运行标识>           生成静态查看页：时间线、全局局面与角色所见',
+  '  outcomes <运行标识…>       按结局归类批量推演的结果，列出代表运行的关键转折',
   '  report <清单.yaml>         生成评估包：均衡分配、隐藏来源、答案键单独存放  [--out 目录]',
   '  report analyze --out <目录> 汇总评价者填好的评分表',
   '',

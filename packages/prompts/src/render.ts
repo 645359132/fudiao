@@ -25,9 +25,11 @@ import {
   BaselineOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
+  DirectorProposalOutput,
   EvidenceJudgementOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
+  StalemateJudgementOutput,
   SynopsisOutput,
 } from './schemas';
 
@@ -46,6 +48,8 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   ActionProposal,
   BaselineOutput,
   SynopsisOutput,
+  StalemateJudgementOutput,
+  DirectorProposalOutput,
   SemanticRulingOutput,
   BeliefUpdateOutput,
   EvidenceJudgementOutput,
@@ -347,8 +351,21 @@ export function renderRunSynopsis(
   final: SimState,
   rounds: readonly { readonly round: number; readonly occurrences: readonly Occurrence[] }[],
 ): Result<RenderedPrompt, string> {
-  const names = namesOf([...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]);
-  const asObservation = (o: Occurrence): Observation => ({
+  const names = sceneNames(scene);
+  return renderTemplate('run_synopsis', {
+    actors: scene.actors.map((a) => ({ name: a.name })),
+    rounds: globalRounds(rounds, names),
+    final: actorStates(scene, final, names),
+  });
+}
+
+type RoundRecord = { readonly round: number; readonly occurrences: readonly Occurrence[] };
+
+const sceneNames = (scene: Scene) => namesOf([...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]);
+
+/** 作者侧提示词中的“发生的事”：按全局记录完整呈现，不经过任何角色的感知。 */
+function occurrenceAsObservation(o: Occurrence): Observation {
+  return {
     occurrence: o.id,
     channel: 'participant',
     kind: o.kind,
@@ -361,18 +378,75 @@ export function renderRunSynopsis(
     ...(o.kind === 'failed_attempt' && { failed: true as const }),
     ...(o.speech && { speech: { clarity: 'full', sentences: o.speech.sentences, volume: o.speech.volume } }),
     ...(o.description && { description: o.description }),
+  };
+}
+
+function globalRounds(rounds: readonly RoundRecord[], names: ReturnType<typeof namesOf>) {
+  return rounds.map((r) => ({
+    round: r.round,
+    // 观察与发现机关不改变局面，不列出。
+    events: r.occurrences
+      .filter((o) => o.kind !== 'observe' && o.kind !== 'discovered')
+      .map((o) => observationModel(occurrenceAsObservation(o), names, null)),
+  }));
+}
+
+function actorStates(scene: Scene, state: SimState, names: ReturnType<typeof namesOf>) {
+  return scene.actors.map((a) => {
+    const s = state.world.actors[a.id];
+    return { name: a.name, zone: names(s?.zone) ?? '', injury: flag(s?.injury ?? 'none'), withdrawn: s?.status === 'withdrawn' };
   });
-  return renderTemplate('run_synopsis', {
-    actors: scene.actors.map((a) => ({ name: a.name })),
-    rounds: rounds.map((r) => ({
-      round: r.round,
-      // 只听自己说话的“观察”“等待”之类不进入梗概。
-      events: r.occurrences.filter((o) => o.kind !== 'observe' && o.kind !== 'discovered').map((o) => observationModel(asObservation(o), names, null)),
-    })),
-    final: scene.actors.map((a) => {
-      const s = final.world.actors[a.id];
-      return { name: a.name, zone: names(s?.zone) ?? '', injury: flag(s?.injury ?? 'none'), withdrawn: s?.status === 'withdrawn' };
+}
+
+/**
+ * 僵局判断（M0-07）：作者侧请求，读最近几回合的全局记录与各人的当前目标，
+ * 不读任何角色的认知与内心。
+ */
+export function renderStalemateJudgement(scene: Scene, rounds: readonly RoundRecord[]): Result<RenderedPrompt, string> {
+  const names = sceneNames(scene);
+  return renderTemplate('stalemate_judgement', {
+    actors: scene.actors.map((a) => ({ name: a.name, goal: a.card.goal ?? '' })),
+    window: rounds.length,
+    rounds: globalRounds(rounds, names),
+  });
+}
+
+export type DirectorInput = {
+  readonly scene: Scene;
+  readonly state: SimState;
+  readonly recent: readonly RoundRecord[];
+  readonly tensionCurve: string;
+  readonly maxRounds: number;
+  /** 触发方式为僵局时，检测到的僵局类型。 */
+  readonly stalemate?: 'standoff' | 'repetition' | 'polite_resolution';
+};
+
+/**
+ * 导演提议（B47 简化形式）。导演透镜只含全局局面与张力曲线：
+ * 不含任何角色的认知、角色卡、内心片段与秘密原文，导演不改变角色的决策与认知。
+ */
+export function renderDirectorProposal(input: DirectorInput): Result<RenderedPrompt, string> {
+  const { scene, state } = input;
+  const names = sceneNames(scene);
+  const flags = Object.entries(state.world.flags).map(([key, value]) => ({ key, value }));
+  return renderTemplate('director_proposal', {
+    zones: scene.zones.map((z) => ({ id: z.id, name: z.name })),
+    flags,
+    hasFlags: flags.length > 0,
+    curve: input.tensionCurve,
+    round: state.round,
+    maxRounds: input.maxRounds,
+    stalemate: input.stalemate === undefined ? null : flag(input.stalemate),
+    actors: actorStates(scene, state, names),
+    items: scene.items.map((i) => {
+      const loc = state.world.items[i.id]?.location;
+      return {
+        name: i.name,
+        holder: loc?.kind === 'actor' ? names(loc.actor) : null,
+        zone: loc?.kind === 'zone' ? names(loc.zone) : null,
+      };
     }),
+    rounds: globalRounds(input.recent, names),
   });
 }
 

@@ -37,7 +37,28 @@ M0 回答一个问题：多角色推演能否比直接让模型写一场同类�
    pnpm m0 baseline m0/scenes/warehouse.yaml --runs 3
    ```
 
-5. **导演提议与批量推演**：M0-07 完成后补充这两个条件的样本。
+5. **导演提议与批量推演**：
+   - 导演提议有两种触发方式，作为两个实验条件：`stalemate` 只在检测到僵局后提议，`curve` 按张力曲线在每个回合边界提议。条件分别记为 `director_stalemate` 与 `director_curve`。
+
+     ```bash
+     pnpm m0 run m0/scenes/warehouse.yaml --runs 3 --director stalemate
+     ```
+
+     ```bash
+     pnpm m0 run m0/scenes/warehouse.yaml --runs 3 --director curve --curve "前三轮蓄势，第五轮爆发"
+     ```
+
+   - 批量推演后由作者挑选（条件记为 `batch_pick`）：并行运行多次，按结局归类，作者从归类结果中选一次运行，再用 `narrate` 生成样本。
+
+     ```bash
+     pnpm m0 run m0/scenes/warehouse.yaml --runs 8 --parallel 4
+     ```
+
+     ```bash
+     pnpm m0 outcomes <运行标识…>
+     ```
+
+   归类文件写在 `m0/runs/outcomes-<标识>.md`，列出每种结局的次数、对应的运行与代表运行的关键转折（物品易手、伤势变化、离场、机关触发、导演事件）。僵局检测默认开启，摘要与查看页中会标出检测到的僵局。
 6. **生成评估包**：按 `evaluation/round1.example.yaml` 写好清单，生成评估包。每位评价者一个文件夹，答案键在 `_key/`，不要分发。
 
    ```bash
@@ -62,4 +83,4 @@ pnpm m0 motive-check m0/scenes/warehouse.yaml --actor wei_qi --expect attack:she
 
 ## 费用
 
-施工文档估算单次推演（8 回合、约 40 次调用）约 2 至 5 美元，节拍表、候选稿与梗概另需 3 次调用。默认配置中每次运行的预算上限为 6 美元，超出时运行以“预算”结束，已完成的结果保留。
+施工文档估算单次推演（8 回合、约 40 次调用）约 2 至 5 美元，节拍表、候选稿与梗概另需 3 次调用。僵局判断（默认开启）与导演提议（开启时）按调用次数的上限计入运行前的估算。默认配置中每次运行的预算上限为 6 美元，超出时运行以“预算”结束，已完成的结果保留。

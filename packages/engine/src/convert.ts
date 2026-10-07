@@ -5,14 +5,17 @@ import {
   type BeliefProposal,
   type CharacterView,
   type Effect,
+  type ExternalEvent,
   type FlagKey,
   type ItemId,
   type KnowledgeId,
   type CounterKey,
+  type Scene,
   type SemanticRuling,
+  type SimState,
   type ZoneId,
 } from '@novel-writer/domain';
-import type { ActionProposal, BeliefUpdateOutput, SemanticRulingOutput } from '@novel-writer/prompts';
+import type { ActionProposal, BeliefUpdateOutput, DirectorProposalOutput, SemanticRulingOutput } from '@novel-writer/prompts';
 import { err, ok, type Result } from '@novel-writer/shared';
 
 /**
@@ -60,6 +63,31 @@ export function beliefProposal(
       .filter((r) => own.has(r.id) && once(r.id))
       .map((r) => ({ id: r.id as KnowledgeId, confidence: r.confidence })),
     retract: (update?.retract ?? []).filter((id) => own.has(id) && once(id)).map((id) => id as KnowledgeId),
+  };
+}
+
+/**
+ * 导演提议转换为外部事件。导演只能设置场景已声明的标记并产生一件外部事件，
+ * 不能移动角色、转移物品或改变伤势；未声明的标记被丢弃，区域不存在时视为没有提议。
+ */
+export function directorEvent(output: DirectorProposalOutput, scene: Scene, state: SimState): ExternalEvent | null {
+  const e = output.event;
+  if (!output.propose || e === null) return null;
+  if (!scene.zones.some((z) => z.id === e.zone)) return null;
+  const effects: Effect[] = e.setFlags
+    .filter((f) => f.flag in state.world.flags)
+    .map((f) => ({ type: 'setFlag', flag: f.flag as FlagKey, value: f.value }));
+  return {
+    effects,
+    occurrences: [
+      {
+        participants: [],
+        zones: [e.zone as ZoneId],
+        visible: e.visible,
+        loudness: e.loudness,
+        description: { ...(e.visual !== null && { visual: e.visual }), ...(e.sound !== null && { sound: e.sound }) },
+      },
+    ],
   };
 }
 

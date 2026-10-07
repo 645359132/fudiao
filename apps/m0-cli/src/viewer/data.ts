@@ -236,6 +236,16 @@ export function buildViewerData(scene: Scene, runId: string, events: readonly Ru
       case 'RunPaused':
         current.notes.push(`暂停：${event.reason}${event.detail ? `（${event.detail}）` : ''}`);
         break;
+      case 'StalemateDetected':
+        current.notes.push(`僵局：${event.kind}${event.explanation ? `（${event.explanation}）` : ''}`);
+        break;
+      // 导演事件发生在回合之间，记在下一回合开头。
+      case 'DirectorProposed':
+        current.notes.push(`导演提议：${event.rationale}${event.event === null ? '（不注入事件）' : ''}`);
+        break;
+      case 'DirectorDecided':
+        if (event.accepted || event.by === 'author') current.notes.push(`导演提议${event.accepted ? '已采用' : '未采用'}（${event.by === 'author' ? '作者' : '自动'}）`);
+        break;
       case 'RoundEnded':
         rounds.push(snapshot(event.round));
         current = { proposals: [], rulings: new Map(), occurrences: [], notes: [] };

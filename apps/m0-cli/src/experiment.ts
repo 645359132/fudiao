@@ -30,6 +30,10 @@ export const Experiment = z.object({
     beat_sheet: Task,
     candidate_text: Task,
     baseline: Task,
+    /** 僵局判断；未配置时只做程序判定的两类僵局。 */
+    stalemate: Task.optional(),
+    /** 导演提议；开启导演时必须配置。 */
+    director: Task.optional(),
   }),
   run: z
     .object({
@@ -37,6 +41,14 @@ export const Experiment = z.object({
       runs: z.number().int().positive().default(1),
       maxProposalAttempts: z.number().int().positive().default(2),
       maxRepairs: z.number().int().nonnegative().default(2),
+      stalemate: z.object({ enabled: z.boolean().default(true), window: z.number().int().min(2).default(3) }).prefault({}),
+      director: z
+        .object({
+          mode: z.enum(['off', 'stalemate', 'curve']).default('off'),
+          tensionCurve: z.string().default(''),
+          maxProposals: z.number().int().positive().default(3),
+        })
+        .prefault({}),
     })
     .prefault({}),
   budget: z.object({ limitUsdPerRun: z.number().positive() }),
@@ -56,7 +68,11 @@ export function loadExperiment(text: string): Result<Experiment, string> {
     const issue = parsed.error.issues[0];
     return err(`${issue?.path.join('.') ?? ''}: ${issue?.message ?? ''}`);
   }
+  if (parsed.data.run.director.mode !== 'off' && parsed.data.tasks.director === undefined) {
+    return err('tasks.director: 开启导演时必须配置导演使用的模型');
+  }
   for (const [task, t] of Object.entries(parsed.data.tasks)) {
+    if (t === undefined) continue;
     const model = parsed.data.models[t.model];
     if (model === undefined) return err(`tasks.${task}.model: 未定义的模型 ${t.model}`);
     if (parsed.data.providers[model.provider] === undefined) return err(`models.${t.model}.provider: 未定义的服务 ${model.provider}`);
@@ -66,6 +82,7 @@ export function loadExperiment(text: string): Result<Experiment, string> {
 
 export function taskModel(experiment: Experiment, task: ExperimentTask): TaskModel {
   const t = experiment.tasks[task];
+  if (t === undefined) throw new Error(`任务 ${task} 没有配置模型`);
   const profile = experiment.models[t.model];
   if (profile === undefined) throw new Error(`未定义的模型 ${t.model}`);
   return { profile, maxOutputTokens: t.maxOutputTokens, ...(t.effort !== undefined && { effort: t.effort }) };
@@ -74,8 +91,15 @@ export function taskModel(experiment: Experiment, task: ExperimentTask): TaskMod
 export function runConfig(
   experiment: Experiment,
   sceneRun: SceneRun,
-  overrides: { readonly seed: number; readonly mode?: 'interactive' | 'auto' },
+  overrides: {
+    readonly seed: number;
+    readonly mode?: 'interactive' | 'auto';
+    /** 命令行的 --director 与 --curve 覆盖实验配置。 */
+    readonly director?: 'off' | 'stalemate' | 'curve';
+    readonly tensionCurve?: string;
+  },
 ): RunConfig {
+  const director = overrides.director ?? experiment.run.director.mode;
   return {
     protocol: sceneRun.protocol,
     mode: overrides.mode ?? experiment.run.mode,
@@ -84,11 +108,20 @@ export function runConfig(
     ...(sceneRun.firstSpeaker !== undefined && { firstSpeaker: sceneRun.firstSpeaker }),
     maxProposalAttempts: experiment.run.maxProposalAttempts,
     maxRepairs: experiment.run.maxRepairs,
+    stalemate: experiment.run.stalemate,
+    director: {
+      enabled: director !== 'off',
+      trigger: director === 'stalemate' ? 'stalemate' : 'curve',
+      tensionCurve: overrides.tensionCurve ?? experiment.run.director.tensionCurve,
+      maxProposals: experiment.run.director.maxProposals,
+    },
     models: {
       character_action: taskModel(experiment, 'character_action'),
       semantic_ruling: taskModel(experiment, 'semantic_ruling'),
       belief_update: taskModel(experiment, 'belief_update'),
       judgement: taskModel(experiment, 'judgement'),
+      ...(experiment.tasks.stalemate !== undefined && { stalemate: taskModel(experiment, 'stalemate') }),
+      ...(experiment.tasks.director !== undefined && { director: taskModel(experiment, 'director') }),
     },
   };
 }

@@ -3,6 +3,8 @@ import { modelJsonSchema } from './json-schema';
 import {
   ActionProposal,
   BaselineOutput,
+  DirectorProposalOutput,
+  StalemateJudgementOutput,
   SynopsisOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
@@ -11,7 +13,7 @@ import {
   SemanticRulingOutput,
 } from './schemas';
 
-const all = { BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput };
+const all = { StalemateJudgementOutput, DirectorProposalOutput, BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput };
 
 function walk(node: unknown, visit: (n: Readonly<Record<string, unknown>>) => void): void {
   if (Array.isArray(node)) node.forEach((n) => walk(n, visit));

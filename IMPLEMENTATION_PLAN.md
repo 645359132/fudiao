@@ -235,6 +235,10 @@ stateDiagram-v2
     Distributing --> UpdatingBeliefs
     UpdatingBeliefs --> CheckingEnd
     CheckingEnd --> BuildingViews: 继续下一回合
+    CheckingEnd --> Directing: 开启导演且需要询问
+    Directing --> AwaitingAuthor: 交互模式，等待作者决定导演提议
+    Directing --> BuildingViews: 自动模式采用，或导演不提议
+    AwaitingAuthor --> BuildingViews: 作者采用或拒绝导演提议
     CheckingEnd --> Paused: 命中断点或检测到僵局
     CheckingEnd --> Ended: 满足结束条件
     Paused --> BuildingViews: 作者继续
@@ -246,6 +250,8 @@ stateDiagram-v2
 校验与收集提案合并：提案提交时即按回合开始的状态检查，被拒绝时在同一对话中附上拒绝原因请求修正，超过次数暂停，由作者替换行动。认知更新只为本回合有新观察或新说法的角色请求，行动提案中的推测一并写入。
 
 轮流对话（B40）：每回合只有持有发言权的人行动。他说话时，其余在场角色在同一回合用一次调用决定回应，并看到按句编号的台词，可以在任一句之后打断；最早的打断点决定实际说出的句数，被打断的部分不进入任何人的认知。这次回应就是该角色下一次持有发言权时的行动，不再额外调用；到时若已不合法，按规则拒绝重问。打断者获得下一回合的发言权，否则按场景中的角色顺序传递。
+
+僵局与导演（M0-07）：检查结束时，程序先在最近 K 回合（默认 3）的窗口内判定“双方观望”（只有等待、观察或防御且世界状态不变）与“重复相同动作”（同一个人每回合提交相同的行动，说话连同内容比较）；世界状态不变但有对话时，才请求僵局判断，区分“冲突被礼貌化解”与“目标已无法达成”。僵局判断是作者侧请求，只读窗口内的全局记录与各人的当前目标。检测到后窗口重新计数。自动模式记录并继续，目标已无法达成时以僵局结束；交互模式暂停，把类型与建议交给作者。导演在回合边界提议，只读全局局面、最近两回合发生的事与作者的张力曲线，不读任何角色的认知、角色卡与内心片段；只能产生一件外部事件并设置场景已声明的标记，经 `commitExternal` 按感知规则分发。
 
 ### 事件类型
 
@@ -262,12 +268,12 @@ stateDiagram-v2
 | `PerceptionDelivered` | 角色、按感知通道裁剪后的观察；归约时生成认知条目 |
 | `BeliefsUpdated` / `BeliefsReviewed` | 角色、新增的推测、修改的相信程度、撤回的条目；该角色本回合的认知更新已完成 |
 | `KnowledgeEdited` | 作者介入时修改的角色认知（可以是观察或听闻，不能是人物说法） |
-| `DirectorProposed` / `DirectorApplied` | 导演提议及处理结果（P1） |
+| `DirectorProposed` / `DirectorDecided` | 回合边界上的导演提议（理由、外部事件或不提议）；作者或自动采用与否。采用时随后是 `Committed`（来源为导演）与领域事件 |
 | `AuthorIntervened` | 介入类型（替换行动、修改认知、外部事件）、原因、介入前的状态哈希 |
 | `EvidenceGapFlagged` / `EvidenceChecked` | 缺少证据链的命中；本回合证据链检查已完成 |
-| `StalemateDetected` / `BreakpointHit` | 僵局类型、命中的条件 |
-| `RoundEnded` / `RunEnded` | 回合结束时的状态哈希与下一位持有发言权的人；结束原因（回合上限、在场不足两人、预算、作者停止） |
-| `RunPaused` / `RunResumed` | 暂停原因（作者、提案不合法、模型错误、拒答、截断、输出无效、裁决不合法） |
+| `StalemateDetected` / `BreakpointHit` | 僵局类型（双方观望、重复相同动作、冲突被礼貌化解、目标已无法达成）与说明；命中的条件 |
+| `RoundEnded` / `RunEnded` | 回合结束时的状态哈希与下一位持有发言权的人；结束原因（回合上限、在场不足两人、预算、作者停止、僵局） |
+| `RunPaused` / `RunResumed` | 暂停原因（作者、提案不合法、模型错误、拒答、截断、输出无效、裁决不合法、僵局） |
 
 分支：`fork(runId, seq)` 在批次边界复制前缀生成新的运行，`RunStarted` 记录来源，原记录不动。
 
@@ -473,7 +479,7 @@ M1 与 M0 之间没有代码依赖。若 M0 进行中人力允许，M1 的脚手
 | M0-04 | 模型端口、`AnthropicAdapter` 与 `OpenAIChatAdapter`（M0 的国内模型对照条件使用）、录制回放适配器、结构化输出管线、拒答处理、预算守卫 | `packages/llm` | B35、B36、B38 |
 | M0-05 | 提示词模板：角色行动、语义裁决、认知更新、节拍表、正文、场景配置草稿 | `packages/prompts` | B25、B39、B43、B45 |
 | M0-06 | 回合状态机、两种回合协议、自动与交互模式、恢复与幂等 | `packages/engine` | B28、B40 |
-| M0-07 | 僵局分类、简化导演提议、批量推演 | 实验条件开关 | B47、B48 的简化形式 |
+| M0-07 | 僵局分类、简化导演提议、批量推演 | 实验条件开关；导演有两种触发方式（`stalemate` 只在僵局后提议，`curve` 按张力曲线在每个回合边界提议），由配置切换，可作为两个实验条件比较 | B47、B48 的简化形式 |
 | M0-08 | 事件存储：JSONL 文件实现，与 SQLite 实现共用 `EventStore` 接口 | 运行记录 | B30 |
 | M0-09 | 命令行：`run`、`baseline`、`narrate`、`motive-check`、`report` | `apps/m0-cli` | — |
 | M0-10 | 静态查看页：读取运行记录，显示时间线、全局局面与角色所见 | 单个 HTML 文件 | 简易查看界面 |

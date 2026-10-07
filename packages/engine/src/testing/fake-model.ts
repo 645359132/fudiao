@@ -4,8 +4,10 @@ import type {
   ActionProposal,
   BeatSheetOutput,
   BeliefUpdateOutput,
+  DirectorProposalOutput,
   EvidenceJudgementOutput,
   SemanticRulingOutput,
+  StalemateJudgementOutput,
 } from '@novel-writer/prompts';
 import { ok } from '@novel-writer/shared';
 import type { RunConfig } from '../config';
@@ -28,6 +30,8 @@ export type Policy = {
   readonly beat_sheet?: (ctx: CallContext) => BeatSheetOutput;
   /** 正文类任务直接返回文字。 */
   readonly candidate_text?: (ctx: CallContext) => string;
+  readonly stalemate?: (ctx: CallContext) => StalemateJudgementOutput;
+  readonly director?: (ctx: CallContext) => DirectorProposalOutput;
 };
 
 export const waitProposal = (overrides: Partial<ActionProposal> = {}): ActionProposal => ({
@@ -55,6 +59,8 @@ const defaults: Required<Policy> = {
     })),
   }),
   candidate_text: () => '雨下得更紧了。他没有回头。',
+  stalemate: () => ({ type: 'none', explanation: '' }),
+  director: () => ({ propose: false, rationale: '局面仍在推进', event: null }),
   character_action: () => waitProposal(),
   semantic_ruling: () => ({ rationale: '按常理推断', effects: [], occurrences: [], uncertainties: [] }),
   belief_update: () => ({ add: [], revise: [], retract: [] }),
@@ -89,22 +95,21 @@ export function fakeModel(policy: Policy = {}, options: { delay?: (ctx: CallCont
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       const p = { ...defaults, ...policy };
       // 评估用的两种结构化输出按输出 schema 区分，其余按任务种类。
-      const output =
-        request.output?.name === 'BaselineOutput'
-          ? { synopsis: ['两人在雨夜对峙', '一方先退了一步'], text: p.candidate_text(ctx) }
-          : request.output?.name === 'SynopsisOutput'
-            ? { synopsis: ['两人试探', '局面僵持'] }
-            : request.task === 'character_action'
-          ? p.character_action(ctx)
-          : request.task === 'semantic_ruling'
-            ? p.semantic_ruling(ctx)
-            : request.task === 'belief_update'
-              ? p.belief_update(ctx)
-              : request.task === 'beat_sheet'
-                ? p.beat_sheet(ctx)
-                : request.task === 'candidate_text'
-                  ? p.candidate_text(ctx)
-                  : p.judgement(ctx);
+      const byOutput: Readonly<Record<string, () => unknown>> = {
+        BaselineOutput: () => ({ synopsis: ['两人在雨夜对峙', '一方先退了一步'], text: p.candidate_text(ctx) }),
+        SynopsisOutput: () => ({ synopsis: ['两人试探', '局面僵持'] }),
+        // 僵局判断与证据链判断同属 judgement 任务，按输出区分。
+        StalemateJudgementOutput: () => p.stalemate(ctx),
+      };
+      const byTask: Readonly<Partial<Record<LlmRequest['task'], () => unknown>>> = {
+        character_action: () => p.character_action(ctx),
+        semantic_ruling: () => p.semantic_ruling(ctx),
+        belief_update: () => p.belief_update(ctx),
+        beat_sheet: () => p.beat_sheet(ctx),
+        candidate_text: () => p.candidate_text(ctx),
+        director: () => p.director(ctx),
+      };
+      const output = (byOutput[request.output?.name ?? ''] ?? byTask[request.task] ?? (() => p.judgement(ctx)))();
       const result: LlmResult = {
         outcome: 'completed',
         text: typeof output === 'string' ? output : JSON.stringify(output),
@@ -137,6 +142,9 @@ export function testConfig(overrides: Partial<RunConfig> = {}): RunConfig {
     seed: 7,
     maxProposalAttempts: 2,
     maxRepairs: 1,
+    // 测试默认关闭僵局检测与导演，由专门的测试开启。
+    stalemate: { enabled: false, window: 3 },
+    director: { enabled: false, trigger: 'curve', tensionCurve: '', maxProposals: 3 },
     models: { character_action: model, semantic_ruling: model, belief_update: model, judgement: model },
     ...overrides,
   };

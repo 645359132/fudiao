@@ -1,11 +1,29 @@
-import { applyEvent, initialState, type ActorId, type RuleViolation, type Scene, type SimState } from '@novel-writer/domain';
+import {
+  applyEvent,
+  initialState,
+  type Action,
+  type ActorId,
+  type Occurrence,
+  type RuleViolation,
+  type Scene,
+  type SimState,
+} from '@novel-writer/domain';
 import { err, ok, type Result } from '@novel-writer/shared';
 import type { RunConfig } from './config';
-import { isDomainEvent, type EndReason, type EngineEvent, type PauseReason, type RunEvent } from './events';
+import {
+  isDomainEvent,
+  type EndReason,
+  type EngineEvent,
+  type PauseReason,
+  type RunEvent,
+  type StalemateKind,
+} from './events';
 
 /** 回合阶段（施工文档第五章状态图）。“校验”在提交提案时即时完成，并入收集提案。 */
 export type Phase =
   | 'BuildingViews'
+  /** 回合之间询问导演（M0-07）。 */
+  | 'Directing'
   | 'AwaitingProposals'
   | 'Adjudicating'
   | 'AwaitingAuthor'
@@ -47,7 +65,23 @@ export type RunState = {
   readonly floor: ActorId | null;
   /** 自动接受、待作者复核的裁决。 */
   readonly needsReview: readonly RulingConfirmation[];
+  /** 已结束各回合的记录，用于僵局分类。 */
+  readonly history: readonly RoundRecord[];
+  /** 当前回合的累计：世界状态是否变化、发生的事。回合之间的导演与作者事件计入下一回合。 */
+  readonly current: { readonly changed: boolean; readonly occurrences: readonly Occurrence[] };
+  readonly stalemates: readonly { readonly round: number; readonly kind: StalemateKind }[];
+  /** 当前回合边界上的导演提议及是否已决定。 */
+  readonly director: { readonly proposed: DirectorProposal | null; readonly decided: boolean; readonly adopted: number };
 };
+
+export type RoundRecord = {
+  readonly round: number;
+  readonly actions: readonly Action[];
+  readonly changed: boolean;
+  readonly occurrences: readonly Occurrence[];
+};
+
+export type DirectorProposal = Extract<EngineEvent, { type: 'DirectorProposed' }>;
 
 export type ReduceError = { readonly seq: number; readonly code: string; readonly detail?: string };
 
@@ -57,7 +91,13 @@ const presentActors = (sim: SimState): ActorId[] =>
 function phaseOf(s: Omit<RunState, 'phase'>, awaitingAuthor: boolean): Phase {
   if (s.endReason !== null) return 'Ended';
   if (s.pause !== null) return 'Paused';
-  if (!s.inRound) return 'BuildingViews';
+  if (!s.inRound) {
+    const { proposed, decided } = s.director;
+    if (proposed !== null && !decided) {
+      return s.config.mode === 'interactive' && proposed.event !== null ? 'AwaitingAuthor' : 'Directing';
+    }
+    return needsDirector(s) ? 'Directing' : 'BuildingViews';
+  }
   const present = presentActors(s.sim);
   if (present.some((a) => !s.views.has(a))) return 'BuildingViews';
   if (s.proposalsComplete === null) return 'AwaitingProposals';
@@ -69,6 +109,25 @@ function phaseOf(s: Omit<RunState, 'phase'>, awaitingAuthor: boolean): Phase {
   }
   if (!s.evidenceChecked) return 'UpdatingBeliefs';
   return 'CheckingEnd';
+}
+
+/** 当前回合（尚未结束）的记录：本回合裁决的行动与累计的变化。 */
+export function currentRecord(s: Pick<RunState, 'sim' | 'proposals' | 'current'>): RoundRecord {
+  return {
+    round: s.sim.round,
+    actions: [...s.proposals.values()].map((p) => p.action),
+    changed: s.current.changed,
+    occurrences: s.current.occurrences,
+  };
+}
+
+/** 刚结束的回合边界上是否需要询问导演。 */
+function needsDirector(s: Omit<RunState, 'phase'>): boolean {
+  const d = s.config.director;
+  const round = s.sim.round;
+  if (!d.enabled || round === 0 || s.director.proposed !== null || s.director.adopted >= d.maxProposals) return false;
+  if (s.history.at(-1)?.round !== round || round >= s.config.maxRounds) return false;
+  return d.trigger === 'curve' || s.stalemates.some((x) => x.round === round && x.kind !== 'goal_unreachable');
 }
 
 // 各阶段允许出现的事件。不在表中的事件说明记录损坏或实现有误，归约直接报错。
@@ -94,7 +153,8 @@ const ALLOWED: Readonly<Record<Phase, ReadonlySet<RunEvent['type']>>> = {
     'RunEnded',
   ]),
   Adjudicating: new Set(['AdjudicationProposed', 'AdjudicationConfirmed', 'Committed', 'RunPaused', 'RunEnded']),
-  AwaitingAuthor: new Set(['AdjudicationProposed', 'AdjudicationConfirmed', 'RunPaused', 'RunEnded']),
+  AwaitingAuthor: new Set(['AdjudicationProposed', 'AdjudicationConfirmed', 'DirectorDecided', 'RunPaused', 'RunEnded']),
+  Directing: new Set(['DirectorProposed', 'DirectorDecided', 'RunPaused', 'RunEnded']),
   Committing: new Set(['Committed', 'StateChanged', 'PerceptionDelivered', 'RunPaused', 'RunEnded']),
   UpdatingBeliefs: new Set([
     'StateChanged',
@@ -106,7 +166,7 @@ const ALLOWED: Readonly<Record<Phase, ReadonlySet<RunEvent['type']>>> = {
     'RunPaused',
     'RunEnded',
   ]),
-  CheckingEnd: new Set(['RoundEnded', 'RunEnded', 'RunPaused']),
+  CheckingEnd: new Set(['StalemateDetected', 'RoundEnded', 'RunEnded', 'RunPaused']),
   Paused: new Set([
     'RunResumed',
     'RunEnded',
@@ -151,6 +211,10 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
     evidenceChecked: false,
     floor: firstFloor,
     needsReview: [],
+    history: [],
+    current: { changed: false, occurrences: [] },
+    stalemates: [],
+    director: { proposed: null, decided: false, adopted: 0 },
   };
   let awaitingAuthor = false;
 
@@ -179,6 +243,14 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
         s.committed = false;
         s.reviewed = new Set();
         s.evidenceChecked = false;
+        s.director = { proposed: null, decided: false, adopted: s.director.adopted };
+      }
+      if (event.type === 'StateChanged') {
+        // 回合之间的导演与作者事件也累计进来，计入下一回合的记录。
+        s.current = {
+          changed: s.current.changed || event.effects.some((e) => e.type !== 'advanceRng'),
+          occurrences: [...s.current.occurrences, ...event.occurrences],
+        };
       }
       continue;
     }
@@ -241,6 +313,18 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
       case 'RoundEnded':
         s.inRound = false;
         s.floor = event.nextFloor;
+        s.history = [...s.history, currentRecord(s)];
+        s.current = { changed: false, occurrences: [] };
+        break;
+      case 'StalemateDetected':
+        s.stalemates = [...s.stalemates, { round: event.round, kind: event.kind }];
+        break;
+      case 'DirectorProposed':
+        s.director = { proposed: event, decided: false, adopted: s.director.adopted };
+        break;
+      case 'DirectorDecided':
+        if (s.director.proposed === null) return err({ seq: stored.seq, code: 'decide_without_proposal' });
+        s.director = { ...s.director, decided: true, adopted: s.director.adopted + (event.accepted ? 1 : 0) };
         break;
       case 'RunPaused':
         s.pause = {

@@ -2,6 +2,7 @@ import type {
   Action,
   ActorId,
   DomainEvent,
+  ExternalEvent,
   KnowledgeEdited,
   RuleViolation,
   SecretId,
@@ -10,7 +11,10 @@ import type {
 import type { ActionProposal } from '@novel-writer/prompts';
 import type { RunConfig } from './config';
 
-export type EndReason = 'max_rounds' | 'actors_left' | 'budget' | 'author_stop';
+export type EndReason = 'max_rounds' | 'actors_left' | 'budget' | 'author_stop' | 'stalemate';
+
+/** 僵局类型（需求第五章“戏剧性与导演层”）。 */
+export type StalemateKind = 'standoff' | 'repetition' | 'polite_resolution' | 'goal_unreachable';
 
 export type PauseReason =
   | 'author'
@@ -19,7 +23,8 @@ export type PauseReason =
   | 'refused'
   | 'truncated'
   | 'invalid_output'
-  | 'ruling_invalid';
+  | 'ruling_invalid'
+  | 'stalemate';
 
 /** 引擎自己的事件。与领域事件一起组成推演运行的事件记录（sim_event），只追加。 */
 export type EngineEvent =
@@ -73,7 +78,16 @@ export type EngineEvent =
       /** 自动接受的裁决在采纳进作品前必须逐项经作者复核。 */
       readonly needsReview: boolean;
     }
-  | { readonly type: 'Committed'; readonly round: number; readonly origin: 'round' | 'intervention' }
+  | { readonly type: 'Committed'; readonly round: number; readonly origin: 'round' | 'intervention' | 'director' }
+  | { readonly type: 'StalemateDetected'; readonly round: number; readonly kind: StalemateKind; readonly explanation: string }
+  | {
+      readonly type: 'DirectorProposed';
+      readonly round: number;
+      readonly rationale: string;
+      /** 不提议时为 null。 */
+      readonly event: ExternalEvent | null;
+    }
+  | { readonly type: 'DirectorDecided'; readonly round: number; readonly accepted: boolean; readonly by: 'author' | 'auto' }
   | { readonly type: 'BeliefsReviewed'; readonly round: number; readonly actor: ActorId }
   | {
       readonly type: 'EvidenceGapFlagged';

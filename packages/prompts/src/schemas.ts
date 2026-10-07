@@ -194,3 +194,27 @@ export type SynopsisOutput = z.infer<typeof SynopsisOutput>;
 /** 单次提示词对照组：同时给出事件梗概与正文，用于分层比较（M0 评估）。 */
 export const BaselineOutput = z.object({ synopsis: z.array(z.string()), text: z.string() });
 export type BaselineOutput = z.infer<typeof BaselineOutput>;
+
+/** 僵局判断（M0-07）：程序判断不了的两类僵局。 */
+export const StalemateJudgementOutput = z.object({
+  type: z.enum(['polite_resolution', 'goal_unreachable', 'none']),
+  explanation: z.string(),
+});
+export type StalemateJudgementOutput = z.infer<typeof StalemateJudgementOutput>;
+
+/** 导演提议（B47 简化形式）：只改变局面，不改变角色的决策与认知。 */
+export const DirectorProposalOutput = z.object({
+  propose: z.boolean(),
+  rationale: z.string(),
+  event: z
+    .object({
+      zone: z.string(),
+      visible: z.boolean(),
+      loudness: z.number().int().min(0),
+      visual: z.string().nullable(),
+      sound: z.string().nullable(),
+      setFlags: z.array(z.object({ flag: z.string(), value: z.boolean() })),
+    })
+    .nullable(),
+});
+export type DirectorProposalOutput = z.infer<typeof DirectorProposalOutput>;

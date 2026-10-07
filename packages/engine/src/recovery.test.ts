@@ -71,10 +71,15 @@ async function runAll(scene: Scene, config: RunConfig, store: EventStore, calls:
 }
 
 /** 运行；崩溃时换一个新的引擎实例，从同一存储与调用记录恢复，直到结束。 */
-async function runWithCrash(scene: Scene, config: RunConfig, wrap: { store?: (s: EventStore) => EventStore; llm?: (p: LlmPort) => LlmPort }) {
+async function runWithCrash(
+  scene: Scene,
+  config: RunConfig,
+  wrap: { store?: (s: EventStore) => EventStore; llm?: (p: LlmPort) => LlmPort },
+  use: Policy = policy,
+) {
   const store = memoryEventStore();
   const calls = memoryCallLog();
-  const model = fakeModel(policy);
+  const model = fakeModel(use);
   let crashed = false;
   try {
     await runAll(scene, config, wrap.store?.(store) ?? store, calls, wrap.llm?.(model.port) ?? model.port);
@@ -132,6 +137,57 @@ describe('故障注入：任一阶段中断后恢复', () => {
     const committed = baseline.events.filter((e) => (e as { type: string; origin?: string }).type === 'Committed');
     expect(committed).toHaveLength(3);
   });
+});
+
+describe('故障注入：开启僵局检测与导演', () => {
+  const scene = warehouse();
+  const model = testConfig().models.character_action;
+  const config = testConfig({
+    maxRounds: 4,
+    stalemate: { enabled: true, window: 2 },
+    director: { enabled: true, trigger: 'curve', tensionCurve: '第二轮后加压', maxProposals: 2 },
+    models: { ...testConfig().models, stalemate: model, director: model },
+  });
+  const drama: Policy = {
+    ...policy,
+    stalemate: () => ({ type: 'polite_resolution', explanation: '客气寒暄' }),
+    director: (ctx) =>
+      ctx.round === 2
+        ? {
+            propose: true,
+            rationale: '加压',
+            event: { zone: 'center', visible: true, loudness: 3, visual: '风灯坠落', sound: '一声巨响', setFlags: [{ flag: 'office_open', value: true }] },
+          }
+        : { propose: false, rationale: '', event: null },
+  };
+
+  it('基线运行包含僵局与导演事件', async () => {
+    const baseline = await runWithCrash(scene, config, {}, drama);
+    const types = baseline.events.map((e) => (e as { type: string }).type);
+    expect(types).toContain('StalemateDetected');
+    expect(types).toContain('DirectorDecided');
+    expect(baseline.events.some((e) => (e as { type: string; origin?: string }).origin === 'director')).toBe(true);
+  });
+
+  it('每一次追加前后与每一次调用中崩溃：恢复后记录一致，调用不重复', async () => {
+    const baseline = await runWithCrash(scene, config, {}, drama);
+    let crashes = 0;
+    for (let n = 1; n <= baseline.events.length; n++) {
+      for (const when of ['before', 'after'] as const) {
+        const result = await runWithCrash(scene, config, { store: (s) => crashingStore(s, n, when) }, drama);
+        if (!result.crashed) continue;
+        crashes++;
+        expect(result.events, `第 ${n} 次追加${when === 'before' ? '前' : '后'}崩溃`).toEqual(baseline.events);
+        expect(result.modelCalls).toBe(baseline.modelCalls);
+      }
+    }
+    expect(crashes).toBeGreaterThan(20);
+    for (let n = 1; n <= baseline.modelCalls; n++) {
+      const result = await runWithCrash(scene, config, { llm: (p) => crashingModel(p, n) }, drama);
+      expect(result.events, `第 ${n} 次调用中崩溃`).toEqual(baseline.events);
+      expect(result.completedCalls).toBe(baseline.completedCalls);
+    }
+  }, 120_000);
 });
 
 describe('金丝雀：引擎发出的角色请求', () => {

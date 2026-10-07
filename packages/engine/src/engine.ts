@@ -39,13 +39,17 @@ import {
 import {
   ActionProposal,
   BeliefUpdateOutput,
+  DirectorProposalOutput,
   EvidenceJudgementOutput,
   SemanticRulingOutput,
+  StalemateJudgementOutput,
   renderActionRejected,
   renderBeliefUpdate,
   renderCharacterAction,
+  renderDirectorProposal,
   renderEvidenceJudgement,
   renderSemanticRuling,
+  renderStalemateJudgement,
   renderStructuredRepair,
   type RenderedPrompt,
 } from '@novel-writer/prompts';
@@ -53,9 +57,18 @@ import type { EventStore } from '@novel-writer/store';
 import { canonicalJson, err, ok, sha256, type Result } from '@novel-writer/shared';
 import type { z } from 'zod';
 import type { RunConfig, TaskModel } from './config';
-import { beliefProposal, proposalToAction, rulingFromOutput } from './convert';
-import type { EngineEvent, PauseReason, RunEvent } from './events';
-import { presentActors, reduceRun, type Phase, type RunState, type RulingProposal } from './run-state';
+import { beliefProposal, directorEvent, proposalToAction, rulingFromOutput } from './convert';
+import type { EndReason, EngineEvent, PauseReason, RunEvent, StalemateKind } from './events';
+import {
+  currentRecord,
+  presentActors,
+  reduceRun,
+  type DirectorProposal,
+  type Phase,
+  type RunState,
+  type RulingProposal,
+} from './run-state';
+import { detectStalemate } from './stalemate';
 
 export type EngineDeps = {
   readonly llm: LlmPort;
@@ -73,6 +86,8 @@ export type RunStatus = {
   readonly state: RunState;
   /** 等待作者确认的裁决。 */
   readonly awaiting: readonly RulingProposal[];
+  /** 等待作者决定是否采用的导演提议。 */
+  readonly awaitingDirector: DirectorProposal | null;
 };
 
 export type EngineError = {
@@ -163,6 +178,8 @@ export function createEngine(deps: EngineDeps) {
     phase: state.phase,
     state,
     awaiting: [...state.rulingsProposed.values()].filter((p) => !state.rulingsConfirmed.has(p.requestId)),
+    awaitingDirector:
+      !state.inRound && (state.director.proposed?.event ?? null) !== null && !state.director.decided ? state.director.proposed : null,
   });
 
   function request(
@@ -538,8 +555,88 @@ export function createEngine(deps: EngineDeps) {
     return null;
   }
 
+  // —— 僵局与导演（M0-07） ——
+
+  async function stepCheckingEnd(state: RunState, scene: Scene, signal?: AbortSignal): Promise<RunEvent[] | 'cancelled'> {
+    const { sim, config, runId } = state;
+    const events: RunEvent[] = [];
+    let found: StalemateKind | null = null;
+
+    if (config.stalemate.enabled) {
+      const last = state.stalemates.at(-1)?.round ?? 0;
+      const records = [...state.history, currentRecord(state)];
+      const check = detectStalemate(records, config.stalemate.window, last);
+      let explanation = '';
+      if (check?.kind === 'standoff' || check?.kind === 'repetition') {
+        found = check.kind;
+      } else if (check?.kind === 'needs_judgement' && config.models.stalemate !== undefined) {
+        const recent = records.filter((r) => r.round > last).slice(-config.stalemate.window);
+        const prompt = unwrapPrompt(renderStalemateJudgement(scene, recent.map((r) => ({ round: r.round, occurrences: r.occurrences }))));
+        const outcome = await call(
+          StalemateJudgementOutput,
+          request('judgement', config.models.stalemate, prompt, `${runId}:${sim.round}:stalemate:all:0`),
+          config,
+          signal,
+        );
+        if (outcome.kind === 'cancelled') return 'cancelled';
+        if (outcome.kind === 'stop') return [outcome.event];
+        if (outcome.value.type !== 'none') {
+          found = outcome.value.type;
+          explanation = outcome.value.explanation;
+        }
+      }
+      if (found !== null) events.push({ type: 'StalemateDetected', round: sim.round, kind: found, explanation });
+    }
+
+    events.push({ type: 'RoundEnded', round: sim.round, stateHash: stateHash(sim), nextFloor: nextFloor(state, scene) });
+    let ended: EndReason | null = null;
+    if (sim.round >= config.maxRounds) ended = 'max_rounds';
+    else if (presentActors(sim).length < 2) ended = 'actors_left';
+    // 自动模式记录僵局后继续，只有目标已无法达成时结束；交互模式一律暂停，交给作者。
+    else if (found === 'goal_unreachable' && config.mode === 'auto') ended = 'stalemate';
+    if (ended !== null) events.push({ type: 'RunEnded', reason: ended });
+    else if (found !== null && config.mode === 'interactive') events.push({ type: 'RunPaused', reason: 'stalemate', detail: found });
+    return events;
+  }
+
+  async function stepDirecting(state: RunState, scene: Scene, signal?: AbortSignal): Promise<RunEvent[] | 'cancelled'> {
+    const { sim, config, runId } = state;
+    const model = config.models.director;
+    if (model === undefined) return [{ type: 'RunPaused', reason: 'llm_error', detail: 'director_model_missing' }];
+    const stalemate = state.stalemates.find((x) => x.round === sim.round)?.kind;
+    const prompt = unwrapPrompt(
+      renderDirectorProposal({
+        scene,
+        state: sim,
+        recent: state.history.slice(-2).map((r) => ({ round: r.round, occurrences: r.occurrences })),
+        tensionCurve: config.director.tensionCurve,
+        maxRounds: config.maxRounds,
+        ...(config.director.trigger === 'stalemate' && stalemate !== undefined && stalemate !== 'goal_unreachable' && { stalemate }),
+      }),
+    );
+    const outcome = await call(DirectorProposalOutput, request('director', model, prompt, `${runId}:${sim.round}:director:all:0`), config, signal);
+    if (outcome.kind === 'cancelled') return 'cancelled';
+    if (outcome.kind === 'stop') return [outcome.event];
+
+    const event = directorEvent(outcome.value, scene, sim);
+    // 预先确认注入可以成立；不成立的提议视为没有提议。
+    const committed = event === null ? null : commitExternal(scene, sim, event);
+    const usable = committed?.ok === true ? event : null;
+    const events: RunEvent[] = [{ type: 'DirectorProposed', round: sim.round, rationale: outcome.value.rationale, event: usable }];
+    if (usable === null) {
+      events.push({ type: 'DirectorDecided', round: sim.round, accepted: false, by: 'auto' });
+    } else if (config.mode === 'auto' && committed?.ok === true) {
+      events.push(
+        { type: 'DirectorDecided', round: sim.round, accepted: true, by: 'auto' },
+        { type: 'Committed', round: sim.round, origin: 'director' },
+        ...committed.value.events,
+      );
+    }
+    return events;
+  }
+
   async function stepOnce(state: RunState, scene: Scene, signal?: AbortSignal): Promise<RunEvent[] | 'cancelled'> {
-    const { sim, config } = state;
+    const { sim } = state;
     switch (state.phase) {
       case 'BuildingViews': {
         const events: RunEvent[] = [];
@@ -568,12 +665,10 @@ export function createEngine(deps: EngineDeps) {
       }
       case 'UpdatingBeliefs':
         return stepBeliefs(state, scene, signal);
-      case 'CheckingEnd': {
-        const events: RunEvent[] = [{ type: 'RoundEnded', round: sim.round, stateHash: stateHash(sim), nextFloor: nextFloor(state, scene) }];
-        if (sim.round >= config.maxRounds) events.push({ type: 'RunEnded', reason: 'max_rounds' });
-        else if (presentActors(sim).length < 2) events.push({ type: 'RunEnded', reason: 'actors_left' });
-        return events;
-      }
+      case 'CheckingEnd':
+        return stepCheckingEnd(state, scene, signal);
+      case 'Directing':
+        return stepDirecting(state, scene, signal);
       case 'AwaitingAuthor':
       case 'Paused':
       case 'Ended':
@@ -636,6 +731,24 @@ export function createEngine(deps: EngineDeps) {
       const appended = await append(state, [
         { type: 'AdjudicationConfirmed', round: state.sim.round, requestId, ruling: chosen, by: 'author', needsReview: false },
       ]);
+      if (!appended.ok) return appended;
+      return this.status(runId, scene);
+    },
+
+    /** 作者决定是否采用导演提议（B47）。采用时在回合边界注入，按感知规则分发，标记为导演事件。 */
+    async decideDirector(runId: string, scene: Scene, accept: boolean): Promise<Result<RunStatus, EngineError>> {
+      const loaded = await load(runId, scene);
+      if (!loaded.ok) return loaded;
+      const state = loaded.value;
+      const proposal = status(state).awaitingDirector;
+      if (state.phase !== 'AwaitingAuthor' || proposal === null || proposal.event === null) return err({ code: 'invalid_phase' });
+      const events: RunEvent[] = [{ type: 'DirectorDecided', round: state.sim.round, accepted: accept, by: 'author' }];
+      if (accept) {
+        const committed = commitExternal(scene, state.sim, proposal.event);
+        if (!committed.ok) return err({ code: 'invalid_intervention', detail: committed.error.code });
+        events.push({ type: 'Committed', round: state.sim.round, origin: 'director' }, ...committed.value.events);
+      }
+      const appended = await append(state, events);
       if (!appended.ok) return appended;
       return this.status(runId, scene);
     },

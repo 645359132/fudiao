@@ -29,12 +29,23 @@ tasks:
   beat_sheet: { model: opus, effort: medium, maxOutputTokens: 16000 }
   candidate_text: { model: opus, effort: high, maxOutputTokens: 32000 }
   baseline: { model: opus, effort: high, maxOutputTokens: 32000 }
+  # 僵局判断：只在世界状态不变但有对话时请求，区分“冲突被礼貌化解”与“目标已无法达成”。
+  stalemate: { model: opus, effort: low, maxOutputTokens: 8000 }
+  # 导演提议：只在开启导演（run.director.mode 或 --director）时请求。
+  director: { model: opus, effort: low, maxOutputTokens: 8000 }
 
 run:
   mode: auto
   runs: 1
   maxProposalAttempts: 2
   maxRepairs: 2
+  # 僵局检测窗口：最近几回合。自动模式记录并继续，目标已无法达成时结束；交互模式暂停。
+  stalemate: { enabled: true, window: 3 }
+  # 导演：off 不开启；stalemate 只在僵局后提议；curve 按张力曲线在每个回合边界提议。
+  director:
+    mode: off
+    tensionCurve: ''
+    maxProposals: 3
 
 budget:
   # 单次推演的费用上限；施工文档估算单次约 2 至 5 美元。

@@ -32,9 +32,11 @@ import {
   renderBeliefUpdate,
   renderCandidateText,
   renderCharacterAction,
+  renderDirectorProposal,
   renderEvidenceJudgement,
   renderSceneDraft,
   renderSemanticRuling,
+  renderStalemateJudgement,
   renderStructuredRepair,
   type RenderedPrompt,
 } from './render';
@@ -218,6 +220,26 @@ describe('金丝雀泄露测试（提示词）', () => {
       }),
       { numRuns: 100 },
     );
+  });
+
+  it('导演提示词只含全局局面与张力曲线，不含任何角色的认知、角色卡、秘密与场景元信息', () => {
+    const state = { ...initialState(canary, 1), round: 3 };
+    const text = fullText(
+      unwrap(renderDirectorProposal({ scene: canary, state, recent: [], tensionCurve: '前三轮蓄势，第五轮爆发', maxRounds: 8 })),
+    );
+    expect(text).toContain('前三轮蓄势，第五轮爆发');
+    expect(text).toContain('office_open（现在为 false）');
+    // 物品位置属于全局局面，导演可以看到；角色卡与认知、秘密、场景元信息不可以。
+    expect(text).toContain(`${CANARY}-ITEM-letter`);
+    for (const marker of [`${CANARY}-CARD-`, `${CANARY}-SECRET-`, `${CANARY}-META-`]) expect(text).not.toContain(marker);
+  });
+
+  it('僵局判断只含各人的当前目标，不含角色卡的其他内容、认知与秘密', () => {
+    const text = fullText(unwrap(renderStalemateJudgement(canary, [])));
+    for (const a of canary.actors) expect(text).toContain(`${CANARY}-CARD-${a.id}-goal`);
+    expect(text).not.toMatch(/CANARY-CARD-[a-z_]+-(bottomLine|trait|risk|emotion|lossOfControl|speech|k\d)/);
+    expect(text).not.toContain(`${CANARY}-SECRET-`);
+    expect(text).not.toContain(`${CANARY}-META-`);
   });
 
   it('裁决提示词不含场景元信息与任何角色卡', () => {

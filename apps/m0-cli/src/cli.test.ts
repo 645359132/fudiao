@@ -92,7 +92,7 @@ describe('真实调用前的费用确认', () => {
     const { d, lines } = deps({ answers: [false] });
     const code = await main(['run', 'm0/scenes/warehouse.yaml', '--out', out], d);
     expect(code).toBe(1);
-    expect(lines.join('\n')).toMatch(/预计调用 40 次，费用约 \$\d+\.\d\d 至 \$\d+\.\d\d；每次运行的预算上限 \$6\.00/);
+    expect(lines.join('\n')).toMatch(/预计调用 46 次，费用约 \$\d+\.\d\d 至 \$\d+\.\d\d；每次运行的预算上限 \$6\.00/);
     expect(lines).toContain('已取消。');
   });
 
@@ -197,6 +197,55 @@ describe('命令（测试模型）', () => {
     expect(await main(['motive-check', 'm0/scenes/warehouse.yaml', '--actor', 'wei_qi', '--expect', 'speak', '--samples', '3', '--out', out], d)).toBe(0);
     expect(lines.at(-1)).toBe('动机可达性：3/3 次采样选择了 speak。');
     expect(readdirSync(out)).toContain('motive-MOTIVE01.json');
+  });
+
+  it('run --runs N --parallel P --director curve 并行写出 N 份记录，导演事件计入摘要', async () => {
+    const batch = join(out, 'batch');
+    const director = fakeModel({
+      director: (ctx) =>
+        ctx.round === 1
+          ? {
+              propose: true,
+              rationale: '雨势加大，逼两人进屋',
+              event: { zone: 'courtyard', visible: true, loudness: 4, visual: null, sound: '一声惊雷', setFlags: [] },
+            }
+          : { propose: false, rationale: '', event: null },
+    });
+    const { d, lines } = deps({ port: director.port });
+    const code = await main(
+      ['run', 'm0/scenes/rainy-night.yaml', '--out', batch, '--runs', '3', '--parallel', '2', '--director', 'curve', '--curve', '第三轮爆发'],
+      d,
+    );
+    expect(code).toBe(0);
+    // 3 次运行 × 10 回合；导演按张力曲线在 9 个回合边界各请求一次，计入估算。
+    expect(lines[0]).toMatch(/^预计调用 171 次/);
+    const runs = readdirSync(batch).filter((f) => f.startsWith('TESTRUN')).sort();
+    expect(runs).toEqual(['TESTRUN0000', 'TESTRUN0001', 'TESTRUN0002']);
+    for (const run of runs) {
+      const summary = JSON.parse(readFileSync(join(batch, run, 'summary.json'), 'utf8')) as { directorEvents: number };
+      expect(summary.directorEvents).toBe(1);
+    }
+    const directorCalls = director.calls.filter((c) => c.step === 'director');
+    expect(directorCalls.length).toBe(3 * 9);
+    expect(directorCalls[0]?.text).toContain('第三轮爆发');
+  }, 30_000);
+
+  it('outcomes 按结局归类，列出代表运行的关键转折', async () => {
+    const batch = join(out, 'batch');
+    const { d, lines } = deps();
+    expect(await main(['outcomes', 'TESTRUN0000', 'TESTRUN0001', 'TESTRUN0002', '--out', batch], d)).toBe(0);
+    expect(lines.at(-1)).toMatch(/^3 次运行，1 种结局/);
+    const text = readFileSync(join(batch, 'outcomes-TESTRUN0000.md'), 'utf8');
+    expect(text).toContain('## 结局 1（3 次）');
+    expect(text).toContain('没寄出的信：阿青手里');
+    expect(text).toContain('第 1 回合（导演事件）：一声惊雷');
+  });
+
+  it('run 的导演与并行参数有误时报错', async () => {
+    const { d, errors } = deps();
+    expect(await main(['run', 'm0/scenes/rainy-night.yaml', '--director', 'always'], d)).toBe(1);
+    expect(await main(['run', 'm0/scenes/rainy-night.yaml', '--parallel', '0'], d)).toBe(1);
+    expect(errors).toHaveLength(2);
   });
 
   it('未知命令与缺少参数时给出用法', async () => {
