@@ -81,6 +81,16 @@ M0 回答一个问题：多角色推演能否比直接让模型写一场同类�
 pnpm m0 motive-check m0/scenes/warehouse.yaml --actor wei_qi --expect attack:shen_yan --samples 5
 ```
 
+## 使用 OpenAI 写法的服务
+
+默认配置使用 Anthropic。DeepSeek、通义千问、Kimi、智谱、OpenRouter、OpenAI 官方接口与本地的 Ollama、vLLM 等使用 OpenAI 写法（Chat Completions）的服务，按 `experiments/openai-compatible.example.yaml` 复制一份配置，填好模型、能力与价格后用 `--experiment` 指定：
+
+```bash
+pnpm m0 run m0/scenes/warehouse.yaml --experiment m0/experiments/openai-compatible.yaml
+```
+
+只支持 JSON 模式的服务把 `structuredOutput` 设为 `json_object`；服务不认识 `max_tokens` 或 `stream_options` 时，在服务配置中调整 `maxTokensField`、`streamUsage`。
+
 ## 费用
 
 施工文档估算单次推演（8 回合、约 40 次调用）约 2 至 5 美元，节拍表、候选稿与梗概另需 3 次调用。僵局判断（默认开启）与导演提议（开启时）按调用次数的上限计入运行前的估算。默认配置中每次运行的预算上限为 6 美元，超出时运行以“预算”结束，已完成的结果保留。

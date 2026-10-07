@@ -1,0 +1,73 @@
+# OpenAI 写法（Chat Completions）服务的实验配置示例。复制为 openai-compatible.yaml 后修改，再用
+#   pnpm m0 run m0/scenes/warehouse.yaml --experiment m0/experiments/openai-compatible.yaml
+# API Key 只从环境变量读取，不写入本文件。
+#
+# 服务种类：
+#   openai             OpenAI 官方接口（baseURL 默认 https://api.openai.com/v1）
+#   openai_compatible  其他使用 OpenAI 写法的服务：DeepSeek、通义千问（DashScope 兼容模式）、Kimi、智谱、OpenRouter 等
+#   local              本地端点：Ollama、LM Studio、vLLM 等，只允许回环地址，可免密钥
+#
+# openai_compatible 与 local 可按服务调整：
+#   maxTokensField  输出上限的参数名，默认 max_tokens；只接受 max_completion_tokens 的服务改为该值
+#   streamUsage     是否请求流式用量（stream_options），默认 true；服务报错时改为 false，费用记为未知
+#   stripThinkTags  是否去掉正文开头的 <think>…</think>，默认 true
+#
+# 模型能力（capabilities）决定发送哪些参数：
+#   structuredOutput  native（支持 json_schema）、json_object（只保证合法 JSON）、prompt（只靠提示词）
+#   reasoningControl  effort（接受 reasoning_effort）或 none
+# 下面的能力与上限是示例值，使用前请按服务商文档核对；价格请填入服务商当前价格（美元 / 百万 Token），
+# 未填价格时费用显示为未知，预算上限无法生效。
+
+providers:
+  deepseek:
+    kind: openai_compatible
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: https://api.deepseek.com
+  ollama:
+    kind: local
+    baseURL: http://127.0.0.1:11434/v1
+
+models:
+  chat:
+    provider: deepseek
+    model: deepseek-chat
+    capabilities:
+      structuredOutput: json_object
+      promptCaching: false
+      reasoningControl: none
+      refusalFallback: none
+      contextWindow: 64000
+      maxOutputTokens: 8000
+      selfTestPassed: false
+    # prices: { input: 0, output: 0 }
+  local:
+    provider: ollama
+    model: qwen3:32b
+    capabilities:
+      structuredOutput: json_object
+      promptCaching: false
+      reasoningControl: none
+      refusalFallback: none
+      contextWindow: 32000
+      maxOutputTokens: 8000
+      selfTestPassed: false
+
+tasks:
+  character_action: { model: chat, maxOutputTokens: 8000 }
+  semantic_ruling: { model: chat, maxOutputTokens: 8000 }
+  belief_update: { model: chat, maxOutputTokens: 4000 }
+  judgement: { model: chat, maxOutputTokens: 4000 }
+  beat_sheet: { model: chat, maxOutputTokens: 8000 }
+  candidate_text: { model: chat, maxOutputTokens: 8000 }
+  baseline: { model: chat, maxOutputTokens: 8000 }
+  stalemate: { model: chat, maxOutputTokens: 4000 }
+  director: { model: chat, maxOutputTokens: 4000 }
+
+run:
+  mode: auto
+  runs: 1
+  maxProposalAttempts: 2
+  maxRepairs: 2
+
+budget:
+  limitUsdPerRun: 6

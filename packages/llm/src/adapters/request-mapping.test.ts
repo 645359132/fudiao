@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { anthropicChunks, fakeFetch, openaiChunks, type Scenario } from '../testing/fake-fetch';
 import { CONSERVATIVE_CAPABILITIES, type LlmRequest, type ModelCapabilities } from '../types';
 import { AnthropicAdapter } from './anthropic';
-import { OpenAIChatAdapter } from './openai-chat';
+import { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './openai-chat';
 
 const full: ModelCapabilities = {
   structuredOutput: 'native',
@@ -119,5 +119,47 @@ describe('OpenAIChatAdapter 请求参数', () => {
       request(full),
     );
     expect(result.ok && result.value).toMatchObject({ outcome: 'refused', refusal: { category: null } });
+  });
+});
+
+describe('OpenAI 兼容接口的差异', () => {
+  const adapter = (fetch: typeof globalThis.fetch, dialect = COMPATIBLE_DIALECT) =>
+    new OpenAIChatAdapter({ baseURL: 'https://api.example.com/v1', apiKey: 'k', fetch, maxRetries: 0, dialect });
+  const send = async (capabilities: ModelCapabilities, dialect = COMPATIBLE_DIALECT, effort: LlmRequest['effort'] = 'high') => {
+    const { fetch, requests } = fakeFetch([{ chunks: openaiChunks('m', done) }]);
+    await adapter(fetch, dialect).complete({ ...request(capabilities), effort });
+    return requests[0]!.body as Record<string, unknown>;
+  };
+
+  it('兼容接口用 max_tokens；只支持 JSON 模式的服务发送 json_object', async () => {
+    const body = await send({ ...full, structuredOutput: 'json_object' });
+    expect(body['max_tokens']).toBe(4_000);
+    expect(body).not.toHaveProperty('max_completion_tokens');
+    expect(body['response_format']).toEqual({ type: 'json_object' });
+  });
+
+  it('不支持 stream_options 的接口不请求用量', async () => {
+    const body = await send(full, { ...COMPATIBLE_DIALECT, streamUsage: false });
+    expect(body).not.toHaveProperty('stream_options');
+  });
+
+  it('推理深度高于 high 时按 high 发送', async () => {
+    expect((await send(full, OPENAI_DIALECT, 'max'))['reasoning_effort']).toBe('high');
+    expect((await send(full, OPENAI_DIALECT, 'low'))['reasoning_effort']).toBe('low');
+  });
+
+  it('去掉正文开头的思考，增量中也不出现', async () => {
+    const scenario: Scenario = { text: ['<think>', '先想想谁在说谎', '</think>\n', '{"kind":', '"wait"}'], end: 'stop' };
+    const { fetch } = fakeFetch([{ chunks: openaiChunks('m', scenario) }]);
+    const deltas: string[] = [];
+    const result = await adapter(fetch).complete(request(full), { onEvent: (e) => e.type === 'text' && deltas.push(e.delta) });
+    expect(result.ok && result.value.text).toBe('{"kind":"wait"}');
+    expect(deltas.join('')).toBe('{"kind":"wait"}');
+  });
+
+  it('OpenAI 官方接口不处理思考标签', async () => {
+    const { fetch } = fakeFetch([{ chunks: openaiChunks('m', { text: ['<think>x</think>y'], end: 'stop' }) }]);
+    const result = await adapter(fetch, OPENAI_DIALECT).complete(request(full));
+    expect(result.ok && result.value.text).toBe('<think>x</think>y');
   });
 });

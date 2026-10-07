@@ -1,7 +1,7 @@
 export type { AnthropicAdapterOptions } from './adapters/anthropic';
 export { AnthropicAdapter } from './adapters/anthropic';
-export type { OpenAIChatAdapterOptions } from './adapters/openai-chat';
-export { OpenAIChatAdapter } from './adapters/openai-chat';
+export type { ChatDialect, OpenAIChatAdapterOptions } from './adapters/openai-chat';
+export { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './adapters/openai-chat';
 export type { Budget } from './budget';
 export { BudgetGuard, costOf, estimateInputTokens, withBudget } from './budget';
 export type { CallLog, LlmCallRecord } from './call-log';

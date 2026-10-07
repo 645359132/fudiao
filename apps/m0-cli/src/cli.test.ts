@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeModel, waitProposal } from '@fudiao/engine/testing';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args';
 import { main, type CliDeps } from './cli';
 import { estimateCalls, estimateCost } from './cost';
-import { loadExperiment, runConfig, taskModel } from './experiment';
+import { buildPort, loadExperiment, runConfig, taskModel } from './experiment';
 import { loadSceneFile } from './scene-file';
 import { ulid } from './ulid';
 
@@ -72,6 +72,41 @@ describe('默认实验配置与费用估算', () => {
     expect(estimate.calls).toBe(40);
     expect(estimate.lowUsd).toBeGreaterThan(1.5);
     expect(estimate.highUsd).toBeLessThan(5);
+  });
+
+  it('OpenAI 写法的示例配置：按服务的写法发送请求', async () => {
+    const example = loadExperiment(readFileSync(join(root, 'm0/experiments/openai-compatible.example.yaml'), 'utf8'));
+    if (!example.ok) throw new Error(example.error);
+    expect(buildPort(example.value, {})).toEqual({ ok: false, error: 'deepseek：环境变量 DEEPSEEK_API_KEY 未设置' });
+
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    const chunk = (delta: Record<string, unknown>, finish: string | null) =>
+      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: 'deepseek-chat', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(init.body as string) as Record<string, unknown> });
+      const body = chunk({ content: '<think>先想想</think>{"ok":true}' }, null) + chunk({}, 'stop') + 'data: [DONE]\n\n';
+      return Promise.resolve(new Response(body, { headers: { 'content-type': 'text/event-stream' } }));
+    });
+    try {
+      const port = buildPort(example.value, { DEEPSEEK_API_KEY: 'test-key' });
+      if (!port.ok) throw new Error(port.error);
+      const model = taskModel(example.value, 'character_action');
+      const result = await port.value.complete({
+        task: 'character_action',
+        model: model.profile,
+        template: { id: 'character_action', version: '1' },
+        system: [{ text: '按要求输出 JSON。' }],
+        messages: [{ role: 'user', content: '行动' }],
+        output: { name: 'ActionProposal', schema: { type: 'object' } },
+        maxOutputTokens: model.maxOutputTokens,
+      });
+      expect(result.ok && result.value.text).toBe('{"ok":true}');
+      expect(sent[0]?.url).toBe('https://api.deepseek.com/chat/completions');
+      expect(sent[0]?.body).toMatchObject({ model: 'deepseek-chat', max_tokens: 8000, response_format: { type: 'json_object' } });
+      expect(sent[0]?.body).not.toHaveProperty('max_completion_tokens');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('价格未配置时费用为未知', () => {

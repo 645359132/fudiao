@@ -15,5 +15,8 @@
     "@fudiao/shared": "workspace:*",
     "openai": "^7.30.0",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
   }
 }

@@ -231,7 +231,7 @@ const result = done ?? await callModel({ ...request, stepKey: key });
 
 ```ts
 type ModelCapabilities = {
-  structuredOutput: 'native' | 'prompt' | 'none';
+  structuredOutput: 'native' | 'json_object' | 'prompt' | 'none';
   promptCaching: boolean;
   reasoningControl: 'effort' | 'none';
   refusalFallback: 'server_default' | 'none';   // 拒答时由服务端改用其他模型重试

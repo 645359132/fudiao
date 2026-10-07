@@ -22,7 +22,12 @@ export type TaskKind =
  * 没有记录的模型按保守能力处理。适配器只按能力描述决定传哪些参数（硬性规则 13）。
  */
 export type ModelCapabilities = {
-  readonly structuredOutput: 'native' | 'prompt' | 'none';
+  /**
+   * native：服务按 JSON Schema 约束输出；json_object：服务只保证输出合法 JSON（OpenAI 兼容接口的
+   * `response_format: json_object`），字段由提示词约束；prompt：只靠提示词；none：不用于结构化任务。
+   * 后三者的结果都经结构化输出管线校验，不合格时请求修正。
+   */
+  readonly structuredOutput: 'native' | 'json_object' | 'prompt' | 'none';
   readonly promptCaching: boolean;
   readonly reasoningControl: 'effort' | 'none';
   /** 拒答时由服务端改用其他模型重试。 */

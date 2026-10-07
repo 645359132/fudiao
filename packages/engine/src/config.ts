@@ -3,7 +3,7 @@ import type { ModelProfile } from '@fudiao/llm';
 import { z } from 'zod';
 
 const Capabilities = z.object({
-  structuredOutput: z.enum(['native', 'prompt', 'none']),
+  structuredOutput: z.enum(['native', 'json_object', 'prompt', 'none']),
   promptCaching: z.boolean(),
   reasoningControl: z.enum(['effort', 'none']),
   refusalFallback: z.enum(['server_default', 'none']),

@@ -1,16 +1,32 @@
 import { ModelProfileSchema, type RunConfig, type TaskModel } from '@fudiao/engine';
-import { AnthropicAdapter, OpenAIChatAdapter, routeByProvider, type LlmPort } from '@fudiao/llm';
+import { AnthropicAdapter, COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter, routeByProvider, type ChatDialect, type LlmPort } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import type { RunConfig as SceneRun } from './scene-file';
 
+/** OpenAI 兼容接口各家的细节差异；未填时用兼容接口的默认值（见 COMPATIBLE_DIALECT）。 */
+const Dialect = {
+  maxTokensField: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
+  streamUsage: z.boolean().optional(),
+  stripThinkTags: z.boolean().optional(),
+};
+
 const Provider = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('anthropic'), apiKeyEnv: z.string().min(1), baseURL: z.string().url().optional() }),
-  z.object({ kind: z.literal('openai_compatible'), apiKeyEnv: z.string().min(1), baseURL: z.string().url() }),
-  /** 本地端点（Ollama、LM Studio 等），可免密钥，只允许回环地址。 */
-  z.object({ kind: z.literal('local'), baseURL: z.string().url() }),
+  /** OpenAI 官方接口。 */
+  z.object({ kind: z.literal('openai'), apiKeyEnv: z.string().min(1), baseURL: z.string().url().default('https://api.openai.com/v1') }),
+  /** 使用 OpenAI Chat Completions 写法的其他服务（DeepSeek、通义千问、Kimi、智谱、OpenRouter 等）。 */
+  z.object({ kind: z.literal('openai_compatible'), apiKeyEnv: z.string().min(1), baseURL: z.string().url(), ...Dialect }),
+  /** 本地端点（Ollama、LM Studio、vLLM 等），可免密钥，只允许回环地址。 */
+  z.object({ kind: z.literal('local'), baseURL: z.string().url(), ...Dialect }),
 ]);
+
+const dialectOf = (p: { maxTokensField?: ChatDialect['maxTokensField']; streamUsage?: boolean; stripThinkTags?: boolean }): ChatDialect => ({
+  maxTokensField: p.maxTokensField ?? COMPATIBLE_DIALECT.maxTokensField,
+  streamUsage: p.streamUsage ?? COMPATIBLE_DIALECT.streamUsage,
+  stripThinkTags: p.stripThinkTags ?? COMPATIBLE_DIALECT.stripThinkTags,
+});
 
 const Task = z.object({
   model: z.string().min(1),
@@ -134,7 +150,7 @@ export function buildPort(experiment: Experiment, env: Readonly<Record<string, s
   for (const [id, provider] of Object.entries(experiment.providers)) {
     if (provider.kind === 'local') {
       if (!LOOPBACK.has(new URL(provider.baseURL).hostname)) return err(`${id}：本地端点只允许回环地址`);
-      adapters[id] = new OpenAIChatAdapter({ baseURL: provider.baseURL });
+      adapters[id] = new OpenAIChatAdapter({ baseURL: provider.baseURL, dialect: dialectOf(provider) });
       continue;
     }
     const apiKey = env[provider.apiKeyEnv];
@@ -142,7 +158,9 @@ export function buildPort(experiment: Experiment, env: Readonly<Record<string, s
     adapters[id] =
       provider.kind === 'anthropic'
         ? new AnthropicAdapter({ apiKey, ...(provider.baseURL !== undefined && { baseURL: provider.baseURL }) })
-        : new OpenAIChatAdapter({ apiKey, baseURL: provider.baseURL });
+        : provider.kind === 'openai'
+          ? new OpenAIChatAdapter({ apiKey, baseURL: provider.baseURL, dialect: OPENAI_DIALECT })
+          : new OpenAIChatAdapter({ apiKey, baseURL: provider.baseURL, dialect: dialectOf(provider) });
   }
   return ok(routeByProvider(adapters));
 }

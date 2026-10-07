@@ -320,6 +320,8 @@ stateDiagram-v2
 
 三个适配器共用同一组内部类型、结构化输出管线、预算守卫与调用记录。服务之间的差异（参数名称、用量字段、错误码、拒答表示）只在适配器内部处理。
 
+使用 OpenAI 写法（Chat Completions）的服务在细节上各不相同，`OpenAIChatAdapter` 按服务配置的写法差异（`ChatDialect`）处理：输出上限的参数名（OpenAI 官方的推理模型只接受 `max_completion_tokens`，多数兼容接口只认 `max_tokens`）、是否请求流式用量（`stream_options`）、是否去掉正文开头的 `<think>…</think>`（部分推理模型经 vLLM、Ollama 等把思考过程放在正文里）。OpenAI 官方接口与兼容接口各有默认值，作者可按服务覆盖。M0 命令行暂以 Chat Completions 接入 OpenAI 官方接口（服务种类 `openai`）；桌面端在 M2-02a 按上表改用 Responses API。
+
 ### 分工
 
 ```text
@@ -378,7 +380,8 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 
 - OpenAI：使用 Responses API；结构化输出使用其 JSON Schema 输出能力；推理深度参数按模型能力表传递。
 - Gemini：经 OpenAI 兼容端点接入，结构化输出与缓存能力以 M2 实测为准，结果写入内置能力表。
-- 其他兼容接口：结构化输出优先使用服务端的 JSON Schema 输出（`response_format`）；不支持时退回提示词约束，并完全依赖结构化输出管线的修复与重试。
+- 其他兼容接口：结构化输出优先使用服务端的 JSON Schema 输出（`response_format: json_schema`，能力为 `native`）；只支持 JSON 模式的服务（例如 DeepSeek）用 `response_format: json_object`（能力为 `json_object`），字段由提示词约束，因此每个结构化输出模板都必须提到 “JSON”（模板测试检查）；都不支持时退回提示词约束（`prompt`）。后两种完全依赖结构化输出管线的校验、修复与重试。
+- 推理深度：Chat Completions 的 `reasoning_effort` 只保证 low、medium、high，更高的深度按 high 发送。
 - 本地模型：多数未通过结构化输出自检，按 B57 只用于选区改写、续写、摘要等纯文本任务。
 - 各服务的拒答表示不同（专门的停止原因、内容过滤标记或空响应），适配器统一转换为内部的拒答结果，供 B38 使用。
 
