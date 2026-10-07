@@ -108,7 +108,7 @@ novel-writer/
 
 | 端口 | 职责 | 桌面实现 | Node 实现（M0 与测试） |
 | --- | --- | --- | --- |
-| `SqlPort` | 执行查询与事务 | Tauri 命令 `db_query`、`db_tx` | better-sqlite3 |
+| `SqlPort` | 执行查询与事务。事务是一批语句一次提交，不提供跨调用的交互式事务；先读后写用影响行数守卫（`expectChanges`）表达乐观并发。两端行为由 `packages/store/contract/sql-cases.json` 的契约用例保证一致 | Tauri 命令 `db_open`、`db_query`、`db_tx`、`db_close` | better-sqlite3 |
 | `EventStore` | 按批次追加与读取推演事件，序号冲突检查 | 基于 `SqlPort` | 内存版（测试）与 JSONL 文件版（`packages/store/src/node`） |
 | `LlmPort` | 发起模型调用、流式接收、取消 | 同一套 TypeScript 适配器，网络请求经 Rust 凭据代理 | 同一套适配器直连 HTTP；录制回放 |
 | `Clock` / `Rng` | 时间与可记录的随机数 | 系统时钟、带种子的随机数 | 固定时钟、固定种子 |
@@ -159,6 +159,7 @@ novel-writer/
 - 完整项目导出：一个 zip 文件，内含 `manifest.json`（schema_version、导出时间）、`chapters/0001-章节名.md`，以及 `data/` 下每张表一个 JSONL 文件。人可以直接阅读，也可以完整导回。
 - 导入：先校验 schema_version，按需执行迁移；导入后与导出前逐表比对，作为“数据迁移”验收的自动测试。
 - 备份：用 SQLite 的 `VACUUM INTO` 生成一致快照，按时间命名，保留策略可配置。
+- 迁移：`packages/store/migrations/NNNN_名称.sql`，桌面端由 Rust 在打开作品库时执行（编译期嵌入），Node 端由同规则的执行器执行。执行记录写入 `schema_migrations`（版本、名称、校验和、执行时间）；已执行迁移的校验和不一致、或库的版本高于程序已知的最新迁移时拒绝打开；已有数据的库在迁移前先备份到 `backups/pre-migration-v<版本>-<时间>.sqlite`。
 
 ## 五 推演引擎设计
 

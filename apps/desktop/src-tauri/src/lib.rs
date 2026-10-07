@@ -1,5 +1,7 @@
-//! 桌面应用的 Rust 部分。数据库命令（M1-02）、凭据代理与凭据存储（M2-01、M2-02）在此加入；
+//! 桌面应用的 Rust 部分：数据库命令（M1-02），凭据代理与凭据存储在 M2-01、M2-02 加入。
 //! 业务逻辑留在 TypeScript，Rust 只提供 IO 与凭据（施工文档第二章）。
+
+pub mod db;
 
 use serde::Serialize;
 
@@ -26,7 +28,14 @@ fn app_info() -> AppInfo {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_info])
+        .manage(db::commands::DbState::default())
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            db::commands::db_open,
+            db::commands::db_close,
+            db::commands::db_query,
+            db::commands::db_tx
+        ])
         .run(tauri::generate_context!())
         .expect("无法启动应用");
 }

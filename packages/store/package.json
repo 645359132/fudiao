@@ -13,6 +13,10 @@
   },
   "dependencies": {
     "@novel-writer/llm": "workspace:*",
-    "@novel-writer/shared": "workspace:*"
+    "@novel-writer/shared": "workspace:*",
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
   }
 }

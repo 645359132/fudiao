@@ -1,0 +1,113 @@
+{
+  "$comment": "SqlPort 的契约用例。Node 实现（Vitest）与 Rust 实现（cargo test）各跑一遍，保证两端行为一致。每个用例在新建的库上执行 setup 后运行；error 只比较列出的字段。",
+  "setup": [
+    "CREATE TABLE item (id TEXT PRIMARY KEY, title TEXT NOT NULL, score REAL, count INTEGER, version INTEGER NOT NULL DEFAULT 1)",
+    "CREATE TABLE child (id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES item(id))",
+    "INSERT INTO item (id, title, score, count) VALUES ('a', '甲', 1.5, 3)"
+  ],
+  "cases": [
+    {
+      "name": "参数与列值的类型往返",
+      "query": {
+        "sql": "SELECT ? AS i, ? AS f, ? AS t, ? AS n, typeof(?) AS ti, typeof(?) AS tf",
+        "params": [42, 2.5, "第一章：雨夜", null, 42, 2.5]
+      },
+      "expect": { "rows": [{ "i": 42, "f": 2.5, "t": "第一章：雨夜", "n": null, "ti": "integer", "tf": "real" }] }
+    },
+    {
+      "name": "读取已有的行",
+      "query": { "sql": "SELECT id, title, score, count FROM item" },
+      "expect": { "rows": [{ "id": "a", "title": "甲", "score": 1.5, "count": 3 }] }
+    },
+    {
+      "name": "插入并返回",
+      "tx": [{ "sql": "INSERT INTO item (id, title) VALUES (?, ?) RETURNING id, version", "params": ["b", "乙"] }],
+      "expect": { "results": [{ "changes": 1, "rows": [{ "id": "b", "version": 1 }] }] },
+      "after": { "sql": "SELECT count(*) AS c FROM item", "rows": [{ "c": 2 }] }
+    },
+    {
+      "name": "多条语句在一个事务中提交",
+      "tx": [
+        { "sql": "INSERT INTO item (id, title) VALUES ('c', '丙')" },
+        { "sql": "UPDATE item SET count = count + 1 WHERE id = 'a'" }
+      ],
+      "expect": { "results": [{ "changes": 1, "rows": [] }, { "changes": 1, "rows": [] }] },
+      "after": { "sql": "SELECT id, count FROM item ORDER BY id", "rows": [{ "id": "a", "count": 4 }, { "id": "c", "count": null }] }
+    },
+    {
+      "name": "守卫满足时提交",
+      "tx": [{ "sql": "UPDATE item SET title = ?, version = version + 1 WHERE id = ? AND version = ?", "params": ["甲二", "a", 1], "expectChanges": 1 }],
+      "expect": { "results": [{ "changes": 1, "rows": [] }] },
+      "after": { "sql": "SELECT title, version FROM item", "rows": [{ "title": "甲二", "version": 2 }] }
+    },
+    {
+      "name": "守卫不满足时整个事务回滚",
+      "tx": [
+        { "sql": "INSERT INTO item (id, title) VALUES ('c', '丙')" },
+        { "sql": "UPDATE item SET title = '甲二' WHERE id = 'a' AND version = ?", "params": [9], "expectChanges": 1 }
+      ],
+      "expect": { "error": { "code": "guard_failed", "index": 1, "expected": 1, "actual": 0 } },
+      "after": { "sql": "SELECT count(*) AS c FROM item", "rows": [{ "c": 1 }] }
+    },
+    {
+      "name": "主键冲突时整个事务回滚",
+      "tx": [
+        { "sql": "INSERT INTO item (id, title) VALUES ('d', '丁')" },
+        { "sql": "INSERT INTO item (id, title) VALUES ('a', '重复')" }
+      ],
+      "expect": { "error": { "code": "constraint", "index": 1 } },
+      "after": { "sql": "SELECT count(*) AS c FROM item", "rows": [{ "c": 1 }] }
+    },
+    {
+      "name": "外键约束已开启",
+      "tx": [{ "sql": "INSERT INTO child (id, item_id) VALUES ('x', 'nope')" }],
+      "expect": { "error": { "code": "constraint", "index": 0 } }
+    },
+    {
+      "name": "非空约束",
+      "tx": [{ "sql": "INSERT INTO item (id) VALUES ('e')" }],
+      "expect": { "error": { "code": "constraint", "index": 0 } }
+    },
+    {
+      "name": "语法错误",
+      "tx": [{ "sql": "SELECT 1" }, { "sql": "SELEC 1" }],
+      "expect": { "error": { "code": "sql_error", "index": 1 } }
+    },
+    {
+      "name": "事务中的查询返回行",
+      "tx": [{ "sql": "SELECT title FROM item WHERE id = ?", "params": ["a"] }],
+      "expect": { "results": [{ "changes": 0, "rows": [{ "title": "甲" }] }] }
+    },
+    {
+      "name": "空事务",
+      "tx": [],
+      "expect": { "results": [] }
+    },
+    {
+      "name": "只读查询拒绝写语句",
+      "query": { "sql": "DELETE FROM item" },
+      "expect": { "error": { "code": "readonly" } },
+      "after": { "sql": "SELECT count(*) AS c FROM item", "rows": [{ "c": 1 }] }
+    },
+    {
+      "name": "一次只能执行一条语句",
+      "query": { "sql": "SELECT 1; SELECT 2" },
+      "expect": { "error": { "code": "sql_error", "index": 0 } }
+    },
+    {
+      "name": "参数个数不符",
+      "query": { "sql": "SELECT ?, ?", "params": [1] },
+      "expect": { "error": { "code": "sql_error", "index": 0 } }
+    },
+    {
+      "name": "超出安全整数范围的列值",
+      "query": { "sql": "SELECT 9007199254740993 AS big" },
+      "expect": { "error": { "code": "sql_error", "index": 0 } }
+    }
+  ],
+  "checksums": [
+    { "text": "CREATE TABLE t (id TEXT);\n", "sha256": "c5368385fb15d396d9e12fa3523cb466b787e40a15f636ac84581ebc2735ceb6" },
+    { "text": "CREATE TABLE t (id TEXT);\r\n", "sha256": "c5368385fb15d396d9e12fa3523cb466b787e40a15f636ac84581ebc2735ceb6" },
+    { "text": "-- 第一版\r\nCREATE TABLE 作品 (id TEXT);\r\n", "sha256": "8ab30722684af0dd2b2396013562338cf87133c4ca74ec21f548c75eb2f10329" }
+  ]
+}

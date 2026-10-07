@@ -50,6 +50,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
@@ -57,6 +59,10 @@ jobs:
       - name: 构建界面
         # generate_context! 在编译期读取前端产物，cargo test 之前先构建。
         run: pnpm --filter @novel-writer/desktop build
+      - name: Rust 格式与静态检查
+        run: |
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+          cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Rust 测试
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: 生成安装包
