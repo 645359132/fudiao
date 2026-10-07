@@ -1,4 +1,4 @@
-import type { Result } from '@novel-writer/shared';
+import type { Result } from '@fudiao/shared';
 
 /** 一条已写入的事件。事件只追加，不修改、不删除（硬性规则 8）。 */
 export type StoredEvent = {

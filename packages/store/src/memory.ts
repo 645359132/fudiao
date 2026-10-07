@@ -1,4 +1,4 @@
-import { err, ok } from '@novel-writer/shared';
+import { err, ok } from '@fudiao/shared';
 import { envelope, type EventStore, type StoredEvent } from './event-store';
 
 /** 内存中的事件存储，测试使用。 */

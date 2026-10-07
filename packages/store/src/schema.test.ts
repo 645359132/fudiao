@@ -8,7 +8,7 @@ import { TABLES } from './schema';
 import type { Statement } from './sql';
 
 const NOW = '2026-10-07T00:00:00.000Z';
-const root = mkdtempSync(join(tmpdir(), 'novel-writer-schema-'));
+const root = mkdtempSync(join(tmpdir(), 'fudiao-schema-'));
 const opened: ProjectDb[] = [];
 afterAll(() => {
   for (const db of opened) db.close();

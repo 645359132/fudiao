@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';
 import type { ActorId, ZoneId } from './ids';
 import type { OccurrenceDraft } from './occurrence';

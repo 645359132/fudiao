@@ -1,4 +1,4 @@
-import { canonicalJson, err, ok, sha256, type Result } from '@novel-writer/shared';
+import { canonicalJson, err, ok, sha256, type Result } from '@fudiao/shared';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';
 import { claimsFromOccurrences, knowledgeFromObservations } from './cognition/knowledge';
 import { applyKnowledgeEdited, type KnowledgeEdited, type KnowledgeEditError } from './cognition/author-edit';

@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-基于 Tauri 的中文长篇小说编辑器。核心创新是“有限情报下的角色行为推演”：每个角色代理只依据自己掌握的信息行动，程序统一裁决结果，作者把选中的事件写成正文。产品的根基是“谁在什么时候知道什么”的结构化记录与严格的信息隔离。
+产品名“复调”（英文名 fudiao）：基于 Tauri 的中文长篇小说编辑器。核心创新是“有限情报下的角色行为推演”：每个角色代理只依据自己掌握的信息行动，程序统一裁决结果，作者把选中的事件写成正文。产品的根基是“谁在什么时候知道什么”的结构化记录与严格的信息隔离。
 
 ## 必读文档
 
@@ -29,10 +29,10 @@
 - M0-10 已完成：`pnpm m0 view <运行标识>` 由运行记录生成单个 HTML 查看页（时间线、全局局面、角色所见），只读事件、不调用模型。
 - M0-12 已完成：`pnpm m0 report` 按清单生成评估包（均衡分配、隐藏来源、答案键单独存放、分层评分表），`report analyze` 汇总评分；对照组与推演组都输出事件梗概。实验步骤见 `m0/README.md`。
 - M0-07 已完成：僵局分类（程序判定观望与重复，僵局判断区分礼貌化解与目标无法达成）、导演提议（`stalemate` 与 `curve` 两种触发，导演只读全局局面）、`run --runs N --parallel P --director …` 与 `pnpm m0 outcomes` 走向归类。
-- M1-01 已完成：`apps/desktop` 的 Tauri 2 外壳（React 19 + React Compiler、Vite），持续集成在 Windows 上运行 Rust 测试并生成 NSIS 安装包（内置 WebView2 引导程序）。产品名 `Novel Writer` 与标识 `dev.novelwriter.desktop` 为暂定。
+- M1-01 已完成：`apps/desktop` 的 Tauri 2 外壳（React 19 + React Compiler、Vite），持续集成在 Windows 上运行 Rust 测试并生成 NSIS 安装包（内置 WebView2 引导程序）。产品名为“复调”，英文名 fudiao（应用标识 `com.fudiao.desktop`、可执行文件 `fudiao.exe`、工作区包 `@fudiao/*`）。
 - M1-02 已完成：`packages/store` 的 `SqlPort`（批量事务与影响行数守卫）、Node 实现（better-sqlite3）与迁移执行器；Rust 的 `db_open`、`db_query`、`db_tx`、`db_close`（一个写连接加只读连接池、WAL、迁移前备份、迁移编译期嵌入）；两端共用 `packages/store/contract/sql-cases.json` 契约用例；桌面端适配器 `apps/desktop/src/adapters/tauri-sql.ts`。
 - M1-03 已完成：第一版迁移 `packages/store/migrations/0001_init.sql`（作品、章节、段落、快照、设定、事实、来源关系、故事事件与事件段落关联，STRICT 表与约束）；故事时间领域类型（标签加排序键）；表结构清单 `packages/store/src/schema.ts` 与数据层导出导入（每张表一个 JSONL）及往返测试。
-- M0-13（真实实验与 `m0/DECISION.md`）需要作者提供 API Key、确认费用并安排评价者。按施工文档，M1 的脚手架与存储部分可与 M0 并行；M1 的其余任务在 M0 结论为继续或调整后进行。下一步是 M1-04（作品管理与章节目录）；按施工文档，M1 的界面任务在 M0 结论为继续或调整后进行。
+- M0-13（真实实验与 `m0/DECISION.md`）需要作者提供 API Key、确认费用并安排评价者。按施工文档，M1 的脚手架与存储部分可与 M0 并行；M1 的其余任务在 M0 结论为继续或调整后进行。作者决定（2026-10-07）：M0-13 的真实实验暂缓，M1 先行，不等 M0 结论。下一步是 OpenAI 兼容接口的补强，然后是 M1-04（作品管理与章节目录）。
 
 ## 工作方式
 
@@ -139,7 +139,7 @@ pnpm m0 outcomes <运行标识…>
 Rust 测试（`generate_context!` 在编译期读取前端产物，首次运行前先构建界面）：
 
 ```bash
-pnpm --filter @novel-writer/desktop build
+pnpm --filter @fudiao/desktop build
 ```
 
 ```bash
@@ -159,14 +159,14 @@ cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- 
 桌面应用的开发模式与安装包（需要 Rust 工具链；安装包写在 `apps/desktop/src-tauri/target/release/bundle/nsis/`）：
 
 ```bash
-pnpm --filter @novel-writer/desktop tauri dev
+pnpm --filter @fudiao/desktop tauri dev
 ```
 
 ```bash
-pnpm --filter @novel-writer/desktop tauri build
+pnpm --filter @fudiao/desktop tauri build
 ```
 
-工作区包的命名为 `@novel-writer/<包名>`，以源码形式互相引用（`exports` 指向 `src/index.ts`），不需要构建步骤。
+工作区包的命名为 `@fudiao/<包名>`，以源码形式互相引用（`exports` 指向 `src/index.ts`），不需要构建步骤。
 
 ## 硬性规则
 

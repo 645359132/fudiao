@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { SceneSpec } from './schema';
 
 declare const validated: unique symbol;

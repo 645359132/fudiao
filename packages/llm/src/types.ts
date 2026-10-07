@@ -1,4 +1,4 @@
-import type { JsonValue, Result } from '@novel-writer/shared';
+import type { JsonValue, Result } from '@fudiao/shared';
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 

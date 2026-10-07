@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/domain",
+  "name": "@fudiao/domain",
   "version": "0.0.0",
   "private": true,
   "description": "领域内核：纯函数，禁止任何 IO",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@novel-writer/shared": "workspace:*",
+    "@fudiao/shared": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {

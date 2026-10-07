@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { drawInt, seedRng, type RngState } from '@novel-writer/domain';
-import { err, ok, type Result } from '@novel-writer/shared';
+import { drawInt, seedRng, type RngState } from '@fudiao/domain';
+import { err, ok, type Result } from '@fudiao/shared';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { parseCsv, toCsv } from './csv';

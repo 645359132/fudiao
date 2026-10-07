@@ -1,5 +1,5 @@
-import { ActorId, parseScene, type Scene, type SceneError } from '@novel-writer/domain';
-import { err, ok, type Result } from '@novel-writer/shared';
+import { ActorId, parseScene, type Scene, type SceneError } from '@fudiao/domain';
+import { err, ok, type Result } from '@fudiao/shared';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 

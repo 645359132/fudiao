@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { buildCharacterView, initialState, type ActorId, type KnowledgeId, type Occurrence, type Scene } from '@novel-writer/domain';
-import { createEngine, reduceRun, type RunEvent, type RunStatus } from '@novel-writer/engine';
-import { BudgetGuard, costOf, structured, type LlmPort, type LlmRequest, type LlmResult, type Prices } from '@novel-writer/llm';
+import { buildCharacterView, initialState, type ActorId, type KnowledgeId, type Occurrence, type Scene } from '@fudiao/domain';
+import { createEngine, reduceRun, type RunEvent, type RunStatus } from '@fudiao/engine';
+import { BudgetGuard, costOf, structured, type LlmPort, type LlmRequest, type LlmResult, type Prices } from '@fudiao/llm';
 import {
   ActionProposal,
   BaselineOutput,
@@ -15,9 +15,9 @@ import {
   renderRunSynopsis,
   renderStructuredRepair,
   type RenderedPrompt,
-} from '@novel-writer/prompts';
-import type { StoredEvent } from '@novel-writer/store';
-import { jsonlCallLog, jsonlEventStore } from '@novel-writer/store/node';
+} from '@fudiao/prompts';
+import type { StoredEvent } from '@fudiao/store';
+import { jsonlCallLog, jsonlEventStore } from '@fudiao/store/node';
 import { flagInt, flagString, parseArgs, type Args } from './args';
 import { estimateCalls, estimateCost, formatUsd, type CostEstimate } from './cost';
 import { buildPort, loadExperiment, runConfig, taskModel, type Experiment, type ExperimentTask } from './experiment';

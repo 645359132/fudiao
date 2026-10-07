@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/llm",
+  "name": "@fudiao/llm",
   "version": "0.0.0",
   "private": true,
   "description": "模型端口、适配器、结构化输出管线、预算守卫、录制回放",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
-    "@novel-writer/shared": "workspace:*",
+    "@fudiao/shared": "workspace:*",
     "openai": "^7.30.0",
     "zod": "^4.6.5"
   }

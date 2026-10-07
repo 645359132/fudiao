@@ -1,7 +1,7 @@
-import { stateHash, type Scene } from '@novel-writer/domain';
-import { canaryScene, staticForbidden, warehouse } from '@novel-writer/domain/testing';
-import { inspectRequests, memoryCallLog, type CallLog, type LlmPort } from '@novel-writer/llm';
-import { memoryEventStore, type EventStore } from '@novel-writer/store';
+import { stateHash, type Scene } from '@fudiao/domain';
+import { canaryScene, staticForbidden, warehouse } from '@fudiao/domain/testing';
+import { inspectRequests, memoryCallLog, type CallLog, type LlmPort } from '@fudiao/llm';
+import { memoryEventStore, type EventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine } from './engine';

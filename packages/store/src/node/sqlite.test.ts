@@ -16,7 +16,7 @@ type Case = {
 type Contract = { setup: string[]; cases: Case[]; checksums: { text: string; sha256: string }[] };
 
 const contract = JSON.parse(readFileSync(new URL('../../contract/sql-cases.json', import.meta.url), 'utf8')) as Contract;
-const root = mkdtempSync(join(tmpdir(), 'novel-writer-sql-'));
+const root = mkdtempSync(join(tmpdir(), 'fudiao-sql-'));
 const opened: ProjectDb[] = [];
 afterAll(() => {
   for (const db of opened) db.close();

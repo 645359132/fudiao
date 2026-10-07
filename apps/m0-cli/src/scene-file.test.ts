@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildCharacterView, initialState } from '@novel-writer/domain';
-import { canonicalJson } from '@novel-writer/shared';
+import { buildCharacterView, initialState } from '@fudiao/domain';
+import { canonicalJson } from '@fudiao/shared';
 import { describe, expect, it } from 'vitest';
 import { loadSceneFile } from './scene-file';
 

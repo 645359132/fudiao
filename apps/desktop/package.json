@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/desktop",
+  "name": "@fudiao/desktop",
   "version": "0.1.0",
   "private": true,
   "description": "桌面应用：Tauri 2 外壳、React 界面与应用服务层",
@@ -11,8 +11,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@novel-writer/shared": "workspace:*",
-    "@novel-writer/store": "workspace:*",
+    "@fudiao/shared": "workspace:*",
+    "@fudiao/store": "workspace:*",
     "@tauri-apps/api": "^2.12.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn app_info_serializes_in_camel_case() {
         let json = serde_json::to_value(app_info_value()).unwrap();
-        assert_eq!(json["name"], "novel-writer");
+        assert_eq!(json["name"], "fudiao");
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
     }
 }

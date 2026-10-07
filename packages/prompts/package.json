@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/prompts",
+  "name": "@fudiao/prompts",
   "version": "0.0.0",
   "private": true,
   "description": "提示词模板、输出 schema、模板版本",
@@ -11,8 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@novel-writer/domain": "workspace:*",
-    "@novel-writer/shared": "workspace:*",
+    "@fudiao/domain": "workspace:*",
+    "@fudiao/shared": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {

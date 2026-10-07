@@ -1,6 +1,6 @@
-import { ModelProfileSchema, type RunConfig, type TaskModel } from '@novel-writer/engine';
-import { AnthropicAdapter, OpenAIChatAdapter, routeByProvider, type LlmPort } from '@novel-writer/llm';
-import { err, ok, type Result } from '@novel-writer/shared';
+import { ModelProfileSchema, type RunConfig, type TaskModel } from '@fudiao/engine';
+import { AnthropicAdapter, OpenAIChatAdapter, routeByProvider, type LlmPort } from '@fudiao/llm';
+import { err, ok, type Result } from '@fudiao/shared';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import type { RunConfig as SceneRun } from './scene-file';

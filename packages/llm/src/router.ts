@@ -1,4 +1,4 @@
-import { err } from '@novel-writer/shared';
+import { err } from '@fudiao/shared';
 import type { CallOptions, LlmPort, LlmRequest } from './types';
 
 /** 按请求中的服务标识把调用交给对应的适配器。未配置的服务返回错误，不会改用其他服务。 */

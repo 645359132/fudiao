@@ -1,5 +1,5 @@
-import { applyEvent, initialState, type Scene, type SimState } from '@novel-writer/domain';
-import type { RunEvent } from '@novel-writer/engine';
+import { applyEvent, initialState, type Scene, type SimState } from '@fudiao/domain';
+import type { RunEvent } from '@fudiao/engine';
 
 /** 一次运行的结局与关键转折，由事件记录重放得到，不调用模型。 */
 export type RunOutcome = {

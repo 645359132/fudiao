@@ -1,5 +1,5 @@
-import { err, ok, type Result } from '@novel-writer/shared';
-import type { OpenError, OpenReport, Row, SqlError, SqlPort, StatementResult } from '@novel-writer/store';
+import { err, ok, type Result } from '@fudiao/shared';
+import type { OpenError, OpenReport, Row, SqlError, SqlPort, StatementResult } from '@fudiao/store';
 
 /** Tauri 的 invoke（`@tauri-apps/api/core`）；以参数注入，测试中替换为假实现。 */
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;

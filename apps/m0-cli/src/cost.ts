@@ -1,5 +1,5 @@
-import type { TaskModel } from '@novel-writer/engine';
-import { costOf } from '@novel-writer/llm';
+import type { TaskModel } from '@fudiao/engine';
+import { costOf } from '@fudiao/llm';
 
 /**
  * 运行前的粗略费用估算（施工文档第六章“费用与速度”）：按每回合的调用次数、

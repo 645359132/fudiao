@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/engine",
+  "name": "@fudiao/engine",
   "version": "0.0.0",
   "private": true,
   "description": "推演编排：回合状态机、运行模式、批量推演、介入、恢复",
@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@novel-writer/domain": "workspace:*",
-    "@novel-writer/llm": "workspace:*",
-    "@novel-writer/prompts": "workspace:*",
-    "@novel-writer/shared": "workspace:*",
-    "@novel-writer/store": "workspace:*",
+    "@fudiao/domain": "workspace:*",
+    "@fudiao/llm": "workspace:*",
+    "@fudiao/prompts": "workspace:*",
+    "@fudiao/shared": "workspace:*",
+    "@fudiao/store": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {

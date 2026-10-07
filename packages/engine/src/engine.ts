@@ -23,7 +23,7 @@ import {
   type SemanticRuling,
   type SimState,
   applyEvent,
-} from '@novel-writer/domain';
+} from '@fudiao/domain';
 import {
   structured,
   withBudget,
@@ -35,7 +35,7 @@ import {
   type LlmRequest,
   type StructuredError,
   type TaskKind,
-} from '@novel-writer/llm';
+} from '@fudiao/llm';
 import {
   ActionProposal,
   BeliefUpdateOutput,
@@ -52,9 +52,9 @@ import {
   renderStalemateJudgement,
   renderStructuredRepair,
   type RenderedPrompt,
-} from '@novel-writer/prompts';
-import type { EventStore } from '@novel-writer/store';
-import { canonicalJson, err, ok, sha256, type Result } from '@novel-writer/shared';
+} from '@fudiao/prompts';
+import type { EventStore } from '@fudiao/store';
+import { canonicalJson, err, ok, sha256, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
 import type { RunConfig, TaskModel } from './config';
 import { beliefProposal, directorEvent, proposalToAction, rulingFromOutput } from './convert';

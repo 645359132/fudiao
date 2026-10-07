@@ -7,7 +7,7 @@ export function App() {
         <p className="shell-empty">还没有打开作品</p>
       </aside>
       <section className="shell-editor" aria-label="正文">
-        <h1>小说编辑器</h1>
+        <h1>复调</h1>
         <p>新建或打开一部作品后，在这里写作。</p>
       </section>
     </main>

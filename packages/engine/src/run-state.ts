@@ -7,8 +7,8 @@ import {
   type RuleViolation,
   type Scene,
   type SimState,
-} from '@novel-writer/domain';
-import { err, ok, type Result } from '@novel-writer/shared';
+} from '@fudiao/domain';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { RunConfig } from './config';
 import {
   isDomainEvent,

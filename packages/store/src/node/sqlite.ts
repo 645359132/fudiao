@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import {
   backupFileName,
   normalizeMigration,

@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { Adjudication } from './adjudicate';
 import { observe } from './cognition/observation';
 import { applyEffects, type Effect, type InvariantViolation } from './effects';

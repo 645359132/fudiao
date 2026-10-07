@@ -58,7 +58,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 构建界面
         # generate_context! 在编译期读取前端产物，cargo test 之前先构建。
-        run: pnpm --filter @novel-writer/desktop build
+        run: pnpm --filter @fudiao/desktop build
       - name: Rust 格式与静态检查
         run: |
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
@@ -66,7 +66,7 @@ jobs:
       - name: Rust 测试
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - name: 生成安装包
-        run: pnpm --filter @novel-writer/desktop tauri build
+        run: pnpm --filter @fudiao/desktop tauri build
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer

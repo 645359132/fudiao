@@ -1,4 +1,4 @@
-import type { Result } from '@novel-writer/shared';
+import type { Result } from '@fudiao/shared';
 
 /**
  * SQL 参数与列值。整数必须在安全整数范围内（标识用 ULID 文本，不用自增整数作为外部标识）；

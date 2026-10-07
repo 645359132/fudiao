@@ -11,10 +11,10 @@ import type {
   Scene,
   SecretCandidate,
   SimState,
-} from '@novel-writer/domain';
-import { deliveredSentences } from '@novel-writer/domain';
-import type { JsonValue } from '@novel-writer/shared';
-import { err, ok, type Result } from '@novel-writer/shared';
+} from '@fudiao/domain';
+import { deliveredSentences } from '@fudiao/domain';
+import type { JsonValue } from '@fudiao/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
 import { parseTemplate, render, type RenderContext } from './engine';
 import { PARTIAL_SOURCES, TEMPLATE_SOURCES } from './generated/templates';

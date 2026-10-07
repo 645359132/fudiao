@@ -14,9 +14,9 @@ import {
   type SemanticRuling,
   type SimState,
   type ZoneId,
-} from '@novel-writer/domain';
-import type { ActionProposal, BeliefUpdateOutput, DirectorProposalOutput, SemanticRulingOutput } from '@novel-writer/prompts';
-import { err, ok, type Result } from '@novel-writer/shared';
+} from '@fudiao/domain';
+import type { ActionProposal, BeliefUpdateOutput, DirectorProposalOutput, SemanticRulingOutput } from '@fudiao/prompts';
+import { err, ok, type Result } from '@fudiao/shared';
 
 /**
  * 模型的行动提案转换为领域行动。标识是否存在、行动是否合法由 checkAction 判断，

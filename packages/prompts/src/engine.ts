@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 
 /**
  * 极简的模板渲染：{{变量}}、{{#区块}}…{{/区块}}、{{^反向区块}}…{{/区块}}、{{> 局部模板}}。

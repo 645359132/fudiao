@@ -1,6 +1,6 @@
 // 数据层的导出与导入：每张表一个 JSONL（施工文档第四章“完整项目导出”的 data/ 部分）。
 // 只依赖 SqlPort，桌面端与 Node 端通用；zip、manifest 与章节 Markdown 在 M1-07。
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { TABLES, type TableSpec } from './schema';
 import type { SqlError, SqlPort, SqlValue, Statement } from './sql';
 

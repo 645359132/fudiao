@@ -2,7 +2,7 @@
 
 use std::{fs, path::Path};
 
-use novel_writer_lib::db::{
+use fudiao_lib::db::{
     migrate::{Applied, Migration, EMBEDDED},
     Database, OpenError, OpenReport, Statement, PROJECT_DB_FILE,
 };

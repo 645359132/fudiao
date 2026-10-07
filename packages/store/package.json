@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/store",
+  "name": "@fudiao/store",
   "version": "0.0.0",
   "private": true,
   "description": "SQL 迁移、仓储、事件存储、投影",
@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@novel-writer/llm": "workspace:*",
-    "@novel-writer/shared": "workspace:*",
+    "@fudiao/llm": "workspace:*",
+    "@fudiao/shared": "workspace:*",
     "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {

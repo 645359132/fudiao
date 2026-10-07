@@ -1,4 +1,4 @@
-import type { JsonValue } from '@novel-writer/shared';
+import type { JsonValue } from '@fudiao/shared';
 import { z } from 'zod';
 
 // 结构化输出不支持的约束：从发给服务的 schema 中去掉，由结构化输出管线在本地用 Zod 校验。

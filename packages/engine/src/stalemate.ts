@@ -1,4 +1,4 @@
-import type { Action } from '@novel-writer/domain';
+import type { Action } from '@fudiao/domain';
 import type { StalemateKind } from './events';
 import type { RoundRecord } from './run-state';
 

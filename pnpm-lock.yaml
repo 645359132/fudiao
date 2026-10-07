@@ -169,7 +169,7 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.12.0(supports-color@7.2.0))
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:packages/shared
       '@types/node':
@@ -199,10 +199,10 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@novel-writer/store':
+      '@fudiao/store':
         specifier: workspace:*
         version: link:../../packages/store
       '@tauri-apps/api':
@@ -245,22 +245,22 @@ importers:
 
   apps/m0-cli:
     dependencies:
-      '@novel-writer/domain':
+      '@fudiao/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@novel-writer/engine':
+      '@fudiao/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@novel-writer/llm':
+      '@fudiao/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@novel-writer/prompts':
+      '@fudiao/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@novel-writer/store':
+      '@fudiao/store':
         specifier: workspace:*
         version: link:../../packages/store
       yaml:
@@ -274,7 +274,7 @@ importers:
 
   packages/domain:
     dependencies:
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -289,19 +289,19 @@ importers:
 
   packages/engine:
     dependencies:
-      '@novel-writer/domain':
+      '@fudiao/domain':
         specifier: workspace:*
         version: link:../domain
-      '@novel-writer/llm':
+      '@fudiao/llm':
         specifier: workspace:*
         version: link:../llm
-      '@novel-writer/prompts':
+      '@fudiao/prompts':
         specifier: workspace:*
         version: link:../prompts
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../shared
-      '@novel-writer/store':
+      '@fudiao/store':
         specifier: workspace:*
         version: link:../store
       zod:
@@ -317,7 +317,7 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.131.0
         version: 0.131.0(zod@4.6.5)
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../shared
       openai:
@@ -329,10 +329,10 @@ importers:
 
   packages/prompts:
     dependencies:
-      '@novel-writer/domain':
+      '@fudiao/domain':
         specifier: workspace:*
         version: link:../domain
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -347,10 +347,10 @@ importers:
 
   packages/store:
     dependencies:
-      '@novel-writer/llm':
+      '@fudiao/llm':
         specifier: workspace:*
         version: link:../llm
-      '@novel-writer/shared':
+      '@fudiao/shared':
         specifier: workspace:*
         version: link:../shared
       better-sqlite3:

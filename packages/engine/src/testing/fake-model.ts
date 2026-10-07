@@ -1,5 +1,5 @@
 // 测试模型：按请求的步骤键与模板生成合法的 JSON，不访问任何模型服务。仅供测试使用。
-import { requestHash, CONSERVATIVE_CAPABILITIES, type LlmPort, type LlmRequest, type LlmResult, type ModelProfile } from '@novel-writer/llm';
+import { requestHash, CONSERVATIVE_CAPABILITIES, type LlmPort, type LlmRequest, type LlmResult, type ModelProfile } from '@fudiao/llm';
 import type {
   ActionProposal,
   BeatSheetOutput,
@@ -8,8 +8,8 @@ import type {
   EvidenceJudgementOutput,
   SemanticRulingOutput,
   StalemateJudgementOutput,
-} from '@novel-writer/prompts';
-import { ok } from '@novel-writer/shared';
+} from '@fudiao/prompts';
+import { ok } from '@fudiao/shared';
 import type { RunConfig } from '../config';
 
 export type CallContext = {

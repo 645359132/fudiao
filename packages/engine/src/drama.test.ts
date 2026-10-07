@@ -1,8 +1,8 @@
-import type { Scene } from '@novel-writer/domain';
-import { CANARY, canaryScene, warehouse } from '@novel-writer/domain/testing';
-import { inspectRequests, memoryCallLog, type LlmRequest } from '@novel-writer/llm';
-import type { DirectorProposalOutput } from '@novel-writer/prompts';
-import { memoryEventStore } from '@novel-writer/store';
+import type { Scene } from '@fudiao/domain';
+import { CANARY, canaryScene, warehouse } from '@fudiao/domain/testing';
+import { inspectRequests, memoryCallLog, type LlmRequest } from '@fudiao/llm';
+import type { DirectorProposalOutput } from '@fudiao/prompts';
+import { memoryEventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine } from './engine';

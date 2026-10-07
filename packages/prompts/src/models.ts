@@ -1,4 +1,4 @@
-import type { CharacterView, Claim, KnowledgeItem, Observation, RuleViolation } from '@novel-writer/domain';
+import type { CharacterView, Claim, KnowledgeItem, Observation, RuleViolation } from '@fudiao/domain';
 import type { RenderContext } from './engine';
 
 // 渲染模型只包含数据：名称、标识、数值与布尔标志。所有文字都在模板文件中。

@@ -1,4 +1,4 @@
-import { parseScene } from '@novel-writer/domain';
+import { parseScene } from '@fudiao/domain';
 import { describe, expect, it } from 'vitest';
 import { sceneDraftToSpec } from './scene-draft';
 import { SceneDraftOutput } from './schemas';

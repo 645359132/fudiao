@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { parseCsv, toCsv } from './csv';
 import { analyze, assign, loadManifest, loadSamples, writePackets, type Manifest } from './report';
 
-const root = mkdtempSync(join(tmpdir(), 'novel-writer-report-'));
+const root = mkdtempSync(join(tmpdir(), 'fudiao-report-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const scenes = ['warehouse', 'pawnshop', 'rainy'];

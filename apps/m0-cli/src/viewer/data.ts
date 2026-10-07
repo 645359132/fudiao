@@ -6,8 +6,8 @@ import {
   type Observation,
   type Scene,
   type SimState,
-} from '@novel-writer/domain';
-import type { RunEvent } from '@novel-writer/engine';
+} from '@fudiao/domain';
+import type { RunEvent } from '@fudiao/engine';
 
 // 静态查看页的数据：只由事件记录回放得到，不调用模型（硬性规则 9）。
 // “角色所见”直接取自 buildCharacterView，与实际发给角色代理的信息一致。

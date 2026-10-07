@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { RulingRequest } from './adjudicate';
 import type { Effect } from './effects';
 import type { ActorId, ZoneId } from './ids';

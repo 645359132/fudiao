@@ -1,4 +1,4 @@
-import { err, type Result } from '@novel-writer/shared';
+import { err, type Result } from '@fudiao/shared';
 import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage, Prices } from './types';
 
 const PER_MILLION = 1_000_000;

@@ -1,7 +1,7 @@
-import { stateHash, type Scene } from '@novel-writer/domain';
-import { A, P, item, warehouse, zone } from '@novel-writer/domain/testing';
-import { BudgetGuard, memoryCallLog } from '@novel-writer/llm';
-import { memoryEventStore } from '@novel-writer/store';
+import { stateHash, type Scene } from '@fudiao/domain';
+import { A, P, item, warehouse, zone } from '@fudiao/domain/testing';
+import { BudgetGuard, memoryCallLog } from '@fudiao/llm';
+import { memoryEventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine, replayRun } from './engine';

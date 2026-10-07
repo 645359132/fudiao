@@ -1,14 +1,14 @@
 [package]
-name = "novel-writer"
+name = "fudiao"
 version = "0.1.0"
-description = "中文长篇小说编辑器"
+description = "复调：中文长篇小说编辑器"
 edition = "2021"
 rust-version = "1.85"
 publish = false
 
 [lib]
 # 库名与可执行文件名分开，避免 Windows 上 cargo 的同名产物冲突。
-name = "novel_writer_lib"
+name = "fudiao_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

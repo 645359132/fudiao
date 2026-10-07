@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { ActorId, KnowledgeId } from '../ids';
 import type { Scene } from '../scene/validate';
 import type { SimState } from '../world';

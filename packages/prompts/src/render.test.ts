@@ -7,7 +7,7 @@ import {
   screenSecretInferences,
   type KnowledgeId,
   type SimState,
-} from '@novel-writer/domain';
+} from '@fudiao/domain';
 import {
   A,
   CANARY,
@@ -22,7 +22,7 @@ import {
   tapeArb,
   withEffects,
   zone,
-} from '@novel-writer/domain/testing';
+} from '@fudiao/domain/testing';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {

@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages';
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { mapSdkError } from './errors';

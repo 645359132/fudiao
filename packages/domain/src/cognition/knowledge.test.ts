@@ -1,4 +1,4 @@
-import { canonicalJson } from '@novel-writer/shared';
+import { canonicalJson } from '@fudiao/shared';
 import { describe, expect, it } from 'vitest';
 import type { ActorId, ClaimId, CounterKey } from '../ids';
 import { crowded, run } from '../testing/round';

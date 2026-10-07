@@ -1,4 +1,4 @@
-import type { SceneSpecInput } from '@novel-writer/domain';
+import type { SceneSpecInput } from '@fudiao/domain';
 import type { SceneDraftOutput } from './schemas';
 
 const optional = (s: string) => (s.trim() === '' ? undefined : s);

@@ -78,7 +78,7 @@ flowchart TB
 ### 代码仓库结构
 
 ```text
-novel-writer/
+fudiao/
 ├─ apps/
 │  ├─ desktop/                 Tauri 应用
 │  │  ├─ src/                  React 界面、应用服务层、Tauri 适配器

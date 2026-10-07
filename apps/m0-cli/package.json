@@ -1,5 +1,5 @@
 {
-  "name": "@novel-writer/m0-cli",
+  "name": "@fudiao/m0-cli",
   "version": "0.0.0",
   "private": true,
   "description": "M0 命令行：运行场景、对照组、生成评估材料",
@@ -8,12 +8,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@novel-writer/domain": "workspace:*",
-    "@novel-writer/engine": "workspace:*",
-    "@novel-writer/llm": "workspace:*",
-    "@novel-writer/prompts": "workspace:*",
-    "@novel-writer/shared": "workspace:*",
-    "@novel-writer/store": "workspace:*",
+    "@fudiao/domain": "workspace:*",
+    "@fudiao/engine": "workspace:*",
+    "@fudiao/llm": "workspace:*",
+    "@fudiao/prompts": "workspace:*",
+    "@fudiao/shared": "workspace:*",
+    "@fudiao/store": "workspace:*",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   }

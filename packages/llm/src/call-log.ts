@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { costOf } from './budget';
 import { requestHash } from './request-hash';
 import type { CallOptions, Effort, LlmError, LlmOutcome, LlmPort, LlmRequest, LlmResult, TaskKind } from './types';

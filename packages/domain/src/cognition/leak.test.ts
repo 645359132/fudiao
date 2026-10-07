@@ -1,4 +1,4 @@
-import { canonicalJson } from '@novel-writer/shared';
+import { canonicalJson } from '@fudiao/shared';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { Action } from '../actions';

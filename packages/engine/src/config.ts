@@ -1,5 +1,5 @@
-import { ActorId } from '@novel-writer/domain';
-import type { ModelProfile } from '@novel-writer/llm';
+import { ActorId } from '@fudiao/domain';
+import type { ModelProfile } from '@fudiao/llm';
 import { z } from 'zod';
 
 const Capabilities = z.object({

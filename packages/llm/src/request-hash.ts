@@ -1,4 +1,4 @@
-import { canonicalJson, sha256 } from '@novel-writer/shared';
+import { canonicalJson, sha256 } from '@fudiao/shared';
 import type { LlmRequest } from './types';
 
 /**

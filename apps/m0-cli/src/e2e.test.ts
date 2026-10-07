@@ -2,11 +2,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createEngine, type RunConfig } from '@novel-writer/engine';
-import { fakeModel, testConfig, waitProposal, type Policy } from '@novel-writer/engine/testing';
-import { memoryCallLog, memorySamples, RecordingAdapter, ReplayAdapter } from '@novel-writer/llm';
-import { memoryEventStore } from '@novel-writer/store';
-import { jsonlCallLog, jsonlEventStore } from '@novel-writer/store/node';
+import { createEngine, type RunConfig } from '@fudiao/engine';
+import { fakeModel, testConfig, waitProposal, type Policy } from '@fudiao/engine/testing';
+import { memoryCallLog, memorySamples, RecordingAdapter, ReplayAdapter } from '@fudiao/llm';
+import { memoryEventStore } from '@fudiao/store';
+import { jsonlCallLog, jsonlEventStore } from '@fudiao/store/node';
 import { afterAll, describe, expect, it } from 'vitest';
 import { loadSceneFile } from './scene-file';
 
@@ -14,7 +14,7 @@ import { loadSceneFile } from './scene-file';
 
 const AT = '2026-10-07T00:00:00.000Z';
 const dir = fileURLToPath(new URL('../../../m0/scenes/', import.meta.url));
-const root = mkdtempSync(join(tmpdir(), 'novel-writer-e2e-'));
+const root = mkdtempSync(join(tmpdir(), 'fudiao-e2e-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const policy: Policy = {

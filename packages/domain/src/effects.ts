@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import type { ActorId, CounterKey, FlagKey, ItemId, MechanismId, ZoneId } from './ids';
 import type { RngState } from './rng';
 import type { InjuryLevel } from './scene/schema';

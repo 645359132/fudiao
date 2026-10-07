@@ -1,4 +1,4 @@
-import { err, ok, type Result } from '@novel-writer/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import OpenAI from 'openai';
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 import { requestHash } from '../request-hash';

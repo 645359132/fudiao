@@ -2,7 +2,7 @@
 
 use std::{fs, path::PathBuf};
 
-use novel_writer_lib::db::{migrate::checksum, Database, Statement};
+use fudiao_lib::db::{migrate::checksum, Database, Statement};
 use serde_json::{json, Value};
 
 fn contract() -> Value {

@@ -1,4 +1,4 @@
-import { ActionKind, InjuryLevel, Volume } from '@novel-writer/domain';
+import { ActionKind, InjuryLevel, Volume } from '@fudiao/domain';
 import { z } from 'zod';
 
 // 模型输出的 schema。字段全部必填，可缺省的用 nullable 表示：

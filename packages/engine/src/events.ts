@@ -7,8 +7,8 @@ import type {
   RuleViolation,
   SecretId,
   SemanticRuling,
-} from '@novel-writer/domain';
-import type { ActionProposal } from '@novel-writer/prompts';
+} from '@fudiao/domain';
+import type { ActionProposal } from '@fudiao/prompts';
 import type { RunConfig } from './config';
 
 export type EndReason = 'max_rounds' | 'actors_left' | 'budget' | 'author_stop' | 'stalemate';

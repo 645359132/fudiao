@@ -1,6 +1,6 @@
 // 由提示词模板文件生成 packages/prompts/src/generated/templates.ts，并维护版本锁。
 // 修改模板必须提升版本号（硬性规则 12）：内容变了而版本没变时，生成失败。
-import { sha256 } from '@novel-writer/shared';
+import { sha256 } from '@fudiao/shared';
 
 export type Lock = Readonly<Record<string, { readonly version: string; readonly sha256: string }>>;
 

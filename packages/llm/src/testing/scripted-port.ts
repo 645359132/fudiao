@@ -1,5 +1,5 @@
 // 测试辅助：按脚本返回结果的模型端口，并记录收到的请求。仅供测试使用。
-import { ok, type Result } from '@novel-writer/shared';
+import { ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import {
   CONSERVATIVE_CAPABILITIES,

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fakeModel, waitProposal } from '@novel-writer/engine/testing';
+import { fakeModel, waitProposal } from '@fudiao/engine/testing';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parseArgs } from './args';
 import { main, type CliDeps } from './cli';
@@ -12,7 +12,7 @@ import { loadSceneFile } from './scene-file';
 import { ulid } from './ulid';
 
 const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
-const out = mkdtempSync(join(tmpdir(), 'novel-writer-cli-'));
+const out = mkdtempSync(join(tmpdir(), 'fudiao-cli-'));
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 
 function deps(overrides: Partial<CliDeps> & { answers?: boolean[] } = {}) {

@@ -1,4 +1,4 @@
-import { canonicalJson } from '@novel-writer/shared';
+import { canonicalJson } from '@fudiao/shared';
 import { describe, expect, it } from 'vitest';
 import { requestHash } from '../request-hash';
 import { anthropicChunks, errorBody, fakeFetch, openaiChunks, type Scenario } from '../testing/fake-fetch';

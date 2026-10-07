@@ -1,7 +1,7 @@
 import { closeSync, existsSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CallLog, LlmCallRecord } from '@novel-writer/llm';
-import { err, ok } from '@novel-writer/shared';
+import type { CallLog, LlmCallRecord } from '@fudiao/llm';
+import { err, ok } from '@fudiao/shared';
 import { completeBatches, envelope, type EventStore, type StoredEvent } from '../event-store';
 
 /** 按行解析，遇到无法解析的一行即停止：它只可能是崩溃时写到一半的末尾。 */

@@ -7,7 +7,7 @@ import { memoryEventStore } from './memory';
 import { jsonlCallLog, jsonlEventStore } from './node/jsonl';
 
 const AT = '2026-10-07T00:00:00.000Z';
-const root = mkdtempSync(join(tmpdir(), 'novel-writer-store-'));
+const root = mkdtempSync(join(tmpdir(), 'fudiao-store-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 let n = 0;
