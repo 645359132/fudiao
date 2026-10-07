@@ -53,6 +53,11 @@ export type CharacterView = {
   readonly knowledge: readonly KnowledgeItem[];
   /** 本人听清的人物说法。 */
   readonly claims: readonly Claim[];
+  /**
+   * 视图中出现过的标识对应的名称（例如认知里提到、此刻已看不见的人与物）。
+   * 只为已在视图中的标识提供名称，不引入新的信息。
+   */
+  readonly names: readonly { readonly id: string; readonly name: string }[];
   readonly [lens]: 'character';
 };
 
@@ -73,7 +78,7 @@ export function buildCharacterView(scene: Scene, state: SimState, actor: ActorId
   const claimIds = new Set(knowledge.flatMap((k) => (k.body.kind === 'claim' ? [k.body.claim] : [])));
   const { initialKnowledge, ...card } = spec.card;
 
-  const view: Omit<CharacterView, typeof lens> = {
+  const view: Omit<CharacterView, typeof lens | 'names'> = {
     actorId: actor,
     round: state.round,
     self: {
@@ -127,11 +132,18 @@ export function buildCharacterView(scene: Scene, state: SimState, actor: ActorId
     knowledge,
     claims: Object.values(state.claims).filter((c) => claimIds.has(c.id)),
   };
-  return view as CharacterView;
+  const ids = collectIds(view);
+  const names = [...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]
+    .filter((entity) => ids.has(entity.id))
+    .map((entity) => ({ id: entity.id, name: entity.name }));
+  const complete: Omit<CharacterView, typeof lens> = { ...view, names };
+  return complete as CharacterView;
 }
 
 /** 视图中出现过的全部标识。角色提出的推测只能引用这些标识。 */
-export function viewIds(view: CharacterView): ReadonlySet<string> {
+export const viewIds = (view: CharacterView): ReadonlySet<string> => collectIds(view);
+
+function collectIds(view: Omit<CharacterView, typeof lens | 'names'>): Set<string> {
   const ids = new Set<string>([view.actorId, ...view.map.exits]);
   for (const z of view.map.zones) ids.add(z.id);
   for (const i of view.self.items) ids.add(i.id);

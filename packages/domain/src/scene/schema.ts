@@ -201,6 +201,8 @@ export const SceneSpec = z.object({
       requirements: z.array(Requirement).default([]),
       /** 多人同轮拾取同一物品：draw 用推演状态中的随机数抽取，ruling 交给语义裁决。 */
       contests: z.object({ take: z.enum(['draw', 'ruling']).default('ruling') }).prefault({}),
+      /** 原语无法表达的规则以自然语言记录，交给语义裁决（B41）。不进入角色视图。 */
+      narrativeRules: z.array(z.string().min(1)).default([]),
     })
     .prefault({}),
   loudness: LoudnessTable.prefault({}),

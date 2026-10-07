@@ -95,6 +95,15 @@ describe('buildCharacterView', () => {
     expect(buildCharacterView(scene, open, P).visible.items.map((i) => i.id)).not.toContain('ledger');
   });
 
+  it('names 只为视图中出现过的标识提供名称', () => {
+    const view = buildCharacterView(scene, start, P);
+    const names = Object.fromEntries(view.names.map((n) => [n.id, n.name]));
+    expect(names).toMatchObject({ protagonist: '主角', antagonist: '对手', crossbow: '弩', center: '仓库中央' });
+    expect(names).not.toHaveProperty('tripwire');
+    expect(names).not.toHaveProperty('ledger');
+    expect(view.names.every((n) => viewIds(view).has(n.id))).toBe(true);
+  });
+
   it('viewIds 收集视图中出现过的标识', () => {
     const ids = viewIds(buildCharacterView(scene, start, P));
     expect(ids.has('crossbow')).toBe(true);

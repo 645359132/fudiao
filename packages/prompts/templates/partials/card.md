@@ -1,0 +1,14 @@
+{{#card.goal}}当前目标：{{card.goal}}
+{{/card.goal}}
+{{#card.bottomLine}}底线：{{card.bottomLine}}
+{{/card.bottomLine}}
+{{#hasTraits}}性格倾向：{{#card.traits}}{{.}}；{{/card.traits}}
+{{/hasTraits}}
+{{#card.riskPreference}}风险偏好：{{card.riskPreference}}
+{{/card.riskPreference}}
+{{#card.emotionThreshold}}情绪阈值：{{card.emotionThreshold}}
+{{/card.emotionThreshold}}
+{{#card.lossOfControl}}失控条件：{{card.lossOfControl}}
+{{/card.lossOfControl}}
+{{#card.speechStyle}}说话风格：{{card.speechStyle}}
+{{/card.speechStyle}}

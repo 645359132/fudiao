@@ -1,0 +1,1 @@
+{{#k.observe}}观察{{/k.observe}}{{#k.move}}移动{{/k.move}}{{#k.probe}}试探{{/k.probe}}{{#k.attack}}攻击{{/k.attack}}{{#k.defend}}防御{{/k.defend}}{{#k.use_item}}使用物品{{/k.use_item}}{{#k.take}}拾取{{/k.take}}{{#k.drop}}放下{{/k.drop}}{{#k.speak}}说话{{/k.speak}}{{#k.withdraw}}撤离{{/k.withdraw}}{{#k.wait}}等待{{/k.wait}}{{#k.other}}其他行动{{/k.other}}

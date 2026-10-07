@@ -1,0 +1,38 @@
+{
+  "action_rejected": {
+    "version": "1",
+    "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
+  },
+  "beat_sheet": {
+    "version": "1",
+    "sha256": "81275cd4ce0825be36ae9d23b55feb3db34648d0408980cb79810e1c349f33fc"
+  },
+  "belief_update": {
+    "version": "1",
+    "sha256": "3d0a78d9834b2184571961ab898788e628d85ad47fbe56ff559c874bc9b879e9"
+  },
+  "candidate_text": {
+    "version": "1",
+    "sha256": "e74d066c652b59dccb7208bbfd6955c7885d5bc2168bb83ef19a9c2d7fc16c8b"
+  },
+  "character_action": {
+    "version": "1",
+    "sha256": "208a4ce7910b34737ad82aa5e56bb670e4e5c9163b2d2663411c6b5cb8ff6448"
+  },
+  "evidence_judgement": {
+    "version": "1",
+    "sha256": "91bd05fa87474da4857e2bf7396f26542cd9c1d01c8b923063c0784cf0cadabf"
+  },
+  "scene_draft": {
+    "version": "1",
+    "sha256": "a6b51734e6de4a32e9b3019aa392405bfc0eaeddbfe6874f4937eb80340fe97a"
+  },
+  "semantic_ruling": {
+    "version": "1",
+    "sha256": "83d40968911813cd08e91621a3fc0551569457403f56c1ec9b96737b2cf2a4db"
+  },
+  "structured_repair": {
+    "version": "1",
+    "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
+  }
+}

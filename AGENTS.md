@@ -22,7 +22,8 @@
 - M0-02 已完成：`packages/domain` 的场景配置、区域图、世界状态与效果、规则原语、裁决、语义裁决范围校验、机关、感知计算、领域事件与回放。
 - M0-03 已完成：角色卡与秘密、认知条目与二阶认知、人物说法、感知投影、认知更新校验、角色视图（`buildCharacterView`）、证据链筛选、金丝雀泄露测试（`packages/domain/src/cognition/leak.test.ts`）。
 - M0-04 已完成：`packages/llm` 的模型端口、`AnthropicAdapter`、`OpenAIChatAdapter`、录制回放、结构化输出管线、预算守卫、步骤键调用记录与请求检查；适配器契约测试用不联网的 fetch 夹具。
-- 下一步是 M0-05（提示词模板与输出 schema）。
+- M0-05 已完成：`packages/prompts` 的模板渲染、九个模板（角色行动、规则拒绝、格式修正、认知更新、语义裁决、证据链判断、节拍表、候选稿正文、场景配置草稿）、输出 schema、模板版本锁与提示词金丝雀测试。
+- 下一步是 M0-06（回合状态机与推演引擎），属于核心模块，先给出方案并获得确认。
 
 ## 工作方式
 
@@ -87,6 +88,12 @@ pnpm depcheck
 
 ```bash
 pnpm test
+```
+
+修改 `packages/prompts/templates` 后重新生成模板模块与版本锁（内容变化必须先提升模板版本号）：
+
+```bash
+pnpm prompts:build
 ```
 
 依次运行以上四项检查：
