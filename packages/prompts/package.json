@@ -1,0 +1,13 @@
+{
+  "name": "@novel-writer/prompts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "提示词模板、输出 schema、模板版本",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

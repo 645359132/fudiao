@@ -1,0 +1,13 @@
+{
+  "name": "@novel-writer/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "领域内核：纯函数，禁止任何 IO",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

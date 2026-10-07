@@ -1,0 +1,13 @@
+{
+  "name": "@novel-writer/editor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TipTap 扩展：段落标识、来源标记、锚点、实体高亮",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

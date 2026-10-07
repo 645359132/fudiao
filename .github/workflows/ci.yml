@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 检查（${{ matrix.os }}）
+    strategy:
+      fail-fast: false
+      matrix:
+        # 产品目标平台是 Windows；Linux 用于尽早发现路径与换行符问题。
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 代码检查
+        run: pnpm lint
+      - name: 依赖边界检查
+        run: pnpm depcheck
+      - name: 测试
+        # 持续集成不访问任何真实模型服务（硬性规则 14）。
+        run: pnpm test

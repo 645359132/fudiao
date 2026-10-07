@@ -1,0 +1,13 @@
+{
+  "name": "@novel-writer/m0-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M0 命令行：运行场景、对照组、生成评估材料",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@novel-writer/shared": "workspace:*"
+  }
+}

@@ -18,8 +18,8 @@
 
 ## 当前状态
 
-- 仓库目前只有文档，尚未搭建脚手架；下一步是 M0-01。
-- 脚手架完成后，更新本文件的“常用命令”一节。
+- M0-01 已完成：pnpm 单仓库、TypeScript 严格模式、ESLint、Vitest、dependency-cruiser 与持续集成。各包只有空入口，`apps/desktop` 在 M1-01 创建。
+- 下一步是 M0-02（领域内核），属于核心模块，先给出方案并获得确认。
 
 ## 工作方式
 
@@ -28,6 +28,7 @@
 - 领域内核先写测试，再写实现。
 - 实现与文档不一致时，先指出差异；经确认后同步修改文档，不要悄悄偏离文档中的决定。
 - 未经要求，不推送远程仓库，不发布，不新增重量级依赖；新增依赖须说明理由与许可证（只接受 MIT、Apache-2.0、BSD、ISC 等宽松许可证）。
+  - 已确认的例外：`lightningcss`（MPL-2.0），Vite 的必需依赖，只在开发与构建时使用，不随产品分发。
 
 ## 技术栈
 
@@ -57,19 +58,25 @@ m0/                 M0 场景、实验配置、评估材料与结论
 
 ## 常用命令
 
-脚手架完成后补充实际命令。预定如下：
+需要 Node 22.12 及以上与 pnpm 12（版本见根目录 `package.json` 的 `packageManager`）。
 
 ```bash
 pnpm install
 ```
 
+类型检查（根目录配置文件与各包分别检查；`domain`、`shared` 等包不加载 Node 类型）：
+
 ```bash
 pnpm typecheck
 ```
 
+代码检查（含领域内核禁止 `Math.random`、`Date.now`、`new Date()`，推演相关包禁止 `JSON.parse`）：
+
 ```bash
 pnpm lint
 ```
+
+依赖边界检查（规则在 `.dependency-cruiser.cjs`，规则本身由 `tools/depcruise/rules.test.ts` 测试）：
 
 ```bash
 pnpm depcheck
@@ -79,9 +86,25 @@ pnpm depcheck
 pnpm test
 ```
 
+依次运行以上四项检查：
+
+```bash
+pnpm check
+```
+
+M0 命令行：
+
+```bash
+pnpm m0 help
+```
+
+Rust 测试在 M1-01 创建 `apps/desktop` 后启用：
+
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
+
+工作区包的命名为 `@novel-writer/<包名>`，以源码形式互相引用（`exports` 指向 `src/index.ts`），不需要构建步骤。
 
 ## 硬性规则
 

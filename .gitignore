@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vite/
+.env
+.env.*
+!.env.example
+*.log
+# 真实模型调用记录与运行产物不入库（硬性规则 18）
+m0/runs/
+.DS_Store
+Thumbs.db
