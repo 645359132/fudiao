@@ -3,7 +3,7 @@
 
 run:
   protocol: turn_based
-  maxRounds: 10
+  maxRounds: 20
   firstSpeaker: a_qing
 
 scene:
