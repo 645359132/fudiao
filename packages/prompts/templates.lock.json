@@ -23,6 +23,10 @@
     "version": "2",
     "sha256": "b9f00c494cc4e1393fa7b9e60d97df682c15b54512f0ebe97a26d0151e68cfa7"
   },
+  "connection_test": {
+    "version": "1",
+    "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
+  },
   "director_proposal": {
     "version": "1",
     "sha256": "eec3a439254f655820f823ef4a11cb62ae908b5b99bde9a2c8aa3316644704e0"

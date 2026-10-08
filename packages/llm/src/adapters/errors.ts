@@ -7,7 +7,9 @@ type StatusError = { readonly status: number; readonly headers: Headers | undefi
 /** 两家 SDK 的错误类型结构相同；按类型分类，不匹配错误文字。消息中不含凭据。 */
 export function mapSdkError(error: unknown): LlmError {
   if (error instanceof Anthropic.APIConnectionError || error instanceof OpenAI.APIConnectionError) {
-    return { code: 'network', message: error.message };
+    // SDK 只说“连接错误”，具体原因（例如凭据代理拒绝了目标地址）在 cause 中。
+    const cause: unknown = error.cause;
+    return { code: 'network', message: cause instanceof Error && cause.message !== '' ? `${error.message} ${cause.message}` : error.message };
   }
   if (error instanceof Anthropic.APIError || error instanceof OpenAI.APIError) {
     const status: unknown = error.status;

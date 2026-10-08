@@ -205,6 +205,9 @@ importers:
       '@fudiao/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@fudiao/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@fudiao/shared':
         specifier: workspace:*
         version: link:../../packages/shared

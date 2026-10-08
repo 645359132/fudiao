@@ -1,7 +1,9 @@
 // 应用依赖的桌面实现：经 Tauri 命令访问作品列表、作品文件夹与作品库。
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { err, ok, ulid, type Result } from '@fudiao/shared';
+import { createProxyFetch, type NetEvent } from '@fudiao/llm';
+import { tauriNet } from '../adapters/tauri-net';
 import { closeProjectDb, openProjectDb, tauriSqlPort } from '../adapters/tauri-sql';
 import type { AppDeps, BackupInfo, DecodedText, PackageFile, Probe } from '../app/ports';
 
@@ -14,6 +16,15 @@ async function call<T>(promise: Promise<T>): Promise<Result<T, string>> {
     const { detail, code } = e as { detail?: unknown; code?: unknown };
     return err(typeof detail === 'string' ? detail : typeof code === 'string' ? code : e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * 某个模型服务的 fetch：经 Rust 凭据代理转发，交给适配器的 SDK（API Key 填 PLACEHOLDER_API_KEY）。
+ * 服务与凭据在 M2-02 配置；之前所有请求都会被代理拒绝为 unknown_provider。
+ */
+export function providerFetch(providerId: string): typeof fetch {
+  const net = tauriNet(invoke, () => new Channel<NetEvent>());
+  return createProxyFetch(net, providerId, () => ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))));
 }
 
 export function tauriDeps(): AppDeps {

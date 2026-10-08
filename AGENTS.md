@@ -32,7 +32,7 @@
 - M1-01 已完成：`apps/desktop` 的 Tauri 2 外壳（React 19 + React Compiler、Vite），持续集成在 Windows 上运行 Rust 测试并生成 NSIS 安装包（内置 WebView2 引导程序）。产品名为“复调”，英文名 fudiao（应用标识 `com.fudiao.desktop`、可执行文件 `fudiao.exe`、工作区包 `@fudiao/*`）。
 - M1-02 已完成：`packages/store` 的 `SqlPort`（批量事务与影响行数守卫）、Node 实现（better-sqlite3）与迁移执行器；Rust 的 `db_open`、`db_query`、`db_tx`、`db_close`（一个写连接加只读连接池、WAL、迁移前备份、迁移编译期嵌入）；两端共用 `packages/store/contract/sql-cases.json` 契约用例；桌面端适配器 `apps/desktop/src/adapters/tauri-sql.ts`。
 - M1-03 已完成：第一版迁移 `packages/store/migrations/0001_init.sql`（作品、章节、段落、快照、设定、事实、来源关系、故事事件与事件段落关联，STRICT 表与约束）；故事时间领域类型（标签加排序键）；表结构清单 `packages/store/src/schema.ts` 与数据层导出导入（每张表一个 JSONL）及往返测试。
-- M0-13（真实实验与 `m0/DECISION.md`）需要作者提供 API Key、确认费用并安排评价者。按施工文档，M1 的脚手架与存储部分可与 M0 并行；M1 的其余任务在 M0 结论为继续或调整后进行。作者决定（2026-10-07）：M0-13 的真实实验暂缓，M1 先行，不等 M0 结论。M1 的任务已全部完成，待作者执行手工清单。
+- M0-13（真实实验与 `m0/DECISION.md`）需要作者提供 API Key、确认费用并安排评价者。按施工文档，M1 的脚手架与存储部分可与 M0 并行；M1 的其余任务在 M0 结论为继续或调整后进行。作者决定（2026-10-07）：M0-13 的真实实验暂缓，M1 先行，不等 M0 结论。M1 的任务已全部完成，待作者执行手工清单；M2 与之并行推进。
 - M1-04 已完成：作品列表（默认作品库“文档\复调”、打开其他位置的作品、归档、丢失提示）、作品信息与写作目标、章节目录（新建、重命名、拖动与上下移动排序、回收站与恢复）。分层为仓储（`packages/store/src/repos`）→ 应用服务层（`apps/desktop/src/app`）→ Zustand 状态（`src/state`）→ 界面（`src/ui`）；分数索引排序键与 ULID 在 `packages/shared`；界面测试用 jsdom 与 Testing Library 驱动真实用例；手工清单见 `apps/desktop/MANUAL_TESTS.md`。
 - M1-05 已完成：正文编辑器（TipTap 3，doc > paragraph+，关闭按事务重渲染）；段落标识扩展 `packages/editor/src/paragraph-identity.ts`（拆分、合并、粘贴、撤销后的标识继承，输入法组合期间不改动文档）；保存计划 `packages/store/src/repos/paragraph-plan.ts` 与段落仓储（只写变化的段落、版本守卫、事件关联随拆合继承）；自动保存控制器 `apps/desktop/src/app/autosave.ts`；草稿与意外退出恢复；保存失败时复制全文与导出本章；字数统计 `countWords`（`packages/shared`）。
 - M1-06 已完成：章节快照（`packages/store/src/repos/snapshot.ts`）的建立、列表、预览与恢复；恢复前自动把现稿存为快照；快照带来源标记与事件关联，恢复后标识、来源与关联正确；界面为章节的“保存快照”“版本快照”。
@@ -42,6 +42,7 @@
 - M1-10 已完成：段落来源（`packages/store/src/repos/paragraph-source.ts`）按字符区间记录 AI 文字，保存时推导来源（改动超过生成原文的 10% 为“AI 生成后修改”，合并不同来源为“混合”，拆分各部分按区间判定）；来源统计（`source-stats.ts`）与“段落来源”页；正文左侧来源色条（`packages/editor/src/source-marks.ts`），开关在作品列表文件的偏好中。接受候选稿写入来源在 M2-06。
 - M1-11 已完成：迁移 `0002_paragraph_search.sql`（FTS5 trigram 索引，触发器维护，派生表不导出）；`searchParagraphs`（3 字及以上走索引，1 至 2 字扫描段落）；查找页与 Ctrl+F，结果跳转并选中；较旧结构版本的作品包按 `UPGRADES` 转换后导入。
 - M1-12 已完成：`tools/bench` 的测试集生成器（基础集 10 万字 40 章、连载规模集 200 万字 800 章，固定种子）与性能基准 `pnpm bench`；开发机上两档全部达标，结果见 `tools/bench/README.md`。
+- M2-01 已完成：Rust 凭据代理 `src-tauri/src/net.rs`（`net_fetch` 流式转发、`net_cancel`、凭据与源绑定、只允许 https 或回环地址、不跟随重定向、按源限制并发；reqwest 用 native-tls）；`packages/llm` 的 `createProxyFetch` 与 `testConnection`、`connection_test` 模板；桌面端传输层 `adapters/tauri-net.ts`。凭据的系统存储在 M2-02。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

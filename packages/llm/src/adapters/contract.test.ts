@@ -1,7 +1,9 @@
 import { canonicalJson } from '@fudiao/shared';
 import { describe, expect, it } from 'vitest';
 import { requestHash } from '../request-hash';
+import { createProxyFetch } from '../proxy-fetch';
 import { anthropicChunks, errorBody, fakeFetch, openaiChunks, type Scenario } from '../testing/fake-fetch';
+import { fakeNet } from '../testing/fake-net';
 import type { LlmPort, LlmRequest, LlmStreamEvent, ModelCapabilities } from '../types';
 import { AnthropicAdapter } from './anthropic';
 import { OpenAIChatAdapter } from './openai-chat';
@@ -69,7 +71,15 @@ const normal: Scenario = {
   usage: { input: 100, output: 30, cacheRead: 20 },
 };
 
-describe.each(subjects)('$name', (subject) => {
+// 每个适配器分别直连与经凭据代理（桌面端的路径）各跑一遍，结果必须一致。
+let proxied = 0;
+const viaProxy = (inner: typeof globalThis.fetch) => createProxyFetch(fakeNet(inner), 'p1', () => `req-${++proxied}`);
+const routes = subjects.flatMap((s) => [
+  { ...s, via: '直连' },
+  { ...s, via: '经凭据代理', build: (fetch: typeof globalThis.fetch, maxRetries?: number) => s.build(viaProxy(fetch), maxRetries) },
+]);
+
+describe.each(routes)('$name（$via）', (subject) => {
   const req = request(subject.provider);
 
   it('正常：返回完整文本与用量', async () => {

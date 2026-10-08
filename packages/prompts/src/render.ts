@@ -342,6 +342,11 @@ export function renderBaseline(scene: Scene, options: { readonly targetLength: n
   });
 }
 
+/** 模型服务的连接测试（B15）：一个最小的请求，只用来确认地址、凭据与模型可用。 */
+export function renderConnectionTest(): Result<RenderedPrompt, string> {
+  return renderTemplate('connection_test', {});
+}
+
 /**
  * 推演运行的事件梗概（M0 评估的分层比较）。作者侧提示词：读全局事件记录，
  * 与对照组的梗概由同一模型写出，评价时不暴露来源。

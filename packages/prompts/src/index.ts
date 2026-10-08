@@ -18,6 +18,7 @@ export {
   renderCharacterAction,
   renderDirectorProposal,
   renderEvidenceJudgement,
+  renderConnectionTest,
   renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,

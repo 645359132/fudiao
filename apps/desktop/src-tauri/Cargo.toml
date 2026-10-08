@@ -28,9 +28,17 @@ encoding_rs = "0.8"
 chardetng = "1"
 # 作品包（zip）：只启用 deflate，不带其他压缩格式与加密。
 zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# 凭据代理（M2-01）：转发模型服务的请求。TLS 用系统的 schannel（native-tls），使用系统证书库，
+# 不需要 rustls 默认的 aws-lc-rs 构建工具；system-proxy 让请求走系统代理设置。
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "http2", "system-proxy"] }
+tokio = { version = "1", features = ["sync", "macros", "time"] }
+futures-util = { version = "0.3", default-features = false }
+url = "2"
 
 [dev-dependencies]
 tempfile = "3"
+# 凭据代理的测试：本机起一个最小的 HTTP 服务。
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time"] }
 
 [profile.release]
 codegen-units = 1

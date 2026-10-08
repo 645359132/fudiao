@@ -373,12 +373,16 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 
 ### 代理与适配器行为
 
-- 主机白名单：凭据只会附加到该服务配置的主机，防止凭据被发往其他地址。
+- 主机白名单：凭据与服务的源（协议、主机、端口）一起保存、一起取出，只附加到这个源；请求目标不是这个源时拒绝，一个字节也不发。更改服务地址须重新填写 API Key，界面无法单独改写绑定的地址。需要凭据的服务必须是 https；本地端点（不需要凭据）只允许回环地址，代理不能被当作任意地址的 fetch。
+- 不跟随重定向：自定义的认证头（`x-api-key`）在跨主机重定向时不会被去掉，3xx 原样交给 SDK。
+- 转发时去掉界面带来的认证头（SDK 中的占位 Key）、Cookie 与逐跳头，再按服务的写法注入凭据（Anthropic 用 `x-api-key`，其余用 `Authorization: Bearer`）；响应去掉 `Set-Cookie`。TLS 用系统的 schannel（reqwest 的 native-tls），并遵循系统代理设置。
+- 事件格式：`head`（状态码与响应头）、若干 `chunk`（字节）、`end`（是否被取消）或 `failed`（原因，不含 URL）。代理在发出前拒绝时 `net_fetch` 返回错误码（`unknown_provider`、`host_not_allowed`、`insecure_scheme`、`invalid_request`、`duplicate_id`），适配器归为网络错误并带上原因。请求标识由界面生成，取消在请求开始前到达同样生效。
+- 实现：`src-tauri/src/net.rs`（凭据来源为 `Credentials` 接口，M2-02 由系统凭据管理器实现）；TypeScript 侧 `packages/llm/src/proxy-fetch.ts` 把事件还原成标准 Response，Tauri 传输层在 `apps/desktop/src/adapters/tauri-net.ts`。适配器契约测试的每个场景都直连与经代理各跑一遍。
 - 重试只做一层：由 SDK 或适配器负责（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。
 - 并发：代理按主机设置并发上限，批量推演在同一信号量下排队。
 - 日志：普通日志不记录凭据与请求正文；完整的请求与响应只保存在作品库的 `llm_call` 表中。
 - 用量与费用：读取服务返回的用量，包括缓存读写与思考产生的输出；价格表未配置时费用记为未知（B19）。
-- 连接测试（B15）：发送一个最小请求，显示延迟、模型名称与错误原因。
+- 连接测试（B15）：发送一个最小请求（`connection_test` 模板，任务种类 `connection_test`，输出上限 64），显示延迟、实际提供服务的模型与错误原因；达到输出上限也算连接可用（`packages/llm/src/connection.ts`）。
 
 ### Anthropic 接入要点
 
