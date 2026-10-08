@@ -1183,3 +1183,35 @@ fieldset.plain {
   white-space: pre-wrap;
 }
 
+/* AI 写作 */
+.op-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.ai-write .instruction {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.ai-write .instruction input {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.ai-text {
+  min-height: 4em;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'SimSun', serif;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+

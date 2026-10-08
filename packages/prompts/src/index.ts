@@ -19,6 +19,7 @@ export {
   renderDirectorProposal,
   renderEvidenceJudgement,
   renderConnectionTest,
+  renderSelectionEdit,
   renderSelfTest,
   renderRunSynopsis,
   renderSceneDraft,
@@ -43,3 +44,4 @@ export {
 } from './schemas';
 export type { RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
+export type { SelectionEditInput, SelectionOperation } from './render';

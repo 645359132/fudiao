@@ -141,7 +141,11 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
       const end = at(to);
       return start === null || end === null ? null : { from: start, to: end };
     };
-    registerEditor({ chapterId, flush: () => autosave.flush(), selection });
+    const selectedText = () => {
+      const { from, to } = editor.state.selection;
+      return editor.state.doc.textBetween(from, to, '\n');
+    };
+    registerEditor({ chapterId, flush: () => autosave.flush(), selection, selectedText });
     return () => {
       editor.off('update', onUpdate);
       dom.removeEventListener('compositionend', onCompositionEnd);

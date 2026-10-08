@@ -344,6 +344,42 @@ export function renderBaseline(scene: Scene, options: { readonly targetLength: n
   });
 }
 
+/** 选区操作（B16）：续写、改写、扩写、缩写、润色。 */
+export type SelectionOperation = 'continue' | 'rewrite' | 'expand' | 'shorten' | 'polish';
+
+export type SelectionEditInput = {
+  readonly operation: SelectionOperation;
+  /** 上下文清单中纳入的材料（作品信息、梗概、设定、事实等），不含前后文与选中的文字。 */
+  readonly materials: readonly { readonly title: string; readonly text: string }[];
+  readonly before: string;
+  readonly selection: string;
+  readonly after: string;
+  /** 目标字数：续写、扩写、缩写使用。 */
+  readonly length: number;
+  /** 作者附加的要求，可为空。 */
+  readonly instruction: string;
+};
+
+/** 选区操作的提示词。这是作者侧的写作辅助，材料来自作者可见的作品内容，不经过角色视图。 */
+export function renderSelectionEdit(input: SelectionEditInput): Result<RenderedPrompt, string> {
+  return renderTemplate('selection_edit', {
+    materials: input.materials.map((m) => ({ title: m.title, text: m.text })),
+    before: input.before,
+    hasBefore: input.before !== '',
+    selection: input.selection,
+    hasSelection: input.selection !== '',
+    after: input.after,
+    hasAfter: input.after !== '',
+    length: input.length,
+    instruction: input.instruction.trim(),
+    isContinue: input.operation === 'continue',
+    isRewrite: input.operation === 'rewrite',
+    isExpand: input.operation === 'expand',
+    isShorten: input.operation === 'shorten',
+    isPolish: input.operation === 'polish',
+  });
+}
+
 /** 能力自检（B57）：固定的结构化输出测试，期望内容见 self-test.ts。 */
 export function renderSelfTest(): Result<RenderedPrompt, string> {
   return renderTemplate('self_test', {});

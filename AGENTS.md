@@ -48,6 +48,7 @@
 - M2-02b 已完成：适配器的 `listModels` 与“获取模型列表”；能力合并 `resolveModel`（内置能力与价格表 `builtin-models.ts` 首版为空，待核实后填写）；“能力与价格”编辑（来源记为用户编辑，改结构化输出方式须重新自检）；能力自检 `runSelfTest`、`self_test` 模板与期望内容。
 - M2-03 已完成：迁移 `0003_llm_call.sql`；调用记录仓储 `packages/store/src/repos/llm-call.ts`（读写与用量汇总）；`withCallLog` 记录每次调用；桌面端调用器 `apps/desktop/src/app/model-runner.ts`（默认模型、调用记录、结构化任务的自检门槛、有限次修正与暂停原因）；“用量与费用”页。
 - M2-04 已完成：`packages/context` 的写作上下文构建（候选收集、预算选入、清单与原因）；应用层 `apps/desktop/src/app/writing-context.ts`（按选区分开正文、设定提及、适用事实、预算）；章节旁的“AI 上下文”抽屉，可增减条目。
+- M2-05 已完成：`selection_edit` 模板（版本 1）与 `renderSelectionEdit`；应用层 `selection-ops.ts` 与用例 `runSelectionOperation`（按上下文清单组合提示词，经调用器流式生成）；章节旁的“AI 写作”抽屉（五种操作、附加要求、流式结果、取消、重试、复制）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

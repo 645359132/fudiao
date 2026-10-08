@@ -702,3 +702,54 @@ describe('AI 上下文', () => {
   });
 });
 
+describe('AI 写作', () => {
+  async function ready() {
+    const ctx = start();
+    const { service, store, user } = ctx;
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('沈砚推开当铺的门。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['沈砚推开当铺的门。']));
+    const saved = await service.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk' });
+    if (!saved.ok) throw new Error('服务');
+    await service.addModel(saved.value.providers[0]?.id ?? '', 'm');
+    return ctx;
+  }
+
+  it('没有选中文字时只能续写；续写的结果流式显示，可以复制与重试', async () => {
+    const { deps, user } = await ready();
+    await user.click(screen.getByRole('button', { name: 'AI 写作' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    expect(within(drawer).getByText('没有选中文字：只能续写，从光标处接着写。')).toBeTruthy();
+    expect(within(drawer).getByRole('button', { name: '改写' }).matches(':disabled')).toBe(true);
+
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['柜台后', '没有人。'], end: 'stop' }) });
+    await user.click(within(drawer).getByRole('button', { name: '续写' }));
+    const result = await within(drawer).findByRole('region', { name: '生成结果' });
+    await waitFor(() => expect(within(result).getByRole('status').textContent).toBe('续写：已完成'));
+    expect(result.querySelector('.ai-text')?.textContent).toBe('柜台后没有人。');
+    await user.click(within(result).getByRole('button', { name: '复制' }));
+    expect(deps.copied.at(-1)).toBe('柜台后没有人。');
+
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['雨还在下。'], end: 'stop' }) });
+    await user.click(within(result).getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(result.querySelector('.ai-text')?.textContent).toBe('雨还在下。'));
+    // 正文没有被改动：结果是候选稿。
+    expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('沈砚推开当铺的门。');
+  });
+
+  it('生成中可以取消，保留已生成的部分', async () => {
+    const { deps, user } = await ready();
+    await user.click(screen.getByRole('button', { name: 'AI 写作' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['柜台后'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    await user.click(within(drawer).getByRole('button', { name: '续写' }));
+    const result = await within(drawer).findByRole('region', { name: '生成结果' });
+    await waitFor(() => expect(result.querySelector('.ai-text')?.textContent).toBe('柜台后'));
+    await user.click(within(result).getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(within(result).getByRole('status').textContent).toBe('续写：已取消，保留已生成的部分'));
+    expect(result.querySelector('.ai-text')?.textContent).toBe('柜台后');
+  });
+});
+

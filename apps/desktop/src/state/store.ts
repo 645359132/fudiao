@@ -7,6 +7,7 @@ import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
 import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
 import type { ConnectionReport, ListedModel } from '@fudiao/llm';
+import type { SelectionOperation } from '@fudiao/prompts';
 import type { ModelServicesView, ProviderForm, ProviderView } from '../app/model-services';
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
 import { splitText, type SplitRule } from '../app/text-import';
@@ -27,6 +28,17 @@ export type EditorHandle = {
   readonly flush: () => Promise<boolean>;
   /** 当前的选区或光标；选在段落之外时为 null。 */
   readonly selection: () => EditorSelection | null;
+  /** 选中的文字（段落之间以换行连接）。 */
+  readonly selectedText: () => string;
+};
+
+/** 一次选区操作：流式生成的文字与状态（B16）。 */
+export type AiWriteJob = {
+  readonly operation: SelectionOperation;
+  readonly instruction: string;
+  readonly status: 'running' | 'done' | 'cancelled' | 'failed';
+  readonly text: string;
+  readonly error: string | null;
 };
 
 export type AppState = {
@@ -64,6 +76,11 @@ export type AppState = {
   readonly writingContext: ContextManifest | null;
   readonly contextSelection: EditorSelection | null;
   readonly contextOverrides: Readonly<Record<string, ContextOverrides>>;
+  /** AI 写作抽屉：打开时记下的选区与选中的文字，以及最近一次选区操作。 */
+  readonly writeDrawerOpen: boolean;
+  readonly writeSelection: EditorSelection | null;
+  readonly writeSelectedText: string;
+  readonly aiWrite: AiWriteJob | null;
   /** 用量与费用（打开“用量与费用”时读取）。 */
   readonly usage: { readonly summary: UsageSummary; readonly recent: readonly LlmCallRow[] } | null;
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
@@ -166,6 +183,11 @@ export type AppState = {
   readonly closeContext: () => void;
   /** 作者加入（include 为真）或移除一个上下文条目，随即重算。 */
   readonly toggleContextItem: (id: string, include: boolean) => Promise<void>;
+  /** 保存正文后记下当前选区，打开 AI 写作抽屉。 */
+  readonly openAiWrite: () => Promise<void>;
+  readonly closeAiWrite: () => void;
+  readonly runSelectionOp: (operation: SelectionOperation, instruction: string) => Promise<void>;
+  readonly cancelSelectionOp: () => void;
   /** 保存正文后打开用量与费用。 */
   readonly openUsage: () => Promise<void>;
   /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
@@ -195,6 +217,8 @@ export type AppStore = StoreApi<AppState>;
 export function createAppStore(service: AppService): AppStore {
   return createStore<AppState>()((set, get) => {
     let editor: EditorHandle | null = null;
+    /** 正在进行的选区操作；取消时中止。 */
+    let writeAbort: AbortController | null = null;
 
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
     async function run<T>(task: Promise<Result<T, AppError>>, apply: (value: T) => Partial<AppState>): Promise<boolean> {
@@ -266,6 +290,10 @@ export function createAppStore(service: AppService): AppStore {
       writingContext: null,
       contextSelection: null,
       contextOverrides: {},
+      writeDrawerOpen: false,
+      writeSelection: null,
+      writeSelectedText: '',
+      aiWrite: null,
       searchQuery: '',
       searchResult: null,
       reveal: null,
@@ -300,7 +328,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {} });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -553,7 +581,7 @@ export function createAppStore(service: AppService): AppStore {
         return done;
       },
       // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
-      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false }),
+      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false }),
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;
         set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawerEntityId: null });
@@ -574,6 +602,7 @@ export function createAppStore(service: AppService): AppStore {
           writingContext,
           contextSelection: selection,
           contextDrawerOpen: true,
+          writeDrawerOpen: false,
           drawerEntityId: null,
         }));
       },
@@ -589,6 +618,49 @@ export function createAppStore(service: AppService): AppStore {
         set({ contextOverrides: { ...get().contextOverrides, [chapterId]: next } });
         await run(service.writingContext(chapterId, get().contextSelection, next), (writingContext) => ({ writingContext }));
       },
+      async openAiWrite() {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null) return;
+        const handle = editor?.chapterId === chapterId ? editor : null;
+        const selection = handle?.selection() ?? null;
+        const selectedText = handle?.selectedText() ?? '';
+        if (handle !== null && !(await handle.flush())) return;
+        set({ writeDrawerOpen: true, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection, drawerEntityId: null, contextDrawerOpen: false });
+      },
+      closeAiWrite: () => {
+        writeAbort?.abort();
+        set({ writeDrawerOpen: false });
+      },
+      async runSelectionOp(operation, instruction) {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null || get().aiWrite?.status === 'running') return;
+        const abort = new AbortController();
+        writeAbort = abort;
+        set({ aiWrite: { operation, instruction, status: 'running', text: '', error: null } });
+        const update = (patch: Partial<AiWriteJob>) => {
+          const job = get().aiWrite;
+          if (job !== null && writeAbort === abort) set({ aiWrite: { ...job, ...patch } });
+        };
+        const result = await service.runSelectionOperation(
+          { chapterId, selection: get().writeSelection, operation, instruction, overrides: get().contextOverrides[chapterId] ?? NO_OVERRIDES },
+          {
+            signal: abort.signal,
+            onEvent: (e) => {
+              if (e.type === 'text') update({ text: (get().aiWrite?.text ?? '') + e.delta });
+            },
+          },
+        );
+        if (result.ok) {
+          const { outcome, text, refusal } = result.value.result;
+          update({
+            text,
+            status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
+            error: outcome === 'refused' ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}` : outcome === 'truncated' ? '输出达到上限，结果可能不完整' : null,
+          });
+        } else update({ status: abort.signal.aborted ? 'cancelled' : 'failed', error: describeError(result.error) });
+        if (writeAbort === abort) writeAbort = null;
+      },
+      cancelSelectionOp: () => writeAbort?.abort(),
       async openUsage() {
         if (!(await get().leaveChapter())) return;
         await run(service.usage(), (usage) => ({ usage, panel: 'usage', chapterContent: null, drawerEntityId: null }));
