@@ -25,6 +25,17 @@ async function schemaVersion(port: SqlPort): Promise<Result<number, DataError>> 
 
 const parseJson = (text: string): unknown => JSON.parse(text);
 
+type Tables = ExportedData['tables'];
+
+/**
+ * 每个迁移对导出数据的转换：把结构版本 v - 1 导出的表改写成版本 v 的样子，导入较旧的作品包时依次执行。
+ * 新增迁移必须在这里登记（测试检查每个迁移都有对应项）；只增加派生表或不影响导出表的迁移登记为原样保留。
+ */
+export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
+  // 0002：全文查找索引，派生数据，导出的表不变。
+  2: (tables) => tables,
+};
+
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {
   const version = await schemaVersion(port);
   if (!version.ok) return version;
@@ -84,10 +95,19 @@ function insertStatement(t: TableSpec, row: ExportedRow, index: number): Result<
  * 导入到空库：版本须与当前库一致（跨版本导入在 M1-07 处理），按外键依赖顺序在一个事务中插入。
  * 导入的数据来自文件，逐行校验表名、列名与值类型；约束由数据库检查，失败时整体回滚。
  */
-export async function importData(port: SqlPort, data: ExportedData): Promise<Result<Readonly<Record<string, number>>, DataError>> {
+export async function importData(port: SqlPort, input: ExportedData): Promise<Result<Readonly<Record<string, number>>, DataError>> {
   const version = await schemaVersion(port);
   if (!version.ok) return version;
-  if (version.value !== data.schemaVersion) return err({ code: 'schema_mismatch', expected: version.value, actual: data.schemaVersion });
+  // 较旧版本导出的数据依次经过各迁移的转换；比本程序新的拒绝。
+  const mismatch = err({ code: 'schema_mismatch', expected: version.value, actual: input.schemaVersion } as const);
+  if (input.schemaVersion > version.value || input.schemaVersion < 1) return mismatch;
+  let upgraded = input.tables;
+  for (let v = input.schemaVersion + 1; v <= version.value; v++) {
+    const upgrade = UPGRADES[v];
+    if (upgrade === undefined) return mismatch;
+    upgraded = upgrade(upgraded);
+  }
+  const data: ExportedData = { schemaVersion: version.value, tables: upgraded };
 
   for (const name of Object.keys(data.tables)) {
     if (!TABLES.some((t) => t.name === name)) return err({ code: 'invalid', table: name, row: -1, detail: '未知的表' });

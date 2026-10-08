@@ -10,6 +10,8 @@ export type { AiSpan, DerivedProvenance } from './paragraph-source';
 export { aiCharacters, classify, MODIFIED_RATIO } from './paragraph-source';
 export type { ChapterSourceStats, SourceStats, SourceTally, WordsBySource } from './source-stats';
 export { sourceStats } from './source-stats';
+export type { SearchHit, SearchResult } from './search';
+export { DEFAULT_HIT_LIMIT, MIN_INDEXED_LENGTH, searchParagraphs } from './search';
 export type { Snapshot, SnapshotParagraph, SnapshotReason, SnapshotSummary } from './snapshot';
 export { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
 export type { ImportChapter } from './import';

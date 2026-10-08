@@ -21,6 +21,7 @@ import {
   listChapters,
   listParagraphs,
   saveChapterParagraphs,
+  searchParagraphs,
   sourceStats,
   createSnapshot,
   getSnapshot,
@@ -48,6 +49,7 @@ import {
   type Snapshot,
   type SnapshotSummary,
   type ImportChapter,
+  type SearchResult,
   type SourceStats,
   type StructuralEdits,
 } from '@fudiao/store';
@@ -409,14 +411,14 @@ export function createAppService(deps: AppDeps) {
       return openAt(path.value, freshEntry(path.value), async (port) => {
         const imported = await importData(port, data);
         if (imported.ok) return imported;
-        // 作品包的结构版本与本程序不同时 importData 拒绝；目前只有一个结构版本，跨版本导入在出现第二个版本时补上。
+        // 较旧结构版本的作品包由 importData 按各迁移的转换导入；比本程序新的拒绝。
         return err({
           code: 'library',
           detail:
             imported.error.code === 'schema_mismatch'
               ? imported.error.actual > imported.error.expected
                 ? '作品包由更新版本的复调导出，请先升级复调'
-                : '作品包的结构版本较旧，暂不支持导入'
+                : '作品包的结构版本无效'
               : `导入失败：${imported.error.code}`,
         });
       });
@@ -474,6 +476,13 @@ export function createAppService(deps: AppDeps) {
     async setPreferences(patch: Partial<Preferences>): Promise<Result<LibraryView, AppError>> {
       const saved = await save({ ...file, preferences: { ...file.preferences, ...patch } });
       return saved.ok ? loadLibrary() : saved;
+    },
+
+    /** 全文查找（需求 B04）：查回收站以外的章节。调用前界面先保存正在编辑的正文。 */
+    async search(query: string): Promise<Result<SearchResult, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const result = await searchParagraphs(session.port, query);
+      return result.ok ? result : err(repo(result.error));
     },
 
     /** 段落来源统计（需求 B33）：每章与全书的 AI 参与比例。 */

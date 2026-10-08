@@ -260,6 +260,14 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "story_event",
         "event_paragraph_link",
         "schema_migrations",
+        // 全文查找的派生表（schema.ts 的 DERIVED_TABLES）。
+        "paragraph_search_key",
+        "paragraph_fts",
+        "paragraph_fts_config",
+        "paragraph_fts_content",
+        "paragraph_fts_data",
+        "paragraph_fts_docsize",
+        "paragraph_fts_idx",
     ];
     expected.sort();
     assert_eq!(
@@ -269,4 +277,31 @@ fn embedded_migrations_apply_on_a_fresh_database() {
             .map(|n| json!({ "name": n }))
             .collect::<Vec<_>>())
     );
+}
+
+#[test]
+fn bundled_sqlite_supports_trigram_full_text_search() {
+    // 全文查找依赖 FTS5 的 trigram 分词（SQLite 3.34 起）；确认 rusqlite 内置的 SQLite 带有它，索引随段落维护。
+    let dir = tempfile::tempdir().unwrap();
+    let (db, _) = open(dir.path(), EMBEDDED, NOW).unwrap();
+    db.transaction(&[
+        sql("INSERT INTO chapter (id, order_key, title, created_at, updated_at) VALUES ('c1', 'a0', '第一章', 'x', 'x')"),
+        sql("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('p1', 'c1', 'a0', '当铺的门半掩着。', 'x', 'x')"),
+        sql("UPDATE paragraph SET text = '当铺的门开了。' WHERE id = 'p1'"),
+    ])
+    .unwrap();
+    let rows = db
+        .query(
+            "SELECT k.paragraph_id AS id FROM paragraph_fts f JOIN paragraph_search_key k ON k.id = f.rowid WHERE paragraph_fts MATCH '\"门开了\"'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(json!(rows), json!([{ "id": "p1" }]));
+    let stale = db
+        .query(
+            "SELECT rowid FROM paragraph_fts WHERE paragraph_fts MATCH '\"半掩着\"'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(json!(stale), json!([]));
 }

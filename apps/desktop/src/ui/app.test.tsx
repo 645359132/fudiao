@@ -552,3 +552,36 @@ describe('段落来源', () => {
     expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(0);
   });
 });
+
+describe('全文查找', () => {
+  it('Ctrl+F 打开查找页；按章节列出结果；点击结果打开章节并选中该处；回到查找页结果仍在', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('雨下得更紧了。{Enter}当铺的门半掩着。');
+    await addChapter(user, '第二章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    // 未保存的正文也能查到：打开查找页前先保存。
+    await user.keyboard('掌柜说当铺不收这个。');
+    await user.keyboard('{Control>}f{/Control}');
+    await screen.findByRole('region', { name: '全文查找' });
+    await user.type(screen.getByRole('searchbox', { name: '查找内容' }), '当铺{Enter}');
+    expect((await screen.findByRole('status')).textContent).toBe('共 2 处。');
+    expect(screen.getByRole('region', { name: '第一章（1 处）' })).toBeTruthy();
+    const second = screen.getByRole('region', { name: '第二章（1 处）' });
+
+    await user.click(within(second).getByRole('button', { name: '掌柜说当铺不收这个。' }));
+    await waitFor(() => expect(store.getState().selectedChapterId).toBe(store.getState().work?.chapters[1]?.id));
+    await waitFor(() => expect(document.getSelection()?.toString()).toBe('当铺'));
+    expect(store.getState().reveal).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '查找' }));
+    expect((await screen.findByRole('status')).textContent).toBe('共 2 处。');
+    expect(screen.getByRole('searchbox', { name: '查找内容' })).toHaveProperty('value', '当铺');
+
+    await user.clear(screen.getByRole('searchbox', { name: '查找内容' }));
+    await user.type(screen.getByRole('searchbox', { name: '查找内容' }), '没有的词{Enter}');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('没有找到“没有的词”。'));
+  });
+});

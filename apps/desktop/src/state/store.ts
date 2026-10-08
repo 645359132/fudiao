@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, SourceStats, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -14,6 +14,9 @@ export type ImportDraft = { readonly decoded: DecodedText; readonly rule: SplitR
 /** 文件名去掉扩展名，作为新作品名或不拆分时的章节名。 */
 export const baseName = (fileName: string) => fileName.replace(/\.(txt|md|markdown)$/i, '') || '导入的作品';
 
+/** 打开章节后要选中并滚动到的位置（查找结果）。 */
+export type Reveal = { readonly chapterId: string; readonly paragraphId: string; readonly start: number; readonly end: number };
+
 /** 正文编辑器向状态登记的句柄：离开章节前先保存。 */
 export type EditorHandle = {
   readonly chapterId: string;
@@ -24,7 +27,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -50,6 +53,10 @@ export type AppState = {
   readonly wordCount: number;
   /** 段落来源统计（打开“段落来源”时读取）。 */
   readonly sourceStats: SourceStats | null;
+  /** 查找页的查询与结果；回到正文后保留，再打开查找页时接着看。 */
+  readonly searchQuery: string;
+  readonly searchResult: SearchResult | null;
+  readonly reveal: Reveal | null;
 
   readonly init: () => Promise<void>;
   readonly createWork: (title: string) => Promise<boolean>;
@@ -131,6 +138,13 @@ export type AppState = {
   /** 保存正文后打开段落来源统计。 */
   readonly openSourceStats: () => Promise<void>;
   readonly setShowParagraphSource: (show: boolean) => Promise<void>;
+
+  /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
+  readonly openSearch: (query?: string) => Promise<void>;
+  readonly runSearch: (query: string) => Promise<void>;
+  /** 打开结果所在的章节，选中这一处。 */
+  readonly revealHit: (hit: SearchHit) => Promise<void>;
+  readonly clearReveal: () => void;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -204,6 +218,9 @@ export function createAppStore(service: AppService): AppStore {
       facts: [],
       selectedFactId: null,
       sourceStats: null,
+      searchQuery: '',
+      searchResult: null,
+      reveal: null,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -230,7 +247,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, searchQuery: '', searchResult: null, reveal: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -493,6 +510,25 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         await run(service.sourceStats(), (sourceStats) => ({ sourceStats, panel: 'sources', chapterContent: null, drawerEntityId: null }));
       },
+      async openSearch(query) {
+        if (!(await get().leaveChapter())) return;
+        set({ panel: 'search', chapterContent: null, drawerEntityId: null });
+        if (query !== undefined && query.trim() !== '') await get().runSearch(query);
+      },
+      async runSearch(query) {
+        set({ searchQuery: query });
+        if (query.trim() === '') {
+          set({ searchResult: null });
+          return;
+        }
+        await run(service.search(query), (searchResult) => ({ searchResult }));
+      },
+      async revealHit(hit) {
+        if (!(await get().leaveChapter())) return;
+        set({ reveal: { chapterId: hit.chapterId, paragraphId: hit.paragraphId, start: hit.start, end: hit.end } });
+        await get().selectChapter(hit.chapterId);
+      },
+      clearReveal: () => set({ reveal: null }),
       async setShowParagraphSource(show) {
         await run(service.setPreferences({ showParagraphSource: show }), (library) => ({ library }));
       },

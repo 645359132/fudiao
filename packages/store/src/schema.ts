@@ -96,3 +96,17 @@ export const TABLES: readonly TableSpec[] = [
     json: [],
   },
 ];
+
+/**
+ * 派生的表：由触发器维护的索引（全文查找），不导出，导入数据时随之重建。
+ * 含 FTS5 自动建立的影子表。表结构清单的测试据此确认库中没有遗漏的表。
+ */
+export const DERIVED_TABLES: readonly string[] = [
+  'paragraph_search_key',
+  'paragraph_fts',
+  'paragraph_fts_config',
+  'paragraph_fts_content',
+  'paragraph_fts_data',
+  'paragraph_fts_docsize',
+  'paragraph_fts_idx',
+];

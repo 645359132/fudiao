@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { ChapterSidebar } from './ChapterSidebar';
 import { BackupsPanel } from './BackupsPanel';
 import { FactsPanel } from './FactsPanel';
 import { HistoryPanel } from './HistoryPanel';
+import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SourcesPanel } from './SourcesPanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
@@ -19,8 +21,22 @@ export function WorkScreen() {
   const openSettings = useApp((s) => s.openSettings);
   const openFacts = useApp((s) => s.openFacts);
   const openSourceStats = useApp((s) => s.openSourceStats);
+  const openSearch = useApp((s) => s.openSearch);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
+
+  // Ctrl+F（或 Ctrl+Shift+F）打开全文查找；正文中选中的一行文字作为查询。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'f') return;
+      e.preventDefault();
+      const selected = window.getSelection()?.toString() ?? '';
+      void openSearch(selected.includes('\n') || selected.length > 50 ? undefined : selected);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openSearch]);
+
   return (
     <div className="work">
       <header className="work-bar">
@@ -31,6 +47,9 @@ export function WorkScreen() {
           {title}
         </button>
         <span className="spacer" />
+        <button type="button" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
+          查找
+        </button>
         <button type="button" aria-pressed={panel === 'settings'} onClick={() => void openSettings()}>
           设定
         </button>
@@ -63,7 +82,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

@@ -57,7 +57,7 @@ describe('作品包', () => {
     expect(paths.filter((p) => p.startsWith('chapters/'))).toEqual(['chapters/0001-第一章 雨夜.md', 'chapters/0002-第二章：当铺.md']);
     expect(paths.filter((p) => p.startsWith('data/'))).toHaveLength(9);
     expect(files.find((f) => f.path === 'chapters/0001-第一章 雨夜.md')?.content).toBe('# 第一章 雨夜\n\n雨下得更紧了。\n\n他没有回头。\n\n');
-    expect(JSON.parse(files[0]?.content ?? '')).toMatchObject({ format: 'fudiao-project', formatVersion: 1, schemaVersion: 1, title: '雨夜/归来', chapters: 2 });
+    expect(JSON.parse(files[0]?.content ?? '')).toMatchObject({ format: 'fudiao-project', formatVersion: 1, schemaVersion: loadMigrations().at(-1)?.version, title: '雨夜/归来', chapters: 2 });
   });
 
   it('导出再导入为新作品：正文、章节顺序、回收站、快照、设定、事实、来源关系、故事事件与关联逐表一致（数据迁移验收）', async () => {

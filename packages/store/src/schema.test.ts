@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { exportData, fromJsonl, importData, toJsonl, type ExportedData } from './data-export';
+import { exportData, fromJsonl, importData, toJsonl, UPGRADES, type ExportedData } from './data-export';
 import { loadMigrations, openProjectDb, type ProjectDb } from './node/sqlite';
-import { TABLES } from './schema';
+import { DERIVED_TABLES, TABLES } from './schema';
 import type { Statement } from './sql';
 
 const NOW = '2026-10-07T00:00:00.000Z';
@@ -140,7 +140,7 @@ describe('表结构清单', () => {
   it('与迁移后的实际结构一致，库中没有清单以外的表', async () => {
     const db = fresh();
     const tables = await db.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-    expect(tables.ok && tables.value.map((r) => r['name'])).toEqual([...TABLES.map((t) => t.name), 'schema_migrations'].sort());
+    expect(tables.ok && tables.value.map((r) => r['name'])).toEqual([...TABLES.map((t) => t.name), ...DERIVED_TABLES, 'schema_migrations'].sort());
     for (const t of TABLES) {
       const info = await db.query(`SELECT name, pk FROM pragma_table_info('${t.name}') ORDER BY cid`);
       if (!info.ok) throw new Error(t.name);
@@ -160,7 +160,7 @@ describe('数据层导出导入（硬性规则 20）', () => {
 
   it('导出 → JSONL → 导入新库 → 再导出，逐表一致', async () => {
     const first = await exported(await seeded());
-    expect(first.schemaVersion).toBe(1);
+    expect(first.schemaVersion).toBe(loadMigrations().at(-1)?.version);
     for (const t of TABLES) expect(first.tables[t.name]?.length, `样本缺少 ${t.name}`).toBeGreaterThan(0);
     // JSON 列导出为对象，便于阅读。
     expect(first.tables['entity']?.[0]?.['aliases']).toEqual(['沈先生']);
@@ -183,9 +183,48 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(await seeded(), data)).toEqual({ ok: false, error: { code: 'not_empty', table: 'project' } });
   });
 
-  it('版本不符时拒绝导入', async () => {
+  it('比本程序新的结构版本拒绝导入', async () => {
     const data = await exported(await seeded());
-    expect(await importData(fresh(), { ...data, schemaVersion: 2 })).toEqual({ ok: false, error: { code: 'schema_mismatch', expected: 1, actual: 2 } });
+    const latest = data.schemaVersion;
+    expect(await importData(fresh(), { ...data, schemaVersion: latest + 1 })).toEqual({ ok: false, error: { code: 'schema_mismatch', expected: latest, actual: latest + 1 } });
+  });
+
+  it('较旧结构版本导出的数据经各迁移的转换后导入（版本 1 的作品包）', async () => {
+    const data = await exported(await seeded());
+    const target = fresh();
+    expect((await importData(target, { ...data, schemaVersion: 1 })).ok).toBe(true);
+    expect((await exported(target)).tables).toEqual(data.tables);
+  });
+
+  it('每个迁移都登记了导出数据的转换', () => {
+    const versions = loadMigrations()
+      .map((m) => m.version)
+      .filter((v) => v > 1);
+    expect(versions.filter((v) => UPGRADES[v] === undefined)).toEqual([]);
+  });
+
+  it('全文索引随段落的插入、修改、删除与章节删除维护；导入后可查', async () => {
+    const db = await seeded();
+    const indexed = async () => {
+      const rows = await db.query(
+        'SELECT k.paragraph_id AS id, f.text FROM paragraph_fts f JOIN paragraph_search_key k ON k.id = f.rowid ORDER BY k.paragraph_id',
+      );
+      const paragraphs = await db.query('SELECT id, text FROM paragraph ORDER BY id');
+      return { rows: rows.ok ? rows.value : null, paragraphs: paragraphs.ok ? paragraphs.value : null };
+    };
+    let state = await indexed();
+    expect(state.rows).toEqual(state.paragraphs);
+    await db.transaction([s("UPDATE paragraph SET text = '当铺的门开了。' WHERE id = '01G1'")]);
+    state = await indexed();
+    expect(state.rows).toEqual(state.paragraphs);
+    const hit = await db.query("SELECT rowid FROM paragraph_fts WHERE paragraph_fts MATCH '\"门开了\"'");
+    expect(hit.ok && hit.value.length).toBe(1);
+    await db.transaction([s("DELETE FROM chapter WHERE id = '01C1'")]);
+    state = await indexed();
+    expect(state.rows).toEqual(state.paragraphs);
+    const keys = await db.query('SELECT count(*) AS n FROM paragraph_search_key');
+    const left = await db.query('SELECT count(*) AS n FROM paragraph');
+    expect(keys.ok && keys.value).toEqual(left.ok && left.value);
   });
 
   it('拒绝未知的表与列；约束失败时整体回滚', async () => {

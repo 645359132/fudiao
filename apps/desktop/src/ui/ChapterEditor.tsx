@@ -88,6 +88,8 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   const showSource = useApp((s) => s.library?.preferences.showParagraphSource ?? true);
   // 保存后的段落（来源由保存时推导）；保存成功后状态中的这一份会更新。
   const savedParagraphs = useApp((s) => (s.chapterContent?.chapterId === content.chapterId ? s.chapterContent.saved : content.saved));
+  const reveal = useApp((s) => s.reveal);
+  const clearReveal = useApp((s) => s.clearReveal);
   const chapterId = content.chapterId;
 
   const editor = useEditor(
@@ -141,6 +143,19 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   useEffect(() => {
     if (editor !== null) setHighlightEntities(editor, entities);
   }, [editor, entities]);
+
+  // 查找结果：选中这一处并滚动到可见位置。段落已不在或文字变短时选到段尾。
+  useEffect(() => {
+    if (editor === null || reveal === null || reveal.chapterId !== chapterId) return;
+    let target: { from: number; to: number } | null = null;
+    editor.state.doc.forEach((node, pos) => {
+      if (target !== null || node.attrs['id'] !== reveal.paragraphId) return;
+      const length = node.textContent.length;
+      target = { from: pos + 1 + Math.min(reveal.start, length), to: pos + 1 + Math.min(reveal.end, length) };
+    });
+    if (target !== null) editor.chain().focus().setTextSelection(target).scrollIntoView().run();
+    clearReveal();
+  }, [editor, reveal, chapterId]);
 
   // 段落来源色条（只改装饰，不改文档）。输入法组合期间不改动正文的 DOM，组合结束后再更新。
   useEffect(() => {

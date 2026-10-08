@@ -777,6 +777,47 @@ fieldset.plain {
   align-items: center;
 }
 
+/* 全文查找 */
+.search .text-form input {
+  flex: 1;
+  max-width: 420px;
+}
+
+.search-group h3 {
+  margin: 20px 0 6px;
+  font-size: 15px;
+}
+
+.search-hits {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.search-hits button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'SimSun', serif;
+}
+
+.search-hits button:hover,
+.search-hits button:focus-visible {
+  background: var(--accent-soft);
+}
+
+.search-hits mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* 段落来源色条：段落左侧的细条，不占排版空间；手写段落没有色条。 */
 .chapter-text p.source {
   position: relative;
