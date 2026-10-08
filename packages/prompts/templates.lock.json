@@ -20,8 +20,8 @@
     "sha256": "99cc70999d0e71672ebdecc5b7d44beb6734d465be1b02928eb989536b652285"
   },
   "character_action": {
-    "version": "3",
-    "sha256": "20091a61ba9688a76684438f82c8636aba17f8a561b9df22c29ca1dc2a044b3b"
+    "version": "4",
+    "sha256": "35c56eb20914da02e3dc44a432e1d556a8dc3f0c21d937de4b5abc35e8813ed6"
   },
   "connection_test": {
     "version": "1",

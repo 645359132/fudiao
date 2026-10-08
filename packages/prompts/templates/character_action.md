@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 3
+version: 4
 task: character_action
 output: ActionProposal
 ---
@@ -29,11 +29,11 @@ output: ActionProposal
 - other：以上都不合适时的其他行动，在 intent 中写清楚要做什么
 
 输出一个 JSON 对象，字段如下：
-- kind、target、item、toZone、utterance：行动本身。用方括号里的标识指代人、物和区域；不需要的字段填 null。utterance 为 {"sentences": [...], "volume": ...}。
+- kind、target、item、toZone、utterance：行动本身。人、物和区域用方括号里面的标识指代，只填方括号里面的部分，不带方括号（名字后写着 [标识] 的，填 "标识"）；不需要的字段填 null。utterance 为 {"sentences": [...], "volume": ...}。
 - interruptAfter：只在轮流说话、对方正在对你说话时使用：在第几句之后打断对方（0 表示对方一开口就打断）；听完再回应时为 null，其他时候也为 null。
 - intent：你这一回合想达成什么。
 - rationale：一两句话的决策摘要，说明你为什么这样做。
-- beliefRefs：这次决定依据的认知条目标识（方括号中的标识），没有则为空数组。
+- beliefRefs：这次决定依据的认知条目标识（同样只填方括号里面的部分），没有则为空数组。
 - innerThought：人物此刻的内心片段：感受、犹豫、自我说服、没说出口的念头。只给作者看，不参与裁决。
 - inferences：这一回合新形成的推测，每条含 content、about（涉及的标识组成的数组，只有一个也写成数组，形如 ["标识"]）、confidence（0 到 1）、concerning（若是在推测某人怎么看你，填那个人的标识，否则为 null）。
 @@system cache
