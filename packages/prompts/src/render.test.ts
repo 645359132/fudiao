@@ -58,7 +58,7 @@ describe('角色行动提案', () => {
     expect(prompt.system[1]?.text).toContain('带着密信从南门脱身');
     expect(prompt.system[1]?.text).toContain('仓库中央[center]');
     expect(prompt.system[2]?.text).toContain('现在是第 1 回合');
-    expect(prompt.template).toEqual({ id: 'character_action', version: '4' });
+    expect(prompt.template).toEqual({ id: 'character_action', version: '5' });
     expect(prompt.output?.name).toBe('ActionProposal');
   });
 
@@ -131,6 +131,18 @@ describe('其他模板', () => {
     expect(text).toContain('攻击，对象 主角，使用 弩（需要裁决）');
     expect(text).not.toContain('废仓库夺信');
     expect(text).not.toContain('带着密信从南门脱身');
+  });
+
+  it('语义裁决写出旁人可见的具体动作与同时说的话', () => {
+    const adjudication = unwrap(
+      ((r) => (r.ok ? { ok: true as const, value: r.value } : { ok: false as const, error: JSON.stringify(r.error) }))(
+        adjudicate(scene, start, [
+          { actor: A, kind: 'other', target: P, description: '把弩横放在地上', utterance: { sentences: ['我不想动手。'], volume: 'normal' } },
+        ]),
+      ),
+    );
+    const text = fullText(unwrap(renderSemanticRuling({ scene, state: start, adjudication, request: adjudication.pending[0]! })));
+    expect(text).toContain('具体动作：把弩横放在地上，说：“我不想动手。”（需要裁决）');
   });
 
   it('证据链判断附上秘密与人物已有的线索', () => {

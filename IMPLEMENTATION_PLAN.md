@@ -219,7 +219,8 @@ const ActionProposal = z.object({
   target: z.string().optional(),
   item: z.string().optional(),
   toZone: z.string().optional(),
-  utterance: z.array(z.string()).optional(),  // 台词按句切分，用于轮流对话中的打断
+  utterance: z.array(z.string()).optional(),  // 台词按句切分，用于轮流对话中的打断；任何行动都可附带台词
+  description: z.string().optional(),         // 旁人能看到的具体动作；other、use_item、probe、attack 须写清，交给语义裁决
   interruptAfter: z.number().optional(),      // 轮流对话中听到第几句后打断；听者在一次决策中选择
   intent: z.string(),                         // 当前目标
   rationale: z.string(),                      // 简短决策摘要
@@ -230,6 +231,8 @@ const ActionProposal = z.object({
 ```
 
 该 schema 是模型输出的格式，位于 `packages/prompts`；引擎把它转换为领域层的 `Action`（标识已解析）后交给规则检查与裁决。
+
+边做事边说话：任何行动附带的台词在同一回合另生成一次“说话”（`adjudicate`），交给语义裁决的行动同样不丢台词。语义裁决看到的是 `description`（旁人能看到的动作），而不是 `intent`（人物的内心目标）：意图可能被写进旁人感知的描述，造成信息泄露。（M0-13 首轮真实实验中，雨夜场景第 7 回合阿青边放信边说的话因此丢失，裁决也因不知道具体动作而没有结果。）
 
 内心片段与推测条目在行动提案的同一次调用中返回，不额外请求模型。`beliefRefs` 是因果追问的连接点，提交时校验其引用的条目确实存在于该角色的视图中。
 

@@ -194,6 +194,18 @@ export function adjudicate(
         }
         break;
     }
+
+    // 边做事边说话：台词与动作在同一回合发生。说话类行动已在上面处理；交给语义裁决的动作同样不丢台词。
+    const u = action.utterance;
+    if (action.kind !== 'speak' && u !== undefined && deliveredSentences(u).length > 0) {
+      occurrences.push({
+        ...base,
+        kind: 'speak',
+        loudness: loud.speak[u.volume],
+        speech: { sentences: deliveredSentences(u), volume: u.volume },
+        ...(action.target && { target: action.target }),
+      });
+    }
   }
 
   return ok({

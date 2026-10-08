@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 4
+version: 5
 task: character_action
 output: ActionProposal
 ---
@@ -26,10 +26,13 @@ output: ActionProposal
 - speak：说话（utterance），可指定对谁说（target）；volume 为 whisper（耳语，只有同一区域听得到）、normal 或 shout
 - withdraw：从出口离开现场
 - wait：按兵不动
-- other：以上都不合适时的其他行动，在 intent 中写清楚要做什么
+- other：以上都不合适时的其他行动，在 description 中写清楚具体做什么
+
+做任何行动的同时都可以说话：把要说的话写在 utterance 里。
 
 输出一个 JSON 对象，字段如下：
-- kind、target、item、toZone、utterance：行动本身。人、物和区域用方括号里面的标识指代，只填方括号里面的部分，不带方括号（名字后写着 [标识] 的，填 "标识"）；不需要的字段填 null。utterance 为 {"sentences": [...], "volume": ...}。
+- kind、target、item、toZone、utterance、description：行动本身。人、物和区域用方括号里面的标识指代，只填方括号里面的部分，不带方括号（名字后写着 [标识] 的，填 "标识"）；不需要的字段填 null。utterance 为 {"sentences": [...], "volume": ...}。
+- description：旁人能看到的具体动作，一句话，例如“把信放在桌上推过去”；other、use_item、probe、attack 必须填写，其他行动可为 null。只写看得见的动作，不写心里的打算。
 - interruptAfter：只在轮流说话、对方正在对你说话时使用：在第几句之后打断对方（0 表示对方一开口就打断）；听完再回应时为 null，其他时候也为 null。
 - intent：你这一回合想达成什么。
 - rationale：一两句话的决策摘要，说明你为什么这样做。

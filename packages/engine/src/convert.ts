@@ -30,8 +30,9 @@ export function proposalToAction(proposal: ActionProposal, actor: ActorId): Acti
     ...(proposal.target !== null && { target: proposal.target }),
     ...(proposal.item !== null && { item: proposal.item as ItemId }),
     ...(proposal.toZone !== null && { toZone: proposal.toZone as ZoneId }),
-    ...(proposal.kind === 'speak' &&
-      proposal.utterance !== null && { utterance: { sentences, volume: proposal.utterance.volume } }),
+    // 任何行动都可以附带台词（边做事边说话）；只有说话类行动才把空台词当作没有行动内容。
+    ...(proposal.utterance !== null && (proposal.kind === 'speak' || sentences.length > 0) && { utterance: { sentences, volume: proposal.utterance.volume } }),
+    ...(proposal.description !== null && proposal.description.trim() !== '' && { description: proposal.description.trim() }),
   };
 }
 

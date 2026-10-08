@@ -63,6 +63,30 @@ describe('adjudicate', () => {
     expect(result.value.occurrences.map((o) => o.kind)).toEqual(['withdraw', 'drop']);
   });
 
+  it('边做事边说话：附带的台词与动作在同一回合发生，交给语义裁决的动作同样不丢台词', () => {
+    const speech = { sentences: ['信在这儿。', '你拿去。'], volume: 'normal' as const };
+    const result = adjudicate(scene, round1, [
+      { actor: P, kind: 'drop', item: item('letter'), utterance: speech },
+      { actor: A, kind: 'other', target: P, utterance: { ...speech, deliveredCount: 1 } },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const said = result.value.occurrences.filter((o) => o.kind === 'speak');
+    expect(said.map((o) => [o.actor, o.speech?.sentences])).toEqual([
+      [A, ['信在这儿。']],
+      [P, ['信在这儿。', '你拿去。']],
+    ]);
+    expect(said.find((o) => o.actor === A)?.target).toBe(P);
+    expect(result.value.occurrences.map((o) => o.kind)).toEqual(['speak', 'drop', 'speak']);
+    // “其他”行动本身仍交给语义裁决。
+    expect(result.value.pending.flatMap((r) => r.actors)).toContain(A);
+  });
+
+  it('没有句子的台词不生成说话', () => {
+    const result = adjudicate(scene, round1, [{ actor: P, kind: 'defend', utterance: { sentences: [], volume: 'normal' } }]);
+    expect(result.ok && result.value.occurrences.map((o) => o.kind)).toEqual(['defend']);
+  });
+
   describe('同轮争夺同一物品', () => {
     it('draw 规则下用推演状态中的随机数抽取，恰好一人得到物品', () => {
       const { scene: s, state } = looseLetter('draw');

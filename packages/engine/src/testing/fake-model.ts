@@ -40,6 +40,7 @@ export const waitProposal = (overrides: Partial<ActionProposal> = {}): ActionPro
   item: null,
   toZone: null,
   utterance: null,
+  description: null,
   interruptAfter: null,
   intent: '先看清局面',
   rationale: '不知道对方的底细，先观望',

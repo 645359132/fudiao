@@ -1,6 +1,6 @@
 ---
 id: semantic_ruling
-version: 2
+version: 3
 task: semantic_ruling
 output: SemanticRulingOutput
 ---
@@ -54,7 +54,7 @@ output: SemanticRulingOutput
 
 本回合这些人的行动：
 {{#actions}}
-- {{actorName}}[{{actor}}]：{{#k}}{{> action_kind}}{{/k}}{{#target}}，对象 {{target}}{{/target}}{{#item}}，使用 {{item}}{{/item}}{{#toZone}}，去往 {{toZone}}{{/toZone}}{{#speech}}，说：“{{speech}}”{{/speech}}{{#needsRuling}}（需要裁决）{{/needsRuling}}
+- {{actorName}}[{{actor}}]：{{#k}}{{> action_kind}}{{/k}}{{#target}}，对象 {{target}}{{/target}}{{#item}}，使用 {{item}}{{/item}}{{#toZone}}，去往 {{toZone}}{{/toZone}}{{#description}}，具体动作：{{description}}{{/description}}{{#speech}}，说：“{{speech}}”{{/speech}}{{#needsRuling}}（需要裁决）{{/needsRuling}}
 {{/actions}}
 {{#hasContested}}
 多人同时争夺：{{#contested}}{{.}}；{{/contested}}

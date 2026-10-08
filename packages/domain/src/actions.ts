@@ -20,7 +20,10 @@ export type Action = {
   readonly target?: string;
   readonly item?: ItemId;
   readonly toZone?: ZoneId;
+  /** 任何行动都可以附带台词：边做事边说话。 */
   readonly utterance?: Utterance;
+  /** 旁人能看到的具体动作（一句话），交给语义裁决判断“其他”等行动的结果；不含人物的内心意图。 */
+  readonly description?: string;
 };
 
 export const deliveredSentences = (u: Utterance): readonly string[] =>

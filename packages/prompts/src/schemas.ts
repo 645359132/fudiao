@@ -13,6 +13,8 @@ export const ActionProposal = z.object({
   item: z.string().nullable(),
   toZone: z.string().nullable(),
   utterance: z.object({ sentences: z.array(z.string()), volume: Volume }).nullable(),
+  /** 旁人能看到的具体动作；其他、使用物品、试探、攻击等需要裁决的行动必须写清，其余可为 null。 */
+  description: z.string().nullable(),
   /** 轮流对话中听到第几句后打断；0 表示对方一开口就打断，null 表示听完。 */
   interruptAfter: z.number().int().min(0).nullable(),
   intent: z.string(),

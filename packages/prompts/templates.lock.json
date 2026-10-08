@@ -20,8 +20,8 @@
     "sha256": "99cc70999d0e71672ebdecc5b7d44beb6734d465be1b02928eb989536b652285"
   },
   "character_action": {
-    "version": "4",
-    "sha256": "35c56eb20914da02e3dc44a432e1d556a8dc3f0c21d937de4b5abc35e8813ed6"
+    "version": "5",
+    "sha256": "06f531b02084d2691b3e3f9397e715d632bc30f78e8db8bdce8543cdedf1e0a7"
   },
   "connection_test": {
     "version": "1",
@@ -52,8 +52,8 @@
     "sha256": "1dc06375e372c9779462baa375268c459e8f8eac5ec1afb9632074a7061b0eb8"
   },
   "semantic_ruling": {
-    "version": "2",
-    "sha256": "2bc9a1f1b6a0e02b4302dc6ede4ae7293dabfdaca88d00b1b449a546d70eccf1"
+    "version": "3",
+    "sha256": "a30acb52b41b10a3d221ea26052d6fac4d831bc9952dda1c5e73c949aafd7165"
   },
   "stalemate_judgement": {
     "version": "1",
