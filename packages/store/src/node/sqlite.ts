@@ -2,7 +2,7 @@
 // （packages/store/contract/sql-cases.json）与同样的迁移规则。
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { err, ok, type Result } from '@fudiao/shared';
@@ -24,7 +24,8 @@ import {
 /** 作品库文件名（施工文档第四章：每部作品一个项目文件夹）。 */
 export const PROJECT_DB_FILE = 'project.sqlite';
 
-export const defaultMigrationsDir = fileURLToPath(new URL('../../migrations', import.meta.url));
+// 用文件路径而不是 new URL 计算：jsdom 测试环境会替换全局 URL，Node 的 fileURLToPath 不接受它。
+export const defaultMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
 export function migrationChecksum(sql: string): string {
   return createHash('sha256').update(normalizeMigration(sql)).digest('hex');

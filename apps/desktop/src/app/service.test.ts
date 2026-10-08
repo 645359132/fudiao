@@ -1,0 +1,175 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { folderName } from './library';
+import { createAppService, type WorkView } from './service';
+
+const roots: TestDeps[] = [];
+afterEach(async () => {
+  for (const d of roots.splice(0)) {
+    await d.opener.close();
+    rmSync(d.root, { recursive: true, force: true });
+  }
+});
+
+function setup() {
+  const deps = fsDeps();
+  roots.push(deps);
+  return { deps, app: createAppService(deps) };
+}
+
+function value<T>(result: { ok: true; value: T } | { ok: false; error: unknown }): T {
+  if (!result.ok) throw new Error(JSON.stringify(result.error));
+  return result.value;
+}
+
+const titles = (view: WorkView) => view.chapters.map((c) => c.title);
+
+describe('作品列表', () => {
+  it('首次启动时作品列表为空，作品库为文档下的“复调”', async () => {
+    const { deps, app } = setup();
+    expect(value(await app.loadLibrary())).toEqual({ libraryDir: join(deps.root, 'Documents', '复调'), works: [] });
+  });
+
+  it('新建作品：在作品库下建文件夹与作品库，加入列表并成为当前作品', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const view = value(await app.createWork('  雨夜 '));
+    expect(view.project.title).toBe('雨夜');
+    expect(view.entry.path).toBe(join(deps.root, 'Documents', '复调', '雨夜'));
+    expect(existsSync(join(view.entry.path, 'project.sqlite'))).toBe(true);
+    const stored = JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { works: { id: string; title: string }[] };
+    expect(stored.works).toEqual([expect.objectContaining({ id: view.project.id, title: '雨夜', archived: false })]);
+  });
+
+  it('重名时文件夹加序号；标题中不允许的字符被去掉', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    const a = value(await app.createWork('雨夜'));
+    const b = value(await app.createWork('雨夜'));
+    expect(b.entry.path).toBe(`${a.entry.path}（2）`);
+    expect(folderName('第一卷：雨夜?')).toBe('第一卷：雨夜');
+    expect(folderName('a/b:c')).toBe('abc');
+    expect(folderName('CON')).toBe('CON_');
+    expect(folderName('...')).toBe('未命名作品');
+    expect(value(await app.loadLibrary()).works).toHaveLength(2);
+  });
+
+  it('关闭后重新打开，最近打开的排在前面', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    const first = value(await app.createWork('甲'));
+    value(await app.createWork('乙'));
+    await app.closeWork();
+    value(await app.openWork(first.project.id));
+    expect(value(await app.loadLibrary()).works.map((w) => w.title)).toEqual(['甲', '乙']);
+  });
+
+  it('打开其他位置的已有作品；选择的文件夹不是作品时拒绝，取消时什么也不做', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.createWork('外部作品'));
+    await app.closeWork();
+    // 把作品文件夹挪到作品库以外，并从列表中移除。
+    const moved = join(deps.root, 'elsewhere');
+    renameSync(work.entry.path, moved);
+    value(await app.removeMissingWork(work.project.id));
+
+    const plain = join(deps.root, 'plain');
+    mkdirSync(plain);
+    deps.picks.push(plain, null, moved);
+    expect(await app.addWorkFromFolder()).toEqual({ ok: false, error: { code: 'not_a_work', path: plain } });
+    expect(existsSync(join(plain, 'project.sqlite'))).toBe(false);
+    expect(await app.addWorkFromFolder()).toEqual({ ok: true, value: null });
+    const added = value(await app.addWorkFromFolder());
+    expect(added?.project.id).toBe(work.project.id);
+    expect(value(await app.loadLibrary()).works.map((w) => w.path)).toEqual([moved]);
+  });
+
+  it('归档与取消归档：文件不动，可以打开', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.createWork('旧作'));
+    await app.closeWork();
+    const archived = value(await app.setArchived(work.project.id, true));
+    expect(archived.works[0]).toMatchObject({ archived: true, missing: false });
+    value(await app.openWork(work.project.id));
+    await app.closeWork();
+    expect(value(await app.setArchived(work.project.id, false)).works[0]?.archived).toBe(false);
+  });
+
+  it('文件夹丢失时标出，打开报错；只有丢失的作品可以从列表移除', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.createWork('丢失'));
+    await app.closeWork();
+    expect(await app.removeMissingWork(work.project.id)).toMatchObject({ ok: false, error: { code: 'library' } });
+    rmSync(work.entry.path, { recursive: true });
+    expect(value(await app.loadLibrary()).works[0]?.missing).toBe(true);
+    expect(await app.openWork(work.project.id)).toEqual({ ok: false, error: { code: 'missing', path: work.entry.path } });
+    expect(value(await app.removeMissingWork(work.project.id)).works).toEqual([]);
+  });
+
+  it('作品列表文件损坏时报错，不覆盖', async () => {
+    const { deps, app } = setup();
+    await deps.library.write('{坏的');
+    expect(await app.loadLibrary()).toEqual({ ok: false, error: { code: 'library', detail: '作品列表文件已损坏' } });
+    expect(readFileSync(deps.libraryFile, 'utf8')).toBe('{坏的');
+  });
+
+  it('更改作品库位置后，新作品建在新位置', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const dir = join(deps.root, 'D盘作品');
+    deps.picks.push(dir);
+    expect(value(await app.chooseLibraryDir())?.libraryDir).toBe(dir);
+    expect(value(await app.createWork('新作')).entry.path).toBe(join(dir, '新作'));
+  });
+});
+
+describe('作品信息与章节', () => {
+  it('更新作品信息；改名同步到作品列表', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    const view = value(await app.updateWorkInfo({ title: '雨夜行', genre: '武侠', synopsis: '两人在当铺重逢', goals: { totalWords: 300_000, note: '' } }));
+    expect(view.project).toMatchObject({ title: '雨夜行', genre: '武侠', goals: { totalWords: 300_000 } });
+    expect(value(await app.loadLibrary()).works[0]?.title).toBe('雨夜行');
+  });
+
+  it('章节的新建、重命名、排序、回收站与恢复', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    value(await app.createChapter('第一章'));
+    value(await app.createChapter('第二章'));
+    let view = value(await app.createChapter('第三章'));
+    const [c1, c2, c3] = view.chapters;
+    if (!c1 || !c2 || !c3) throw new Error();
+    view = value(await app.createChapter('楔子', undefined));
+    view = value(await app.moveChapter(view.chapters[3] ?? c1, null));
+    expect(titles(view)).toEqual(['楔子', '第一章', '第二章', '第三章']);
+    view = value(await app.renameChapter(c2, '第二章 当铺'));
+    view = value(await app.trashChapter(view.chapters.find((c) => c.id === c3.id) ?? c3));
+    expect(titles(view)).toEqual(['楔子', '第一章', '第二章 当铺']);
+    expect(view.trashed.map((c) => c.title)).toEqual(['第三章']);
+    view = value(await app.restoreChapter(view.trashed[0] ?? c3));
+    expect(titles(view)).toEqual(['楔子', '第一章', '第二章 当铺', '第三章']);
+  });
+
+  it('用过期的版本修改时返回冲突', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    const stale = value(await app.createChapter('第一章')).chapters[0];
+    if (!stale) throw new Error();
+    value(await app.renameChapter(stale, '序章'));
+    expect(await app.renameChapter(stale, '又改')).toEqual({ ok: false, error: { code: 'repo', error: { code: 'conflict' } } });
+  });
+
+  it('没有打开作品时章节操作报错', async () => {
+    const { app } = setup();
+    expect(await app.createChapter('第一章')).toEqual({ ok: false, error: { code: 'no_work' } });
+  });
+});

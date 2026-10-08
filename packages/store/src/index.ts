@@ -7,3 +7,4 @@ export type { DataError, ExportedData, ExportedRow } from './data-export';
 export { exportData, fromJsonl, importData, toJsonl } from './data-export';
 export type { TableSpec } from './schema';
 export { TABLES } from './schema';
+export * from './repos';

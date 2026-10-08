@@ -53,6 +53,13 @@ module.exports = {
       to: { dependencyTypes: ['core'] },
     },
     {
+      name: 'desktop-ui-no-node-builtins',
+      severity: 'error',
+      comment: '桌面界面运行在 WebView 中，没有 Node；测试可以使用 Node 内置模块。',
+      from: { path: '^apps/desktop/src/', pathNot: TEST_FILE },
+      to: { dependencyTypes: ['core'] },
+    },
+    {
       name: 'pure-core-npm-allowlist',
       severity: 'error',
       comment: `领域内核与 shared 只能使用白名单内的第三方包（${PURE_NPM_ALLOWLIST.join('、')}），防止引入 Tauri、数据库或网络库。`,

@@ -1,15 +1,29 @@
-/** 应用外壳。作品管理、章节目录与编辑器在 M1-04、M1-05 加入。 */
-export function App() {
+import { useEffect } from 'react';
+import type { AppStore } from './state/store';
+import { LibraryScreen } from './ui/LibraryScreen';
+import { MessageBar } from './ui/MessageBar';
+import { StoreProvider, useApp } from './ui/store-context';
+import { WorkScreen } from './ui/WorkScreen';
+
+function Screens() {
+  const init = useApp((s) => s.init);
+  const hasWork = useApp((s) => s.work !== null);
+  useEffect(() => {
+    void init();
+  }, [init]);
   return (
-    <main className="shell">
-      <aside className="shell-sidebar" aria-label="章节目录">
-        <h2>章节</h2>
-        <p className="shell-empty">还没有打开作品</p>
-      </aside>
-      <section className="shell-editor" aria-label="正文">
-        <h1>复调</h1>
-        <p>新建或打开一部作品后，在这里写作。</p>
-      </section>
-    </main>
+    <>
+      <MessageBar />
+      {hasWork ? <WorkScreen /> : <LibraryScreen />}
+    </>
+  );
+}
+
+/** 应用外壳：没有打开作品时显示作品列表，打开后显示作品界面。 */
+export function App({ store }: { readonly store: AppStore }) {
+  return (
+    <StoreProvider store={store}>
+      <Screens />
+    </StoreProvider>
   );
 }
