@@ -12,6 +12,8 @@ import type { ModelServicesView, ProviderForm, ProviderView } from '../app/model
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
 import { splitText, type SplitRule } from '../app/text-import';
 import type { EditorSelection } from '../app/writing-context';
+import { OPERATION_LABELS } from '../app/selection-ops';
+import { reduceTasks, type TaskEvent, type TaskRecord } from '../app/tasks';
 
 /** 导入预览：选中的文件、拆分方式与导入到哪里。 */
 export type ImportDraft = { readonly decoded: DecodedText; readonly rule: SplitRule; readonly target: 'new' | 'current' };
@@ -47,7 +49,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -83,6 +85,8 @@ export type AppState = {
   readonly writeSelection: EditorSelection | null;
   readonly writeSelectedText: string;
   readonly aiWrite: AiWriteJob | null;
+  /** 任务中心（B16、B19）：本次运行中的模型任务，新的在前。 */
+  readonly tasks: readonly TaskRecord[];
   /** 当前章节待处理的候选稿（B17），新的在前。 */
   readonly candidates: readonly Candidate[];
   /** 用量与费用（打开“用量与费用”时读取）。 */
@@ -192,6 +196,10 @@ export type AppState = {
   readonly closeAiWrite: () => void;
   readonly runSelectionOp: (operation: SelectionOperation, instruction: string) => Promise<void>;
   readonly cancelSelectionOp: () => void;
+  /** 保存正文后打开任务中心。 */
+  readonly openTasks: () => Promise<void>;
+  readonly cancelTask: (id: string) => void;
+  readonly clearFinishedTasks: () => void;
   readonly editCandidate: (id: string, content: string) => Promise<boolean>;
   readonly discardCandidate: (id: string) => Promise<void>;
   /** 保存正文后接受候选稿，写入后重新载入本章。 */
@@ -227,6 +235,10 @@ export function createAppStore(service: AppService): AppStore {
     let editor: EditorHandle | null = null;
     /** 正在进行的选区操作；取消时中止。 */
     let writeAbort: AbortController | null = null;
+    /** 各个进行中的任务，任务中心据此取消。 */
+    const taskAborts = new Map<string, AbortController>();
+    let taskSeq = 0;
+    const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
     async function run<T>(task: Promise<Result<T, AppError>>, apply: (value: T) => Partial<AppState>): Promise<boolean> {
@@ -303,6 +315,7 @@ export function createAppStore(service: AppService): AppStore {
       writeSelectedText: '',
       aiWrite: null,
       candidates: [],
+      tasks: [],
       searchQuery: '',
       searchResult: null,
       reveal: null,
@@ -647,6 +660,10 @@ export function createAppStore(service: AppService): AppStore {
         const abort = new AbortController();
         writeAbort = abort;
         set({ aiWrite: { operation, instruction, status: 'running', text: '', error: null, candidateId: null } });
+        const taskId = `task-${++taskSeq}`;
+        taskAborts.set(taskId, abort);
+        const chapterTitle = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+        task({ type: 'started', task: { id: taskId, kind: 'selection_edit', title: `${OPERATION_LABELS[operation]} · ${chapterTitle}`, chapterId, startedAt: new Date().toISOString() } });
         const update = (patch: Partial<AiWriteJob>) => {
           const job = get().aiWrite;
           if (job !== null && writeAbort === abort) set({ aiWrite: { ...job, ...patch } });
@@ -656,7 +673,10 @@ export function createAppStore(service: AppService): AppStore {
           {
             signal: abort.signal,
             onEvent: (e) => {
-              if (e.type === 'text') update({ text: (get().aiWrite?.text ?? '') + e.delta });
+              if (e.type === 'text') {
+                update({ text: (get().aiWrite?.text ?? '') + e.delta });
+                task({ type: 'text', id: taskId, delta: e.delta });
+              } else task({ type: 'usage', id: taskId, usage: e.usage });
             },
           },
         );
@@ -670,10 +690,30 @@ export function createAppStore(service: AppService): AppStore {
             status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
             error: outcome === 'refused' ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}` : outcome === 'truncated' ? '输出达到上限，结果可能不完整' : null,
           });
-        } else update({ status: abort.signal.aborted ? 'cancelled' : 'failed', error: describeError(result.error) });
+          task({
+            type: 'finished',
+            id: taskId,
+            status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
+            finishedAt: new Date().toISOString(),
+            text,
+            cost: result.value.cost,
+            error: outcome === 'refused' ? '模型拒绝了这个请求' : null,
+          });
+        } else {
+          const status = abort.signal.aborted ? 'cancelled' : 'failed';
+          update({ status, error: describeError(result.error) });
+          task({ type: 'finished', id: taskId, status, finishedAt: new Date().toISOString(), error: describeError(result.error) });
+        }
+        taskAborts.delete(taskId);
         if (writeAbort === abort) writeAbort = null;
       },
       cancelSelectionOp: () => writeAbort?.abort(),
+      async openTasks() {
+        if (!(await get().leaveChapter())) return;
+        set({ panel: 'tasks', chapterContent: null, drawerEntityId: null });
+      },
+      cancelTask: (id) => taskAborts.get(id)?.abort(),
+      clearFinishedTasks: () => task({ type: 'clearFinished' }),
       async editCandidate(id, content) {
         const candidate = get().candidates.find((c) => c.id === id);
         if (candidate === undefined) return false;

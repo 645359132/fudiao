@@ -6,6 +6,7 @@ import { HistoryPanel } from './HistoryPanel';
 import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SourcesPanel } from './SourcesPanel';
+import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
@@ -25,6 +26,8 @@ export function WorkScreen() {
   const openSearch = useApp((s) => s.openSearch);
   const openModelServices = useApp((s) => s.openModelServices);
   const openUsage = useApp((s) => s.openUsage);
+  const openTasks = useApp((s) => s.openTasks);
+  const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
 
@@ -50,6 +53,9 @@ export function WorkScreen() {
           {title}
         </button>
         <span className="spacer" />
+        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
+          任务{running > 0 ? `（${running} 进行中）` : ''}
+        </button>
         <button type="button" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
           查找
         </button>
@@ -91,7 +97,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

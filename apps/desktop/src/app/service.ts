@@ -25,6 +25,7 @@ import {
   sourceStats,
   usageSummary,
   listLlmCalls,
+  findCallByRequestHash,
   createSnapshot,
   getSnapshot,
   listSnapshots,
@@ -324,7 +325,7 @@ export function createAppService(deps: AppDeps) {
         readonly overrides: ContextOverrides;
       },
       options: CallOptions = {},
-    ): Promise<Result<{ result: LlmResult; manifest: ContextManifest; candidate: Candidate | null }, AppError>> {
+    ): Promise<Result<{ result: LlmResult; manifest: ContextManifest; candidate: Candidate | null; cost: number | null }, AppError>> {
       const manifest = await writingContext(request.chapterId, request.selection, request.overrides);
       if (!manifest.ok) return manifest;
       const parts = promptParts(manifest.value);
@@ -336,11 +337,14 @@ export function createAppService(deps: AppDeps) {
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
       const result = await runner.text({ prompt: prompt.value, maxOutputTokens: maxOutputTokens(length), effort: 'medium' }, options);
       if (!result.ok) return result;
-      // 完整生成（含达到输出上限）的结果存为候选稿；取消与拒答只显示在界面上。
+      // 费用来自调用记录（价格未配置时为未知）；没有打开作品时不记录，费用也未知。
       const { outcome, text, requestHash } = result.value;
-      if ((outcome !== 'completed' && outcome !== 'truncated') || text.trim() === '') return ok({ result: result.value, manifest: manifest.value, candidate: null });
+      const call = session === null ? null : await findCallByRequestHash(session.port, requestHash);
+      const cost = call?.ok === true ? (call.value?.cost ?? null) : null;
+      // 完整生成（含达到输出上限）的结果存为候选稿；取消与拒答只显示在界面上。
+      if ((outcome !== 'completed' && outcome !== 'truncated') || text.trim() === '') return ok({ result: result.value, manifest: manifest.value, candidate: null, cost });
       const candidate = await candidates.saveCandidate({ chapterId: request.chapterId, selection: request.selection, operation: request.operation, text, requestHash });
-      return candidate.ok ? ok({ result: result.value, manifest: manifest.value, candidate: candidate.value }) : candidate;
+      return candidate.ok ? ok({ result: result.value, manifest: manifest.value, candidate: candidate.value, cost }) : candidate;
     },
 
     /** 用量与费用（B19）：全部、按任务、按模型，以及最近的调用。 */

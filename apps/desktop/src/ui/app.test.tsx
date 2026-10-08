@@ -795,3 +795,47 @@ describe('AI 写作', () => {
   });
 });
 
+describe('任务中心', () => {
+  it('选区操作登记为任务：进行中可在任务页取消并复制部分结果；完成的任务显示用量，没有价格时费用未知', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('沈砚推开当铺的门。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['沈砚推开当铺的门。']));
+    const saved = await service.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk' });
+    if (!saved.ok) throw new Error('服务');
+    await service.addModel(saved.value.providers[0]?.id ?? '', 'm');
+
+    await user.click(screen.getByRole('button', { name: 'AI 写作' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['柜台后'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    await user.click(within(drawer).getByRole('button', { name: '续写' }));
+    await waitFor(() => expect(store.getState().tasks[0]?.text).toBe('柜台后'));
+
+    await user.click(screen.getByRole('button', { name: '任务（1 进行中）' }));
+    const list = await screen.findByRole('list', { name: '任务列表' });
+    const item = within(list).getByRole('listitem', { name: '续写 · 第一章' });
+    expect(item.textContent).toContain('进行中');
+    await user.click(within(item).getByRole('button', { name: '取消 续写 · 第一章' }));
+    await waitFor(() => expect(item.textContent).toContain('已取消'));
+    expect(item.textContent).toContain('已收到 3 字');
+    await user.click(within(item).getByRole('button', { name: '复制 续写 · 第一章 的结果' }));
+    expect(deps.copied.at(-1)).toBe('柜台后');
+    expect(screen.getByRole('button', { name: '任务' })).toBeTruthy();
+
+    // 完成的任务：用量来自服务，费用未知（没有配置价格）。
+    await user.click(screen.getByRole('button', { name: '第一章' }));
+    await user.click(await screen.findByRole('button', { name: 'AI 写作' }));
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['雨还在下。'], end: 'stop', usage: { input: 120, output: 6, cacheRead: 0 } }) });
+    await user.click(within(await screen.findByRole('complementary', { name: 'AI 写作' })).getByRole('button', { name: '续写' }));
+    await waitFor(() => expect(store.getState().tasks[0]?.status).toBe('done'));
+    await user.click(screen.getByRole('button', { name: '任务' }));
+    const done = within(await screen.findByRole('list', { name: '任务列表' })).getAllByRole('listitem')[0];
+    expect(done?.textContent).toContain('已完成');
+    expect(done?.textContent).toContain('输入 120、输出 6 Token，费用未知');
+    await user.click(screen.getByRole('button', { name: '清除已结束的任务' }));
+    expect(await screen.findByText('还没有任务。')).toBeTruthy();
+  });
+});
+

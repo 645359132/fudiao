@@ -50,6 +50,7 @@
 - M2-04 已完成：`packages/context` 的写作上下文构建（候选收集、预算选入、清单与原因）；应用层 `apps/desktop/src/app/writing-context.ts`（按选区分开正文、设定提及、适用事实、预算）；章节旁的“AI 上下文”抽屉，可增减条目。
 - M2-05 已完成：`selection_edit` 模板（版本 1）与 `renderSelectionEdit`；应用层 `selection-ops.ts` 与用例 `runSelectionOperation`（按上下文清单组合提示词，经调用器流式生成）；章节旁的“AI 写作”抽屉（五种操作、附加要求、流式结果、取消、重试、复制）。
 - M2-06 已完成：迁移 `0004_candidate.sql`；候选稿仓储 `candidate.ts` 与按范围替换 `paragraph-range.ts`（版本守卫、事件关联、来源区间）；逐字差异 `textDiff`（`packages/shared`）；应用层 `candidates.ts`（存为候选稿、修改、放弃、接受时检查过期、快照、写入来源）；“AI 写作”抽屉中的候选稿（差异、修改、接受、放弃）。
+- M2-07 已完成：任务记录 `apps/desktop/src/app/tasks.ts`（进度、部分结果、已知用量与费用）；选区操作登记为任务；顶栏“任务”与任务页（取消、复制部分结果、清除）。M2 的任务已全部完成，待作者执行手工清单与真实模型的验证。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

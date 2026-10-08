@@ -135,10 +135,15 @@ export function findCompletedCall(port: SqlPort, stepKey: string): Promise<Resul
   );
 }
 
-/** 按请求哈希找到最近一次调用的记录标识（候选稿据此关联生成它的调用）。 */
-export async function findCallByRequestHash(port: SqlPort, requestHash: string): Promise<Result<string | null, RepoError>> {
-  const row = await queryOne(port, z.object({ id: z.string() }), 'SELECT id FROM llm_call WHERE request_hash = ? ORDER BY finished_at DESC, id DESC LIMIT 1', [requestHash]);
-  return row.ok ? ok(row.value?.id ?? null) : row;
+/** 按请求哈希找到最近一次调用的记录标识与费用（候选稿据此关联生成它的调用，任务中心据此显示费用）。 */
+export async function findCallByRequestHash(port: SqlPort, requestHash: string): Promise<Result<{ id: string; cost: number | null } | null, RepoError>> {
+  const row = await queryOne(
+    port,
+    z.object({ id: z.string(), cost: z.number().nullable() }),
+    'SELECT id, cost FROM llm_call WHERE request_hash = ? ORDER BY finished_at DESC, id DESC LIMIT 1',
+    [requestHash],
+  );
+  return row.ok ? ok(row.value) : row;
 }
 
 /** 最近的调用，新的在前。 */

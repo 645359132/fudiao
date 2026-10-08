@@ -95,7 +95,7 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
           baseText,
           baseVersions: versionsIn(paragraphs.value, range),
           generated: input.text.trim(),
-          llmCallId: call.ok ? call.value : null,
+          llmCallId: call.ok ? (call.value?.id ?? null) : null,
         },
         ctx(),
       );
