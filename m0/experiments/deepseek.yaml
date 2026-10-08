@@ -6,7 +6,8 @@
 #   deepseek-flash    上下文 1M，最大输出 384K，支持 JSON 输出，默认开启思考
 # 价格（美元 / 百万 Token）分高峰（周一至周五 UTC 01:00–04:00、06:00–10:00）与非高峰（高峰价的一半）。
 # 下面按高峰价填写，费用估算与预算上限宁高勿低。
-# DeepSeek 默认开启思考，思考也计入输出，所以输出上限留得较宽。
+# DeepSeek 默认开启思考，思考也计入输出：首轮实验中认知更新与证据判断的思考就用掉六七千 Token，
+# 8000 的上限会截断，所以各任务的输出上限统一放到 32000。
 
 providers:
   deepseek:
@@ -30,15 +31,15 @@ models:
 
 # 全部任务使用 flash（作者决定：官方文档中 pro 没有优势）；推演组与对照组用同一个模型，比较才公平。
 tasks:
-  character_action: { model: flash, maxOutputTokens: 16000 }
-  semantic_ruling: { model: flash, maxOutputTokens: 16000 }
-  belief_update: { model: flash, maxOutputTokens: 8000 }
-  judgement: { model: flash, maxOutputTokens: 8000 }
-  beat_sheet: { model: flash, maxOutputTokens: 16000 }
+  character_action: { model: flash, maxOutputTokens: 32000 }
+  semantic_ruling: { model: flash, maxOutputTokens: 32000 }
+  belief_update: { model: flash, maxOutputTokens: 32000 }
+  judgement: { model: flash, maxOutputTokens: 32000 }
+  beat_sheet: { model: flash, maxOutputTokens: 32000 }
   candidate_text: { model: flash, maxOutputTokens: 32000 }
   baseline: { model: flash, maxOutputTokens: 32000 }
-  stalemate: { model: flash, maxOutputTokens: 8000 }
-  director: { model: flash, maxOutputTokens: 8000 }
+  stalemate: { model: flash, maxOutputTokens: 32000 }
+  director: { model: flash, maxOutputTokens: 32000 }
 
 run:
   mode: auto
