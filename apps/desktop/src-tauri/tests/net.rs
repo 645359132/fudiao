@@ -421,3 +421,24 @@ fn events_and_errors_serialize_like_the_typescript_types() {
     .unwrap();
     assert_eq!(parsed.provider_id, "p");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn configured_limits_override_the_default() {
+    let server = Arc::new(Server::default());
+    let base = serve(server.clone()).await;
+    let proxy = proxy_for(&base, api_key(KeyHeader::XApiKey), 4);
+    proxy.set_limits(&[("p1".into(), 1)]);
+    let tasks: Vec<_> = (0..3)
+        .map(|i| {
+            let prepared = proxy
+                .prepare(request(&format!("r{i}"), format!("{base}/hold")))
+                .unwrap();
+            let runner = proxy.clone();
+            tokio::spawn(async move { runner.run(prepared, |_| {}).await })
+        })
+        .collect();
+    for t in tasks {
+        t.await.unwrap();
+    }
+    assert_eq!(server.max_active.load(Ordering::SeqCst), 1);
+}

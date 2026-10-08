@@ -1,6 +1,7 @@
-//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿（M1-05）、导入导出与备份（M1-07）、凭据代理（M2-01）；凭据存储在 M2-02 加入。
+//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿（M1-05）、导入导出与备份（M1-07）、凭据代理（M2-01）与凭据存储（M2-02）。
 //! 业务逻辑留在 TypeScript，Rust 只提供 IO 与凭据（施工文档第二章）。
 
+pub mod credentials;
 pub mod db;
 pub mod drafts;
 pub mod library;
@@ -31,11 +32,15 @@ fn app_info() -> AppInfo {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 凭据代理与凭据命令共用同一个凭据来源。
+    let credentials = credentials::StoredCredentials::new(Box::new(credentials::KeyringStore));
+    let proxy = std::sync::Arc::new(net::Proxy::new(credentials.clone()));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(db::commands::DbState::default())
         .manage(transfer::ImportState::default())
-        .manage(net::NetState::default())
+        .manage(net::NetState { proxy })
+        .manage(credentials::CredentialState { credentials })
         .invoke_handler(tauri::generate_handler![
             app_info,
             db::commands::db_open,
@@ -59,7 +64,11 @@ pub fn run() {
             transfer::export_project,
             transfer::import_pick_project,
             net::net_fetch,
-            net::net_cancel
+            net::net_cancel,
+            net::net_set_limits,
+            credentials::credential_set,
+            credentials::credential_status,
+            credentials::credential_delete
         ])
         .run(tauri::generate_context!())
         .expect("无法启动应用");

@@ -198,7 +198,10 @@ pub struct Prepared {
 pub struct Proxy {
     client: reqwest::Client,
     credentials: Arc<dyn Credentials>,
-    limits: Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// 每个源的并发上限与信号量；上限改变时换一个新的信号量（进行中的请求在旧信号量上照常完成）。
+    limits: Mutex<HashMap<String, (usize, Arc<Semaphore>)>>,
+    /// 服务设置中的并发上限（`net_set_limits`），没有设置时用绑定中的默认值。
+    overrides: Mutex<HashMap<String, usize>>,
     inflight: Mutex<HashMap<String, Arc<Notify>>>,
 }
 
@@ -213,7 +216,17 @@ impl Proxy {
             client,
             credentials,
             limits: Mutex::new(HashMap::new()),
+            overrides: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// 设置各服务的并发上限（来自应用设置中的服务配置；不涉及凭据，界面可以随时设置）。
+    pub fn set_limits(&self, limits: &[(String, usize)]) {
+        let mut overrides = self.overrides.lock().unwrap();
+        overrides.clear();
+        for (provider_id, limit) in limits {
+            overrides.insert(provider_id.clone(), (*limit).max(1));
         }
     }
 
@@ -275,19 +288,28 @@ impl Proxy {
         Ok(Prepared {
             id: req.id,
             origin,
-            concurrency: binding.concurrency,
+            concurrency: self
+                .overrides
+                .lock()
+                .unwrap()
+                .get(&req.provider_id)
+                .copied()
+                .unwrap_or(binding.concurrency),
             request,
             cancel,
         })
     }
 
     fn semaphore(&self, origin: &str, concurrency: usize) -> Arc<Semaphore> {
-        self.limits
-            .lock()
-            .unwrap()
-            .entry(origin.to_string())
-            .or_insert_with(|| Arc::new(Semaphore::new(concurrency)))
-            .clone()
+        let mut limits = self.limits.lock().unwrap();
+        match limits.get(origin) {
+            Some((limit, semaphore)) if *limit == concurrency => semaphore.clone(),
+            _ => {
+                let semaphore = Arc::new(Semaphore::new(concurrency));
+                limits.insert(origin.to_string(), (concurrency, semaphore.clone()));
+                semaphore
+            }
+        }
     }
 
     /// 发出请求并经 `emit` 回传事件，直到结束、失败或取消。
@@ -372,17 +394,9 @@ impl Proxy {
     }
 }
 
-/// 应用中的代理。M2-02 之前没有任何服务的凭据，所有请求都会被拒绝为 `unknown_provider`。
+/// 应用中的代理，凭据来自系统凭据管理器（`credentials.rs`）。
 pub struct NetState {
     pub proxy: Arc<Proxy>,
-}
-
-impl Default for NetState {
-    fn default() -> Self {
-        NetState {
-            proxy: Arc::new(Proxy::new(Arc::new(MemoryCredentials::default()))),
-        }
-    }
 }
 
 #[tauri::command]
@@ -407,4 +421,9 @@ pub async fn net_fetch(
 #[tauri::command]
 pub fn net_cancel(state: tauri::State<'_, NetState>, id: String) -> bool {
     state.proxy.cancel(&id)
+}
+
+#[tauri::command]
+pub fn net_set_limits(state: tauri::State<'_, NetState>, limits: Vec<(String, usize)>) {
+    state.proxy.set_limits(&limits);
 }
