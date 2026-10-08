@@ -3,6 +3,8 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
+  importChapters,
+  importData,
   createProject,
   getProject,
   listChapters,
@@ -27,12 +29,18 @@ import {
   type SqlPort,
   type Snapshot,
   type SnapshotSummary,
+  type ImportChapter,
   type StructuralEdits,
 } from '@fudiao/store';
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
+import { buildPackage, parsePackage, withProjectId } from './project-package';
+import { toMarkdown, toTxt, type ExportChapter } from './text-export';
 import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type WorkEntry } from './library';
 import { describeError, type AppError } from './errors';
-import type { AppDeps } from './ports';
+import type { AppDeps, BackupInfo } from './ports';
+
+/** 自动备份的间隔：打开作品时距上次自动备份超过这么久才备份。 */
+const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export type { AppError } from './errors';
 
@@ -104,16 +112,24 @@ export function createAppService(deps: AppDeps) {
   }
 
   /** 打开作品库并读取作品信息；成功后成为当前作品。 */
-  async function openAt(path: string, entryOf: (project: Project) => WorkEntry, create?: string): Promise<Result<WorkView, AppError>> {
+  /**
+   * 打开作品库并读取作品信息；成功后成为当前作品。prepare 在新建或导入时写入初始内容
+   * （新建作品信息、导回作品包），失败时关闭作品库。
+   */
+  async function openAt(
+    path: string,
+    entryOf: (project: Project) => WorkEntry,
+    prepare?: (port: SqlPort) => Promise<Result<unknown, AppError>>,
+  ): Promise<Result<WorkView, AppError>> {
     await close();
     const opened = await deps.opener.open(path, deps.clock.now());
     if (!opened.ok) return err({ code: 'open_failed', error: opened.error });
     const port = opened.value.port;
-    if (create !== undefined) {
-      const created = await createProject(port, { id: deps.ids.next(), title: create }, ctx());
-      if (!created.ok) {
+    if (prepare !== undefined) {
+      const prepared = await prepare(port);
+      if (!prepared.ok) {
         await deps.opener.close();
-        return err(repo(created.error));
+        return prepared;
       }
     }
     const project = await getProject(port);
@@ -129,6 +145,29 @@ export function createAppService(deps: AppDeps) {
     }
     session = { entry, port };
     return view();
+  }
+
+  /** 作品库下为新作品取一个不重名的文件夹：文件夹名取自标题，重名时加序号。 */
+  async function newWorkPath(title: string): Promise<Result<string, AppError>> {
+    const dir = await libraryDir();
+    if (!dir.ok) return dir;
+    const base = folderName(title);
+    let path = joinPath(dir.value, base);
+    for (let i = 2; (await deps.library.probe(path)).exists; i++) path = joinPath(dir.value, `${base}（${i}）`);
+    return ok(path);
+  }
+
+  const freshEntry = (path: string) => (p: Project) => ({ id: p.id, path, title: p.title, archived: false, lastOpenedAt: deps.clock.now() });
+
+  async function createWork(title: string): Promise<Result<WorkView, AppError>> {
+    const name = title.trim();
+    if (name === '') return err({ code: 'repo', error: { code: 'invalid', detail: '作品名不能为空' } });
+    const path = await newWorkPath(name);
+    if (!path.ok) return path;
+    return openAt(path.value, freshEntry(path.value), async (port) => {
+      const created = await createProject(port, { id: deps.ids.next(), title: name }, ctx());
+      return created.ok ? created : err(repo(created.error));
+    });
   }
 
   async function close(): Promise<void> {
@@ -164,17 +203,7 @@ export function createAppService(deps: AppDeps) {
     loadLibrary,
 
     /** 在作品库下新建作品文件夹；文件夹名取自标题，重名时加序号。 */
-    async createWork(title: string): Promise<Result<WorkView, AppError>> {
-      const name = title.trim();
-      if (name === '') return err({ code: 'repo', error: { code: 'invalid', detail: '作品名不能为空' } });
-      const dir = await libraryDir();
-      if (!dir.ok) return dir;
-      const base = folderName(name);
-      let path = joinPath(dir.value, base);
-      for (let i = 2; (await deps.library.probe(path)).exists; i++) path = joinPath(dir.value, `${base}（${i}）`);
-      const now = deps.clock.now();
-      return openAt(path, (p) => ({ id: p.id, path, title: p.title, archived: false, lastOpenedAt: now }), name);
-    },
+    createWork,
 
     async openWork(id: string): Promise<Result<WorkView, AppError>> {
       const entry = file.works.find((w) => w.id === id);
@@ -305,7 +334,105 @@ export function createAppService(deps: AppDeps) {
       return ok({ chapterId, saved: restored.value.paragraphs, draft: null });
     },
 
-    exportText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
+    /** 把拆分好的章节导入为一部新作品（需求 B07）。 */
+    async importTextAsWork(title: string, chapters: readonly ImportChapter[]): Promise<Result<WorkView, AppError>> {
+      const created = await createWork(title);
+      if (!created.ok || session === null) return created;
+      const port = session.port;
+      return withPort(() => importChapters(port, chapters, ctx(), () => deps.ids.next()));
+    },
+
+    /** 把拆分好的章节追加到当前作品的目录末尾。 */
+    importChaptersIntoWork: (chapters: readonly ImportChapter[]) => withPort((port) => importChapters(port, chapters, ctx(), () => deps.ids.next())),
+
+    /** 导入作品包，成为一部新作品；作品标识与列表中已有作品相同时换新标识。取消选择时返回 null。 */
+    async importProject(): Promise<Result<WorkView | null, AppError>> {
+      const files = await deps.transfer.pickProject();
+      if (!files.ok) return err({ code: 'library', detail: files.error });
+      if (files.value === null) return ok(null);
+      const parsed = parsePackage(files.value);
+      if (!parsed.ok) return err({ code: 'library', detail: parsed.error });
+      const rawId = parsed.value.data.tables['project']?.[0]?.['id'];
+      const projectId = typeof rawId === 'string' ? rawId : '';
+      const data = file.works.some((w) => w.id === projectId) ? withProjectId(parsed.value.data, deps.ids.next()) : parsed.value.data;
+      const path = await newWorkPath(parsed.value.manifest.title);
+      if (!path.ok) return path;
+      return openAt(path.value, freshEntry(path.value), async (port) => {
+        const imported = await importData(port, data);
+        if (imported.ok) return imported;
+        // 作品包的结构版本与本程序不同时 importData 拒绝；目前只有一个结构版本，跨版本导入在出现第二个版本时补上。
+        return err({
+          code: 'library',
+          detail:
+            imported.error.code === 'schema_mismatch'
+              ? imported.error.actual > imported.error.expected
+                ? '作品包由更新版本的复调导出，请先升级复调'
+                : '作品包的结构版本较旧，暂不支持导入'
+              : `导入失败：${imported.error.code}`,
+        });
+      });
+    },
+
+    /** 导出整本或一章的正文。返回是否已保存。 */
+    async exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const work = await view();
+      if (!work.ok) return work;
+      const chosen = chapterId === undefined ? work.value.chapters : work.value.chapters.filter((c) => c.id === chapterId);
+      const chapters: ExportChapter[] = [];
+      for (const c of chosen) {
+        const paragraphs = await listParagraphs(session.port, c.id);
+        if (!paragraphs.ok) return err(repo(paragraphs.error));
+        chapters.push({ title: c.title, paragraphs: paragraphs.value.map((p) => p.text) });
+      }
+      const title = chapterId === undefined ? work.value.project.title : (chosen[0]?.title ?? '章节');
+      const content = kind === 'txt' ? toTxt(chapters) : toMarkdown(chapters, chapterId === undefined ? title : undefined);
+      const saved = await deps.exporter.exportText(`${folderName(title)}.${kind}`, content, kind);
+      return saved.ok ? saved : err({ code: 'library', detail: saved.error });
+    },
+
+    /** 导出作品包。返回是否已保存。 */
+    async exportProject(): Promise<Result<boolean, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const files = await buildPackage(session.port, deps.clock.now());
+      if (!files.ok) return err({ code: 'library', detail: files.error });
+      const saved = await deps.transfer.exportProject(`${folderName(session.entry.title)}.zip`, files.value);
+      return saved.ok ? saved : err({ code: 'library', detail: saved.error });
+    },
+
+    async listBackups(): Promise<Result<readonly BackupInfo[], AppError>> {
+      const list = await deps.backups.list();
+      return list.ok ? list : err({ code: 'library', detail: list.error });
+    },
+
+    async createBackup(): Promise<Result<BackupInfo, AppError>> {
+      const created = await deps.backups.create('manual', deps.clock.now());
+      return created.ok ? created : err({ code: 'library', detail: created.error });
+    },
+
+    /** 打开作品时的自动备份：距上次自动备份超过 24 小时才备份。返回是否备份了。 */
+    async autoBackupIfDue(): Promise<Result<boolean, AppError>> {
+      const list = await deps.backups.list();
+      if (!list.ok) return err({ code: 'library', detail: list.error });
+      const latest = list.value.filter((b) => b.kind === 'auto').map((b) => b.createdAt).sort().at(-1);
+      const now = deps.clock.now();
+      if (latest !== undefined && Date.parse(now) - Date.parse(latest) < AUTO_BACKUP_INTERVAL_MS) return ok(false);
+      const created = await deps.backups.create('auto', now);
+      return created.ok ? ok(true) : err({ code: 'library', detail: created.error });
+    },
+
+    /** 恢复到备份（现稿先存为恢复前备份），重新读取作品。 */
+    async restoreBackup(name: string): Promise<Result<WorkView, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const restored = await deps.backups.restore(name, deps.clock.now());
+      if (!restored.ok) return err({ code: 'library', detail: restored.error });
+      return view();
+    },
+
+    exportPlainText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
+    pickText: () => deps.transfer.pickText(),
+    redecode: (token: string, encoding: string) => deps.transfer.redecode(token, encoding),
+    releaseImport: (token: string) => deps.transfer.release(token),
     copyText: (content: string) => deps.exporter.copyText(content),
 
     createChapter: (title: string, after?: string) =>

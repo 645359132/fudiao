@@ -1,13 +1,14 @@
 //! 作品库的数据库访问（施工文档第二、三章）：一个写连接加只读连接池，WAL 模式下读写互不阻塞。
 //! TypeScript 经 `SqlPort` 使用；行为与 Node 实现共用 packages/store/contract/sql-cases.json 的契约用例。
 
+pub mod backup;
 pub mod commands;
 pub mod migrate;
 mod value;
 
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex, MutexGuard,
@@ -69,6 +70,7 @@ pub enum SqlError {
 }
 
 pub struct Database {
+    dir: PathBuf,
     writer: Mutex<Connection>,
     readers: Vec<Mutex<Connection>>,
     next: AtomicUsize,
@@ -116,12 +118,26 @@ impl Database {
         }
         Ok((
             Database {
+                dir: project_dir.to_path_buf(),
                 writer: Mutex::new(writer),
                 readers,
                 next: AtomicUsize::new(0),
             },
             report,
         ))
+    }
+
+    /// 作品文件夹。
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// 用写连接把整个库写成一份一致的副本（备份）。
+    pub fn vacuum_into(&self, target: &Path) -> Result<(), SqlError> {
+        let conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
+            .map(|_| ())
+            .map_err(|e| map_error(e, 0))
     }
 
     /// 在只读连接上执行一条只读语句。

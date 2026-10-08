@@ -1,12 +1,9 @@
-//! 未保存编辑的草稿（意外退出后恢复）与正文导出（保存失败时的退路）。M1-05。
+//! 未保存编辑的草稿（意外退出后恢复）。M1-05。正文导出见 transfer.rs。
 
 use std::{
     fs,
     path::{Path, PathBuf},
 };
-
-use tauri::AppHandle;
-use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     db::PROJECT_DB_FILE,
@@ -63,36 +60,6 @@ pub fn draft_delete(project_dir: String, chapter_id: String) -> Result<(), FileE
         }),
         _ => Ok(()),
     }
-}
-
-/// 弹出保存对话框，把正文写入作者选择的文件。路径只来自对话框，WebView 不能指定任意路径。
-/// 返回是否已保存（作者取消时为 false）。
-#[tauri::command]
-pub async fn export_text(
-    app: AppHandle,
-    suggested_name: String,
-    content: String,
-) -> Result<bool, FileError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let picked = app
-            .dialog()
-            .file()
-            .set_file_name(&suggested_name)
-            .add_filter("文本文件", &["txt"])
-            .blocking_save_file();
-        let Some(path) = picked else { return Ok(false) };
-        let path = path.into_path().map_err(|e| FileError::IoError {
-            detail: e.to_string(),
-        })?;
-        fs::write(path, content.as_bytes()).map_err(|e| FileError::IoError {
-            detail: e.to_string(),
-        })?;
-        Ok(true)
-    })
-    .await
-    .map_err(|e| FileError::IoError {
-        detail: e.to_string(),
-    })?
 }
 
 #[cfg(test)]

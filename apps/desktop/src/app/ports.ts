@@ -29,11 +29,43 @@ export interface DraftPort {
   remove(projectDir: string, chapterId: string): Promise<Result<void, string>>;
 }
 
-/** 保存失败时的退路：导出为文本文件（保存对话框由 Rust 弹出）、复制到剪贴板。 */
+/** 导出正文（保存对话框由 Rust 弹出）、复制到剪贴板。 */
 export interface ExportPort {
   /** 返回是否已保存；作者取消时为 false。 */
-  exportText(suggestedName: string, content: string): Promise<Result<boolean, string>>;
+  exportText(suggestedName: string, content: string, kind?: 'txt' | 'md'): Promise<Result<boolean, string>>;
   copyText(content: string): Promise<Result<void, string>>;
+}
+
+/** 选中的导入文件，按识别出的编码解码后的文字（Rust 命令 `import_pick_text`）。 */
+export type DecodedText = {
+  readonly token: string;
+  readonly fileName: string;
+  readonly encoding: string;
+  readonly text: string;
+  /** 有无法按该编码解码的字节，提示作者换一种编码。 */
+  readonly hadErrors: boolean;
+};
+
+export type PackageFile = { readonly path: string; readonly content: string };
+
+/** 导入文件与作品包。文件只经 Rust 弹出的对话框选择，界面拿不到路径。 */
+export interface TransferPort {
+  pickText(): Promise<Result<DecodedText | null, string>>;
+  redecode(token: string, encoding: string): Promise<Result<DecodedText, string>>;
+  release(token: string): Promise<void>;
+  exportProject(suggestedName: string, files: readonly PackageFile[]): Promise<Result<boolean, string>>;
+  pickProject(): Promise<Result<readonly PackageFile[] | null, string>>;
+}
+
+export type BackupKind = 'auto' | 'manual' | 'pre-restore' | 'pre-migration';
+export type BackupInfo = { readonly name: string; readonly kind: BackupKind; readonly createdAt: string; readonly sizeBytes: number };
+
+/** 当前打开的作品库的备份（Rust 命令 `backup_*`）。 */
+export interface BackupPort {
+  list(): Promise<Result<readonly BackupInfo[], string>>;
+  create(kind: 'auto' | 'manual', now: string): Promise<Result<BackupInfo, string>>;
+  /** 恢复到备份；返回恢复前自动保存的现稿备份。 */
+  restore(name: string, now: string): Promise<Result<BackupInfo, string>>;
 }
 
 export interface Clock {
@@ -51,6 +83,8 @@ export type AppDeps = {
   readonly opener: ProjectOpener;
   readonly drafts: DraftPort;
   readonly exporter: ExportPort;
+  readonly transfer: TransferPort;
+  readonly backups: BackupPort;
   readonly clock: Clock;
   readonly ids: Ids;
 };

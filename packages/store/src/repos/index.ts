@@ -8,3 +8,5 @@ export { planParagraphSave } from './paragraph-plan';
 export { listParagraphs, saveChapterParagraphs } from './paragraph';
 export type { Snapshot, SnapshotParagraph, SnapshotReason, SnapshotSummary } from './snapshot';
 export { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
+export type { ImportChapter } from './import';
+export { importChapters } from './import';

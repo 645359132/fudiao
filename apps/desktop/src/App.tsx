@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { AppStore } from './state/store';
+import { ImportPreview } from './ui/ImportPreview';
 import { LibraryScreen } from './ui/LibraryScreen';
 import { MessageBar } from './ui/MessageBar';
 import { StoreProvider, useApp } from './ui/store-context';
@@ -15,6 +16,7 @@ function Screens() {
     <>
       <MessageBar />
       {hasWork ? <WorkScreen /> : <LibraryScreen />}
+      <ImportPreview />
     </>
   );
 }

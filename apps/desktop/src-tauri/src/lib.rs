@@ -1,9 +1,10 @@
-//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿与导出（M1-05）；凭据代理与凭据存储在 M2-01、M2-02 加入。
+//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿（M1-05）、导入导出与备份（M1-07）；凭据代理与凭据存储在 M2-01、M2-02 加入。
 //! 业务逻辑留在 TypeScript，Rust 只提供 IO 与凭据（施工文档第二章）。
 
 pub mod db;
 pub mod drafts;
 pub mod library;
+pub mod transfer;
 
 use serde::Serialize;
 
@@ -32,6 +33,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(db::commands::DbState::default())
+        .manage(transfer::ImportState::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             db::commands::db_open,
@@ -45,7 +47,15 @@ pub fn run() {
             drafts::draft_read,
             drafts::draft_write,
             drafts::draft_delete,
-            drafts::export_text
+            db::commands::backup_list,
+            db::commands::backup_create,
+            db::commands::backup_restore,
+            transfer::import_pick_text,
+            transfer::import_redecode,
+            transfer::import_release,
+            transfer::export_text,
+            transfer::export_project,
+            transfer::import_pick_project
         ])
         .run(tauri::generate_context!())
         .expect("无法启动应用");

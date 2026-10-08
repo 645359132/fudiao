@@ -23,6 +23,11 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 sha2 = "0.11"
 # 只用于选择作品文件夹。
 tauri-plugin-dialog = "2.8"
+# 导入 TXT 时识别与转换编码（GB18030、Big5、UTF-16 等）。
+encoding_rs = "0.8"
+chardetng = "1"
+# 作品包（zip）：只启用 deflate，不带其他压缩格式与加密。
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -4,7 +4,15 @@ import type { Chapter, CurrentParagraph, ProjectPatch, SavedParagraph, Snapshot,
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
+import type { BackupInfo, DecodedText } from '../app/ports';
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
+import { splitText, type SplitRule } from '../app/text-import';
+
+/** 导入预览：选中的文件、拆分方式与导入到哪里。 */
+export type ImportDraft = { readonly decoded: DecodedText; readonly rule: SplitRule; readonly target: 'new' | 'current' };
+
+/** 文件名去掉扩展名，作为新作品名或不拆分时的章节名。 */
+export const baseName = (fileName: string) => fileName.replace(/\.(txt|md|markdown)$/i, '') || '导入的作品';
 
 /** 正文编辑器向状态登记的句柄：离开章节前先保存。 */
 export type EditorHandle = {
@@ -16,7 +24,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -28,6 +36,8 @@ export type AppState = {
   /** 当前章节的快照列表与正在预览的快照。 */
   readonly snapshots: readonly SnapshotSummary[] | null;
   readonly previewSnapshot: Snapshot | null;
+  readonly importDraft: ImportDraft | null;
+  readonly backups: readonly BackupInfo[] | null;
   readonly wordCount: number;
 
   readonly init: () => Promise<void>;
@@ -78,6 +88,20 @@ export type AppState = {
   readonly previewSnapshotById: (id: string) => Promise<void>;
   /** 恢复到快照（现稿先存为快照），回到正文。 */
   readonly restoreSnapshot: (id: string) => Promise<void>;
+
+  /** 选择 TXT 或 Markdown 文件，进入导入预览。 */
+  readonly startTextImport: (target: 'new' | 'current') => Promise<void>;
+  readonly setImportRule: (rule: SplitRule) => void;
+  readonly setImportEncoding: (encoding: string) => Promise<void>;
+  readonly cancelImport: () => Promise<void>;
+  readonly confirmImport: () => Promise<void>;
+  readonly importProject: () => Promise<void>;
+  readonly exportBook: (kind: 'txt' | 'md') => Promise<void>;
+  readonly exportChapter: (id: string, kind: 'txt' | 'md') => Promise<void>;
+  readonly exportProject: () => Promise<void>;
+  readonly openBackups: () => Promise<void>;
+  readonly createBackup: () => Promise<void>;
+  readonly restoreBackup: (name: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -110,6 +134,12 @@ export function createAppStore(service: AppService): AppStore {
       const c = chapter(id);
       return c === undefined ? Promise.resolve(false) : run(f(c), (work) => ({ work, ...after }));
     };
+    /** 打开已有作品后的自动备份；失败只提示，不妨碍写作。 */
+    async function autoBackup() {
+      const result = await service.autoBackupIfDue();
+      if (!result.ok) set({ message: `自动备份失败：${describeError(result.error)}` });
+    }
+
     const opened = (work: WorkView): Partial<AppState> => ({
       work,
       selectedChapterId: work.chapters[0]?.id ?? null,
@@ -130,16 +160,20 @@ export function createAppStore(service: AppService): AppStore {
       contentRevision: 0,
       snapshots: null,
       previewSnapshot: null,
+      importDraft: null,
+      backups: null,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
       },
       createWork: (title) => run(service.createWork(title), opened),
       async openWork(id) {
-        await run(service.openWork(id), opened);
+        if (await run(service.openWork(id), opened)) await autoBackup();
       },
       async addWorkFromFolder() {
+        const before = get().work;
         await run(service.addWorkFromFolder(), (work) => (work === null ? {} : opened(work)));
+        if (get().work !== before) await autoBackup();
       },
       async closeWork() {
         if (!(await get().leaveChapter())) return;
@@ -285,8 +319,84 @@ export function createAppStore(service: AppService): AppStore {
         const chapterId = get().selectedChapterId;
         if (ok && chapterId !== null) await run(service.listSnapshots(chapterId), (snapshots) => ({ snapshots }));
       },
+      async startTextImport(target) {
+        if (target === 'current' && !(await get().leaveChapter())) return;
+        const picked = await service.pickText();
+        if (!picked.ok) set({ message: `读取文件失败：${picked.error}` });
+        else if (picked.value !== null) {
+          const md = /\.(md|markdown)$/i.test(picked.value.fileName);
+          set({ importDraft: { decoded: picked.value, rule: { kind: md ? 'markdown' : 'auto' }, target }, message: null });
+        }
+      },
+      setImportRule(rule) {
+        const draft = get().importDraft;
+        if (draft !== null) set({ importDraft: { ...draft, rule } });
+      },
+      async setImportEncoding(encoding) {
+        const draft = get().importDraft;
+        if (draft === null) return;
+        const decoded = await service.redecode(draft.decoded.token, encoding);
+        if (decoded.ok) set({ importDraft: { ...draft, decoded: decoded.value } });
+        else set({ message: decoded.error });
+      },
+      async cancelImport() {
+        const draft = get().importDraft;
+        set({ importDraft: null });
+        if (draft !== null) await service.releaseImport(draft.decoded.token);
+      },
+      async confirmImport() {
+        const draft = get().importDraft;
+        if (draft === null) return;
+        const title = baseName(draft.decoded.fileName);
+        const chapters = splitText(draft.decoded.text, draft.rule, title);
+        if (!chapters.ok) {
+          set({ message: chapters.error });
+          return;
+        }
+        const done =
+          draft.target === 'new'
+            ? await run(service.importTextAsWork(title, chapters.value), opened)
+            : await run(service.importChaptersIntoWork(chapters.value), (work) => ({ work }));
+        if (done) {
+          set({ importDraft: null });
+          await service.releaseImport(draft.decoded.token);
+        }
+      },
+      async importProject() {
+        await run(service.importProject(), (work) => (work === null ? {} : opened(work)));
+      },
+      async exportBook(kind) {
+        if (!(await get().leaveChapter())) return;
+        await run(service.exportText(kind), () => ({}));
+      },
+      async exportChapter(id, kind) {
+        if (!(await get().leaveChapter())) return;
+        await run(service.exportText(kind, id), () => ({}));
+      },
+      async exportProject() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.exportProject(), () => ({}));
+      },
+      async openBackups() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.listBackups(), (backups) => ({ backups, panel: 'backups', chapterContent: null }));
+      },
+      async createBackup() {
+        if (!(await get().leaveChapter())) return;
+        if (await run(service.createBackup(), () => ({}))) await run(service.listBackups(), (backups) => ({ backups }));
+      },
+      async restoreBackup(name) {
+        if (!(await get().leaveChapter())) return;
+        const ok = await run(service.restoreBackup(name), (work) => ({
+          work,
+          chapterContent: null,
+          contentRevision: get().contentRevision + 1,
+          selectedChapterId: work.chapters.some((c) => c.id === get().selectedChapterId) ? get().selectedChapterId : (work.chapters[0]?.id ?? null),
+        }));
+        if (ok) await run(service.listBackups(), (backups) => ({ backups }));
+      },
       async exportText(title, text) {
-        const result = await service.exportText(`${title}.txt`, text);
+        const result = await service.exportPlainText(`${title}.txt`, text);
         if (!result.ok) set({ message: `导出失败：${result.error}` });
       },
     };

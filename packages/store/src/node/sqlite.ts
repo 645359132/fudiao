@@ -45,7 +45,11 @@ export function loadMigrations(dir: string = defaultMigrationsDir): Migration[] 
   return migrations;
 }
 
-export type ProjectDb = SqlPort & { close(): void };
+export type ProjectDb = SqlPort & {
+  close(): void;
+  /** 用 VACUUM INTO 把整个库写成一份一致的副本。 */
+  backupTo(path: string): void;
+};
 
 /**
  * 打开或创建 `<projectDir>/project.sqlite` 并执行待执行的迁移。已有数据的库在迁移前先用 VACUUM INTO 备份。
@@ -204,6 +208,10 @@ function port(writer: Database.Database, reader: Database.Database): ProjectDb {
         if (writer.inTransaction) writer.exec('ROLLBACK');
         return Promise.resolve(err(mapError(error, index)));
       }
+    },
+
+    backupTo(path) {
+      writer.prepare('VACUUM INTO ?').run(path);
     },
 
     close() {

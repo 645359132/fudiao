@@ -39,6 +39,7 @@ export function ChapterPanel() {
   const revision = useApp((s) => s.contentRevision);
   const createSnapshot = useApp((s) => s.createSnapshot);
   const openHistory = useApp((s) => s.openHistory);
+  const exportChapter = useApp((s) => s.exportChapter);
   const busy = useApp((s) => s.busy);
   const chapterId = chapter?.id ?? null;
   const loaded = content !== null && content.chapterId === chapterId;
@@ -57,6 +58,9 @@ export function ChapterPanel() {
         </button>
         <button type="button" disabled={busy} onClick={() => void openHistory()}>
           版本快照
+        </button>
+        <button type="button" disabled={busy} title="把本章已保存的正文导出为 TXT" onClick={() => void exportChapter(chapter.id, 'txt')}>
+          导出 TXT
         </button>
       </div>
       {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}

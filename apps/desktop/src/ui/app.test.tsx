@@ -286,3 +286,83 @@ describe('章节快照', () => {
     await waitFor(() => expect(editorText()).toBe('一句。'));
   });
 });
+
+describe('导入、导出与备份', () => {
+  const novel = '第一章 雨夜\n　　雨下得更紧了。\n第二章 当铺\n　　掌柜抬起头。';
+
+  it('导入 TXT 为新作品：预览拆分结果，可改拆分方式与编码，确认后打开作品', async () => {
+    const { deps, user } = start();
+    deps.textPicks.push({ fileName: '雨夜.txt', text: novel });
+    await user.click(await screen.findByRole('button', { name: '导入 TXT/Markdown' }));
+    const dialog = await screen.findByRole('dialog', { name: '导入预览' });
+    expect(within(dialog).getByText('共 2 章，13 字')).toBeTruthy();
+    await user.click(within(dialog).getByRole('radio', { name: '不拆分，整篇为一章' }));
+    expect(within(dialog).getByText('共 1 章，23 字')).toBeTruthy();
+    await user.click(within(dialog).getByRole('radio', { name: /自动识别章节标题/ }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: '编码' }), 'GB18030');
+    expect(await within(dialog).findByText(/无法按这种编码识别/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: '导入' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['第一章 雨夜', '第二章 当铺']));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: '雨夜' })).toBeTruthy();
+  });
+
+  it('作品中导入章节，追加到目录末尾；取消导入什么也不写', async () => {
+    const { deps, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '楔子');
+    deps.textPicks.push({ fileName: '续写.txt', text: novel }, { fileName: '不要.txt', text: novel });
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '导入章节（TXT/Markdown）' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '导入' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['楔子', '第一章 雨夜', '第二章 当铺']));
+    await user.click(screen.getByRole('menuitem', { name: '导入章节（TXT/Markdown）' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '取消' }));
+    expect(chapterTitles()).toEqual(['楔子', '第一章 雨夜', '第二章 当铺']);
+  });
+
+  it('导出整本、本章与作品包', async () => {
+    const { deps, user } = start();
+    deps.textPicks.push({ fileName: '雨夜.txt', text: novel });
+    await user.click(await screen.findByRole('button', { name: '导入 TXT/Markdown' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '导入' }));
+    await waitFor(() => expect(chapterTitles()).toHaveLength(2));
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '导出整本 TXT' }));
+    await user.click(screen.getByRole('menuitem', { name: '导出作品包' }));
+    await user.click(await screen.findByRole('button', { name: '导出 TXT' }));
+    await waitFor(() => expect(deps.exported.map((e) => e.name)).toEqual(['雨夜.txt', '第一章 雨夜.txt']));
+    expect(deps.exportedPackages[0]?.files.map((f) => f.path)).toContain('chapters/0002-第二章 当铺.md');
+  });
+
+  it('备份与恢复：立即备份，修改后恢复，目录回到备份时', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
+    await user.click(await screen.findByRole('button', { name: '立即备份' }));
+    const list = await screen.findByRole('list', { name: '备份列表' });
+    expect(within(list).getByText('手动备份')).toBeTruthy();
+    await addChapter(user, '第二章');
+    expect(chapterTitles()).toEqual(['第一章', '第二章']);
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
+    await user.click(await screen.findByRole('button', { name: /恢复到 .* 的备份/ }));
+    await user.click(screen.getByRole('button', { name: '确定恢复' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['第一章']));
+    expect(within(screen.getByRole('list', { name: '备份列表' })).getByText('恢复前自动备份')).toBeTruthy();
+  });
+
+  it('打开已有作品时自动备份一次', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    await screen.findByRole('navigation', { name: '章节目录' });
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
+    const list = await screen.findByRole('list', { name: '备份列表' });
+    expect(within(list).getAllByText('自动备份')).toHaveLength(1);
+  });
+});

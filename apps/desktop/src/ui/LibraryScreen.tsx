@@ -36,6 +36,8 @@ export function LibraryScreen() {
   const createWork = useApp((s) => s.createWork);
   const addWorkFromFolder = useApp((s) => s.addWorkFromFolder);
   const chooseLibraryDir = useApp((s) => s.chooseLibraryDir);
+  const startTextImport = useApp((s) => s.startTextImport);
+  const importProject = useApp((s) => s.importProject);
   const busy = useApp((s) => s.busy);
   const [creating, setCreating] = useState(false);
 
@@ -60,6 +62,12 @@ export function LibraryScreen() {
         </button>
         <button type="button" disabled={busy} onClick={() => void addWorkFromFolder()}>
           打开作品文件夹
+        </button>
+        <button type="button" disabled={busy} onClick={() => void startTextImport('new')}>
+          导入 TXT/Markdown
+        </button>
+        <button type="button" disabled={busy} onClick={() => void importProject()}>
+          导入作品包
         </button>
       </div>
       {creating && <TextForm label="作品名" submitText="创建" onSubmit={createWork} onCancel={() => setCreating(false)} />}

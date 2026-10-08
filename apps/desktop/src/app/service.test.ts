@@ -173,3 +173,87 @@ describe('作品信息与章节', () => {
     expect(await app.createChapter('第一章')).toEqual({ ok: false, error: { code: 'no_work' } });
   });
 });
+
+describe('导入导出与备份', () => {
+  const chapters = [
+    { title: '第一章 雨夜', paragraphs: ['雨下得更紧了。', '他没有回头。'] },
+    { title: '第二章 当铺', paragraphs: ['掌柜抬起头。'] },
+  ];
+
+  it('导入为新作品；导入章节追加到当前作品末尾', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.importTextAsWork('雨夜', chapters));
+    expect(work.project.title).toBe('雨夜');
+    expect(titles(work)).toEqual(['第一章 雨夜', '第二章 当铺']);
+    const more = value(await app.importChaptersIntoWork([{ title: '第三章 旧信', paragraphs: ['信纸已经发黄。'] }]));
+    expect(titles(more)).toEqual(['第一章 雨夜', '第二章 当铺', '第三章 旧信']);
+    const third = more.chapters[2];
+    if (!third) throw new Error();
+    expect(value(await app.openChapter(third.id)).saved.map((p) => p.text)).toEqual(['信纸已经发黄。']);
+  });
+
+  it('导出整本 TXT 与 Markdown，导出一章', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.importTextAsWork('雨夜', chapters));
+    value(await app.exportText('txt'));
+    value(await app.exportText('md'));
+    value(await app.exportText('md', work.chapters[1]?.id));
+    expect(deps.exported).toEqual([
+      { name: '雨夜.txt', content: '第一章 雨夜\n\n　　雨下得更紧了。\n　　他没有回头。\n\n第二章 当铺\n\n　　掌柜抬起头。\n' },
+      { name: '雨夜.md', content: '# 雨夜\n\n## 第一章 雨夜\n\n雨下得更紧了。\n\n他没有回头。\n\n## 第二章 当铺\n\n掌柜抬起头。\n\n' },
+      { name: '第二章 当铺.md', content: '# 第二章 当铺\n\n掌柜抬起头。\n\n' },
+    ]);
+  });
+
+  it('导出作品包再导入：成为一部新作品，与原作品同标识时换新标识，内容一致', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const original = value(await app.importTextAsWork('雨夜', chapters));
+    value(await app.exportProject());
+    const pkg = deps.exportedPackages[0];
+    expect(pkg?.name).toBe('雨夜.zip');
+    deps.projectPicks.push(pkg?.files ?? []);
+    const imported = value(await app.importProject());
+    if (imported === null) throw new Error('应导入');
+    expect(imported.project.id).not.toBe(original.project.id);
+    expect(imported.entry.path).toBe(`${original.entry.path}（2）`);
+    expect(titles(imported)).toEqual(titles(original));
+    expect(value(await app.loadLibrary()).works).toHaveLength(2);
+    // 取消选择时什么也不做。
+    expect(await app.importProject()).toEqual({ ok: true, value: null });
+  });
+
+  it('不是作品包时报错，不建作品', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    deps.projectPicks.push([{ path: 'manifest.json', content: '{"format":"other"}' }]);
+    expect(await app.importProject()).toEqual({ ok: false, error: { code: 'library', detail: '这不是复调的作品包' } });
+    expect(value(await app.loadLibrary()).works).toEqual([]);
+  });
+
+  it('自动备份：打开作品时距上次超过 24 小时才备份', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    expect(value(await app.autoBackupIfDue())).toBe(true);
+    expect(value(await app.autoBackupIfDue())).toBe(false);
+    expect(value(await app.listBackups()).map((b) => b.kind)).toEqual(['auto']);
+  });
+
+  it('立即备份与恢复：恢复后内容回到备份时，现稿成为恢复前备份', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.importTextAsWork('雨夜', chapters));
+    const backup = value(await app.createBackup());
+    expect(backup.kind).toBe('manual');
+    value(await app.createChapter('第三章'));
+    const restored = value(await app.restoreBackup(backup.name));
+    expect(titles(restored)).toEqual(['第一章 雨夜', '第二章 当铺']);
+    const kinds = value(await app.listBackups()).map((b) => b.kind);
+    expect(kinds).toContain('pre-restore');
+    // 恢复后作品照常可写。
+    expect(titles(value(await app.createChapter('新的第三章')))).toEqual(['第一章 雨夜', '第二章 当铺', '新的第三章']);
+  });
+});
