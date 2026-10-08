@@ -9,7 +9,9 @@ export type OccurrenceKind =
   | 'discovered'
   | 'ruled'
   /** 作者安排的外部事件或导演提议。 */
-  | 'external';
+  | 'external'
+  /** 读到物品上写着的内容，只有读的人知道。 */
+  | 'read';
 
 /**
  * 裁决产生的“发生的事”，是感知分发的单位。全部为结构化数据，不含程序生成的文字；
@@ -37,6 +39,8 @@ export type Occurrence = {
   /** 来自语义裁决的请求标识与描述。 */
   readonly ruling?: string;
   readonly description?: { readonly visual?: string; readonly sound?: string };
+  /** 读到的内容（kind 为 read 时）。 */
+  readonly content?: string;
 };
 
 export type OccurrenceDraft = Omit<Occurrence, 'id'>;

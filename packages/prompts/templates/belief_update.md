@@ -1,6 +1,6 @@
 ---
 id: belief_update
-version: 3
+version: 4
 task: belief_update
 output: BeliefUpdateOutput
 ---

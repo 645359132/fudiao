@@ -101,6 +101,11 @@ export const ItemSpec = z.object({
   use: z.object({ loudness: Amount }).optional(),
   /** 被持有时他人看不见，例如藏在怀里的密信。 */
   concealed: z.boolean().default(false),
+  /**
+   * 物品上写着的内容（例如信）。持有者使用这件物品时读到，旁人只看见他在用这件物品。
+   * 与作者的秘密不同，内容是角色读了就会知道的文字。
+   */
+  content: z.string().min(1).optional(),
 });
 
 /** 作者标记的秘密。text 只给作者与命中判断使用，永远不进入角色视图。 */

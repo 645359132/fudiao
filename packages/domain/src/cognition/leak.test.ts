@@ -59,6 +59,18 @@ describe('金丝雀泄露测试', () => {
     expect(viewText(dropped, W)).toContain(`${CANARY}-ITEM-letter`);
   });
 
+  it('物品上写着的内容只有读的人知道；读之前持有者也不知道', () => {
+    const marker = `${CANARY}-CONTENT-letter`;
+    const lettered = { ...scene, items: scene.items.map((i) => (i.id === 'letter' ? { ...i, content: marker } : i)) };
+    const before = { ...initialState(lettered, 11), round: 1 };
+    for (const who of actors) expect(canonicalJson(buildCharacterView(lettered, before, who))).not.toContain(marker);
+    const read = run(lettered, before, [{ actor: P, kind: 'use_item', item: item('letter') }]).nextState;
+    expect(canonicalJson(buildCharacterView(lettered, read, P))).toContain(marker);
+    for (const who of actors.filter((a) => a !== P)) {
+      expect(canonicalJson(buildCharacterView(lettered, read, who)), `${who} 不应读到信的内容`).not.toContain(marker);
+    }
+  });
+
   it('看不见的区域中的物品不出现，进入后才出现', () => {
     for (const who of actors) expectAbsent(start, who, `${CANARY}-ITEM-ledger`);
     const inside = withEffects(scene, start, [

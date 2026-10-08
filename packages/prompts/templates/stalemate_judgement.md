@@ -1,6 +1,6 @@
 ---
 id: stalemate_judgement
-version: 1
+version: 2
 task: judgement
 output: StalemateJudgementOutput
 ---

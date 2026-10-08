@@ -1,6 +1,6 @@
 ---
 id: director_proposal
-version: 1
+version: 2
 task: director
 output: DirectorProposalOutput
 ---

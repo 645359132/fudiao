@@ -82,6 +82,20 @@ describe('adjudicate', () => {
     expect(result.value.pending.flatMap((r) => r.actors)).toContain(A);
   });
 
+  it('使用带内容的物品（读信）由程序结算：旁人看见在用这件物品，内容只给持有者', () => {
+    const lettered = warehouse((s) => {
+      s.items![0]!.content = '货在城西第三个码头。';
+    });
+    const result = adjudicate(lettered, { ...initialState(lettered, 1), round: 1 }, [{ actor: P, kind: 'use_item', item: item('letter') }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.pending).toEqual([]);
+    expect(result.value.occurrences).toEqual([
+      expect.objectContaining({ kind: 'use_item', actor: P, item: 'letter', visible: true }),
+      expect.objectContaining({ kind: 'read', actor: P, item: 'letter', visible: false, loudness: 0, participants: [P], content: '货在城西第三个码头。' }),
+    ]);
+  });
+
   it('没有句子的台词不生成说话', () => {
     const result = adjudicate(scene, round1, [{ actor: P, kind: 'defend', utterance: { sentences: [], volume: 'normal' } }]);
     expect(result.ok && result.value.occurrences.map((o) => o.kind)).toEqual(['defend']);

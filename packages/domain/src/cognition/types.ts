@@ -36,6 +36,8 @@ export type Observation = {
   readonly violation?: RuleViolation;
   readonly speech?: ObservedSpeech;
   readonly description?: { readonly visual?: string; readonly sound?: string };
+  /** 读到的物品内容；只有读的人（当事人）的观察中才有。 */
+  readonly content?: string;
 };
 
 export type KnowledgeBody =

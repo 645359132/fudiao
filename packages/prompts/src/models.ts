@@ -39,6 +39,7 @@ export function observationModel(o: Observation, names: Names, viewer: string | 
     soundKind: o.sound === undefined ? null : flag(o.sound),
     visual: o.description?.visual ?? null,
     soundText: o.description?.sound ?? null,
+    content: o.content ?? null,
   };
 }
 

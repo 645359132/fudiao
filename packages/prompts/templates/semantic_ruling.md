@@ -1,6 +1,6 @@
 ---
 id: semantic_ruling
-version: 3
+version: 4
 task: semantic_ruling
 output: SemanticRulingOutput
 ---

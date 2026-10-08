@@ -23,6 +23,7 @@ const SOUND_OF: Readonly<Record<OccurrenceKind, SoundCategory>> = {
   discovered: 'noise',
   ruled: 'noise',
   external: 'noise',
+  read: 'noise',
 };
 
 /** 看见时能认出物品的行动：物品被拿在手里、放下或使用。 */
@@ -56,6 +57,7 @@ export function observe(
       ...(o.violation && { violation: o.violation }),
       ...(o.speech && { speech: { clarity: 'full', sentences: o.speech.sentences, volume: o.speech.volume } }),
       ...(o.description && { description: o.description }),
+      ...(o.content !== undefined && { content: o.content }),
     };
   }
 

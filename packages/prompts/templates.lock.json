@@ -8,36 +8,36 @@
     "sha256": "86a1b1b567a37fb155f5007a0f0e0c7bbeee40cbe8739cfc361712c24f179268"
   },
   "beat_sheet": {
-    "version": "2",
-    "sha256": "ed13c80cbd9eaecd64e64ef7cc09a3a7d0680633a8357c27eb6d4644bdf5816a"
+    "version": "3",
+    "sha256": "a12b3da7964f1fe8bda7e791ae7d8dd2fb949da29fb9969d73aa965014b35e50"
   },
   "belief_update": {
-    "version": "3",
-    "sha256": "349433c7dd23490650262191d60ad2767d32aafdb027a02a69ccd952b7ccd3c6"
+    "version": "4",
+    "sha256": "62028630052f440a53bcd12bbe15fce99e2891e92b53d769beeb2cf82b457da4"
   },
   "candidate_text": {
-    "version": "2",
-    "sha256": "99cc70999d0e71672ebdecc5b7d44beb6734d465be1b02928eb989536b652285"
+    "version": "3",
+    "sha256": "3f89bc243ddc830115dcdb720ddeee4c8ce8e42c81bef7a91c72e9402f73d3ff"
   },
   "character_action": {
-    "version": "5",
-    "sha256": "06f531b02084d2691b3e3f9397e715d632bc30f78e8db8bdce8543cdedf1e0a7"
+    "version": "6",
+    "sha256": "c7e730fb8fc51b78c8d7a851e3709f69c429fd85ed656b1b9048db4c7d9f7717"
   },
   "connection_test": {
     "version": "1",
     "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
   },
   "director_proposal": {
-    "version": "1",
-    "sha256": "eec3a439254f655820f823ef4a11cb62ae908b5b99bde9a2c8aa3316644704e0"
+    "version": "2",
+    "sha256": "b8e5efbcfc50a3564bcd66bfef70fc9dd3b6ae288bc5e2f71e27949dcb9adbcd"
   },
   "evidence_judgement": {
-    "version": "2",
-    "sha256": "64d78d0390a1208463931896e9c8b9ca80f19ea7c94fedd3e1a00c3cebadf7d6"
+    "version": "3",
+    "sha256": "5eb646e6fe8839ed19bd7ce17bb460f0101a3f52d398e2c7d82de83399633dc5"
   },
   "run_synopsis": {
-    "version": "1",
-    "sha256": "ad9cfee6162e252c5a1179037f840fb6caa819ee3bfb47550825d5d617a8b9dd"
+    "version": "2",
+    "sha256": "4b98027c3944279a06f0c2cc676abef8ea4b1c63fd51148f3ab47486025bac05"
   },
   "scene_draft": {
     "version": "1",
@@ -52,12 +52,12 @@
     "sha256": "1dc06375e372c9779462baa375268c459e8f8eac5ec1afb9632074a7061b0eb8"
   },
   "semantic_ruling": {
-    "version": "3",
-    "sha256": "a30acb52b41b10a3d221ea26052d6fac4d831bc9952dda1c5e73c949aafd7165"
+    "version": "4",
+    "sha256": "fea14a50468d2b1cf7c071cb5178bced13d90ebaef1254e9bf1dbc3fee60d441"
   },
   "stalemate_judgement": {
-    "version": "1",
-    "sha256": "e0a2a218963691c1491233b222cfa25dd1c0e52f3217f334804bbada0e402465"
+    "version": "2",
+    "sha256": "491903088612aa65545e530886142c7256d05de9a27224a8d644de9ad4532020"
   },
   "structured_repair": {
     "version": "1",

@@ -1,6 +1,6 @@
 ---
 id: evidence_judgement
-version: 2
+version: 3
 task: judgement
 output: EvidenceJudgementOutput
 ---

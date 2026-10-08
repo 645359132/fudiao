@@ -140,7 +140,22 @@ export function adjudicate(
         occurrences.push({ ...base, kind: 'drop', item: action.item, loudness: loud.drop });
         break;
       case 'use_item': {
-        const use = scene.items.find((i) => i.id === action.item)?.use;
+        const spec = scene.items.find((i) => i.id === action.item);
+        const use = spec?.use;
+        const at = action.item === undefined ? undefined : state.world.items[action.item]?.location;
+        const held = at?.kind === 'actor' && at.actor === action.actor;
+        // 读物品上写着的内容：程序结算，不需要语义裁决。旁人看见在用这件物品，内容只给读的人。
+        if (spec?.content !== undefined && held && action.item !== undefined) {
+          occurrences.push({
+            ...base,
+            kind: 'use_item',
+            loudness: use?.loudness ?? loud.use_item,
+            item: action.item,
+            ...(action.target && { target: action.target }),
+          });
+          occurrences.push({ ...base, kind: 'read', visible: false, loudness: 0, item: action.item, content: spec.content });
+          break;
+        }
         if (use === undefined && declared.length === 0) {
           semantic.add(action.actor);
           break;

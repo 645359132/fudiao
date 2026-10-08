@@ -1,6 +1,6 @@
 ---
 id: run_synopsis
-version: 1
+version: 2
 task: candidate_text
 output: SynopsisOutput
 ---

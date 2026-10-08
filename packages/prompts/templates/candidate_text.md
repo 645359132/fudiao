@@ -1,6 +1,6 @@
 ---
 id: candidate_text
-version: 2
+version: 3
 task: candidate_text
 ---
 @@system

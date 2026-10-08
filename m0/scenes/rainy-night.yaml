@@ -74,7 +74,12 @@ scene:
             about: [a_qing]
 
   items:
-    - { id: unsent_letter, name: 没寄出的信, location: { kind: actor, actor: a_qing }, concealed: true }
+    - id: unsent_letter
+      name: 没寄出的信
+      location: { kind: actor, actor: a_qing }
+      concealed: true
+      # 读信的人（使用这件物品）会读到下面的内容；旁人只看见他在看信。
+      content: 周砚：那天我没去，不是不想去。那晚娘忽然病得厉害，家里连夜套了车，天没亮就把我带回了乡下，我连跟你说一声都来不及。后来我写了好几回信，每回写到一半就觉得像在找借口，就都没寄。我知道这些话迟了，可我还是想让你知道，我没有忘。——阿青
     - { id: umbrella, name: 油纸伞, location: { kind: zone, zone: eaves } }
 
   secrets:
