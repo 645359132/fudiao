@@ -672,3 +672,33 @@ describe('用量与费用', () => {
   });
 });
 
+describe('AI 上下文', () => {
+  it('打开清单：列出前后文与出现的设定；作者移除后列入“没有用到”，再加入回来', async () => {
+    const { service, store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('沈砚走进当铺。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['沈砚走进当铺。']));
+    const created = await service.createEntity('character', '沈砚');
+    if (!created.ok) throw new Error('设定');
+    await service.updateEntity(created.value.created, { description: '当铺掌柜的旧友' });
+
+    await user.click(screen.getByRole('button', { name: 'AI 上下文' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 上下文' });
+    const used = within(drawer).getByRole('list', { name: '会用到的上下文' });
+    expect(within(used).getByText('设定：沈砚')).toBeTruthy();
+    expect(within(used).getByText('前文')).toBeTruthy();
+    expect(within(drawer).getByRole('status').textContent).toMatch(/^已用 [\d,]+ \/ 预算 8,000 Token$/);
+
+    await user.click(within(drawer).getByRole('button', { name: '移除 设定：沈砚' }));
+    const unused = await within(drawer).findByRole('list', { name: '没有用到的上下文' });
+    expect(within(unused).getByText(/作者移除/)).toBeTruthy();
+    await user.click(within(unused).getByRole('button', { name: '加入 设定：沈砚' }));
+    await waitFor(() => expect(within(within(drawer).getByRole('list', { name: '会用到的上下文' })).getByText(/作者加入/)).toBeTruthy());
+
+    await user.click(within(drawer).getByRole('button', { name: '关闭 AI 上下文' }));
+    expect(screen.queryByRole('complementary', { name: 'AI 上下文' })).toBeNull();
+  });
+});
+

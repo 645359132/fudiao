@@ -11,6 +11,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fudiao/context": "workspace:*",
     "@fudiao/editor": "workspace:*",
     "@fudiao/llm": "workspace:*",
     "@fudiao/prompts": "workspace:*",

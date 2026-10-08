@@ -129,7 +129,19 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
     setSaveStatus({ kind: 'saved' });
     editor.on('update', onUpdate);
     dom.addEventListener('compositionend', onCompositionEnd);
-    registerEditor({ chapterId, flush: () => autosave.flush() });
+    // 选区位置换成段落标识加段内下标（AI 上下文与选区操作使用）。
+    const at = (pos: number) => {
+      const resolved = editor.state.doc.resolve(pos);
+      const id: unknown = resolved.parent.attrs['id'];
+      return resolved.parent.type.name === 'paragraph' && typeof id === 'string' ? { paragraphId: id, offset: resolved.parentOffset } : null;
+    };
+    const selection = () => {
+      const { from, to } = editor.state.selection;
+      const start = at(from);
+      const end = at(to);
+      return start === null || end === null ? null : { from: start, to: end };
+    };
+    registerEditor({ chapterId, flush: () => autosave.flush(), selection });
     return () => {
       editor.off('update', onUpdate);
       dom.removeEventListener('compositionend', onCompositionEnd);

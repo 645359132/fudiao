@@ -60,7 +60,9 @@ import {
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
 import { toMarkdown, toTxt, type ExportChapter } from './text-export';
+import { buildWritingContext, type ContextManifest, type ContextOverrides } from '@fudiao/context';
 import { modelRunner } from './model-runner';
+import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
 import { modelServices } from './model-services';
 import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type Preferences, type WorkEntry } from './library';
 import { describeError, type AppError } from './errors';
@@ -263,6 +265,35 @@ export function createAppService(deps: AppDeps) {
   return {
     ...services,
     runner,
+
+    /**
+     * 写作类 AI 任务的上下文清单（B18）：按选区（或光标）收集本章与前面的章节、出现的设定与相关事实，按预算选入。
+     * 调用前界面先保存正在编辑的正文。
+     */
+    async writingContext(chapterId: string, selection: EditorSelection | null, overrides: ContextOverrides): Promise<Result<ContextManifest, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const port = session.port;
+      const project = await getProject(port);
+      if (!project.ok) return err(repo(project.error));
+      if (project.value === null) return err({ code: 'not_found' });
+      const chapters = await listChapters(port, 'normal');
+      if (!chapters.ok) return err(repo(chapters.error));
+      const paragraphs = await listParagraphs(port, chapterId);
+      if (!paragraphs.ok) return err(repo(paragraphs.error));
+      const entities = await listEntities(port);
+      if (!entities.ok) return err(repo(entities.error));
+      const facts = await listFacts(port);
+      if (!facts.ok) return err(repo(facts.error));
+      const input = gatherWritingInput(
+        { project: project.value, chapters: chapters.value, chapterId, paragraphs: paragraphs.value, entities: entities.value, facts: facts.value },
+        selection,
+      );
+      if (input === null) return err({ code: 'not_found' });
+      // 没有设置默认模型时用保守的预算；设置读不出来也不妨碍查看清单。
+      const choice = await services.defaultModel();
+      const budget = contextBudget(choice.ok ? (choice.value?.model ?? null) : null);
+      return ok(buildWritingContext(input, budget, overrides));
+    },
 
     /** 用量与费用（B19）：全部、按任务、按模型，以及最近的调用。 */
     async usage(): Promise<Result<{ summary: UsageSummary; recent: readonly LlmCallRow[] }, AppError>> {

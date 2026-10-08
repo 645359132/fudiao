@@ -1133,3 +1133,53 @@ fieldset.plain {
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+
+/* AI 上下文清单 */
+.context-drawer {
+  width: 320px;
+}
+
+.context-drawer h4 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.context-budget.over {
+  color: var(--danger);
+}
+
+.context-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.context-entry {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.context-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.context-entry-head .context-title {
+  font-weight: 600;
+}
+
+.context-entry-head button {
+  margin-left: auto;
+  padding: 1px 8px;
+}
+
+.context-text {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+

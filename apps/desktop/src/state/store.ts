@@ -5,10 +5,12 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
+import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
 import type { ConnectionReport, ListedModel } from '@fudiao/llm';
 import type { ModelServicesView, ProviderForm, ProviderView } from '../app/model-services';
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
 import { splitText, type SplitRule } from '../app/text-import';
+import type { EditorSelection } from '../app/writing-context';
 
 /** 导入预览：选中的文件、拆分方式与导入到哪里。 */
 export type ImportDraft = { readonly decoded: DecodedText; readonly rule: SplitRule; readonly target: 'new' | 'current' };
@@ -23,6 +25,8 @@ export type Reveal = { readonly chapterId: string; readonly paragraphId: string;
 export type EditorHandle = {
   readonly chapterId: string;
   readonly flush: () => Promise<boolean>;
+  /** 当前的选区或光标；选在段落之外时为 null。 */
+  readonly selection: () => EditorSelection | null;
 };
 
 export type AppState = {
@@ -55,6 +59,11 @@ export type AppState = {
   readonly wordCount: number;
   /** 段落来源统计（打开“段落来源”时读取）。 */
   readonly sourceStats: SourceStats | null;
+  /** AI 上下文清单（B18）：抽屉是否打开、最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
+  readonly contextDrawerOpen: boolean;
+  readonly writingContext: ContextManifest | null;
+  readonly contextSelection: EditorSelection | null;
+  readonly contextOverrides: Readonly<Record<string, ContextOverrides>>;
   /** 用量与费用（打开“用量与费用”时读取）。 */
   readonly usage: { readonly summary: UsageSummary; readonly recent: readonly LlmCallRow[] } | null;
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
@@ -152,6 +161,11 @@ export type AppState = {
   readonly openSourceStats: () => Promise<void>;
   readonly setShowParagraphSource: (show: boolean) => Promise<void>;
 
+  /** 保存正文后按当前光标计算上下文清单并打开抽屉。 */
+  readonly openContext: () => Promise<void>;
+  readonly closeContext: () => void;
+  /** 作者加入（include 为真）或移除一个上下文条目，随即重算。 */
+  readonly toggleContextItem: (id: string, include: boolean) => Promise<void>;
   /** 保存正文后打开用量与费用。 */
   readonly openUsage: () => Promise<void>;
   /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
@@ -248,6 +262,10 @@ export function createAppStore(service: AppService): AppStore {
       selectedFactId: null,
       sourceStats: null,
       usage: null,
+      contextDrawerOpen: false,
+      writingContext: null,
+      contextSelection: null,
+      contextOverrides: {},
       searchQuery: '',
       searchResult: null,
       reveal: null,
@@ -282,7 +300,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {} });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -534,7 +552,8 @@ export function createAppStore(service: AppService): AppStore {
         if (done) await reloadFacts();
         return done;
       },
-      openEntityDrawer: (id) => set({ drawerEntityId: id }),
+      // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
+      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false }),
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;
         set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawerEntityId: null });
@@ -544,6 +563,31 @@ export function createAppStore(service: AppService): AppStore {
       async openSourceStats() {
         if (!(await get().leaveChapter())) return;
         await run(service.sourceStats(), (sourceStats) => ({ sourceStats, panel: 'sources', chapterContent: null, drawerEntityId: null }));
+      },
+      async openContext() {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null) return;
+        const selection = editor?.chapterId === chapterId ? editor.selection() : null;
+        if (editor !== null && !(await editor.flush())) return;
+        const overrides = get().contextOverrides[chapterId] ?? NO_OVERRIDES;
+        await run(service.writingContext(chapterId, selection, overrides), (writingContext) => ({
+          writingContext,
+          contextSelection: selection,
+          contextDrawerOpen: true,
+          drawerEntityId: null,
+        }));
+      },
+      closeContext: () => set({ contextDrawerOpen: false }),
+      async toggleContextItem(id, include) {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null) return;
+        const current = get().contextOverrides[chapterId] ?? NO_OVERRIDES;
+        const next: ContextOverrides = {
+          include: include ? [...current.include.filter((x) => x !== id), id] : current.include.filter((x) => x !== id),
+          exclude: include ? current.exclude.filter((x) => x !== id) : [...current.exclude.filter((x) => x !== id), id],
+        };
+        set({ contextOverrides: { ...get().contextOverrides, [chapterId]: next } });
+        await run(service.writingContext(chapterId, get().contextSelection, next), (writingContext) => ({ writingContext }));
       },
       async openUsage() {
         if (!(await get().leaveChapter())) return;

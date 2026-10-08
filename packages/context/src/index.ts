@@ -1,2 +1,9 @@
-// 本包在后续任务中实现，见施工文档第八章。
-export {};
+export type {
+  ContextEntry,
+  ContextItem,
+  ContextKind,
+  ContextManifest,
+  ContextOverrides,
+  WritingContextInput,
+} from './writing-context';
+export { buildWritingContext, collectWritingCandidates, estimateTokens, NO_OVERRIDES, selectContext } from './writing-context';

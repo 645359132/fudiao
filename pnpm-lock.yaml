@@ -202,6 +202,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@fudiao/context':
+        specifier: workspace:*
+        version: link:../../packages/context
       '@fudiao/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -312,7 +315,11 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
-  packages/context: {}
+  packages/context:
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
 
   packages/domain:
     dependencies:

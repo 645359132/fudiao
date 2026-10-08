@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Chapter, Project } from '@fudiao/store';
 import { ChapterEditor } from './ChapterEditor';
+import { ContextDrawer } from './ContextDrawer';
 import { EntityDrawer } from './SettingsPanel';
 import { NO_CHAPTERS, useApp } from './store-context';
 
@@ -40,6 +41,7 @@ export function ChapterPanel() {
   const revision = useApp((s) => s.contentRevision);
   const createSnapshot = useApp((s) => s.createSnapshot);
   const openHistory = useApp((s) => s.openHistory);
+  const openContext = useApp((s) => s.openContext);
   const exportChapter = useApp((s) => s.exportChapter);
   const busy = useApp((s) => s.busy);
   const chapterId = chapter?.id ?? null;
@@ -63,11 +65,15 @@ export function ChapterPanel() {
         <button type="button" disabled={busy} title="把本章已保存的正文导出为 TXT" onClick={() => void exportChapter(chapter.id, 'txt')}>
           导出 TXT
         </button>
+        <button type="button" disabled={busy} title="查看 AI 会用到的章节、设定与事实" onClick={() => void openContext()}>
+          AI 上下文
+        </button>
       </div>
       {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}
       <div className="chapter-with-drawer">
         {loaded ? <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
         <EntityDrawer />
+        <ContextDrawer />
       </div>
       <details className="chapter-notes">
         <summary>梗概与写作备注</summary>
