@@ -157,8 +157,8 @@ describe('命令（测试模型）', () => {
     const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as { phase: string; endReason: string; calls: number };
     expect(summary).toMatchObject({ phase: 'Ended', endReason: 'max_rounds' });
     expect(summary.calls).toBeGreaterThan(0);
-    expect(lines.at(-1)).toMatch(/^运行 TESTRUN0000：Ended（max_rounds），10 回合/);
-  });
+    expect(lines.at(-1)).toMatch(/^运行 TESTRUN0000：Ended（max_rounds），20 回合/);
+  }, 30_000);
 
   it('run --resume 继续已有的运行而不重复调用', async () => {
     const before = model.calls.length;
@@ -252,8 +252,8 @@ describe('命令（测试模型）', () => {
       d,
     );
     expect(code).toBe(0);
-    // 3 次运行 × 10 回合；导演按张力曲线在 9 个回合边界各请求一次，计入估算。
-    expect(lines[0]).toMatch(/^预计调用 171 次/);
+    // 3 次运行 × 20 回合；导演按张力曲线在 19 个回合边界各请求一次，计入估算。
+    expect(lines[0]).toMatch(/^预计调用 351 次/);
     const runs = readdirSync(batch).filter((f) => f.startsWith('TESTRUN')).sort();
     expect(runs).toEqual(['TESTRUN0000', 'TESTRUN0001', 'TESTRUN0002']);
     for (const run of runs) {
@@ -261,7 +261,7 @@ describe('命令（测试模型）', () => {
       expect(summary.directorEvents).toBe(1);
     }
     const directorCalls = director.calls.filter((c) => c.step === 'director');
-    expect(directorCalls.length).toBe(3 * 9);
+    expect(directorCalls.length).toBe(3 * 19);
     expect(directorCalls[0]?.text).toContain('第三轮爆发');
   }, 30_000);
 
