@@ -96,6 +96,17 @@ describe('adjudicate', () => {
     ]);
   });
 
+  it('把带内容的物品递给别人（指定了对象）不是读信，交给语义裁决', () => {
+    const lettered = warehouse((s) => {
+      s.items![0]!.content = '货在城西第三个码头。';
+    });
+    const result = adjudicate(lettered, { ...initialState(lettered, 1), round: 1 }, [{ actor: P, kind: 'use_item', item: item('letter'), target: A }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.occurrences.filter((o) => o.kind === 'read')).toEqual([]);
+    expect(result.value.pending.flatMap((r) => r.actors)).toContain(P);
+  });
+
   it('没有句子的台词不生成说话', () => {
     const result = adjudicate(scene, round1, [{ actor: P, kind: 'defend', utterance: { sentences: [], volume: 'normal' } }]);
     expect(result.ok && result.value.occurrences.map((o) => o.kind)).toEqual(['defend']);

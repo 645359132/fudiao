@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 6
+version: 7
 task: character_action
 output: ActionProposal
 ---
@@ -20,7 +20,7 @@ output: ActionProposal
 - probe：试探某人或某物（target）
 - attack：攻击某人（target），可指定使用的武器（item）
 - defend：采取防备
-- use_item：使用身上的物品（item），可指定对象（target）
+- use_item：使用身上的物品（item），可指定对象（target）；自己读身上写着字的东西（如信）时不填 target，递给或出示给别人时 target 填对方
 - take：拾取所在区域内无人持有的物品（item）
 - drop：放下身上的物品（item）
 - speak：说话（utterance），可指定对谁说（target）；volume 为 whisper（耳语，只有同一区域听得到）、normal 或 shout

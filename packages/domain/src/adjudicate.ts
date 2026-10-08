@@ -145,14 +145,10 @@ export function adjudicate(
         const at = action.item === undefined ? undefined : state.world.items[action.item]?.location;
         const held = at?.kind === 'actor' && at.actor === action.actor;
         // 读物品上写着的内容：程序结算，不需要语义裁决。旁人看见在用这件物品，内容只给读的人。
-        if (spec?.content !== undefined && held && action.item !== undefined) {
-          occurrences.push({
-            ...base,
-            kind: 'use_item',
-            loudness: use?.loudness ?? loud.use_item,
-            item: action.item,
-            ...(action.target && { target: action.target }),
-          });
+        // 指定了别人作对象（递给、出示给某人）不是自己读，照旧交给语义裁决。
+        const forSelf = action.target === undefined || action.target === action.actor;
+        if (spec?.content !== undefined && held && forSelf && action.item !== undefined) {
+          occurrences.push({ ...base, kind: 'use_item', loudness: use?.loudness ?? loud.use_item, item: action.item });
           occurrences.push({ ...base, kind: 'read', visible: false, loudness: 0, item: action.item, content: spec.content });
           break;
         }
