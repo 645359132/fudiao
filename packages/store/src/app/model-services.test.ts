@@ -11,7 +11,9 @@ import {
   getDefaultModelId,
   listModels,
   listProviders,
+  recordSelfTest,
   setDefaultModel,
+  updateModel,
   updateProvider,
   type StoredCapabilities,
 } from './model-services';
@@ -106,5 +108,22 @@ describe('应用设置库：模型服务', () => {
     value(await deleteProvider(db, 'p1', 1));
     expect(value(await listModels(db))).toEqual([]);
     expect(value(await getDefaultModelId(db))).toBeNull();
+  });
+
+  it('修改能力与价格记为作者编辑；改了结构化输出方式须重新自检', async () => {
+    const db = fresh();
+    value(await createProvider(db, 'p1', { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.test/v1', authMethod: 'api_key' }, ctx));
+    let m = value(await createModel(db, 'm1', { providerId: 'p1', modelId: 'x', capabilities: caps, source: 'service' }, ctx));
+    m = value(await recordSelfTest(db, m, { status: 'passed', at: ctx.now, reason: null }, ctx));
+    expect(m).toMatchObject({ capabilities: { selfTestPassed: true }, selfTest: { status: 'passed' }, version: 2 });
+    // 只改价格与上下文长度：自检结果保留。
+    m = value(await updateModel(db, m, { displayName: '模型 X', capabilities: { ...caps, contextWindow: 64_000 }, prices: { input: 0.5, output: 2 } }, ctx));
+    expect(m).toMatchObject({ displayName: '模型 X', source: 'user', prices: { input: 0.5, output: 2 }, capabilities: { contextWindow: 64_000, selfTestPassed: true }, selfTest: { status: 'passed' } });
+    // 改结构化输出方式：自检作废。
+    m = value(await updateModel(db, m, { displayName: '', capabilities: { ...caps, structuredOutput: 'native' }, prices: null }, ctx));
+    expect(m).toMatchObject({ displayName: 'x', prices: null, capabilities: { structuredOutput: 'native', selfTestPassed: false }, selfTest: null });
+    expect(await updateModel(db, m, { displayName: 'x', capabilities: caps, prices: { input: -1, output: 0 } }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    m = value(await recordSelfTest(db, m, { status: 'failed', at: ctx.now, reason: '第 1 次：输出不符合格式' }, ctx));
+    expect(m).toMatchObject({ capabilities: { selfTestPassed: false }, selfTest: { status: 'failed', reason: '第 1 次：输出不符合格式' } });
   });
 });

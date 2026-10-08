@@ -45,6 +45,7 @@
 - M2-01 已完成：Rust 凭据代理 `src-tauri/src/net.rs`（`net_fetch` 流式转发、`net_cancel`、凭据与源绑定、只允许 https 或回环地址、不跟随重定向、按源限制并发；reqwest 用 native-tls）；`packages/llm` 的 `createProxyFetch` 与 `testConnection`、`connection_test` 模板；桌面端传输层 `adapters/tauri-net.ts`。凭据的系统存储在 M2-02。
 - M2-02 已完成：凭据存储 `src-tauri/src/credentials.rs`（Windows 凭据管理器，凭据与源一起保存）；应用设置库 `app.sqlite`（`packages/store/app-migrations`、`packages/store/src/app/model-services.ts`）；应用层 `apps/desktop/src/app/model-services.ts`（服务、凭据、模型、默认模型、连接测试）与“模型服务”页。
 - M2-02a 已完成：`OpenAIAdapter`（Responses API，`packages/llm/src/adapters/openai-responses.ts`），桌面端的 OpenAI 官方服务改用它；Gemini 走兼容模式；五类服务的适配器选择与连接测试（不联网）均有测试，适配器契约测试覆盖三个适配器、直连与经代理。
+- M2-02b 已完成：适配器的 `listModels` 与“获取模型列表”；能力合并 `resolveModel`（内置能力与价格表 `builtin-models.ts` 首版为空，待核实后填写）；“能力与价格”编辑（来源记为用户编辑，改结构化输出方式须重新自检）；能力自检 `runSelfTest`、`self_test` 模板与期望内容。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

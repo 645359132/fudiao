@@ -1,22 +1,8 @@
 import { useState } from 'react';
-import type { ConnectionReport, LlmError } from '@fudiao/llm';
-import { PROVIDER_KINDS, type ProviderKind, type StoredModel } from '@fudiao/store';
+import { PROVIDER_KINDS, type ProviderKind } from '@fudiao/store';
 import { PROVIDER_PRESETS, type ProviderForm, type ProviderView } from '../app/model-services';
+import { ListedModels, ModelRow } from './ModelDetails';
 import { useApp } from './store-context';
-
-const ERROR_HINT: Partial<Record<LlmError['code'], string>> = {
-  auth: 'API Key 无效或没有权限',
-  rate_limited: '请求过于频繁或额度不足',
-  network: '连不上服务，请检查地址、网络与代理设置',
-  bad_request: '请求被拒绝，请检查模型名称',
-  server: '服务暂时不可用',
-};
-
-function describeReport(r: ConnectionReport | 'testing'): string {
-  if (r === 'testing') return '测试中……';
-  if (r.ok) return `连接正常：${r.latencyMs.toLocaleString('zh-CN')} 毫秒，模型 ${r.servedModel}`;
-  return `连接失败：${ERROR_HINT[r.error.code] ?? '未知错误'}（${r.error.message}）`;
-}
 
 /** 凭据状态：没有保存、已保存，或服务地址改了但还没重新填写 API Key。 */
 function credentialText(p: ProviderView): string {
@@ -141,43 +127,14 @@ function ProviderEditor({ provider, onDone }: { readonly provider: ProviderView 
   );
 }
 
-function ModelRow({ model, isDefault }: { readonly model: StoredModel; readonly isDefault: boolean }) {
-  const test = useApp((s) => s.testConnection);
-  const report = useApp((s) => s.connectionTests[model.id]);
-  const setDefault = useApp((s) => s.setDefaultModel);
-  const remove = useApp((s) => s.deleteModel);
-  const busy = useApp((s) => s.busy);
-  return (
-    <li className="model-row">
-      <span className="model-name">{model.displayName}</span>
-      {isDefault ? (
-        <span className="badge">默认模型</span>
-      ) : (
-        <button type="button" disabled={busy} onClick={() => void setDefault(model.id)}>
-          设为默认
-        </button>
-      )}
-      <button type="button" disabled={report === 'testing'} onClick={() => void test(model.id)}>
-        连接测试
-      </button>
-      <button type="button" disabled={busy} aria-label={`删除模型 ${model.displayName}`} onClick={() => void remove(model.id)}>
-        删除
-      </button>
-      {report !== undefined && (
-        <span className={report !== 'testing' && !report.ok ? 'report failed' : 'report'} role="status" aria-label={`${model.displayName} 的连接测试`}>
-          {describeReport(report)}
-        </span>
-      )}
-    </li>
-  );
-}
-
 function ProviderCard({ provider }: { readonly provider: ProviderView }) {
   // 选择器返回状态中的原数组，过滤放在外面：每次返回新数组会让订阅不停地重新渲染。
   const allModels = useApp((s) => s.modelServices?.models);
   const models = allModels?.filter((m) => m.providerId === provider.id) ?? [];
   const defaultModelId = useApp((s) => s.modelServices?.defaultModelId ?? null);
   const addModel = useApp((s) => s.addModel);
+  const fetchList = useApp((s) => s.fetchModelList);
+  const listed = useApp((s) => s.listedModels[provider.id]);
   const remove = useApp((s) => s.deleteProvider);
   const busy = useApp((s) => s.busy);
   const [editing, setEditing] = useState(false);
@@ -218,6 +175,10 @@ function ProviderCard({ provider }: { readonly provider: ProviderView }) {
           <ModelRow key={m.id} model={m} isDefault={m.id === defaultModelId} />
         ))}
       </ul>
+      <button type="button" disabled={listed === 'loading'} onClick={() => void fetchList(provider.id)}>
+        {listed === 'loading' ? '获取中……' : '获取模型列表'}
+      </button>
+      {listed !== undefined && listed !== 'loading' && <ListedModels providerId={provider.id} listed={listed} added={new Set(models.map((m) => m.modelId))} />}
       <form
         className="text-form"
         onSubmit={(e) => {
@@ -227,7 +188,7 @@ function ProviderCard({ provider }: { readonly provider: ProviderView }) {
           });
         }}
       >
-        <input aria-label={`${provider.name} 的模型名称`} placeholder="模型名称（服务文档中的模型标识）" value={modelId} onChange={(e) => setModelId(e.currentTarget.value)} />
+        <input aria-label={`${provider.name} 的模型名称`} placeholder="或手动填写模型名称（服务文档中的模型标识）" value={modelId} onChange={(e) => setModelId(e.currentTarget.value)} />
         <button type="submit" disabled={busy || modelId.trim() === ''}>
           添加模型
         </button>

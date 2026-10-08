@@ -43,6 +43,10 @@
     "version": "1",
     "sha256": "a6b51734e6de4a32e9b3019aa392405bfc0eaeddbfe6874f4937eb80340fe97a"
   },
+  "self_test": {
+    "version": "1",
+    "sha256": "1dc06375e372c9779462baa375268c459e8f8eac5ec1afb9632074a7061b0eb8"
+  },
   "semantic_ruling": {
     "version": "2",
     "sha256": "2bc9a1f1b6a0e02b4302dc6ede4ae7293dabfdaca88d00b1b449a546d70eccf1"

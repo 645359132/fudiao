@@ -19,6 +19,7 @@ export {
   renderDirectorProposal,
   renderEvidenceJudgement,
   renderConnectionTest,
+  renderSelfTest,
   renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,
@@ -41,3 +42,4 @@ export {
   SynopsisOutput,
 } from './schemas';
 export type { RulingEffect } from './schemas';
+export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
+import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { mapSdkError } from './errors';
 
@@ -24,7 +25,7 @@ export type AnthropicAdapterOptions = {
 const SERVER_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 /** Anthropic Messages API 适配器。服务特有的字段只在这里转换，不越过端口。 */
-export class AnthropicAdapter implements LlmPort {
+export class AnthropicAdapter implements LlmPort, ModelLister {
   private readonly client: Anthropic;
 
   constructor(options: AnthropicAdapterOptions) {
@@ -36,6 +37,30 @@ export class AnthropicAdapter implements LlmPort {
       ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
       ...(options.viaCredentialProxy === true && { dangerouslyAllowBrowser: true }),
     });
+  }
+
+  /** 模型列表（B56）。服务返回的能力（结构化输出、思考深度、上下文长度、最大输出）直接采用。 */
+  async listModels(options: CallOptions = {}): Promise<Result<readonly ListedModel[], LlmError>> {
+    const out: ListedModel[] = [];
+    try {
+      for await (const m of this.client.models.list({ limit: 100 }, options.signal === undefined ? {} : { signal: options.signal })) {
+        const caps = m.capabilities;
+        out.push({
+          id: m.id,
+          displayName: m.display_name || null,
+          capabilities: {
+            ...(caps !== null && { structuredOutput: caps.structured_outputs.supported ? 'native' : 'prompt' }),
+            ...(caps !== null && { reasoningControl: caps.effort.supported ? 'effort' : 'none' }),
+            ...(m.max_input_tokens !== null && { contextWindow: m.max_input_tokens }),
+            ...(m.max_tokens !== null && { maxOutputTokens: m.max_tokens }),
+          },
+        });
+        if (out.length >= MAX_LISTED_MODELS) break;
+      }
+    } catch (error) {
+      return errList(mapSdkError(error));
+    }
+    return okList(out);
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {

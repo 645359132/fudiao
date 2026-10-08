@@ -4,6 +4,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { anthropicChunks } from '@fudiao/llm/testing';
+import { SELF_TEST_EXPECTED } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../App';
 import { createAppService } from '../app/service';
@@ -624,4 +625,28 @@ describe('模型服务', () => {
     await user.click(screen.getByRole('button', { name: '返回' }));
     expect(await screen.findByRole('button', { name: '新建作品' })).toBeTruthy();
   });
+
+  it('获取模型列表并添加；能力自检通过后显示结果', async () => {
+    const { deps, user } = start();
+    await user.click(await screen.findByRole('button', { name: '模型服务' }));
+    await user.click(await screen.findByRole('button', { name: '添加服务' }));
+    const form = screen.getByRole('form', { name: '添加服务' });
+    await user.type(within(form).getByLabelText('API Key'), 'sk-ant-secret-123');
+    await user.click(within(form).getByRole('button', { name: '保存' }));
+    const card = await screen.findByRole('region', { name: 'Anthropic' });
+
+    const listed = { type: 'model', id: 'model-y', display_name: '模型 Y', created_at: '2026-01-01T00:00:00Z', max_input_tokens: 100_000, max_tokens: 8_000, capabilities: null };
+    deps.llmResponses.push({ body: JSON.stringify({ data: [listed], has_more: false, first_id: 'model-y', last_id: 'model-y' }) });
+    await user.click(within(card).getByRole('button', { name: '获取模型列表' }));
+    await user.click(await within(card).findByRole('button', { name: '添加 model-y' }));
+    expect(await within(card).findByText('默认模型')).toBeTruthy();
+    expect(within(card).getByText('没有可添加的模型。')).toBeTruthy();
+    expect(within(card).getByRole('note', { name: '模型 Y 的能力' }).textContent).toContain('未自检');
+
+    const good = JSON.stringify(SELF_TEST_EXPECTED);
+    for (let i = 0; i < 3; i++) deps.llmResponses.push({ chunks: anthropicChunks('model-y', { text: [good], end: 'stop' }) });
+    await user.click(within(card).getByRole('button', { name: '能力自检' }));
+    await waitFor(() => expect(within(card).getByRole('note', { name: '模型 Y 的能力' }).textContent).toContain('自检通过'));
+  });
 });
+

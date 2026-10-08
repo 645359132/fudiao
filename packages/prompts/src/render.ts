@@ -19,6 +19,7 @@ import type { z } from 'zod';
 import { parseTemplate, render, type RenderContext } from './engine';
 import { PARTIAL_SOURCES, TEMPLATE_SOURCES } from './generated/templates';
 import { modelJsonSchema } from './json-schema';
+import { SelfTestOutput } from './self-test';
 import { flag, knowledgeModel, namesOf, observationModel, violationModel, viewModel } from './models';
 import {
   ActionProposal,
@@ -45,6 +46,7 @@ export type RenderedPrompt = {
 };
 
 const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
+  SelfTestOutput,
   ActionProposal,
   BaselineOutput,
   SynopsisOutput,
@@ -340,6 +342,11 @@ export function renderBaseline(scene: Scene, options: { readonly targetLength: n
     rules: scene.rules.narrativeRules,
     hasRules: scene.rules.narrativeRules.length > 0,
   });
+}
+
+/** 能力自检（B57）：固定的结构化输出测试，期望内容见 self-test.ts。 */
+export function renderSelfTest(): Result<RenderedPrompt, string> {
+  return renderTemplate('self_test', {});
 }
 
 /** 模型服务的连接测试（B15）：一个最小的请求，只用来确认地址、凭据与模型可用。 */

@@ -225,6 +225,41 @@ export async function createModel(port: SqlPort, id: string, input: ModelInput, 
   return created;
 }
 
+export type ModelPatch = {
+  readonly displayName: string;
+  readonly capabilities: StoredCapabilities;
+  readonly prices: StoredPrices | null;
+};
+
+/**
+ * 作者修改模型的能力与价格（B56 的用户覆盖）：来源记为 user。结构化输出方式改变时，原来的自检结果不再适用，
+ * 清除自检记录并标记为未通过。
+ */
+export async function updateModel(port: SqlPort, model: StoredModel, patch: ModelPatch, ctx: WriteContext): Promise<Result<StoredModel, RepoError>> {
+  const capabilities = StoredCapabilities.safeParse(patch.capabilities);
+  if (!capabilities.success) return err({ code: 'invalid', detail: '模型能力无效' });
+  const prices = patch.prices === null ? null : StoredPrices.safeParse(patch.prices);
+  if (prices !== null && !prices.success) return err({ code: 'invalid', detail: '价格须为非负数' });
+  const retest = capabilities.data.structuredOutput !== model.capabilities.structuredOutput;
+  const caps = retest ? { ...capabilities.data, selfTestPassed: false } : { ...capabilities.data, selfTestPassed: model.capabilities.selfTestPassed };
+  return guardedUpdate(port, ModelRow, 'model_profile', model.id, {
+    sql: `UPDATE model_profile SET display_name = ?, capabilities = ?, prices = ?, source = 'user', ${retest ? 'self_test = NULL, ' : ''}
+            version = version + 1, updated_at = ?
+          WHERE id = ? AND version = ? RETURNING ${MODEL_COLUMNS}`,
+    params: [patch.displayName.trim() || model.modelId, JSON.stringify(caps), prices === null ? null : JSON.stringify(prices.data), ctx.now, model.id, model.version],
+  });
+}
+
+/** 记录能力自检的结果（B57）：通过时模型才能用于必须输出结构化数据的任务。 */
+export function recordSelfTest(port: SqlPort, model: StoredModel, result: SelfTest, ctx: WriteContext): Promise<Result<StoredModel, RepoError>> {
+  const caps = { ...model.capabilities, selfTestPassed: result.status === 'passed' };
+  return guardedUpdate(port, ModelRow, 'model_profile', model.id, {
+    sql: `UPDATE model_profile SET capabilities = ?, self_test = ?, version = version + 1, updated_at = ?
+          WHERE id = ? AND version = ? RETURNING ${MODEL_COLUMNS}`,
+    params: [JSON.stringify(caps), JSON.stringify(result), ctx.now, model.id, model.version],
+  });
+}
+
 export async function deleteModel(port: SqlPort, id: string, expectedVersion: number): Promise<Result<void, RepoError>> {
   const done = await port.transaction([{ sql: 'DELETE FROM model_profile WHERE id = ? AND version = ?', params: [id, expectedVersion], expectChanges: 1 }]);
   if (done.ok) return ok(undefined);

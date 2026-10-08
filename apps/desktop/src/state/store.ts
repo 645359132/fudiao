@@ -1,11 +1,11 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
-import type { ConnectionReport } from '@fudiao/llm';
+import type { ConnectionReport, ListedModel } from '@fudiao/llm';
 import type { ModelServicesView, ProviderForm, ProviderView } from '../app/model-services';
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
 import { splitText, type SplitRule } from '../app/text-import';
@@ -60,6 +60,10 @@ export type AppState = {
   readonly modelServices: ModelServicesView | null;
   /** 各模型最近一次连接测试：进行中或结果。 */
   readonly connectionTests: Readonly<Record<string, ConnectionReport | 'testing'>>;
+  /** 各服务获取到的模型列表（获取中为 loading）。 */
+  readonly listedModels: Readonly<Record<string, readonly ListedModel[] | 'loading'>>;
+  /** 正在自检的模型。 */
+  readonly selfTesting: readonly string[];
   /** 查找页的查询与结果；回到正文后保留，再打开查找页时接着看。 */
   readonly searchQuery: string;
   readonly searchResult: SearchResult | null;
@@ -162,6 +166,10 @@ export type AppState = {
   readonly deleteModel: (modelId: string) => Promise<void>;
   readonly setDefaultModel: (modelId: string) => Promise<void>;
   readonly testConnection: (modelId: string) => Promise<void>;
+  readonly fetchModelList: (providerId: string) => Promise<void>;
+  readonly addListedModel: (providerId: string, listed: ListedModel) => Promise<void>;
+  readonly updateModel: (modelId: string, patch: ModelPatch) => Promise<boolean>;
+  readonly runSelfTest: (modelId: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -241,6 +249,8 @@ export function createAppStore(service: AppService): AppStore {
       modelServicesOpen: false,
       modelServices: null,
       connectionTests: {},
+      listedModels: {},
+      selfTesting: [],
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -567,6 +577,29 @@ export function createAppStore(service: AppService): AppStore {
       },
       async setDefaultModel(modelId) {
         await run(service.setDefaultModel(modelId), (modelServices) => ({ modelServices }));
+      },
+      async fetchModelList(providerId) {
+        set({ listedModels: { ...get().listedModels, [providerId]: 'loading' } });
+        const result = await service.fetchModelList(providerId);
+        if (result.ok) set({ listedModels: { ...get().listedModels, [providerId]: result.value } });
+        else {
+          const { [providerId]: _dropped, ...rest } = get().listedModels;
+          set({ listedModels: rest, message: describeError(result.error) });
+        }
+      },
+      async addListedModel(providerId, listed) {
+        await run(service.addModel(providerId, listed.id, listed), (modelServices) => ({ modelServices }));
+      },
+      async updateModel(modelId, patch) {
+        const model = get().modelServices?.models.find((m) => m.id === modelId);
+        return model === undefined ? false : run(service.updateModel(model, patch), (modelServices) => ({ modelServices }));
+      },
+      async runSelfTest(modelId) {
+        set({ selfTesting: [...get().selfTesting, modelId] });
+        const result = await service.runSelfTest(modelId);
+        const selfTesting = get().selfTesting.filter((id) => id !== modelId);
+        if (result.ok) set({ selfTesting, modelServices: result.value.view });
+        else set({ selfTesting, message: describeError(result.error) });
       },
       async testConnection(modelId) {
         set({ connectionTests: { ...get().connectionTests, [modelId]: 'testing' } });

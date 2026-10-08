@@ -5,6 +5,8 @@ export type { OpenAIAdapterOptions } from './adapters/openai-responses';
 export { OpenAIAdapter } from './adapters/openai-responses';
 export { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './adapters/openai-chat';
 export type { Budget } from './budget';
+export type { ListedModel, ModelLister, SelfTestPrompt, SelfTestReport } from './models';
+export { isModelLister, MAX_LISTED_MODELS, runSelfTest, SELF_TEST_RUNS } from './models';
 export type { ConnectionPrompt, ConnectionReport } from './connection';
 export { testConnection } from './connection';
 export type { NetEvent, NetRequest, NetTransport } from './proxy-fetch';

@@ -3,6 +3,8 @@ import { PLACEHOLDER_API_KEY } from '@fudiao/llm';
 import { anthropicChunks, errorBody, openaiChunks, responsesChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { SELF_TEST_EXPECTED } from '@fudiao/prompts';
+import { resolveModel } from './model-services';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -145,5 +147,61 @@ describe('模型服务', () => {
       const auth = sent?.headers['x-api-key'] ?? sent?.headers['authorization'];
       expect(auth, c.kind).toBe(local ? undefined : c.kind === 'anthropic' ? 'key-anthropic' : `Bearer key-${c.kind}`);
     }
+  });
+
+  it('新模型的能力：保守能力 ← 内置表 ← 服务返回；价格只来自内置表', () => {
+    const table = [{ kind: 'openai' as const, modelId: 'known', capabilities: { structuredOutput: 'native' as const, contextWindow: 400_000 }, prices: { input: 1, output: 4 } }];
+    expect(resolveModel('openai', 'unknown', null, table)).toMatchObject({ source: 'user', prices: null, capabilities: { structuredOutput: 'prompt', contextWindow: 32_000 } });
+    expect(resolveModel('openai', 'known', { id: 'known', displayName: null, capabilities: {} }, table)).toMatchObject({
+      source: 'builtin',
+      prices: { input: 1, output: 4 },
+      capabilities: { structuredOutput: 'native', contextWindow: 400_000, selfTestPassed: false },
+    });
+    expect(resolveModel('openai', 'known', { id: 'known', displayName: '已知', capabilities: { contextWindow: 128_000 } }, table)).toMatchObject({
+      source: 'service',
+      displayName: '已知',
+      capabilities: { structuredOutput: 'native', contextWindow: 128_000 },
+    });
+    expect(resolveModel('anthropic', 'known', null, table).source).toBe('user');
+  });
+
+  it('获取模型列表并从中添加：带上服务返回的能力', async () => {
+    const { deps, app } = setup();
+    const [p] = value(await app.saveProvider(null, { ...anthropic, apiKey: SECRET })).providers;
+    const model = {
+      type: 'model', id: 'model-x', display_name: '模型 X', created_at: '2026-01-01T00:00:00Z', max_input_tokens: 100_000, max_tokens: 8_000,
+      capabilities: { structured_outputs: { supported: true }, effort: { supported: true } },
+    };
+    deps.llmResponses.push({ body: JSON.stringify({ data: [model], has_more: false, first_id: 'model-x', last_id: 'model-x' }) });
+    const listed = value(await app.fetchModelList(p?.id ?? ''));
+    expect(listed).toEqual([{ id: 'model-x', displayName: '模型 X', capabilities: { structuredOutput: 'native', reasoningControl: 'effort', contextWindow: 100_000, maxOutputTokens: 8_000 } }]);
+    expect(deps.llmRequests.at(-1)?.headers['x-api-key']).toBe(SECRET);
+    const view = value(await app.addModel(p?.id ?? '', 'model-x', listed[0] ?? null));
+    expect(view.models[0]).toMatchObject({ modelId: 'model-x', displayName: '模型 X', source: 'service', capabilities: { structuredOutput: 'native', selfTestPassed: false } });
+
+    deps.llmResponses.push({ status: 401, body: errorBody(401) });
+    expect(await app.fetchModelList(p?.id ?? '')).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('获取模型列表失败（auth）') } });
+  });
+
+  it('能力自检：连续三次输出合格才通过并记录；不合格时记录原因；修改结构化输出方式后须重测', async () => {
+    const { deps, app } = setup();
+    const [p] = value(await app.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk-s' })).providers;
+    const [m] = value(await app.addModel(p?.id ?? '', 'm')).models;
+    const reply = (text: string) => ({ chunks: openaiChunks('m', { text: [text], end: 'stop' as const }) });
+    for (let i = 0; i < 3; i++) deps.llmResponses.push(reply(JSON.stringify(SELF_TEST_EXPECTED)));
+    const passed = value(await app.runSelfTest(m?.id ?? ''));
+    expect(passed.report).toEqual({ passed: true, runs: [null, null, null], reason: null });
+    expect(passed.view.models[0]).toMatchObject({ capabilities: { selfTestPassed: true }, selfTest: { status: 'passed', reason: null } });
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).toContain('能力自检');
+
+    const tested = passed.view.models[0];
+    if (tested === undefined) throw new Error('样本');
+    const changed = value(await app.updateModel(tested, { displayName: 'm', capabilities: { ...tested.capabilities, structuredOutput: 'json_object' }, prices: { input: 0.3, output: 1.2 } }));
+    expect(changed.models[0]).toMatchObject({ source: 'user', capabilities: { structuredOutput: 'json_object', selfTestPassed: false }, selfTest: null, prices: { input: 0.3, output: 1.2 } });
+
+    deps.llmResponses.push(reply('{"scene":"雨夜当铺"}'));
+    const failed = value(await app.runSelfTest(m?.id ?? ''));
+    expect(failed.report.passed).toBe(false);
+    expect(failed.view.models[0]).toMatchObject({ capabilities: { selfTestPassed: false }, selfTest: { status: 'failed', reason: expect.stringMatching(/^第 1 次：输出不符合格式/) } });
   });
 });

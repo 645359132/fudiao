@@ -3,6 +3,7 @@ import type { ResponseCreateParamsStreaming } from 'openai/resources/responses/r
 import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
+import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import { mapSdkError } from './errors';
 
 export type OpenAIAdapterOptions = {
@@ -19,7 +20,7 @@ export type OpenAIAdapterOptions = {
  * OpenAI 官方接口的 Responses API 适配器（施工文档第五章：OpenAI 新模型的推理控制与结构化输出以 Responses API 为主）。
  * 不在服务端保存对话（store: false）；结构化输出按能力描述：native 发送 json_schema，json_object 只要求合法 JSON。
  */
-export class OpenAIAdapter implements LlmPort {
+export class OpenAIAdapter implements LlmPort, ModelLister {
   private readonly client: OpenAI;
 
   constructor(options: OpenAIAdapterOptions) {
@@ -31,6 +32,20 @@ export class OpenAIAdapter implements LlmPort {
       ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
       ...(options.viaCredentialProxy === true && { dangerouslyAllowBrowser: true }),
     });
+  }
+
+  /** 模型列表（B56）。OpenAI 写法的接口只返回模型标识，能力由内置能力表或保守能力补齐。 */
+  async listModels(options: CallOptions = {}): Promise<Result<readonly ListedModel[], LlmError>> {
+    const out: ListedModel[] = [];
+    try {
+      for await (const m of this.client.models.list(options.signal === undefined ? {} : { signal: options.signal })) {
+        out.push({ id: m.id, displayName: null, capabilities: {} });
+        if (out.length >= MAX_LISTED_MODELS) break;
+      }
+    } catch (error) {
+      return errList(mapSdkError(error));
+    }
+    return okList(out);
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {

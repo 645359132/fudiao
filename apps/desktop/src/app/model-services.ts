@@ -6,13 +6,17 @@ import {
   CONSERVATIVE_CAPABILITIES,
   OpenAIAdapter,
   OpenAIChatAdapter,
+  isModelLister,
   PLACEHOLDER_API_KEY,
+  runSelfTest,
   testConnection,
   type ConnectionReport,
+  type ListedModel,
   type LlmPort,
   type ModelCapabilities,
+  type SelfTestReport,
 } from '@fudiao/llm';
-import { renderConnectionTest } from '@fudiao/prompts';
+import { checkSelfTest, renderConnectionTest, renderSelfTest, SelfTestOutput } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createModel,
@@ -22,8 +26,11 @@ import {
   getDefaultModelId,
   listModels,
   listProviders,
+  recordSelfTest,
   setDefaultModel,
+  updateModel,
   updateProvider,
+  type ModelPatch,
   type Provider,
   type ProviderInput,
   type ProviderKind,
@@ -31,7 +38,9 @@ import {
   type SqlPort,
   type StoredCapabilities,
   type StoredModel,
+  type StoredPrices,
 } from '@fudiao/store';
+import { BUILTIN_MODELS, type BuiltinModel } from './builtin-models';
 import type { AppError } from './errors';
 import type { AppDeps, CredentialStatus, KeyHeader } from './ports';
 
@@ -55,6 +64,26 @@ export function buildAdapter(provider: Provider, fetch: typeof globalThis.fetch)
   // Gemini 的兼容端点不在正文中输出思考标签。
   const base = provider.kind === 'gemini' ? { ...COMPATIBLE_DIALECT, stripThinkTags: false } : COMPATIBLE_DIALECT;
   return new OpenAIChatAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, dialect: { ...base, ...provider.dialect }, viaCredentialProxy: true });
+}
+
+/**
+ * 新模型的能力与价格：保守能力 ← 内置能力表 ← 服务返回的信息（施工文档第五章的来源顺序）；价格只来自内置表。
+ * 自检结果总是从“未通过”开始。
+ */
+export function resolveModel(
+  kind: ProviderKind,
+  modelId: string,
+  listed: ListedModel | null,
+  table: readonly BuiltinModel[] = BUILTIN_MODELS,
+): { capabilities: StoredCapabilities; prices: StoredPrices | null; source: 'service' | 'builtin' | 'user'; displayName: string } {
+  const builtin = table.find((b) => b.kind === kind && b.modelId === modelId);
+  const fromService = listed !== null && Object.keys(listed.capabilities).length > 0;
+  return {
+    capabilities: { ...NEW_MODEL_CAPABILITIES, ...builtin?.capabilities, ...(listed?.capabilities ?? {}), selfTestPassed: false },
+    prices: builtin?.prices ?? null,
+    source: fromService ? 'service' : builtin !== undefined ? 'builtin' : listed !== null ? 'service' : 'user',
+    displayName: listed?.displayName ?? builtin?.displayName ?? modelId,
+  };
 }
 
 export type ProviderView = Provider & { readonly credential: CredentialStatus };
@@ -170,15 +199,67 @@ export function modelServices(deps: AppDeps) {
       return view();
     },
 
-    /** 添加模型（作者填写模型名称；M2-02b 起可从服务获取列表）。能力按保守值，还没有默认模型时设为默认。 */
-    async addModel(providerId: string, modelId: string): Promise<Result<ModelServicesView, AppError>> {
+    /** 获取服务的可用模型（B56）。 */
+    async fetchModelList(providerId: string): Promise<Result<readonly ListedModel[], AppError>> {
+      const current = await view();
+      if (!current.ok) return current;
+      const provider = current.value.providers.find((x) => x.id === providerId);
+      if (provider === undefined) return err({ code: 'not_found' });
+      const adapter = deps.llm.forProvider(provider);
+      if (!isModelLister(adapter)) return err(library('这类服务不支持获取模型列表，请手动填写模型名称'));
+      const listed = await adapter.listModels();
+      return listed.ok ? ok(listed.value) : err(library(`获取模型列表失败（${listed.error.code}）：${listed.error.message}`));
+    },
+
+    /**
+     * 添加模型：从列表中选的带上服务返回的信息，手动填写的只有名称。能力与价格按 resolveModel 合并；
+     * 还没有默认模型时设为默认。
+     */
+    async addModel(providerId: string, modelId: string, listed: ListedModel | null = null): Promise<Result<ModelServicesView, AppError>> {
       const p = await port();
       if (!p.ok) return p;
-      const created = await createModel(p.value, deps.ids.next(), { providerId, modelId, capabilities: NEW_MODEL_CAPABILITIES, source: 'user' }, ctx());
+      const current = await view();
+      if (!current.ok) return current;
+      const provider = current.value.providers.find((x) => x.id === providerId);
+      if (provider === undefined) return err({ code: 'not_found' });
+      const resolved = resolveModel(provider.kind, modelId.trim(), listed);
+      const created = await createModel(p.value, deps.ids.next(), { providerId, modelId, ...resolved }, ctx());
       if (!created.ok) return err(repo(created.error));
-      const current = await getDefaultModelId(p.value);
-      if (current.ok && current.value === null) await setDefaultModel(p.value, created.value.id, ctx());
+      if (current.value.defaultModelId === null) await setDefaultModel(p.value, created.value.id, ctx());
       return view();
+    },
+
+    /** 作者修改模型的能力与价格（B56 的用户覆盖）。 */
+    async updateModel(model: StoredModel, patch: ModelPatch): Promise<Result<ModelServicesView, AppError>> {
+      const p = await port();
+      if (!p.ok) return p;
+      const updated = await updateModel(p.value, model, patch, ctx());
+      return updated.ok ? view() : err(repo(updated.error));
+    },
+
+    /** 能力自检（B57）：连续三次通过才可用于必须输出结构化数据的任务；结果写入模型记录。 */
+    async runSelfTest(modelId: string, signal?: AbortSignal): Promise<Result<{ view: ModelServicesView; report: SelfTestReport }, AppError>> {
+      const p = await port();
+      if (!p.ok) return p;
+      const current = await view();
+      if (!current.ok) return current;
+      const model = current.value.models.find((m) => m.id === modelId);
+      const provider = current.value.providers.find((x) => x.id === model?.providerId);
+      if (model === undefined || provider === undefined) return err({ code: 'not_found' });
+      const prompt = renderSelfTest();
+      if (!prompt.ok || prompt.value.output === undefined) return err(library(prompt.ok ? '自检模板缺少输出结构' : prompt.error));
+      const report = await runSelfTest(
+        deps.llm.forProvider(provider),
+        { provider: provider.id, model: model.modelId, capabilities: model.capabilities, ...(model.prices !== null && { prices: model.prices }) },
+        { template: prompt.value.template, system: prompt.value.system, messages: prompt.value.messages, output: prompt.value.output },
+        SelfTestOutput,
+        checkSelfTest,
+        signal === undefined ? {} : { signal },
+      );
+      const recorded = await recordSelfTest(p.value, model, { status: report.passed ? 'passed' : 'failed', at: deps.clock.now(), reason: report.reason }, ctx());
+      if (!recorded.ok) return err(repo(recorded.error));
+      const next = await view();
+      return next.ok ? ok({ view: next.value, report }) : next;
     },
 
     async deleteModel(model: StoredModel): Promise<Result<ModelServicesView, AppError>> {

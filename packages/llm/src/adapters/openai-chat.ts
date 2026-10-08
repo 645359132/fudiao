@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
+import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import { mapSdkError } from './errors';
 import { ThinkFilter } from './think-filter';
 
@@ -42,7 +43,7 @@ export type OpenAIChatAdapterOptions = {
  * 结构化输出按能力描述：native 发送 json_schema，json_object 只要求合法 JSON，prompt 不发送 response_format；
  * 后两者的字段约束由调用方的提示词模板给出。
  */
-export class OpenAIChatAdapter implements LlmPort {
+export class OpenAIChatAdapter implements LlmPort, ModelLister {
   private readonly client: OpenAI;
   private readonly dialect: ChatDialect;
 
@@ -57,6 +58,20 @@ export class OpenAIChatAdapter implements LlmPort {
       ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
       ...(options.viaCredentialProxy === true && { dangerouslyAllowBrowser: true }),
     });
+  }
+
+  /** 模型列表（B56）。OpenAI 写法的接口只返回模型标识，能力由内置能力表或保守能力补齐。 */
+  async listModels(options: CallOptions = {}): Promise<Result<readonly ListedModel[], LlmError>> {
+    const out: ListedModel[] = [];
+    try {
+      for await (const m of this.client.models.list(options.signal === undefined ? {} : { signal: options.signal })) {
+        out.push({ id: m.id, displayName: null, capabilities: {} });
+        if (out.length >= MAX_LISTED_MODELS) break;
+      }
+    } catch (error) {
+      return errList(mapSdkError(error));
+    }
+    return okList(out);
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
