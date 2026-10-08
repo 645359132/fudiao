@@ -1,6 +1,7 @@
 import { ChapterSidebar } from './ChapterSidebar';
 import { BackupsPanel } from './BackupsPanel';
 import { HistoryPanel } from './HistoryPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -13,6 +14,7 @@ export function WorkScreen() {
   const exportBook = useApp((s) => s.exportBook);
   const exportProject = useApp((s) => s.exportProject);
   const openBackups = useApp((s) => s.openBackups);
+  const openSettings = useApp((s) => s.openSettings);
   const busy = useApp((s) => s.busy);
   return (
     <div className="work">
@@ -24,6 +26,9 @@ export function WorkScreen() {
           {title}
         </button>
         <span className="spacer" />
+        <button type="button" aria-pressed={panel === 'settings'} onClick={() => void openSettings()}>
+          设定
+        </button>
         <details className="menu">
           <summary>作品</summary>
           <div className="menu-items" role="menu">
@@ -47,7 +52,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

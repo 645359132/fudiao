@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -24,7 +24,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -38,6 +38,11 @@ export type AppState = {
   readonly previewSnapshot: Snapshot | null;
   readonly importDraft: ImportDraft | null;
   readonly backups: readonly BackupInfo[] | null;
+  /** 当前作品的设定条目（打开作品时载入，正文高亮也用它）。 */
+  readonly entities: readonly Entity[];
+  readonly selectedEntityId: string | null;
+  /** 正文旁的设定卡片（Ctrl + 点击高亮的名字时打开）。 */
+  readonly drawerEntityId: string | null;
   readonly wordCount: number;
 
   readonly init: () => Promise<void>;
@@ -102,6 +107,14 @@ export type AppState = {
   readonly openBackups: () => Promise<void>;
   readonly createBackup: () => Promise<void>;
   readonly restoreBackup: (name: string) => Promise<void>;
+
+  readonly openSettings: (entityId?: string) => Promise<void>;
+  readonly selectEntity: (id: string | null) => void;
+  readonly createEntity: (kind: EntityKind, name: string) => Promise<boolean>;
+  readonly saveEntity: (id: string, patch: EntityPatch) => Promise<boolean>;
+  readonly setEntityLocked: (id: string, locked: boolean) => Promise<void>;
+  readonly deleteEntity: (id: string) => Promise<boolean>;
+  readonly openEntityDrawer: (id: string | null) => void;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -135,6 +148,10 @@ export function createAppStore(service: AppService): AppStore {
       return c === undefined ? Promise.resolve(false) : run(f(c), (work) => ({ work, ...after }));
     };
     /** 打开已有作品后的自动备份；失败只提示，不妨碍写作。 */
+    async function loadEntities() {
+      await run(service.listEntities(), (entities) => ({ entities }));
+    }
+
     async function autoBackup() {
       const result = await service.autoBackupIfDue();
       if (!result.ok) set({ message: `自动备份失败：${describeError(result.error)}` });
@@ -162,23 +179,36 @@ export function createAppStore(service: AppService): AppStore {
       previewSnapshot: null,
       importDraft: null,
       backups: null,
+      entities: [],
+      selectedEntityId: null,
+      drawerEntityId: null,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
       },
-      createWork: (title) => run(service.createWork(title), opened),
+      async createWork(title) {
+        const done = await run(service.createWork(title), opened);
+        if (done) await loadEntities();
+        return done;
+      },
       async openWork(id) {
-        if (await run(service.openWork(id), opened)) await autoBackup();
+        if (await run(service.openWork(id), opened)) {
+          await loadEntities();
+          await autoBackup();
+        }
       },
       async addWorkFromFolder() {
         const before = get().work;
         await run(service.addWorkFromFolder(), (work) => (work === null ? {} : opened(work)));
-        if (get().work !== before) await autoBackup();
+        if (get().work !== before) {
+          await loadEntities();
+          await autoBackup();
+        }
       },
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -363,7 +393,9 @@ export function createAppStore(service: AppService): AppStore {
         }
       },
       async importProject() {
+        const before = get().work;
         await run(service.importProject(), (work) => (work === null ? {} : opened(work)));
+        if (get().work !== before) await loadEntities();
       },
       async exportBook(kind) {
         if (!(await get().leaveChapter())) return;
@@ -395,6 +427,37 @@ export function createAppStore(service: AppService): AppStore {
         }));
         if (ok) await run(service.listBackups(), (backups) => ({ backups }));
       },
+      async openSettings(entityId) {
+        if (!(await get().leaveChapter())) return;
+        set({ panel: 'settings', chapterContent: null, selectedEntityId: entityId ?? get().selectedEntityId, drawerEntityId: null });
+      },
+      selectEntity: (id) => set({ selectedEntityId: id }),
+      async createEntity(kind, name) {
+        let createdId: string | null = null;
+        const done = await run(service.createEntity(kind, name), (r) => {
+          createdId = r.created.id;
+          return { entities: r.entities };
+        });
+        if (done) set({ selectedEntityId: createdId });
+        return done;
+      },
+      async saveEntity(id, patch) {
+        const entity = get().entities.find((e) => e.id === id);
+        if (entity === undefined) return false;
+        const done = await run(service.updateEntity(entity, patch), (entities) => ({ entities }));
+        if (!done) await loadEntities();
+        return done;
+      },
+      async setEntityLocked(id, locked) {
+        const entity = get().entities.find((e) => e.id === id);
+        if (entity !== undefined) await run(service.setEntityLocked(entity, locked), (entities) => ({ entities }));
+      },
+      async deleteEntity(id) {
+        const entity = get().entities.find((e) => e.id === id);
+        if (entity === undefined) return false;
+        return run(service.deleteEntity(entity), (entities) => ({ entities, selectedEntityId: null }));
+      },
+      openEntityDrawer: (id) => set({ drawerEntityId: id }),
       async exportText(title, text) {
         const result = await service.exportPlainText(`${title}.txt`, text);
         if (!result.ok) set({ message: `导出失败：${result.error}` });

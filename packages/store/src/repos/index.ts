@@ -10,3 +10,5 @@ export type { Snapshot, SnapshotParagraph, SnapshotReason, SnapshotSummary } fro
 export { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
 export type { ImportChapter } from './import';
 export { importChapters } from './import';
+export type { Entity, EntityKind, EntityPatch } from './entity';
+export { createEntity, deleteEntity, ENTITY_KINDS, getEntity, listEntities, setEntityLocked, updateEntity } from './entity';

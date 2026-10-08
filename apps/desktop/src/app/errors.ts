@@ -44,6 +44,10 @@ export function describeError(error: AppError): string {
           return '找不到这一项，请刷新后重试';
         case 'invalid':
           return error.error.detail;
+        case 'locked':
+          return '这是锁定设定，先解锁才能修改或删除';
+        case 'in_use':
+          return '还有人物认知或说法以它为持有者，不能删除';
         case 'sql':
           return `保存失败：${error.error.error.code}`;
       }

@@ -3,6 +3,11 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
+  createEntity,
+  deleteEntity,
+  listEntities,
+  setEntityLocked,
+  updateEntity,
   importChapters,
   importData,
   createProject,
@@ -21,6 +26,9 @@ import {
   updateChapterNotes,
   updateProject,
   type Chapter,
+  type Entity,
+  type EntityKind,
+  type EntityPatch,
   type Project,
   type ProjectPatch,
   type RepoError,
@@ -174,6 +182,19 @@ export function createAppService(deps: AppDeps) {
     if (session === null) return;
     session = null;
     await deps.opener.close();
+  }
+
+  async function entities(): Promise<Result<Entity[], AppError>> {
+    if (session === null) return err({ code: 'no_work' });
+    const list = await listEntities(session.port);
+    return list.ok ? list : err(repo(list.error));
+  }
+
+  /** 设定的修改：失败时也返回原因；成功后重新读取列表（含被修改的条目）。 */
+  async function entityChange(f: (port: SqlPort) => Promise<Result<unknown, RepoError>>): Promise<Result<Entity[], AppError>> {
+    if (session === null) return err({ code: 'no_work' });
+    const done = await f(session.port);
+    return done.ok ? entities() : err(repo(done.error));
   }
 
   /** 章节操作的共同结尾：失败时仍重新读取目录，版本冲突后界面拿到最新状态。 */
@@ -428,6 +449,21 @@ export function createAppService(deps: AppDeps) {
       if (!restored.ok) return err({ code: 'library', detail: restored.error });
       return view();
     },
+
+    /** 设定条目（需求 B09）。修改后返回最新的完整列表。 */
+    listEntities: () => entities(),
+
+    async createEntity(kind: EntityKind, name: string): Promise<Result<{ entities: Entity[]; created: Entity }, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const created = await createEntity(session.port, { id: deps.ids.next(), kind, name }, ctx());
+      if (!created.ok) return err(repo(created.error));
+      const list = await entities();
+      return list.ok ? ok({ entities: list.value, created: created.value }) : list;
+    },
+
+    updateEntity: (entity: Entity, patch: EntityPatch) => entityChange((port) => updateEntity(port, entity.id, entity.version, patch, ctx())),
+    setEntityLocked: (entity: Entity, locked: boolean) => entityChange((port) => setEntityLocked(port, entity.id, entity.version, locked, ctx())),
+    deleteEntity: (entity: Entity) => entityChange((port) => deleteEntity(port, entity.id, entity.version)),
 
     exportPlainText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
     pickText: () => deps.transfer.pickText(),

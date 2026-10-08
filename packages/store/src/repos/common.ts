@@ -7,6 +7,10 @@ export type RepoError =
   | { readonly code: 'conflict' }
   | { readonly code: 'not_found' }
   | { readonly code: 'invalid'; readonly detail: string }
+  /** 锁定设定不能修改：自动流程一律不能改，作者须先解锁（需求 B09）。 */
+  | { readonly code: 'locked' }
+  /** 仍被引用，不能删除（例如还有人物认知以该人物为持有者）。 */
+  | { readonly code: 'in_use' }
   | { readonly code: 'sql'; readonly error: SqlError };
 
 /** 写入时间与新标识由调用方提供（时钟端口、标识端口），仓储本身不读系统时间。 */

@@ -366,3 +366,82 @@ describe('导入、导出与备份', () => {
     expect(within(list).getAllByText('自动备份')).toHaveLength(1);
   });
 });
+
+describe('设定', () => {
+  const editorText = () => screen.getByRole('textbox', { name: '正文' }).textContent;
+
+  async function newEntity(user: ReturnType<typeof userEvent.setup>, kind: string, name: string) {
+    await user.click(screen.getByRole('button', { name: '新建设定' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '新设定的种类' }), kind);
+    await user.type(screen.getByRole('textbox', { name: '新设定的名字' }), `${name}{Enter}`);
+    await screen.findByRole('form', { name: '设定内容' });
+  }
+
+  it('新建人物与地点，填写别名与属性；正文中高亮名字与别名；设定卡片显示内容', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(screen.getByRole('button', { name: '设定' }));
+    await newEntity(user, '人物', '沈砚');
+    const form = screen.getByRole('form', { name: '设定内容' });
+    await user.type(within(form).getByRole('textbox', { name: '别名（用顿号分隔）' }), '沈先生');
+    await user.type(within(form).getByRole('textbox', { name: '说明' }), '当铺常客');
+    await user.click(within(form).getByRole('button', { name: '添加属性' }));
+    await user.type(within(form).getByRole('textbox', { name: '属性名 1' }), '年龄');
+    await user.type(within(form).getByRole('textbox', { name: '属性值 1' }), '二十八');
+    await user.click(within(form).getByRole('button', { name: '保存设定' }));
+    await waitFor(() => expect(store.getState().entities[0]).toMatchObject({ aliases: ['沈先生'], attributes: [{ label: '年龄', value: '二十八' }] }));
+    await newEntity(user, '地点', '当铺');
+    expect(within(screen.getByRole('list', { name: '设定列表' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['沈砚人物', '当铺地点']);
+
+    await user.click(screen.getByRole('button', { name: '返回正文' }));
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('沈先生走进当铺。');
+    await waitFor(() => expect(editorText()).toBe('沈先生走进当铺。'));
+    const body = screen.getByRole('textbox', { name: '正文' });
+    await waitFor(() => expect([...body.querySelectorAll('[data-entity-id]')].map((e) => e.textContent)).toEqual(['沈先生', '当铺']));
+
+    // Ctrl + 点击由编辑器扩展调用 openEntityDrawer（扩展测试已覆盖点击判断）。
+    store.getState().openEntityDrawer(store.getState().entities[0]?.id ?? null);
+    const card = await screen.findByRole('complementary', { name: '设定卡片' });
+    expect(within(card).getByText('当铺常客')).toBeTruthy();
+    expect(within(card).getByText('别名：沈先生')).toBeTruthy();
+    await user.click(within(card).getByRole('button', { name: '在设定中编辑' }));
+    expect(await screen.findByRole('form', { name: '设定内容' })).toBeTruthy();
+  });
+
+  it('锁定后字段只读，解锁后才能修改；按种类筛选与查找', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '设定' }));
+    await newEntity(user, '世界规则', '城中宵禁');
+    await user.click(screen.getByRole('button', { name: '锁定' }));
+    const form = await screen.findByRole('form', { name: '设定内容' });
+    await waitFor(() => expect(within(form).getByText('已锁定')).toBeTruthy());
+    // 由外层 fieldset 禁用的控件 .disabled 仍为 false，要看 :disabled。
+    expect(within(form).getByRole('textbox', { name: '说明' }).matches(':disabled')).toBe(true);
+    await user.click(within(form).getByRole('button', { name: '解锁' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '说明' }).matches(':disabled')).toBe(false));
+    await user.type(screen.getByRole('textbox', { name: '说明' }), '子时起宵禁');
+    await user.click(screen.getByRole('button', { name: '保存设定' }));
+    await waitFor(() => expect(store.getState().entities[0]?.description).toBe('子时起宵禁'));
+
+    await newEntity(user, '物品', '玉佩');
+    await user.click(screen.getByRole('tab', { name: '物品' }));
+    expect(within(screen.getByRole('list', { name: '设定列表' })).getAllByRole('button')).toHaveLength(1);
+    await user.click(screen.getByRole('tab', { name: '全部' }));
+    await user.type(screen.getByRole('textbox', { name: '查找设定' }), '宵禁');
+    expect(within(screen.getByRole('list', { name: '设定列表' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['城中宵禁世界规则']);
+  });
+
+  it('删除设定需要确认', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '设定' }));
+    await newEntity(user, '物品', '玉佩');
+    await user.click(screen.getByRole('button', { name: '删除设定' }));
+    await user.click(screen.getByRole('button', { name: '确定删除' }));
+    await waitFor(() => expect(store.getState().entities).toEqual([]));
+    expect(screen.getByText('还没有设定。')).toBeTruthy();
+  });
+});

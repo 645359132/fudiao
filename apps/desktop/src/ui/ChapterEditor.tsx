@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
-import { chapterExtensions, fromDoc, structuralLog, toDoc } from '@fudiao/editor';
+import { chapterExtensions, EntityHighlight, fromDoc, setHighlightEntities, structuralLog, toDoc } from '@fudiao/editor';
 import { countWords, ulid } from '@fudiao/shared';
 import { AutosaveController, type SaveStatus } from '../app/autosave';
 import type { ChapterContent } from '../app/service';
@@ -83,11 +83,13 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   const setSaveStatus = useApp((s) => s.setSaveStatus);
   const setWordCount = useApp((s) => s.setWordCount);
   const registerEditor = useApp((s) => s.registerEditor);
+  const entities = useApp((s) => s.entities);
+  const openEntityDrawer = useApp((s) => s.openEntityDrawer);
   const chapterId = content.chapterId;
 
   const editor = useEditor(
     {
-      extensions: chapterExtensions({ newId }),
+      extensions: [...chapterExtensions({ newId }), EntityHighlight.configure({ onOpen: openEntityDrawer })],
       content: toDoc(content.saved, newId),
       shouldRerenderOnTransaction: false,
       editorProps: { attributes: { class: 'chapter-text', 'aria-label': '正文', spellcheck: 'false' } },
@@ -131,6 +133,11 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
       void autosave.flush().finally(() => autosave.dispose());
     };
   }, [editor, chapterId]);
+
+  // 设定条目变化时重新匹配正文中的名字（只改装饰，不改文档）。
+  useEffect(() => {
+    if (editor !== null) setHighlightEntities(editor, entities);
+  }, [editor, entities]);
 
   if (editor === null) return null;
   return (

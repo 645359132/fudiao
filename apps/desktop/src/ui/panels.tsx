@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Chapter, Project } from '@fudiao/store';
 import { ChapterEditor } from './ChapterEditor';
+import { EntityDrawer } from './SettingsPanel';
 import { NO_CHAPTERS, useApp } from './store-context';
 
 function ChapterNotes({ chapter }: { readonly chapter: Chapter }) {
@@ -64,7 +65,10 @@ export function ChapterPanel() {
         </button>
       </div>
       {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}
-      {loaded ? <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
+      <div className="chapter-with-drawer">
+        {loaded ? <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
+        <EntityDrawer />
+      </div>
       <details className="chapter-notes">
         <summary>梗概与写作备注</summary>
         {/* 以版本作为 key：保存或在别处修改后，表单换成最新内容。 */}

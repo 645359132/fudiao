@@ -639,3 +639,160 @@ textarea {
 .backup-list li > button {
   margin-left: auto;
 }
+
+/* 设定 */
+
+.chapter-with-drawer {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.chapter-with-drawer > .chapter-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.entity-drawer {
+  position: sticky;
+  top: 0;
+  width: 260px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.entity-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.entity-head h3 {
+  flex: 1;
+  margin: 0;
+}
+
+.lock-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.entity-description {
+  white-space: pre-wrap;
+}
+
+.entity-drawer dl div {
+  display: flex;
+  gap: 8px;
+}
+
+.entity-drawer dt {
+  color: var(--muted);
+}
+
+.entity-drawer dd {
+  margin: 0;
+}
+
+.settings-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+}
+
+.kind-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.kind-tabs button[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.entity-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entity-list button {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 4px;
+  text-align: left;
+}
+
+.entity-list button[aria-current='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+fieldset.plain {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.attributes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.attribute {
+  display: flex;
+  gap: 6px;
+}
+
+.attribute input:first-child {
+  width: 30%;
+}
+
+.attribute input:nth-child(2) {
+  flex: 1;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 正文中的设定名：下划虚线，不改变排版。 */
+.entity {
+  border-bottom: 1px dashed var(--accent);
+  cursor: text;
+}
+
+.entity-character {
+  border-bottom-color: #b5651d;
+}
+
+.entity-location {
+  border-bottom-color: #3f7d5a;
+}
+
+.entity-organization {
+  border-bottom-color: #4a6fa5;
+}
+
+.entity-item {
+  border-bottom-color: #8a6bb0;
+}
+
+.entity-rule {
+  border-bottom-color: #a05050;
+}
