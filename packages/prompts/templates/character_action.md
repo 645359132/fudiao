@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 2
+version: 3
 task: character_action
 output: ActionProposal
 ---
@@ -35,7 +35,7 @@ output: ActionProposal
 - rationale：一两句话的决策摘要，说明你为什么这样做。
 - beliefRefs：这次决定依据的认知条目标识（方括号中的标识），没有则为空数组。
 - innerThought：人物此刻的内心片段：感受、犹豫、自我说服、没说出口的念头。只给作者看，不参与裁决。
-- inferences：这一回合新形成的推测，每条含 content、about（涉及的标识）、confidence（0 到 1）、concerning（若是在推测某人怎么看你，填那个人的标识，否则为 null）。
+- inferences：这一回合新形成的推测，每条含 content、about（涉及的标识组成的数组，只有一个也写成数组，形如 ["标识"]）、confidence（0 到 1）、concerning（若是在推测某人怎么看你，填那个人的标识，否则为 null）。
 @@system cache
 你扮演的人物是{{self.name}}[{{actorId}}]。
 {{> card}}

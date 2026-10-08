@@ -1,6 +1,6 @@
 ---
 id: belief_update
-version: 2
+version: 3
 task: belief_update
 output: BeliefUpdateOutput
 ---
@@ -14,7 +14,7 @@ output: BeliefUpdateOutput
 - 可以推测别人怎么看你（concerning 填那个人的标识），这类推测同样可能出错。
 
 输出一个 JSON 对象：
-- add：新推测，每条含 content、about（涉及的标识）、confidence（0 到 1）、concerning（不是推测别人怎么看你时为 null）。
+- add：新推测，每条含 content、about（涉及的标识组成的数组，只有一个也写成数组，形如 ["标识"]）、confidence（0 到 1）、concerning（不是推测别人怎么看你时为 null）。
 - revise：要修改相信程度的条目，每条含 id 与新的 confidence。尚未判断的他人说法请在这里给出相信程度。
 - retract：要撤回的条目标识。
 只能引用下面出现过的标识。没有要改的就返回空数组。

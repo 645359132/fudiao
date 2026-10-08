@@ -12,16 +12,16 @@
     "sha256": "ed13c80cbd9eaecd64e64ef7cc09a3a7d0680633a8357c27eb6d4644bdf5816a"
   },
   "belief_update": {
-    "version": "2",
-    "sha256": "80002cfa3f7a942f75cb9ed097b5fbc20ff5446ff6c673aa749ae96245c60f3e"
+    "version": "3",
+    "sha256": "349433c7dd23490650262191d60ad2767d32aafdb027a02a69ccd952b7ccd3c6"
   },
   "candidate_text": {
     "version": "2",
     "sha256": "99cc70999d0e71672ebdecc5b7d44beb6734d465be1b02928eb989536b652285"
   },
   "character_action": {
-    "version": "2",
-    "sha256": "b9f00c494cc4e1393fa7b9e60d97df682c15b54512f0ebe97a26d0151e68cfa7"
+    "version": "3",
+    "sha256": "20091a61ba9688a76684438f82c8636aba17f8a561b9df22c29ca1dc2a044b3b"
   },
   "connection_test": {
     "version": "1",

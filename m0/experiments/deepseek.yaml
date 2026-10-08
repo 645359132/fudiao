@@ -1,0 +1,56 @@
+# M0 实验配置：DeepSeek（OpenAI 写法，服务种类 openai_compatible），考虑成本代替默认的 Claude 配置。
+# API Key 只从环境变量 DEEPSEEK_API_KEY 读取，不写入本文件。运行：
+#   pnpm m0 run m0/scenes/warehouse.yaml --experiment m0/experiments/deepseek.yaml
+#
+# 模型与价格按 DeepSeek 文档（https://api-docs.deepseek.com/quick_start/pricing，2026-10-08 查阅）：
+#   deepseek-flash    上下文 1M，最大输出 384K，支持 JSON 输出，默认开启思考
+# 价格（美元 / 百万 Token）分高峰（周一至周五 UTC 01:00–04:00、06:00–10:00）与非高峰（高峰价的一半）。
+# 下面按高峰价填写，费用估算与预算上限宁高勿低。
+# DeepSeek 默认开启思考，思考也计入输出，所以输出上限留得较宽。
+
+providers:
+  deepseek:
+    kind: openai_compatible
+    apiKeyEnv: DEEPSEEK_API_KEY
+    baseURL: https://api.deepseek.com
+
+models:
+  flash:
+    provider: deepseek
+    model: deepseek-flash
+    capabilities:
+      structuredOutput: json_object
+      promptCaching: false
+      reasoningControl: none
+      refusalFallback: none
+      contextWindow: 1000000
+      maxOutputTokens: 384000
+      selfTestPassed: false
+    prices: { input: 0.3, output: 1.2, cacheRead: 0.006 }
+
+# 全部任务使用 flash（作者决定：官方文档中 pro 没有优势）；推演组与对照组用同一个模型，比较才公平。
+tasks:
+  character_action: { model: flash, maxOutputTokens: 16000 }
+  semantic_ruling: { model: flash, maxOutputTokens: 16000 }
+  belief_update: { model: flash, maxOutputTokens: 8000 }
+  judgement: { model: flash, maxOutputTokens: 8000 }
+  beat_sheet: { model: flash, maxOutputTokens: 16000 }
+  candidate_text: { model: flash, maxOutputTokens: 32000 }
+  baseline: { model: flash, maxOutputTokens: 32000 }
+  stalemate: { model: flash, maxOutputTokens: 8000 }
+  director: { model: flash, maxOutputTokens: 8000 }
+
+run:
+  mode: auto
+  runs: 1
+  maxProposalAttempts: 2
+  maxRepairs: 2
+  stalemate: { enabled: true, window: 3 }
+  director:
+    mode: off
+    tensionCurve: ''
+    maxProposals: 3
+
+budget:
+  # 单次推演的费用上限（美元）。
+  limitUsdPerRun: 2
