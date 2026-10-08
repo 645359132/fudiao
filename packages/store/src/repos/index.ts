@@ -7,7 +7,7 @@ export type { CurrentParagraph, ParagraphSavePlan, SavedParagraph, SourceKind, S
 export { planParagraphSave } from './paragraph-plan';
 export { listParagraphs, saveChapterParagraphs } from './paragraph';
 export type { AiSpan, DerivedProvenance } from './paragraph-source';
-export { aiCharacters, classify, MODIFIED_RATIO } from './paragraph-source';
+export { aiCharacters, classify, MODIFIED_RATIO, updateSpans } from './paragraph-source';
 export type { ChapterSourceStats, SourceStats, SourceTally, WordsBySource } from './source-stats';
 export { sourceStats } from './source-stats';
 export type { SearchHit, SearchResult } from './search';
@@ -21,4 +21,8 @@ export { createEntity, deleteEntity, ENTITY_KINDS, getEntity, listEntities, setE
 export type { Fact, FactBasis, FactInput, FactKind, FactModality, FactStatus } from './fact';
 export { createFact, deleteFact, getFact, listFacts, reviewStaleFacts, setFactStatus, updateFact } from './fact';
 export type { LlmCallRow, LlmCallStatus, LlmCallUsage, UsageSummary, UsageTotals } from './llm-call';
-export { appendLlmCall, findCompletedCall, listLlmCalls, usageSummary } from './llm-call';
+export { appendLlmCall, findCallByRequestHash, findCompletedCall, listLlmCalls, usageSummary } from './llm-call';
+export type { RangeInsert, RangePlan, TextPosition, TextRange } from './paragraph-range';
+export { applyRangeReplace, planRangeReplace, textInRange } from './paragraph-range';
+export type { Candidate, CandidateInput, CandidateOperation, CandidateStatus } from './candidate';
+export { CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';

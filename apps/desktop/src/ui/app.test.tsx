@@ -717,8 +717,8 @@ describe('AI 写作', () => {
     return ctx;
   }
 
-  it('没有选中文字时只能续写；续写的结果流式显示，可以复制与重试', async () => {
-    const { deps, user } = await ready();
+  it('没有选中文字时只能续写；完成的结果成为候选稿，可以复制、重试、接受与放弃', async () => {
+    const { deps, store, user } = await ready();
     await user.click(screen.getByRole('button', { name: 'AI 写作' }));
     const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
     expect(within(drawer).getByText('没有选中文字：只能续写，从光标处接着写。')).toBeTruthy();
@@ -728,15 +728,57 @@ describe('AI 写作', () => {
     await user.click(within(drawer).getByRole('button', { name: '续写' }));
     const result = await within(drawer).findByRole('region', { name: '生成结果' });
     await waitFor(() => expect(within(result).getByRole('status').textContent).toBe('续写：已完成'));
-    expect(result.querySelector('.ai-text')?.textContent).toBe('柜台后没有人。');
+    const pending = await within(drawer).findByRole('region', { name: '本章待处理的候选稿' });
+    expect(within(pending).getByRole('region', { name: '续写的候选稿' }).textContent).toContain('柜台后没有人。');
     await user.click(within(result).getByRole('button', { name: '复制' }));
     expect(deps.copied.at(-1)).toBe('柜台后没有人。');
+    // 候选稿不会自动写入正文。
+    expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('沈砚推开当铺的门。');
 
     deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['雨还在下。'], end: 'stop' }) });
     await user.click(within(result).getByRole('button', { name: '重试' }));
-    await waitFor(() => expect(result.querySelector('.ai-text')?.textContent).toBe('雨还在下。'));
-    // 正文没有被改动：结果是候选稿。
-    expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('沈砚推开当铺的门。');
+    await waitFor(() => expect(within(pending).getAllByRole('region', { name: '续写的候选稿' })).toHaveLength(2));
+
+    // 接受较早的一份：另起一段写入正文，编辑器重新载入。
+    const [newer, older] = within(pending).getAllByRole('region', { name: '续写的候选稿' });
+    if (newer === undefined || older === undefined) throw new Error('候选稿');
+    await user.click(within(older).getByRole('button', { name: '接受' }));
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => [p.text, p.source])).toEqual([
+      ['沈砚推开当铺的门。', 'handwritten'],
+      ['柜台后没有人。', 'ai_generated'],
+    ]));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('沈砚推开当铺的门。柜台后没有人。'));
+
+    // 另一份生成时的原文已经改变：接受时提示过期，不再列出。
+    await user.click(within(newer).getByRole('button', { name: '接受' }));
+    expect(await screen.findByText(/候选稿已过期/)).toBeTruthy();
+    await waitFor(() => expect(within(drawer).queryByRole('region', { name: '本章待处理的候选稿' })).toBeNull());
+  });
+
+  it('修改候选稿后接受；放弃的候选稿不再列出', async () => {
+    const { deps, store, user } = await ready();
+    await user.click(screen.getByRole('button', { name: 'AI 写作' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['柜台后没有人。'], end: 'stop' }) }, { chunks: openaiChunks('m', { text: ['雨停了。'], end: 'stop' }) });
+    await user.click(within(drawer).getByRole('button', { name: '续写' }));
+    const pending = await within(drawer).findByRole('region', { name: '本章待处理的候选稿' });
+    await user.click(within(drawer).getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(within(pending).getAllByRole('region', { name: '续写的候选稿' })).toHaveLength(2));
+
+    const [second, first] = within(pending).getAllByRole('region', { name: '续写的候选稿' });
+    if (second === undefined || first === undefined) throw new Error('候选稿');
+    await user.click(within(second).getByRole('button', { name: '放弃' }));
+    await waitFor(() => expect(within(pending).getAllByRole('region', { name: /候选稿/ })).toHaveLength(1));
+
+    const card = within(pending).getByRole('region', { name: '续写的候选稿' });
+    await user.click(within(card).getByRole('button', { name: '修改' }));
+    const box = within(card).getByRole('textbox', { name: '修改候选稿' });
+    await user.clear(box);
+    await user.type(box, '柜台后没有人，只有一盏灯。');
+    await user.click(within(card).getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(within(pending).getByText(/已修改/)).toBeTruthy());
+    await user.click(within(within(pending).getByRole('region', { name: '续写的候选稿' })).getByRole('button', { name: '接受' }));
+    await waitFor(() => expect(store.getState().chapterContent?.saved[1]).toMatchObject({ text: '柜台后没有人，只有一盏灯。', source: 'mixed' }));
   });
 
   it('生成中可以取消，保留已生成的部分', async () => {

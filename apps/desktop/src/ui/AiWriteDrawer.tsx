@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SelectionOperation } from '@fudiao/prompts';
 import { needsSelection, OPERATION_LABELS, OPERATIONS } from '../app/selection-ops';
+import { CandidateCard } from './CandidateCard';
 import { useApp } from './store-context';
 
 const STATUS: Record<'running' | 'done' | 'cancelled' | 'failed', string> = {
@@ -24,6 +25,7 @@ export function AiWriteDrawer() {
   const close = useApp((s) => s.closeAiWrite);
   const openContext = useApp((s) => s.openContext);
   const copy = useApp((s) => s.copyText);
+  const candidates = useApp((s) => s.candidates);
   const [instruction, setInstruction] = useState('');
   if (!open) return null;
   const running = job?.status === 'running';
@@ -64,9 +66,11 @@ export function AiWriteDrawer() {
             {OPERATION_LABELS[job.operation]}：{STATUS[job.status]}
             {job.error !== null && `（${job.error}）`}
           </p>
-          <div className="ai-text" aria-live="polite">
-            {job.text}
-          </div>
+          {job.status === 'running' || job.candidateId === null || !candidates.some((c) => c.id === job.candidateId) ? (
+            <div className="ai-text" aria-live="polite">
+              {job.text}
+            </div>
+          ) : null}
           <div className="form-actions">
             {running ? (
               <button type="button" onClick={cancel}>
@@ -83,6 +87,14 @@ export function AiWriteDrawer() {
               </>
             )}
           </div>
+        </section>
+      )}
+      {candidates.length > 0 && (
+        <section aria-label="本章待处理的候选稿">
+          <h4>本章待处理的候选稿（{candidates.length}）</h4>
+          {candidates.map((c) => (
+            <CandidateCard key={`${c.id}:${c.version}`} candidate={c} />
+          ))}
         </section>
       )}
     </aside>

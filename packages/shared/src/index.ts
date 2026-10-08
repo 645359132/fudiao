@@ -6,3 +6,5 @@ export { sha256 } from './sha256';
 export { isOrderKey, keyBetween, keysBetween } from './order-key';
 export { ulid } from './ulid';
 export { countWords } from './word-count';
+export { textDiff } from './text-diff';
+export type { DiffPart } from './text-diff';

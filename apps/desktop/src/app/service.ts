@@ -54,6 +54,7 @@ import {
   type SearchResult,
   type SourceStats,
   type UsageSummary,
+  type Candidate,
   type LlmCallRow,
   type StructuralEdits,
 } from '@fudiao/store';
@@ -61,6 +62,7 @@ import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
 import { toMarkdown, toTxt, type ExportChapter } from './text-export';
 import { buildWritingContext, type ContextManifest, type ContextOverrides } from '@fudiao/context';
+import { candidateUseCases } from './candidates';
 import { modelRunner } from './model-runner';
 import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
 import { maxOutputTokens, needsSelection, promptParts, targetLength } from './selection-ops';
@@ -291,11 +293,20 @@ export function createAppService(deps: AppDeps) {
   }
 
   const services = modelServices(deps);
+  const candidates = candidateUseCases(deps, () => session?.port ?? null);
   /** 模型调用：用默认模型，调用记录写入当前作品库（M2-05 起由选区操作等使用）。 */
   const runner = modelRunner({ deps, project: () => session?.port ?? null, defaultModel: () => services.defaultModel() });
 
   return {
     ...services,
+    ...candidates,
+
+    /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
+    async acceptCandidate(candidateId: string) {
+      const accepted = await candidates.acceptCandidate(candidateId);
+      if (accepted.ok && session !== null) await deps.drafts.remove(session.entry.path, accepted.value.candidate.chapterId);
+      return accepted;
+    },
     runner,
 
     writingContext,
@@ -313,7 +324,7 @@ export function createAppService(deps: AppDeps) {
         readonly overrides: ContextOverrides;
       },
       options: CallOptions = {},
-    ): Promise<Result<{ result: LlmResult; manifest: ContextManifest }, AppError>> {
+    ): Promise<Result<{ result: LlmResult; manifest: ContextManifest; candidate: Candidate | null }, AppError>> {
       const manifest = await writingContext(request.chapterId, request.selection, request.overrides);
       if (!manifest.ok) return manifest;
       const parts = promptParts(manifest.value);
@@ -324,7 +335,12 @@ export function createAppService(deps: AppDeps) {
       const prompt = renderSelectionEdit({ operation: request.operation, ...parts, length, instruction: request.instruction });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
       const result = await runner.text({ prompt: prompt.value, maxOutputTokens: maxOutputTokens(length), effort: 'medium' }, options);
-      return result.ok ? ok({ result: result.value, manifest: manifest.value }) : result;
+      if (!result.ok) return result;
+      // 完整生成（含达到输出上限）的结果存为候选稿；取消与拒答只显示在界面上。
+      const { outcome, text, requestHash } = result.value;
+      if ((outcome !== 'completed' && outcome !== 'truncated') || text.trim() === '') return ok({ result: result.value, manifest: manifest.value, candidate: null });
+      const candidate = await candidates.saveCandidate({ chapterId: request.chapterId, selection: request.selection, operation: request.operation, text, requestHash });
+      return candidate.ok ? ok({ result: result.value, manifest: manifest.value, candidate: candidate.value }) : candidate;
     },
 
     /** 用量与费用（B19）：全部、按任务、按模型，以及最近的调用。 */

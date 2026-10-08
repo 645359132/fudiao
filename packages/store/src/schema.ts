@@ -122,6 +122,25 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['id'],
     json: ['params', 'response', 'error'],
   },
+  {
+    name: 'candidate',
+    columns: [
+      'id',
+      'chapter_id',
+      'operation',
+      'target',
+      'base_text',
+      'base_versions',
+      'generated',
+      'content',
+      'status',
+      'status_reason',
+      'llm_call_id',
+      ...VERSIONED,
+    ],
+    primaryKey: ['id'],
+    json: ['target', 'base_versions'],
+  },
 ];
 
 /**

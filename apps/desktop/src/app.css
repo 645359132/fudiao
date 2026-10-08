@@ -1215,3 +1215,35 @@ fieldset.plain {
   white-space: pre-wrap;
 }
 
+/* 候选稿 */
+.candidate {
+  margin: 10px 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.candidate p {
+  margin: 0 0 6px;
+}
+
+.candidate textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font: inherit;
+  line-height: 1.8;
+}
+
+.diff ins {
+  background: var(--accent-soft);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.diff del {
+  color: var(--danger);
+}
+

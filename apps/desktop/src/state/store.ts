@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -39,6 +39,8 @@ export type AiWriteJob = {
   readonly status: 'running' | 'done' | 'cancelled' | 'failed';
   readonly text: string;
   readonly error: string | null;
+  /** 完整生成后存成的候选稿。 */
+  readonly candidateId: string | null;
 };
 
 export type AppState = {
@@ -81,6 +83,8 @@ export type AppState = {
   readonly writeSelection: EditorSelection | null;
   readonly writeSelectedText: string;
   readonly aiWrite: AiWriteJob | null;
+  /** 当前章节待处理的候选稿（B17），新的在前。 */
+  readonly candidates: readonly Candidate[];
   /** 用量与费用（打开“用量与费用”时读取）。 */
   readonly usage: { readonly summary: UsageSummary; readonly recent: readonly LlmCallRow[] } | null;
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
@@ -188,6 +192,10 @@ export type AppState = {
   readonly closeAiWrite: () => void;
   readonly runSelectionOp: (operation: SelectionOperation, instruction: string) => Promise<void>;
   readonly cancelSelectionOp: () => void;
+  readonly editCandidate: (id: string, content: string) => Promise<boolean>;
+  readonly discardCandidate: (id: string) => Promise<void>;
+  /** 保存正文后接受候选稿，写入后重新载入本章。 */
+  readonly acceptCandidate: (id: string) => Promise<void>;
   /** 保存正文后打开用量与费用。 */
   readonly openUsage: () => Promise<void>;
   /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
@@ -294,6 +302,7 @@ export function createAppStore(service: AppService): AppStore {
       writeSelection: null,
       writeSelectedText: '',
       aiWrite: null,
+      candidates: [],
       searchQuery: '',
       searchResult: null,
       reveal: null,
@@ -328,7 +337,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -626,6 +635,7 @@ export function createAppStore(service: AppService): AppStore {
         const selectedText = handle?.selectedText() ?? '';
         if (handle !== null && !(await handle.flush())) return;
         set({ writeDrawerOpen: true, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection, drawerEntityId: null, contextDrawerOpen: false });
+        await run(service.listCandidates(chapterId), (candidates) => ({ candidates }));
       },
       closeAiWrite: () => {
         writeAbort?.abort();
@@ -636,7 +646,7 @@ export function createAppStore(service: AppService): AppStore {
         if (chapterId === null || get().aiWrite?.status === 'running') return;
         const abort = new AbortController();
         writeAbort = abort;
-        set({ aiWrite: { operation, instruction, status: 'running', text: '', error: null } });
+        set({ aiWrite: { operation, instruction, status: 'running', text: '', error: null, candidateId: null } });
         const update = (patch: Partial<AiWriteJob>) => {
           const job = get().aiWrite;
           if (job !== null && writeAbort === abort) set({ aiWrite: { ...job, ...patch } });
@@ -652,7 +662,10 @@ export function createAppStore(service: AppService): AppStore {
         );
         if (result.ok) {
           const { outcome, text, refusal } = result.value.result;
+          const candidate = result.value.candidate;
+          if (candidate !== null) set({ candidates: [candidate, ...get().candidates] });
           update({
+            candidateId: candidate?.id ?? null,
             text,
             status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
             error: outcome === 'refused' ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}` : outcome === 'truncated' ? '输出达到上限，结果可能不完整' : null,
@@ -661,6 +674,30 @@ export function createAppStore(service: AppService): AppStore {
         if (writeAbort === abort) writeAbort = null;
       },
       cancelSelectionOp: () => writeAbort?.abort(),
+      async editCandidate(id, content) {
+        const candidate = get().candidates.find((c) => c.id === id);
+        if (candidate === undefined) return false;
+        return run(service.editCandidate(candidate, content), (updated) => ({ candidates: get().candidates.map((c) => (c.id === id ? updated : c)) }));
+      },
+      async discardCandidate(id) {
+        const candidate = get().candidates.find((c) => c.id === id);
+        if (candidate !== undefined) await run(service.discardCandidate(candidate), () => ({ candidates: get().candidates.filter((c) => c.id !== id) }));
+      },
+      async acceptCandidate(id) {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null || !(await get().leaveChapter())) return;
+        const accepted = await run(service.acceptCandidate(id), ({ paragraphs }) => ({
+          chapterContent: { chapterId, saved: paragraphs, draft: null },
+          contentRevision: get().contentRevision + 1,
+          saveStatus: { kind: 'saved' },
+          candidates: get().candidates.filter((c) => c.id !== id),
+        }));
+        // 过期的候选稿同样不再列出；直接读取列表，不清掉刚显示的原因。
+        if (!accepted) {
+          const list = await service.listCandidates(chapterId);
+          if (list.ok) set({ candidates: list.value });
+        }
+      },
       async openUsage() {
         if (!(await get().leaveChapter())) return;
         await run(service.usage(), (usage) => ({ usage, panel: 'usage', chapterContent: null, drawerEntityId: null }));

@@ -36,6 +36,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   2: (tables) => tables,
   // 0003：新增 llm_call 表；旧版本导出的数据中没有这张表，导入为空。
   3: (tables) => tables,
+  // 0004：新增 candidate 表，同上。
+  4: (tables) => tables,
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

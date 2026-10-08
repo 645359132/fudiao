@@ -138,7 +138,7 @@ fudiao/
 | `sim_event` | run_id、seq、round、phase、type、actor、payload、created_at；主键 (run_id, seq)，只追加 | B28、B30 |
 | `sim_snapshot` | run_id、seq、state（JSON）、state_hash | B30 |
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
-| `candidate` | id、target_type、target_id、base_version、content、status（待处理、已接受、已放弃、过期）、llm_call_id | B17 |
+| `candidate` | id、chapter_id、operation、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
 | `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
 | `evaluation` | id、run_id 或 batch_id、answers（JSON） | B46 |
 | `paragraph_fts` | FTS5 trigram 虚拟表，内容来自 `paragraph.text`；rowid 取自 `paragraph_search_key` 的整数主键（`paragraph` 的隐式 rowid 在 VACUUM 后可能改变）；由触发器随段落的插入、修改与删除维护，是派生数据，不导出（迁移 0002） | B04 |
@@ -315,6 +315,8 @@ stateDiagram-v2
 角色请求只能通过 `buildCharacterView(state, actorId)` 得到的角色视图构建。上下文构建管线依次执行：收集候选条目、按信息权限与故事时间过滤、按相关性排序、按预算裁剪、渲染模板。管线同时产出上下文清单，记录纳入与排除的条目及原因。清单同时用于作者查看（B18）与“角色所见”视图。
 
 选区操作（M2-05，B16）：续写、改写、扩写、缩写、润色共用 `selection_edit` 模板（纯文本，不需要通过能力自检）。上下文清单中纳入的材料放在可缓存的系统提示中，前文、选中的文字与后文放在用户消息中，作者可以附加一句要求。目标字数：续写 300 字，扩写约两倍，缩写约一半，改写与润色与原文相当；输出上限为目标字数的两倍加 1,024。结果流式显示在章节旁的“AI 写作”抽屉中，可以取消（保留已生成的部分）、重试与复制；结果是候选稿，不直接写入正文（候选稿在 M2-06）。
+
+候选稿（M2-06，B17、B33，`apps/desktop/src/app/candidates.ts`）：选区操作完整生成（含达到输出上限）的结果存为候选稿，取消与拒答的结果只显示不保存。候选稿记下原文位置（段落标识加段内下标；续写没有光标时为本章末尾）、原文与相关段落的版本。作者可以比较（续写只显示新增的文字，其余逐字标出删除与新增，`packages/shared` 的 `textDiff`）、修改、放弃或接受。接受时先检查相关段落的版本与原位置的文字是否与生成时一致，不一致则标为过期并说明原因；一致则先建“接受候选稿”快照，再在一个事务中按范围替换（`packages/store/src/repos/paragraph-range.ts`）：首段保留标识，跨过的其余段落并入首段（事件关联取并集），多出的行成为新段落（复制首段的事件关联，记 `split_from`）；续写的位置在非空段落末尾时另起一段。插入的文字记为 AI 区间（作者改过的候选稿只有与生成原文对得上的文字算 AI 文字）；整段都是未经修改的生成文字时记为 AI 生成并以自身为生成原文，否则按区间判定。接受后删除本章草稿，编辑器重新载入。
 
 写作类任务（选区操作、候选稿）的上下文（M2-04，`packages/context/src/writing-context.ts`，纯函数）：候选条目为作品信息、本章梗概与备注、选区与前后的正文（前 2,000 字、后 600 字，必需）、前面章节的梗概（从近到远）、本章出现的设定（提及次数用编辑器的设定名匹配器计算，选区前后 300 字内出现的优先）与相关事实（与出现的设定有关，适用章节包含本章；只用已确认的，待复核与未确认的列出原因）。选入顺序为必需 → 作者加入（超出预算也纳入并标明）→ 按相关性在预算内；Token 按字符数估算。预算取默认模型上下文长度的 60%，最多 32,000，没有默认模型时 8,000。章节头部的“AI 上下文”显示清单，作者可以加入或移除条目，增减在本次打开作品期间按章节保留。
 

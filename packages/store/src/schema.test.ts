@@ -53,6 +53,10 @@ const sample: Statement[] = [
     "INSERT INTO llm_call (id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at) VALUES ('01L2', NULL, 'selection_edit', 'p1', 'm1', NULL, '{}', 'selection_edit', '1', 'h2', 'error', NULL, NULL, NULL, NULL, NULL, NULL, '{\"code\":\"network\"}', ?, ?)",
     ...T,
   ),
+  s(
+    "INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, status, status_reason, llm_call_id, version, created_at, updated_at) VALUES ('01K1', '01C1', 'rewrite', '{\"from\":{\"paragraphId\":\"01G1\",\"offset\":0},\"to\":{\"paragraphId\":\"01G1\",\"offset\":2}}', '雨下', '{\"01G1\":1}', '风起', '风起了', 'pending', NULL, '01L1', 2, ?, ?)",
+    ...T,
+  ),
   s("INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, to_version, anchor, created_at) VALUES ('01R1', 'fact', '01F1', 'paragraph', '01G1', 1, '{\"paragraphId\":\"01G1\",\"paragraphVersion\":1,\"start\":0,\"end\":4,\"quote\":\"雨下得更\"}', ?)", NOW),
   s("INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, created_at) VALUES ('01R2', 'fact', '01F2', 'entity', '01E2', ?)", NOW),
   s(
