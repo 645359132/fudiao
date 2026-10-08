@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@fudiao/domain": "workspace:*",
     "@fudiao/llm": "workspace:*",
     "@fudiao/shared": "workspace:*",
     "better-sqlite3": "^13.0.3",

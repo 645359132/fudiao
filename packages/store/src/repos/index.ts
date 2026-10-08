@@ -12,3 +12,5 @@ export type { ImportChapter } from './import';
 export { importChapters } from './import';
 export type { Entity, EntityKind, EntityPatch } from './entity';
 export { createEntity, deleteEntity, ENTITY_KINDS, getEntity, listEntities, setEntityLocked, updateEntity } from './entity';
+export type { Fact, FactBasis, FactInput, FactKind, FactModality, FactStatus } from './fact';
+export { createFact, deleteFact, getFact, listFacts, reviewStaleFacts, setFactStatus, updateFact } from './fact';

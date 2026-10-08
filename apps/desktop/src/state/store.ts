@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -24,7 +24,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -43,6 +43,10 @@ export type AppState = {
   readonly selectedEntityId: string | null;
   /** 正文旁的设定卡片（Ctrl + 点击高亮的名字时打开）。 */
   readonly drawerEntityId: string | null;
+  /** 当前作品的事实（打开作品与设定变化后重新读取，其中的待复核标记是最新的）。 */
+  readonly facts: readonly Fact[];
+  /** 事实页中选中的事实；“new” 表示正在新建。 */
+  readonly selectedFactId: string | null;
   readonly wordCount: number;
 
   readonly init: () => Promise<void>;
@@ -115,6 +119,12 @@ export type AppState = {
   readonly setEntityLocked: (id: string, locked: boolean) => Promise<void>;
   readonly deleteEntity: (id: string) => Promise<boolean>;
   readonly openEntityDrawer: (id: string | null) => void;
+
+  readonly openFacts: (factId?: string) => Promise<void>;
+  readonly selectFact: (id: string | null) => void;
+  readonly saveFact: (id: string | null, input: FactInput) => Promise<boolean>;
+  readonly setFactStatus: (id: string, status: FactStatus) => Promise<void>;
+  readonly deleteFact: (id: string) => Promise<boolean>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -150,7 +160,10 @@ export function createAppStore(service: AppService): AppStore {
     /** 打开已有作品后的自动备份；失败只提示，不妨碍写作。 */
     async function loadEntities() {
       await run(service.listEntities(), (entities) => ({ entities }));
+      await run(service.listFacts(), (facts) => ({ facts }));
     }
+
+    const reloadFacts = () => run(service.listFacts(), (facts) => ({ facts }));
 
     async function autoBackup() {
       const result = await service.autoBackupIfDue();
@@ -182,6 +195,8 @@ export function createAppStore(service: AppService): AppStore {
       entities: [],
       selectedEntityId: null,
       drawerEntityId: null,
+      facts: [],
+      selectedFactId: null,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -208,7 +223,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -446,6 +461,7 @@ export function createAppStore(service: AppService): AppStore {
         if (entity === undefined) return false;
         const done = await run(service.updateEntity(entity, patch), (entities) => ({ entities }));
         if (!done) await loadEntities();
+        else await reloadFacts();
         return done;
       },
       async setEntityLocked(id, locked) {
@@ -455,9 +471,42 @@ export function createAppStore(service: AppService): AppStore {
       async deleteEntity(id) {
         const entity = get().entities.find((e) => e.id === id);
         if (entity === undefined) return false;
-        return run(service.deleteEntity(entity), (entities) => ({ entities, selectedEntityId: null }));
+        const done = await run(service.deleteEntity(entity), (entities) => ({ entities, selectedEntityId: null }));
+        if (done) await reloadFacts();
+        return done;
       },
       openEntityDrawer: (id) => set({ drawerEntityId: id }),
+      async openFacts(factId) {
+        if (!(await get().leaveChapter())) return;
+        set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawerEntityId: null });
+        await reloadFacts();
+      },
+      selectFact: (id) => set({ selectedFactId: id }),
+      async saveFact(id, input) {
+        if (id === null) {
+          let created: string | null = null;
+          const done = await run(service.createFact(input, 'candidate'), (r) => {
+            created = r.created;
+            return { facts: r.facts };
+          });
+          if (done) set({ selectedFactId: created });
+          return done;
+        }
+        const fact = get().facts.find((x) => x.id === id);
+        if (fact === undefined) return false;
+        const done = await run(service.updateFact(fact, input), (facts) => ({ facts }));
+        if (!done) await reloadFacts();
+        return done;
+      },
+      async setFactStatus(id, status) {
+        const fact = get().facts.find((x) => x.id === id);
+        if (fact !== undefined && !(await run(service.setFactStatus(fact, status), (facts) => ({ facts })))) await reloadFacts();
+      },
+      async deleteFact(id) {
+        const fact = get().facts.find((x) => x.id === id);
+        if (fact === undefined) return false;
+        return run(service.deleteFact(fact), (facts) => ({ facts, selectedFactId: null }));
+      },
       async exportText(title, text) {
         const result = await service.exportPlainText(`${title}.txt`, text);
         if (!result.ok) set({ message: `导出失败：${result.error}` });

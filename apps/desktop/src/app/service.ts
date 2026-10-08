@@ -4,6 +4,12 @@ import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
   createEntity,
+  createFact,
+  deleteFact,
+  listFacts,
+  reviewStaleFacts,
+  setFactStatus,
+  updateFact,
   deleteEntity,
   listEntities,
   setEntityLocked,
@@ -27,6 +33,9 @@ import {
   updateProject,
   type Chapter,
   type Entity,
+  type Fact,
+  type FactInput,
+  type FactStatus,
   type EntityKind,
   type EntityPatch,
   type Project,
@@ -190,11 +199,28 @@ export function createAppService(deps: AppDeps) {
     return list.ok ? list : err(repo(list.error));
   }
 
-  /** 设定的修改：失败时也返回原因；成功后重新读取列表（含被修改的条目）。 */
+  /** 设定的修改：失败时也返回原因；成功后标出需要复核的事实，再重新读取列表。 */
   async function entityChange(f: (port: SqlPort) => Promise<Result<unknown, RepoError>>): Promise<Result<Entity[], AppError>> {
     if (session === null) return err({ code: 'no_work' });
     const done = await f(session.port);
-    return done.ok ? entities() : err(repo(done.error));
+    if (!done.ok) return err(repo(done.error));
+    const reviewed = await reviewStaleFacts(session.port, ctx());
+    return reviewed.ok ? entities() : err(repo(reviewed.error));
+  }
+
+  /** 事实列表；先标出需要复核的事实（需求 B12），列表中的状态因此总是最新的。 */
+  async function facts(): Promise<Result<Fact[], AppError>> {
+    if (session === null) return err({ code: 'no_work' });
+    const reviewed = await reviewStaleFacts(session.port, ctx());
+    if (!reviewed.ok) return err(repo(reviewed.error));
+    const list = await listFacts(session.port);
+    return list.ok ? list : err(repo(list.error));
+  }
+
+  async function factChange(f: (port: SqlPort) => Promise<Result<unknown, RepoError>>): Promise<Result<Fact[], AppError>> {
+    if (session === null) return err({ code: 'no_work' });
+    const done = await f(session.port);
+    return done.ok ? facts() : err(repo(done.error));
   }
 
   /** 章节操作的共同结尾：失败时仍重新读取目录，版本冲突后界面拿到最新状态。 */
@@ -464,6 +490,17 @@ export function createAppService(deps: AppDeps) {
     updateEntity: (entity: Entity, patch: EntityPatch) => entityChange((port) => updateEntity(port, entity.id, entity.version, patch, ctx())),
     setEntityLocked: (entity: Entity, locked: boolean) => entityChange((port) => setEntityLocked(port, entity.id, entity.version, locked, ctx())),
     deleteEntity: (entity: Entity) => entityChange((port) => deleteEntity(port, entity.id, entity.version)),
+
+    /** 事实记录（需求 B11）：新建默认为候选，作者确认后才算已确认事实。 */
+    listFacts: () => facts(),
+    async createFact(input: FactInput, status: FactStatus): Promise<Result<{ facts: Fact[]; created: string }, AppError>> {
+      const id = deps.ids.next();
+      const list = await factChange((port) => createFact(port, id, input, status, ctx(), () => deps.ids.next()));
+      return list.ok ? ok({ facts: list.value, created: id }) : list;
+    },
+    updateFact: (fact: Fact, input: FactInput) => factChange((port) => updateFact(port, fact.id, fact.version, input, ctx(), () => deps.ids.next())),
+    setFactStatus: (fact: Fact, status: FactStatus) => factChange((port) => setFactStatus(port, fact.id, fact.version, status, ctx())),
+    deleteFact: (fact: Fact) => factChange((port) => deleteFact(port, fact.id, fact.version)),
 
     exportPlainText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
     pickText: () => deps.transfer.pickText(),

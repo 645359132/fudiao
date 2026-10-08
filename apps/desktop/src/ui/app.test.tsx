@@ -445,3 +445,67 @@ describe('设定', () => {
     expect(screen.getByText('还没有设定。')).toBeTruthy();
   });
 });
+
+describe('事实', () => {
+  it('记录人物认知（持有者、来源方式、相信程度、依据）；确认；依据的设定修改后待复核，复核后重新确认', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '设定' }));
+    await user.click(screen.getByRole('button', { name: '新建设定' }));
+    await user.type(screen.getByRole('textbox', { name: '新设定的名字' }), '沈砚{Enter}');
+    await screen.findByRole('form', { name: '设定内容' });
+    await user.click(screen.getByRole('button', { name: '新建设定' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '新设定的种类' }), '地点');
+    await user.type(screen.getByRole('textbox', { name: '新设定的名字' }), '当铺{Enter}');
+    await waitFor(() => expect(store.getState().entities).toHaveLength(2));
+
+    await user.click(screen.getByRole('button', { name: '事实' }));
+    await user.click(await screen.findByRole('button', { name: '记录新事实' }));
+    const form = await screen.findByRole('form', { name: '事实内容' });
+    await user.selectOptions(within(form).getByRole('combobox', { name: '种类' }), '人物认知');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '持有者' }), '沈砚');
+    await user.type(within(form).getByRole('textbox', { name: '内容' }), '掌柜认得那块玉');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '来源方式' }), '推测');
+    await user.type(within(form).getByRole('textbox', { name: '相信程度（0 至 100）' }), '60');
+    const basis = within(form).getByRole('group', { name: '依据的设定（修改后本事实需要复核）' });
+    await user.click(within(basis).getByRole('checkbox', { name: '当铺' }));
+    await user.click(within(form).getByRole('button', { name: '记录事实' }));
+    await waitFor(() => expect(store.getState().facts).toHaveLength(1));
+    expect(store.getState().facts[0]).toMatchObject({ kind: 'belief', modality: 'inferred', confidence: 0.6, status: 'candidate', basis: [{ type: 'entity' }] });
+
+    await user.click(await screen.findByRole('button', { name: '确认' }));
+    await waitFor(() => expect(store.getState().facts[0]?.status).toBe('confirmed'));
+
+    // 修改依据的设定：事实变为待复核，顶栏提示。
+    await user.click(screen.getByRole('button', { name: '设定' }));
+    await user.click(within(await screen.findByRole('list', { name: '设定列表' })).getByRole('button', { name: /当铺/ }));
+    await user.type(screen.getByRole('textbox', { name: '说明' }), '城北的老当铺');
+    await user.click(screen.getByRole('button', { name: '保存设定' }));
+    expect(await screen.findByRole('button', { name: '事实（待复核 1）' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '事实（待复核 1）' }));
+    expect(await screen.findByText('设定“当铺”已修改')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '复核后确认' }));
+    await waitFor(() => expect(store.getState().facts[0]?.status).toBe('confirmed'));
+    expect(screen.getByRole('button', { name: '事实' })).toBeTruthy();
+  });
+
+  it('表单校验：故事时间的排序值须为数字；按种类与状态筛选', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '事实' }));
+    await user.click(await screen.findByRole('button', { name: '记录新事实' }));
+    await user.type(screen.getByRole('textbox', { name: '内容' }), '城中宵禁');
+    await user.type(screen.getByRole('textbox', { name: '故事时间起' }), '第三年春');
+    await user.type(screen.getByRole('textbox', { name: '起始排序值' }), '三');
+    await user.click(screen.getByRole('button', { name: '记录事实' }));
+    expect(screen.getByText('故事时间的排序值须为数字')).toBeTruthy();
+    await user.clear(screen.getByRole('textbox', { name: '起始排序值' }));
+    await user.type(screen.getByRole('textbox', { name: '起始排序值' }), '3');
+    await user.click(screen.getByRole('button', { name: '记录事实' }));
+    await waitFor(() => expect(store.getState().facts[0]?.validFrom).toEqual({ label: '第三年春', order: 3 }));
+    await user.click(screen.getByRole('tab', { name: '人物说法' }));
+    expect(screen.getByText('没有符合的事实。')).toBeTruthy();
+    await user.click(screen.getByRole('tab', { name: '世界事实' }));
+    expect(within(screen.getByRole('list', { name: '事实列表' })).getAllByRole('button')).toHaveLength(1);
+  });
+});

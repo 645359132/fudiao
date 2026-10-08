@@ -1,5 +1,6 @@
 import { ChapterSidebar } from './ChapterSidebar';
 import { BackupsPanel } from './BackupsPanel';
+import { FactsPanel } from './FactsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
@@ -15,6 +16,8 @@ export function WorkScreen() {
   const exportProject = useApp((s) => s.exportProject);
   const openBackups = useApp((s) => s.openBackups);
   const openSettings = useApp((s) => s.openSettings);
+  const openFacts = useApp((s) => s.openFacts);
+  const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
   return (
     <div className="work">
@@ -28,6 +31,9 @@ export function WorkScreen() {
         <span className="spacer" />
         <button type="button" aria-pressed={panel === 'settings'} onClick={() => void openSettings()}>
           设定
+        </button>
+        <button type="button" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
+          事实{pendingReview > 0 ? `（待复核 ${pendingReview}）` : ''}
         </button>
         <details className="menu">
           <summary>作品</summary>
@@ -52,7 +58,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );
