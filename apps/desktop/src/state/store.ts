@@ -1,9 +1,16 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, ProjectPatch } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, ProjectPatch, SavedParagraph, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
-import type { AppError, AppService, LibraryView, WorkView } from '../app/service';
+import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
+
+/** 正文编辑器向状态登记的句柄：离开章节前先保存。 */
+export type EditorHandle = {
+  readonly chapterId: string;
+  readonly flush: () => Promise<boolean>;
+};
 
 export type AppState = {
   readonly library: LibraryView | null;
@@ -13,6 +20,10 @@ export type AppState = {
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
+  /** 当前章节的正文（载入后）。 */
+  readonly chapterContent: ChapterContent | null;
+  readonly saveStatus: SaveStatus;
+  readonly wordCount: number;
 
   readonly init: () => Promise<void>;
   readonly createWork: (title: string) => Promise<boolean>;
@@ -34,15 +45,35 @@ export type AppState = {
   readonly dropChapter: (id: string, targetId: string) => Promise<void>;
   readonly trashChapter: (id: string) => Promise<void>;
   readonly restoreChapter: (id: string) => Promise<void>;
-  readonly selectChapter: (id: string) => void;
-  readonly showPanel: (panel: AppState['panel']) => void;
+  readonly selectChapter: (id: string) => Promise<void>;
+  readonly showPanel: (panel: AppState['panel']) => Promise<void>;
   readonly dismissMessage: () => void;
+
+  /** 离开当前章节前保存正文；保存失败时留在本章并说明原因，返回能否离开。 */
+  readonly leaveChapter: () => Promise<boolean>;
+  readonly registerEditor: (handle: EditorHandle | null) => void;
+  readonly loadChapter: (chapterId: string) => Promise<void>;
+  readonly saveChapter: (
+    chapterId: string,
+    saved: readonly SavedParagraph[],
+    current: readonly CurrentParagraph[],
+    edits: StructuralEdits,
+  ) => Promise<Result<SavedParagraph[], string>>;
+  readonly writeDraft: (chapterId: string, paragraphs: readonly CurrentParagraph[]) => void;
+  /** 作者选择恢复或丢弃草稿后，收起恢复提示；丢弃时删除草稿文件。 */
+  readonly settleDraft: (discard: boolean) => Promise<void>;
+  readonly setSaveStatus: (status: SaveStatus) => void;
+  readonly setWordCount: (count: number) => void;
+  readonly copyText: (text: string) => Promise<void>;
+  readonly exportText: (title: string, text: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
 
 export function createAppStore(service: AppService): AppStore {
   return createStore<AppState>()((set, get) => {
+    let editor: EditorHandle | null = null;
+
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
     async function run<T>(task: Promise<Result<T, AppError>>, apply: (value: T) => Partial<AppState>): Promise<boolean> {
       set({ busy: true });
@@ -67,7 +98,12 @@ export function createAppStore(service: AppService): AppStore {
       const c = chapter(id);
       return c === undefined ? Promise.resolve(false) : run(f(c), (work) => ({ work, ...after }));
     };
-    const opened = (work: WorkView): Partial<AppState> => ({ work, selectedChapterId: work.chapters[0]?.id ?? null, panel: 'chapter' });
+    const opened = (work: WorkView): Partial<AppState> => ({
+      work,
+      selectedChapterId: work.chapters[0]?.id ?? null,
+      panel: 'chapter',
+      chapterContent: null,
+    });
 
     return {
       library: null,
@@ -76,6 +112,9 @@ export function createAppStore(service: AppService): AppStore {
       panel: 'chapter',
       busy: false,
       message: null,
+      chapterContent: null,
+      saveStatus: { kind: 'saved' },
+      wordCount: 0,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -88,8 +127,9 @@ export function createAppStore(service: AppService): AppStore {
         await run(service.addWorkFromFolder(), (work) => (work === null ? {} : opened(work)));
       },
       async closeWork() {
+        if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -104,6 +144,7 @@ export function createAppStore(service: AppService): AppStore {
       updateWorkInfo: (patch) => run(service.updateWorkInfo(patch), (work) => ({ work })),
 
       async createChapter(title) {
+        if (!(await get().leaveChapter())) return false;
         const selected = get().selectedChapterId;
         const ok = await run(service.createChapter(title, selected ?? undefined), (work) => ({ work }));
         if (ok) {
@@ -142,14 +183,58 @@ export function createAppStore(service: AppService): AppStore {
       },
       async trashChapter(id) {
         const selected = get().selectedChapterId === id;
-        await withChapter(id, (c) => service.trashChapter(c), selected ? { selectedChapterId: null } : {});
+        if (selected && !(await get().leaveChapter())) return;
+        await withChapter(id, (c) => service.trashChapter(c), selected ? { selectedChapterId: null, chapterContent: null } : {});
       },
       async restoreChapter(id) {
+        if (!(await get().leaveChapter())) return;
         await withChapter(id, (c) => service.restoreChapter(c), { selectedChapterId: id, panel: 'chapter' });
       },
-      selectChapter: (id) => set({ selectedChapterId: id, panel: 'chapter' }),
-      showPanel: (panel) => set({ panel }),
+      async selectChapter(id) {
+        if (get().selectedChapterId === id && get().panel === 'chapter') return;
+        if (!(await get().leaveChapter())) return;
+        set({ selectedChapterId: id, panel: 'chapter' });
+      },
+      async showPanel(panel) {
+        if (panel !== 'chapter' && !(await get().leaveChapter())) return;
+        set({ panel });
+      },
       dismissMessage: () => set({ message: null }),
+
+      async leaveChapter() {
+        if (editor === null) return true;
+        const saved = await editor.flush();
+        if (!saved) set({ message: '本章正文没有保存成功，已留在本章。可以复制全文或导出本章后再离开。' });
+        return saved;
+      },
+      registerEditor(handle) {
+        editor = handle;
+      },
+      async loadChapter(chapterId) {
+        await run(service.openChapter(chapterId), (content) =>
+          get().selectedChapterId === chapterId ? { chapterContent: content, saveStatus: { kind: 'saved' } } : {},
+        );
+      },
+      saveChapter: (chapterId, saved, current, edits) => service.saveChapter(chapterId, saved, current, edits),
+      writeDraft(chapterId, paragraphs) {
+        void service.writeDraft(chapterId, paragraphs);
+      },
+      async settleDraft(discard) {
+        const content = get().chapterContent;
+        if (content === null) return;
+        if (discard) await service.discardDraft(content.chapterId);
+        set({ chapterContent: { ...content, draft: null } });
+      },
+      setSaveStatus: (saveStatus) => set({ saveStatus }),
+      setWordCount: (wordCount) => set({ wordCount }),
+      async copyText(text) {
+        const result = await service.copyText(text);
+        set({ message: result.ok ? null : `复制失败：${result.error}` });
+      },
+      async exportText(title, text) {
+        const result = await service.exportText(`${title}.txt`, text);
+        if (!result.ok) set({ message: `导出失败：${result.error}` });
+      },
     };
   });
 }

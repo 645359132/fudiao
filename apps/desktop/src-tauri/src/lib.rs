@@ -1,7 +1,8 @@
-//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）；凭据代理与凭据存储在 M2-01、M2-02 加入。
+//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿与导出（M1-05）；凭据代理与凭据存储在 M2-01、M2-02 加入。
 //! 业务逻辑留在 TypeScript，Rust 只提供 IO 与凭据（施工文档第二章）。
 
 pub mod db;
+pub mod drafts;
 pub mod library;
 
 use serde::Serialize;
@@ -40,7 +41,11 @@ pub fn run() {
             library::library_read,
             library::library_write,
             library::library_default_dir,
-            library::project_probe
+            library::project_probe,
+            drafts::draft_read,
+            drafts::draft_write,
+            drafts::draft_delete,
+            drafts::export_text
         ])
         .run(tauri::generate_context!())
         .expect("无法启动应用");

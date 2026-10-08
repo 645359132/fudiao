@@ -34,6 +34,15 @@ export function tauriDeps(): AppDeps {
       },
       close: () => closeProjectDb(invoke),
     },
+    drafts: {
+      read: (projectDir, chapterId) => call(invoke<string | null>('draft_read', { projectDir, chapterId })),
+      write: (projectDir, chapterId, content) => call(invoke<void>('draft_write', { projectDir, chapterId, content })),
+      remove: (projectDir, chapterId) => call(invoke<void>('draft_delete', { projectDir, chapterId })),
+    },
+    exporter: {
+      exportText: (suggestedName, content) => call(invoke<boolean>('export_text', { suggestedName, content })),
+      copyText: (content) => call(navigator.clipboard.writeText(content)),
+    },
     clock: { now: () => new Date().toISOString() },
     ids: { next: () => ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))) },
   };

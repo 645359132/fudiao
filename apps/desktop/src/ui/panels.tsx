@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Chapter, Project } from '@fudiao/store';
+import { ChapterEditor } from './ChapterEditor';
 import { NO_CHAPTERS, useApp } from './store-context';
 
 function ChapterNotes({ chapter }: { readonly chapter: Chapter }) {
@@ -33,13 +34,25 @@ function ChapterNotes({ chapter }: { readonly chapter: Chapter }) {
 
 export function ChapterPanel() {
   const chapter = useApp((s) => s.work?.chapters.find((c) => c.id === s.selectedChapterId) ?? null);
+  const content = useApp((s) => s.chapterContent);
+  const loadChapter = useApp((s) => s.loadChapter);
+  const chapterId = chapter?.id ?? null;
+  const loaded = content !== null && content.chapterId === chapterId;
+
+  useEffect(() => {
+    if (chapterId !== null && !loaded) void loadChapter(chapterId);
+  }, [chapterId, loaded, loadChapter]);
+
   if (chapter === null) return <p className="muted">在左侧选择或新建一个章节。</p>;
   return (
-    <section aria-label="章节">
+    <section aria-label="章节" className="chapter-panel">
       <h2>{chapter.title}</h2>
-      <p className="muted">正文编辑器尚未接入；这里先记录章节梗概与写作备注。</p>
-      {/* 以版本作为 key：保存或在别处修改后，表单换成最新内容。 */}
-      <ChapterNotes key={`${chapter.id}:${chapter.version}`} chapter={chapter} />
+      {loaded ? <ChapterEditor key={chapter.id} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
+      <details className="chapter-notes">
+        <summary>梗概与写作备注</summary>
+        {/* 以版本作为 key：保存或在别处修改后，表单换成最新内容。 */}
+        <ChapterNotes key={`${chapter.id}:${chapter.version}`} chapter={chapter} />
+      </details>
     </section>
   );
 }

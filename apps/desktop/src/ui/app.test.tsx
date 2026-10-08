@@ -9,6 +9,14 @@ import { createAppService } from '../app/service';
 import { createAppStore } from '../state/store';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 
+// jsdom 不做排版，ProseMirror 把选区滚入视野时要用到的几何接口给空实现。
+const noRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
+const zeroRect = () => ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) }) as DOMRect;
+Element.prototype.getClientRects = noRects;
+Range.prototype.getClientRects = noRects;
+Range.prototype.getBoundingClientRect = zeroRect;
+document.elementFromPoint = () => null;
+
 const all: TestDeps[] = [];
 afterEach(async () => {
   cleanup();
@@ -119,5 +127,87 @@ describe('作品与章节界面', () => {
     expect(alert.textContent).toContain('这个文件夹里没有作品');
     await user.click(screen.getByRole('button', { name: '关闭提示' }));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('正文编辑', () => {
+  const editorText = () => screen.getByRole('textbox', { name: '正文' }).textContent;
+
+  async function chapterWithText(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    const body = await screen.findByRole('textbox', { name: '正文' });
+    await user.click(body);
+    await user.keyboard(text);
+    await waitFor(() => expect(editorText()).toBe(text));
+    await waitForSaved();
+  }
+
+  /** 先等到出现未保存状态，再等到保存完成；避免一开始的“已保存”让等待直接通过。 */
+  async function waitForSaved() {
+    await waitFor(() => expect(screen.getByRole('status').textContent).not.toBe('已保存'));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('已保存'), { timeout: 3_000 });
+  }
+
+  it('输入后自动保存；切换章节再回来，正文一致；字数随之更新', async () => {
+    const { user } = start();
+    await chapterWithText(user, '雨下得更紧了。');
+    expect(screen.getByText('本章 7 字')).toBeTruthy();
+    await addChapter(user, '第二章');
+    await waitFor(() => expect(editorText()).toBe(''));
+    await user.click(screen.getByRole('button', { name: '第一章' }));
+    await waitFor(() => expect(editorText()).toBe('雨下得更紧了。'));
+  });
+
+  it('关闭作品后重新打开，正文从库中读回', async () => {
+    const { user } = start();
+    await chapterWithText(user, '他没有回头。');
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    await waitFor(() => expect(editorText()).toBe('他没有回头。'));
+  });
+
+  it('意外退出后重新打开：提示未保存的编辑，可以恢复', async () => {
+    const { deps, store, user } = start();
+    await chapterWithText(user, '已保存的一句。');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    const path = store.getState().work?.entry.path ?? '';
+    const savedId = screen.getByRole('textbox', { name: '正文' }).querySelector('p')?.getAttribute('data-id') ?? '';
+    const saved = [{ id: savedId, text: '已保存的一句。', source: 'handwritten' }];
+    // 模拟崩溃前留下的草稿：比库中多一段。
+    await deps.drafts.write(
+      path,
+      chapterId,
+      JSON.stringify({ version: 1, chapterId, writtenAt: '2026-10-08T01:02:03.000Z', paragraphs: [...saved, { id: 'unsaved', text: '没来得及保存的一句。', source: 'handwritten' }] }),
+    );
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    expect((await screen.findByText(/未保存的编辑/)).textContent).toContain('发现');
+    await user.click(screen.getByRole('button', { name: '恢复这些编辑' }));
+    await waitFor(() => expect(editorText()).toBe('已保存的一句。没来得及保存的一句。'));
+    await waitForSaved();
+    // 恢复的内容已存入库中，草稿已删除：重新打开作品时不再提示。
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    await waitFor(() => expect(editorText()).toBe('已保存的一句。没来得及保存的一句。'));
+    expect(screen.queryByText(/未保存的编辑/)).toBeNull();
+  });
+
+  it('保存失败时显示原因，可以复制全文与导出本章，内容留在编辑器中', async () => {
+    const { deps, user } = start();
+    await chapterWithText(user, '第一句。');
+    // 让后续保存失败：关闭作品库连接。
+    await deps.opener.close();
+    await user.keyboard('第二句。');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('保存失败'), { timeout: 3_000 });
+    expect(editorText()).toBe('第一句。第二句。');
+    await user.click(screen.getByRole('button', { name: '复制全文' }));
+    expect(deps.copied).toEqual(['第一句。第二句。']);
+    await user.click(screen.getByRole('button', { name: '导出本章' }));
+    expect(deps.exported).toEqual([{ name: '第一章.txt', content: '第一句。第二句。' }]);
+    // 保存失败时不能离开本章。
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('没有保存成功');
+    expect(screen.getByRole('textbox', { name: '正文' })).toBeTruthy();
   });
 });

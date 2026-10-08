@@ -1,2 +1,4 @@
-// 本包在后续任务中实现，见施工文档第八章。
-export {};
+export type { EditorParagraph } from './document';
+export { chapterExtensions, fromDoc, toDoc } from './document';
+export type { ParagraphIdentityOptions, SourceKind, StructuralLog } from './paragraph-identity';
+export { ParagraphIdentity, paragraphIdentityKey, structuralLog } from './paragraph-identity';

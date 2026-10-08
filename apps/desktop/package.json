@@ -11,10 +11,14 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@fudiao/editor": "workspace:*",
     "@fudiao/shared": "workspace:*",
     "@fudiao/store": "workspace:*",
     "@tauri-apps/api": "^2.12.1",
     "@tauri-apps/plugin-dialog": "^2.8.1",
+    "@tiptap/core": "^3.31.4",
+    "@tiptap/pm": "^3.31.4",
+    "@tiptap/react": "^3.31.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5",

@@ -13,7 +13,7 @@ export function WorkScreen() {
         <button type="button" onClick={() => void closeWork()}>
           作品列表
         </button>
-        <button type="button" className="work-title" aria-pressed={panel === 'info'} onClick={() => showPanel('info')}>
+        <button type="button" className="work-title" aria-pressed={panel === 'info'} onClick={() => void showPanel('info')}>
           {title}
         </button>
       </header>

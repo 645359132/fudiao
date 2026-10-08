@@ -1,4 +1,15 @@
-import type { AppError } from './service';
+import type { OpenError, RepoError } from '@fudiao/store';
+
+export type AppError =
+  | { readonly code: 'library'; readonly detail: string }
+  /** 作品文件夹已不存在。 */
+  | { readonly code: 'missing'; readonly path: string }
+  /** 文件夹里没有作品库。 */
+  | { readonly code: 'not_a_work'; readonly path: string }
+  | { readonly code: 'open_failed'; readonly error: OpenError }
+  | { readonly code: 'repo'; readonly error: RepoError }
+  | { readonly code: 'no_work' }
+  | { readonly code: 'not_found' };
 
 /** 给作者看的错误说明。 */
 export function describeError(error: AppError): string {

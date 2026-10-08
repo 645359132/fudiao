@@ -22,6 +22,20 @@ export interface ProjectOpener {
   close(): Promise<void>;
 }
 
+/** 未保存编辑的草稿：作品文件夹下 drafts/<章节标识>.json（Rust 命令）。 */
+export interface DraftPort {
+  read(projectDir: string, chapterId: string): Promise<Result<string | null, string>>;
+  write(projectDir: string, chapterId: string, content: string): Promise<Result<void, string>>;
+  remove(projectDir: string, chapterId: string): Promise<Result<void, string>>;
+}
+
+/** 保存失败时的退路：导出为文本文件（保存对话框由 Rust 弹出）、复制到剪贴板。 */
+export interface ExportPort {
+  /** 返回是否已保存；作者取消时为 false。 */
+  exportText(suggestedName: string, content: string): Promise<Result<boolean, string>>;
+  copyText(content: string): Promise<Result<void, string>>;
+}
+
 export interface Clock {
   /** UTC ISO 字符串。 */
   now(): string;
@@ -35,6 +49,8 @@ export interface Ids {
 export type AppDeps = {
   readonly library: LibraryPort;
   readonly opener: ProjectOpener;
+  readonly drafts: DraftPort;
+  readonly exporter: ExportPort;
   readonly clock: Clock;
   readonly ids: Ids;
 };

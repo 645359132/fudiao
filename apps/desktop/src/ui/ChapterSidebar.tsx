@@ -44,7 +44,7 @@ function ChapterItem({ chapter, index, count }: { readonly chapter: Chapter; rea
             type="button"
             className="chapter-title"
             aria-current={selected ? 'page' : undefined}
-            onClick={() => select(chapter.id)}
+            onClick={() => void select(chapter.id)}
             onDoubleClick={() => setEditing(true)}
             onKeyDown={(e) => {
               if (e.key === 'F2') setEditing(true);
@@ -98,7 +98,7 @@ export function ChapterSidebar() {
           ))}
         </ol>
       )}
-      <button type="button" className="trash-toggle" onClick={() => showPanel('trash')}>
+      <button type="button" className="trash-toggle" onClick={() => void showPanel('trash')}>
         回收站（{trashedCount}）
       </button>
     </nav>

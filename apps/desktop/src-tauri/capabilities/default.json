@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口的权限：核心默认权限，以及选择作品文件夹的对话框。文件、网络等插件按需逐项加入。",
+  "description": "主窗口的权限：核心默认权限；关闭窗口前先保存，保存后由界面销毁窗口；选择作品文件夹的对话框。导出的保存对话框由 Rust 弹出，不开放给界面。",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-destroy",
     "dialog:allow-open"
   ]
 }

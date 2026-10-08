@@ -6,6 +6,8 @@ import {
   createProject,
   getProject,
   listChapters,
+  listParagraphs,
+  saveChapterParagraphs,
   moveChapter,
   renameChapter,
   restoreChapter,
@@ -13,28 +15,30 @@ import {
   updateChapterNotes,
   updateProject,
   type Chapter,
-  type OpenError,
   type Project,
   type ProjectPatch,
   type RepoError,
+  type CurrentParagraph,
+  type SavedParagraph,
   type SqlPort,
+  type StructuralEdits,
 } from '@fudiao/store';
+import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type WorkEntry } from './library';
+import { describeError, type AppError } from './errors';
 import type { AppDeps } from './ports';
 
-export type AppError =
-  | { readonly code: 'library'; readonly detail: string }
-  /** 作品文件夹已不存在。 */
-  | { readonly code: 'missing'; readonly path: string }
-  /** 文件夹里没有作品库。 */
-  | { readonly code: 'not_a_work'; readonly path: string }
-  | { readonly code: 'open_failed'; readonly error: OpenError }
-  | { readonly code: 'repo'; readonly error: RepoError }
-  | { readonly code: 'no_work' }
-  | { readonly code: 'not_found' };
+export type { AppError } from './errors';
 
 export type LibraryWork = WorkEntry & { readonly missing: boolean };
 export type LibraryView = { readonly libraryDir: string; readonly works: readonly LibraryWork[] };
+
+/** 打开的章节：库中的段落，以及与之不同的未保存草稿（若有）。 */
+export type ChapterContent = {
+  readonly chapterId: string;
+  readonly saved: readonly SavedParagraph[];
+  readonly draft: DraftFile | null;
+};
 
 export type WorkView = {
   readonly entry: WorkEntry;
@@ -227,6 +231,46 @@ export function createAppService(deps: AppDeps) {
     },
 
     reloadWork: view,
+
+    /** 载入一章正文；草稿与库中不同时一并返回，由作者决定恢复或丢弃。 */
+    async openChapter(chapterId: string): Promise<Result<ChapterContent, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const saved = await listParagraphs(session.port, chapterId);
+      if (!saved.ok) return err(repo(saved.error));
+      const text = await deps.drafts.read(session.entry.path, chapterId);
+      const draft = text.ok && text.value !== null ? parseDraft(text.value, chapterId) : null;
+      return ok({ chapterId, saved: saved.value, draft: draft !== null && draftDiffers(draft, saved.value) ? draft : null });
+    },
+
+    /** 保存一章正文；成功后删除草稿。失败时返回给作者看的说明。 */
+    async saveChapter(
+      chapterId: string,
+      saved: readonly SavedParagraph[],
+      current: readonly CurrentParagraph[],
+      edits: StructuralEdits,
+    ): Promise<Result<SavedParagraph[], string>> {
+      if (session === null) return err(describeError({ code: 'no_work' }));
+      const result = await saveChapterParagraphs(session.port, chapterId, saved, current, edits, ctx());
+      if (!result.ok) {
+        return err(result.error.code === 'conflict' ? '正文已在别处修改，请复制或导出当前内容后重新打开章节' : describeError(repo(result.error)));
+      }
+      await deps.drafts.remove(session.entry.path, chapterId);
+      return result;
+    },
+
+    /** 写草稿；失败不打扰作者（草稿只是意外退出时的退路）。 */
+    async writeDraft(chapterId: string, paragraphs: readonly CurrentParagraph[]): Promise<void> {
+      if (session === null) return;
+      await deps.drafts.write(session.entry.path, chapterId, draftJson(chapterId, deps.clock.now(), paragraphs));
+    },
+
+    async discardDraft(chapterId: string): Promise<void> {
+      if (session === null) return;
+      await deps.drafts.remove(session.entry.path, chapterId);
+    },
+
+    exportText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
+    copyText: (content: string) => deps.exporter.copyText(content),
 
     createChapter: (title: string, after?: string) =>
       withPort((port) => createChapter(port, { id: deps.ids.next(), title, ...(after !== undefined && { after }) }, ctx())),
