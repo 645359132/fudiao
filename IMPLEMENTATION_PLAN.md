@@ -332,7 +332,7 @@ stateDiagram-v2
 
 三个适配器共用同一组内部类型、结构化输出管线、预算守卫与调用记录。服务之间的差异（参数名称、用量字段、错误码、拒答表示）只在适配器内部处理。
 
-使用 OpenAI 写法（Chat Completions）的服务在细节上各不相同，`OpenAIChatAdapter` 按服务配置的写法差异（`ChatDialect`）处理：输出上限的参数名（OpenAI 官方的推理模型只接受 `max_completion_tokens`，多数兼容接口只认 `max_tokens`）、是否请求流式用量（`stream_options`）、是否去掉正文开头的 `<think>…</think>`（部分推理模型经 vLLM、Ollama 等把思考过程放在正文里）。OpenAI 官方接口与兼容接口各有默认值，作者可按服务覆盖。M0 命令行暂以 Chat Completions 接入 OpenAI 官方接口（服务种类 `openai`）；桌面端在 M2-02a 按上表改用 Responses API。
+使用 OpenAI 写法（Chat Completions）的服务在细节上各不相同，`OpenAIChatAdapter` 按服务配置的写法差异（`ChatDialect`）处理：输出上限的参数名（OpenAI 官方的推理模型只接受 `max_completion_tokens`，多数兼容接口只认 `max_tokens`）、是否请求流式用量（`stream_options`）、是否去掉正文开头的 `<think>…</think>`（部分推理模型经 vLLM、Ollama 等把思考过程放在正文里）。OpenAI 官方接口与兼容接口各有默认值，作者可按服务覆盖。M0 命令行暂以 Chat Completions 接入 OpenAI 官方接口（服务种类 `openai`）；桌面端按上表用 Responses API（`OpenAIAdapter`，M2-02a）：系统提示合为 `instructions`，`store: false` 不在服务端保存对话，结构化输出用 `text.format`，推理深度用 `reasoning.effort`（高于 high 按 high 发送），用量扣除缓存命中；只处理文字、拒答、结束与失败事件。Gemini 兼容模式用兼容接口的写法默认值，但不处理思考标签。
 
 ### 分工
 

@@ -93,6 +93,8 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
+    // 构建产物（Vite 的 dist、Rust 的 target）不是源码。
+    exclude: { path: '^apps/[^/]+/(dist|src-tauri/target)/' },
     // 仅类型的导入同样受边界约束。
     tsPreCompilationDeps: true,
     combinedDependencies: true,

@@ -183,6 +183,35 @@ export function openaiChunks(
   ];
 }
 
+const event = (type: string, payload: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`;
+
+/** OpenAI Responses API 的流式事件。用量只在结束时给出。 */
+export function responsesChunks(model: string, s: Scenario, opts: { stopAfterText?: boolean } = {}): string[] {
+  const served = s.servedModel ?? model;
+  const response = (status: string, extra: Record<string, unknown> = {}) => ({ id: 'resp_test', object: 'response', model: served, status, output: [], ...extra });
+  const chunks = [
+    event('response.created', { response: response('in_progress') }),
+    ...(s.end === 'refusal'
+      ? [event('response.refusal.delta', { delta: s.text.join(''), item_id: 'msg', output_index: 0, content_index: 0 })]
+      : s.text.map((t) => event('response.output_text.delta', { delta: t, item_id: 'msg', output_index: 0, content_index: 0 }))),
+  ];
+  if (opts.stopAfterText) return chunks;
+  const u = s.usage ?? { input: 0, output: 0, cacheRead: 0 };
+  const usage = {
+    input_tokens: u.input + u.cacheRead,
+    input_tokens_details: { cached_tokens: u.cacheRead },
+    output_tokens: u.output,
+    output_tokens_details: { reasoning_tokens: 0 },
+    total_tokens: u.input + u.cacheRead + u.output,
+  };
+  return [
+    ...chunks,
+    s.end === 'length'
+      ? event('response.incomplete', { response: response('incomplete', { incomplete_details: { reason: 'max_output_tokens' }, usage }) })
+      : event('response.completed', { response: response('completed', { usage }) }),
+  ];
+}
+
 /** 两家服务的错误响应体。 */
 export const errorBody = (status: number) =>
   JSON.stringify({ type: 'error', error: { type: status === 429 ? 'rate_limit_error' : 'api_error', message: `错误 ${status}` } });

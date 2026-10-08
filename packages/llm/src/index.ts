@@ -1,6 +1,8 @@
 export type { AnthropicAdapterOptions } from './adapters/anthropic';
 export { AnthropicAdapter } from './adapters/anthropic';
 export type { ChatDialect, OpenAIChatAdapterOptions } from './adapters/openai-chat';
+export type { OpenAIAdapterOptions } from './adapters/openai-responses';
+export { OpenAIAdapter } from './adapters/openai-responses';
 export { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './adapters/openai-chat';
 export type { Budget } from './budget';
 export type { ConnectionPrompt, ConnectionReport } from './connection';

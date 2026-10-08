@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { anthropicChunks, fakeFetch, openaiChunks, type Scenario } from '../testing/fake-fetch';
+import { anthropicChunks, fakeFetch, openaiChunks, responsesChunks, type Scenario } from '../testing/fake-fetch';
 import { CONSERVATIVE_CAPABILITIES, type LlmRequest, type ModelCapabilities } from '../types';
 import { AnthropicAdapter } from './anthropic';
 import { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './openai-chat';
+import { OpenAIAdapter } from './openai-responses';
 
 const full: ModelCapabilities = {
   structuredOutput: 'native',
@@ -163,3 +164,46 @@ describe('OpenAI 兼容接口的差异', () => {
     expect(result.ok && result.value.text).toBe('<think>x</think>y');
   });
 });
+
+describe('OpenAIAdapter（Responses API）请求参数', () => {
+  const send = async (capabilities: ModelCapabilities, effort: LlmRequest['effort'] = 'high') => {
+    const { fetch, requests } = fakeFetch([{ chunks: responsesChunks('m', done) }]);
+    await new OpenAIAdapter({ apiKey: 'k', fetch, maxRetries: 0 }).complete({ ...request(capabilities), ...(effort !== undefined && { effort }) });
+    return requests[0]!;
+  };
+
+  it('系统提示合为 instructions，按能力描述传递 json_schema 与推理深度，不在服务端保存', async () => {
+    const sent = await send(full);
+    expect(sent.url).toBe('https://api.openai.com/v1/responses');
+    expect(sent.body).toEqual({
+      model: 'm',
+      stream: true,
+      store: false,
+      max_output_tokens: 4_000,
+      instructions: '通用规则与输出格式\n\n场景规则与角色卡\n\n本回合',
+      input: [{ role: 'user', content: '请裁决' }],
+      text: { format: { type: 'json_schema', name: 'ruling', schema: { type: 'object', properties: {} }, strict: true } },
+      reasoning: { effort: 'high' },
+    });
+  });
+
+  it('保守能力下不发送输出格式与推理深度；高于 high 的深度按 high 发送', async () => {
+    const plain = await send(CONSERVATIVE_CAPABILITIES);
+    expect(plain.body).not.toHaveProperty('text');
+    expect(plain.body).not.toHaveProperty('reasoning');
+    expect((await send(full, 'max')).body).toMatchObject({ reasoning: { effort: 'high' } });
+    expect((await send({ ...full, structuredOutput: 'json_object' })).body).toMatchObject({ text: { format: { type: 'json_object' } } });
+  });
+
+  it('用量扣除缓存命中；服务端失败事件转为错误', async () => {
+    const { fetch } = fakeFetch([{ chunks: responsesChunks('m', { text: ['{}'], end: 'stop', usage: { input: 70, output: 5, cacheRead: 30 } }) }]);
+    const result = await new OpenAIAdapter({ apiKey: 'k', fetch, maxRetries: 0 }).complete(request(full));
+    expect(result.ok && result.value.usage).toEqual({ inputTokens: 70, outputTokens: 5, cacheReadTokens: 30, cacheWriteTokens: 0 });
+
+    const failed = `event: response.failed\ndata: ${JSON.stringify({ type: 'response.failed', response: { id: 'r', status: 'failed', error: { code: 'server_error', message: '服务出错' } } })}\n\n`;
+    const { fetch: failing } = fakeFetch([{ chunks: [failed] }]);
+    const bad = await new OpenAIAdapter({ apiKey: 'k', fetch: failing, maxRetries: 0 }).complete(request(full));
+    expect(bad).toEqual({ ok: false, error: { code: 'server', message: '服务出错' } });
+  });
+});
+

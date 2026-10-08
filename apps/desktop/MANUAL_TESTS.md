@@ -117,6 +117,7 @@ pnpm --filter @fudiao/desktop tauri dev
 4. 本地端点（Ollama 或 LM Studio，地址 `http://127.0.0.1:…`）：不填 API Key 也能连接测试。
 5. 系统设置了代理时，连接测试经过代理。
 6. 关闭并重新打开应用：服务、模型与默认模型保持，连接测试照常可用。
+7. 五类服务各接入一个实例做连接测试（M2-02a）：Anthropic、OpenAI（Responses API）、Google Gemini（AI Studio 的 API Key，兼容模式）、一个 OpenAI 兼容接口（如 DeepSeek）、一个本地端点（Ollama）；记录各自的延迟与是否成功。
 
 ## 记录
 

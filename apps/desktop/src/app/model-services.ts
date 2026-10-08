@@ -4,7 +4,7 @@ import {
   AnthropicAdapter,
   COMPATIBLE_DIALECT,
   CONSERVATIVE_CAPABILITIES,
-  OPENAI_DIALECT,
+  OpenAIAdapter,
   OpenAIChatAdapter,
   PLACEHOLDER_API_KEY,
   testConnection,
@@ -50,8 +50,10 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderKind, { readonly label: s
 /** 为服务建立适配器。SDK 的 API Key 填占位值，真实凭据由凭据代理注入。 */
 export function buildAdapter(provider: Provider, fetch: typeof globalThis.fetch): LlmPort {
   if (provider.kind === 'anthropic') return new AnthropicAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
-  // OpenAI 官方接口在 M2-02a 改用 Responses API；此前与其他服务一样用 Chat Completions。
-  const base = provider.kind === 'openai' ? OPENAI_DIALECT : COMPATIBLE_DIALECT;
+  // OpenAI 官方接口用 Responses API；Gemini（兼容模式）、兼容接口与本地端点用 Chat Completions。
+  if (provider.kind === 'openai') return new OpenAIAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
+  // Gemini 的兼容端点不在正文中输出思考标签。
+  const base = provider.kind === 'gemini' ? { ...COMPATIBLE_DIALECT, stripThinkTags: false } : COMPATIBLE_DIALECT;
   return new OpenAIChatAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, dialect: { ...base, ...provider.dialect }, viaCredentialProxy: true });
 }
 

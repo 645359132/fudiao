@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs';
 import { PLACEHOLDER_API_KEY } from '@fudiao/llm';
-import { anthropicChunks, errorBody, openaiChunks } from '@fudiao/llm/testing';
+import { anthropicChunks, errorBody, openaiChunks, responsesChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { createAppService } from './service';
@@ -117,5 +117,33 @@ describe('模型服务', () => {
     const after = value(await app.deleteProvider(value(await app.loadModelServices()).providers[0]!));
     expect(after).toEqual({ providers: [], models: [], defaultModelId: null });
     expect(deps.secrets.size).toBe(0);
+  });
+
+  it('五类服务各一个实例：按服务种类选用适配器与接口，连接测试都经凭据代理', async () => {
+    const { deps, app } = setup();
+    const cases = [
+      { kind: 'anthropic', baseUrl: 'https://api.anthropic.com', path: 'https://api.anthropic.com/v1/messages?beta=true', chunks: anthropicChunks },
+      { kind: 'openai', baseUrl: 'https://api.openai.com/v1', path: 'https://api.openai.com/v1/responses', chunks: responsesChunks },
+      {
+        kind: 'gemini',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        path: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+        chunks: openaiChunks,
+      },
+      { kind: 'openai_compatible', baseUrl: 'https://api.deepseek.com/v1', path: 'https://api.deepseek.com/v1/chat/completions', chunks: openaiChunks },
+      { kind: 'local', baseUrl: 'http://127.0.0.1:11434/v1', path: 'http://127.0.0.1:11434/v1/chat/completions', chunks: openaiChunks },
+    ] as const;
+    for (const c of cases) {
+      const local = c.kind === 'local';
+      const view = value(await app.saveProvider(null, { kind: c.kind, name: c.kind, baseUrl: c.baseUrl, authMethod: local ? 'none' : 'api_key', apiKey: local ? null : `key-${c.kind}` }));
+      const provider = view.providers.find((p) => p.name === c.kind);
+      const model = value(await app.addModel(provider?.id ?? '', `${c.kind}-model`)).models.find((m) => m.modelId === `${c.kind}-model`);
+      deps.llmResponses.push({ chunks: c.chunks(`${c.kind}-model`, { text: ['好'], end: 'stop', usage: { input: 5, output: 1, cacheRead: 0 } }) });
+      expect(value(await app.testConnection(model?.id ?? '')), c.kind).toMatchObject({ ok: true, servedModel: `${c.kind}-model`, reply: '好' });
+      const sent = deps.llmRequests.at(-1);
+      expect(sent?.url, c.kind).toBe(c.path);
+      const auth = sent?.headers['x-api-key'] ?? sent?.headers['authorization'];
+      expect(auth, c.kind).toBe(local ? undefined : c.kind === 'anthropic' ? 'key-anthropic' : `Bearer key-${c.kind}`);
+    }
   });
 });

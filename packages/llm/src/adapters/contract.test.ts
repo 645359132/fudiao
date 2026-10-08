@@ -2,11 +2,12 @@ import { canonicalJson } from '@fudiao/shared';
 import { describe, expect, it } from 'vitest';
 import { requestHash } from '../request-hash';
 import { createProxyFetch } from '../proxy-fetch';
-import { anthropicChunks, errorBody, fakeFetch, openaiChunks, type Scenario } from '../testing/fake-fetch';
+import { anthropicChunks, errorBody, fakeFetch, openaiChunks, responsesChunks, type Scenario } from '../testing/fake-fetch';
 import { fakeNet } from '../testing/fake-net';
 import type { LlmPort, LlmRequest, LlmStreamEvent, ModelCapabilities } from '../types';
 import { AnthropicAdapter } from './anthropic';
 import { OpenAIChatAdapter } from './openai-chat';
+import { OpenAIAdapter } from './openai-responses';
 
 // 适配器契约测试（施工文档第九章）：同一组逻辑场景，各适配器输出一致的内部结果。
 
@@ -60,6 +61,14 @@ const subjects: Subject[] = [
     build: (fetch, maxRetries = 0) =>
       new OpenAIChatAdapter({ apiKey: KEY, baseURL: 'https://llm.example.test/v1', fetch, maxRetries }),
     chunks: openaiChunks,
+    refusal: { category: null },
+    usageOnCancel: 'unknown',
+  },
+  {
+    name: 'OpenAIAdapter',
+    provider: 'openai',
+    build: (fetch, maxRetries = 0) => new OpenAIAdapter({ apiKey: KEY, fetch, maxRetries }),
+    chunks: responsesChunks,
     refusal: { category: null },
     usageOnCancel: 'unknown',
   },
