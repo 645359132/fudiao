@@ -23,6 +23,8 @@ import {
   saveChapterParagraphs,
   searchParagraphs,
   sourceStats,
+  usageSummary,
+  listLlmCalls,
   createSnapshot,
   getSnapshot,
   listSnapshots,
@@ -51,11 +53,14 @@ import {
   type ImportChapter,
   type SearchResult,
   type SourceStats,
+  type UsageSummary,
+  type LlmCallRow,
   type StructuralEdits,
 } from '@fudiao/store';
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
 import { toMarkdown, toTxt, type ExportChapter } from './text-export';
+import { modelRunner } from './model-runner';
 import { modelServices } from './model-services';
 import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type Preferences, type WorkEntry } from './library';
 import { describeError, type AppError } from './errors';
@@ -251,8 +256,23 @@ export function createAppService(deps: AppDeps) {
     return ok({ libraryDir: dir.value, works, preferences: file.preferences });
   }
 
+  const services = modelServices(deps);
+  /** 模型调用：用默认模型，调用记录写入当前作品库（M2-05 起由选区操作等使用）。 */
+  const runner = modelRunner({ deps, project: () => session?.port ?? null, defaultModel: () => services.defaultModel() });
+
   return {
-    ...modelServices(deps),
+    ...services,
+    runner,
+
+    /** 用量与费用（B19）：全部、按任务、按模型，以及最近的调用。 */
+    async usage(): Promise<Result<{ summary: UsageSummary; recent: readonly LlmCallRow[] }, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const summary = await usageSummary(session.port);
+      if (!summary.ok) return err(repo(summary.error));
+      const recent = await listLlmCalls(session.port, 50);
+      if (!recent.ok) return err(repo(recent.error));
+      return ok({ summary: summary.value, recent: recent.value });
+    },
 
     loadLibrary,
 

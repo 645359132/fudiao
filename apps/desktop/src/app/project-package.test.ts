@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChapter, createProject, exportData, importData, saveChapterParagraphs, trashChapter, type ExportedData } from '@fudiao/store';
+import { createChapter, createProject, exportData, importData, saveChapterParagraphs, TABLES, trashChapter, type ExportedData } from '@fudiao/store';
 import { loadMigrations, openProjectDb, type ProjectDb } from '@fudiao/store/node';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
@@ -55,7 +55,7 @@ describe('作品包', () => {
     const paths = files.map((f) => f.path);
     expect(paths[0]).toBe('manifest.json');
     expect(paths.filter((p) => p.startsWith('chapters/'))).toEqual(['chapters/0001-第一章 雨夜.md', 'chapters/0002-第二章：当铺.md']);
-    expect(paths.filter((p) => p.startsWith('data/'))).toHaveLength(9);
+    expect(paths.filter((p) => p.startsWith('data/'))).toEqual(TABLES.map((t) => `data/${t.name}.jsonl`));
     expect(files.find((f) => f.path === 'chapters/0001-第一章 雨夜.md')?.content).toBe('# 第一章 雨夜\n\n雨下得更紧了。\n\n他没有回头。\n\n');
     expect(JSON.parse(files[0]?.content ?? '')).toMatchObject({ format: 'fudiao-project', formatVersion: 1, schemaVersion: loadMigrations().at(-1)?.version, title: '雨夜/归来', chapters: 2 });
   });

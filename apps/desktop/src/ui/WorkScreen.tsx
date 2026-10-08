@@ -6,6 +6,7 @@ import { HistoryPanel } from './HistoryPanel';
 import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SourcesPanel } from './SourcesPanel';
+import { UsagePanel } from './UsagePanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -23,6 +24,7 @@ export function WorkScreen() {
   const openSourceStats = useApp((s) => s.openSourceStats);
   const openSearch = useApp((s) => s.openSearch);
   const openModelServices = useApp((s) => s.openModelServices);
+  const openUsage = useApp((s) => s.openUsage);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
 
@@ -78,6 +80,9 @@ export function WorkScreen() {
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openSourceStats()}>
               段落来源
             </button>
+            <button type="button" role="menuitem" disabled={busy} onClick={() => void openUsage()}>
+              用量与费用
+            </button>
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openModelServices()}>
               模型服务
             </button>
@@ -86,7 +91,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

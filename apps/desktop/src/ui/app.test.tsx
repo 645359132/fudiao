@@ -3,8 +3,8 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { anthropicChunks } from '@fudiao/llm/testing';
-import { SELF_TEST_EXPECTED } from '@fudiao/prompts';
+import { anthropicChunks, openaiChunks } from '@fudiao/llm/testing';
+import { renderConnectionTest, SELF_TEST_EXPECTED } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../App';
 import { createAppService } from '../app/service';
@@ -647,6 +647,28 @@ describe('模型服务', () => {
     for (let i = 0; i < 3; i++) deps.llmResponses.push({ chunks: anthropicChunks('model-y', { text: [good], end: 'stop' }) });
     await user.click(within(card).getByRole('button', { name: '能力自检' }));
     await waitFor(() => expect(within(card).getByRole('note', { name: '模型 Y 的能力' }).textContent).toContain('自检通过'));
+  });
+});
+
+describe('用量与费用', () => {
+  it('列出本作品的模型调用：合计、按任务、最近的调用；没有价格时费用标为未知', async () => {
+    const { deps, service, user } = start();
+    await createWork(user, '雨夜');
+    const saved = await service.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk' });
+    if (!saved.ok) throw new Error('服务');
+    await service.addModel(saved.value.providers[0]?.id ?? '', 'm');
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['好'], end: 'stop', usage: { input: 10, output: 2, cacheRead: 0 } }) });
+    const prompt = renderConnectionTest();
+    if (!prompt.ok) throw new Error('模板');
+    await service.runner.text({ prompt: prompt.value, maxOutputTokens: 64 });
+
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '用量与费用' }));
+    const totals = await screen.findByRole('table', { name: '用量合计' });
+    expect(within(totals).getByRole('row', { name: /本作品/ }).textContent).toBe('本作品11002未知');
+    expect(within(totals).getByRole('row', { name: /连接测试/ })).toBeTruthy();
+    const recent = screen.getByRole('table', { name: '最近的调用' });
+    expect(within(recent).getAllByRole('row')[1]?.textContent).toMatch(/连接测试mconnection_test v1完成10 \/ 2未知$/);
   });
 });
 

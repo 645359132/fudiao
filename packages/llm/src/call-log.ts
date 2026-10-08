@@ -5,7 +5,8 @@ import type { CallOptions, Effort, LlmError, LlmOutcome, LlmPort, LlmRequest, Ll
 
 /** 调用记录（B19、B36），对应作品库的 llm_call 表。不含请求头与凭据。 */
 export type LlmCallRecord = {
-  readonly stepKey: string;
+  /** 推演步骤的确定键；选区操作等一次性调用没有步骤键。 */
+  readonly stepKey: string | null;
   readonly requestHash: string;
   readonly task: TaskKind;
   readonly provider: string;
@@ -30,17 +31,15 @@ export interface CallLog {
 const FINAL: ReadonlySet<LlmCallRecord['status']> = new Set(['completed', 'truncated', 'refused']);
 
 /**
- * 幂等步骤：带步骤键的调用先查完成记录，有则直接复用，恢复时不重复调用、不重复计费
- * （硬性规则 10）。失败与取消的步骤会重新调用。
+ * 每次调用都写入调用记录（B36）。带步骤键的调用先查完成记录，有则直接复用，恢复时不重复调用、不重复计费
+ * （硬性规则 10）；失败与取消的步骤会重新调用。
  */
 export function withCallLog(port: LlmPort, log: CallLog, now: () => string): LlmPort {
   return {
     async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
-      const { stepKey } = request;
-      if (stepKey === undefined) return port.complete(request, options);
-
+      const stepKey = request.stepKey ?? null;
       const hash = requestHash(request);
-      const done = await log.findCompleted(stepKey);
+      const done = stepKey === null ? undefined : await log.findCompleted(stepKey);
       if (done?.result !== undefined) {
         if (done.requestHash !== hash) {
           return err({ code: 'step_conflict', message: `步骤 ${stepKey} 已有记录，但请求内容不同` });

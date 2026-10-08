@@ -45,6 +45,14 @@ const sample: Statement[] = [
     ...T,
   ),
   s("INSERT INTO fact (id, kind, holder_id, content, modality, created_at, updated_at) VALUES ('01F3', 'claim', '01E1', '我从没来过这里', 'claimed', ?, ?)", ...T),
+  s(
+    "INSERT INTO llm_call (id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at) VALUES ('01L1', 'run1:1:action:shen:0', 'character_action', 'p1', 'm1', 'm1', '{\"maxOutputTokens\":1000}', 'character_action', '3', 'h1', 'completed', 100, 20, 30, 0, 0.0012, '{\"text\":\"{}\"}', NULL, ?, ?)",
+    ...T,
+  ),
+  s(
+    "INSERT INTO llm_call (id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at) VALUES ('01L2', NULL, 'selection_edit', 'p1', 'm1', NULL, '{}', 'selection_edit', '1', 'h2', 'error', NULL, NULL, NULL, NULL, NULL, NULL, '{\"code\":\"network\"}', ?, ?)",
+    ...T,
+  ),
   s("INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, to_version, anchor, created_at) VALUES ('01R1', 'fact', '01F1', 'paragraph', '01G1', 1, '{\"paragraphId\":\"01G1\",\"paragraphVersion\":1,\"start\":0,\"end\":4,\"quote\":\"雨下得更\"}', ?)", NOW),
   s("INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, created_at) VALUES ('01R2', 'fact', '01F2', 'entity', '01E2', ?)", NOW),
   s(

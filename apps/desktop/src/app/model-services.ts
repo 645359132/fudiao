@@ -172,6 +172,15 @@ export function modelServices(deps: AppDeps) {
   return {
     loadModelServices: view,
 
+    /** 默认模型及其服务；没有设置时为 null。 */
+    async defaultModel(): Promise<Result<{ provider: ProviderView; model: StoredModel } | null, AppError>> {
+      const current = await view();
+      if (!current.ok) return current;
+      const model = current.value.models.find((m) => m.id === current.value.defaultModelId);
+      const provider = current.value.providers.find((x) => x.id === model?.providerId);
+      return ok(model === undefined || provider === undefined ? null : { provider, model });
+    },
+
     /** 新建（provider 为 null）或修改服务；API Key 写入系统凭据管理器。 */
     async saveProvider(provider: ProviderView | null, form: ProviderForm): Promise<Result<ModelServicesView, AppError>> {
       const p = await port();

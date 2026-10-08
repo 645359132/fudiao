@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -29,7 +29,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -55,6 +55,8 @@ export type AppState = {
   readonly wordCount: number;
   /** 段落来源统计（打开“段落来源”时读取）。 */
   readonly sourceStats: SourceStats | null;
+  /** 用量与费用（打开“用量与费用”时读取）。 */
+  readonly usage: { readonly summary: UsageSummary; readonly recent: readonly LlmCallRow[] } | null;
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
   readonly modelServicesOpen: boolean;
   readonly modelServices: ModelServicesView | null;
@@ -150,6 +152,8 @@ export type AppState = {
   readonly openSourceStats: () => Promise<void>;
   readonly setShowParagraphSource: (show: boolean) => Promise<void>;
 
+  /** 保存正文后打开用量与费用。 */
+  readonly openUsage: () => Promise<void>;
   /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
   readonly openSearch: (query?: string) => Promise<void>;
   readonly runSearch: (query: string) => Promise<void>;
@@ -243,6 +247,7 @@ export function createAppStore(service: AppService): AppStore {
       facts: [],
       selectedFactId: null,
       sourceStats: null,
+      usage: null,
       searchQuery: '',
       searchResult: null,
       reveal: null,
@@ -277,7 +282,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, searchQuery: '', searchResult: null, reveal: null });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -539,6 +544,10 @@ export function createAppStore(service: AppService): AppStore {
       async openSourceStats() {
         if (!(await get().leaveChapter())) return;
         await run(service.sourceStats(), (sourceStats) => ({ sourceStats, panel: 'sources', chapterContent: null, drawerEntityId: null }));
+      },
+      async openUsage() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.usage(), (usage) => ({ usage, panel: 'usage', chapterContent: null, drawerEntityId: null }));
       },
       async openSearch(query) {
         if (!(await get().leaveChapter())) return;

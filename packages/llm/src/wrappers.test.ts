@@ -186,6 +186,19 @@ describe('调用记录与幂等步骤', () => {
     expect(changed).toEqual({ ok: false, error: expect.objectContaining({ code: 'step_conflict' }) });
   });
 
+  it('没有步骤键的调用同样记录（B36），每次都实际调用', async () => {
+    const log = memoryCallLog();
+    const { port, requests } = scriptedPort([{ text: 'a' }, { text: 'b' }]);
+    const logged = withCallLog(port, log, at);
+    await logged.complete(baseRequest({}));
+    await logged.complete(baseRequest({}));
+    expect(requests).toHaveLength(2);
+    expect(log.records().map((r) => [r.stepKey, r.status])).toEqual([
+      [null, 'completed'],
+      [null, 'completed'],
+    ]);
+  });
+
   it('记录中不含系统提示与消息正文之外的凭据', async () => {
     const log = memoryCallLog();
     await withCallLog(scriptedPort([{ text: 'x' }]).port, log, at).complete(baseRequest({ stepKey: 's' }));

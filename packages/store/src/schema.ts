@@ -95,6 +95,33 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['event_id', 'paragraph_id'],
     json: [],
   },
+  {
+    name: 'llm_call',
+    columns: [
+      'id',
+      'step_key',
+      'task_kind',
+      'provider',
+      'model',
+      'served_model',
+      'params',
+      'template_id',
+      'template_version',
+      'request_hash',
+      'status',
+      'input_tokens',
+      'output_tokens',
+      'cache_read_tokens',
+      'cache_write_tokens',
+      'cost',
+      'response',
+      'error',
+      'started_at',
+      'finished_at',
+    ],
+    primaryKey: ['id'],
+    json: ['params', 'response', 'error'],
+  },
 ];
 
 /**

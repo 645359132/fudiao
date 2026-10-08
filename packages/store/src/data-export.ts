@@ -34,6 +34,8 @@ type Tables = ExportedData['tables'];
 export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   // 0002：全文查找索引，派生数据，导出的表不变。
   2: (tables) => tables,
+  // 0003：新增 llm_call 表；旧版本导出的数据中没有这张表，导入为空。
+  3: (tables) => tables,
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

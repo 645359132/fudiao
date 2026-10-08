@@ -137,7 +137,7 @@ fudiao/
 | `sim_run` | id、scene_id、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、status、end_reason | B28、B48 |
 | `sim_event` | run_id、seq、round、phase、type、actor、payload、created_at；主键 (run_id, seq)，只追加 | B28、B30 |
 | `sim_snapshot` | run_id、seq、state（JSON）、state_hash | B30 |
-| `llm_call` | id、step_key、task_kind、provider、model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cost、response、started_at、finished_at | B19、B36 |
+| `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
 | `candidate` | id、target_type、target_id、base_version、content、status（待处理、已接受、已放弃、过期）、llm_call_id | B17 |
 | `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
 | `evaluation` | id、run_id 或 batch_id、answers（JSON） | B46 |
@@ -386,6 +386,7 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 - 并发：代理按主机设置并发上限，批量推演在同一信号量下排队。
 - 日志：普通日志不记录凭据与请求正文；完整的请求与响应只保存在作品库的 `llm_call` 表中。
 - 用量与费用：读取服务返回的用量，包括缓存读写与思考产生的输出；价格表未配置时费用记为未知（B19）。
+- 桌面端的调用（M2-03，`apps/desktop/src/app/model-runner.ts`）：用默认模型，经凭据代理发出；打开作品时每次调用都写入该作品的 `llm_call`（`withCallLog` 对没有步骤键的调用同样记录，只有带步骤键的调用才复用完成记录）。必须输出结构化数据的任务只能用通过能力自检的模型；结构化输出经管线校验，最多修正 2 次（修正提示来自 `structured_repair` 模板），仍失败则暂停并说明原因（B35）。连接测试与能力自检属于应用设置，不写入作品的调用记录。“作品 → 用量与费用”显示合计、按任务与按模型的汇总和最近的调用，费用未知的调用单独计数。
 - 连接测试（B15）：发送一个最小请求（`connection_test` 模板，任务种类 `connection_test`，输出上限 64），显示延迟、实际提供服务的模型与错误原因；达到输出上限也算连接可用（`packages/llm/src/connection.ts`）。
 
 ### Anthropic 接入要点
