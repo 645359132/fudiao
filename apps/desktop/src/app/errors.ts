@@ -2,6 +2,8 @@ import type { OpenError, RepoError } from '@fudiao/store';
 
 export type AppError =
   | { readonly code: 'library'; readonly detail: string }
+  /** 模型服务与凭据的设置问题，说明原样显示。 */
+  | { readonly code: 'settings'; readonly detail: string }
   /** 作品文件夹已不存在。 */
   | { readonly code: 'missing'; readonly path: string }
   /** 文件夹里没有作品库。 */
@@ -16,6 +18,8 @@ export function describeError(error: AppError): string {
   switch (error.code) {
     case 'library':
       return `作品列表读写失败：${error.detail}`;
+    case 'settings':
+      return error.detail;
     case 'missing':
       return `找不到作品文件夹：${error.path}`;
     case 'not_a_work':

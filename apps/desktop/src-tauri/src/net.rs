@@ -63,15 +63,16 @@ impl Binding {
             detail: "服务地址无效".into(),
         })?;
         let loopback = is_loopback(&url);
-        match url.scheme() {
-            "https" => {}
-            "http" if loopback => {}
-            _ => return Err(NetError::InsecureScheme),
-        }
+        // 不需要凭据的本地端点先查主机：局域网的 http 地址应提示“只能是本机”，而不是“须用 https”。
         if auth == Auth::None && !loopback {
             return Err(NetError::HostNotAllowed {
                 origin: origin_of(&url),
             });
+        }
+        match url.scheme() {
+            "https" => {}
+            "http" if loopback => {}
+            _ => return Err(NetError::InsecureScheme),
         }
         Ok(Binding {
             origin: origin_of(&url),

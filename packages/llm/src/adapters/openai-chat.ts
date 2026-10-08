@@ -33,6 +33,8 @@ export type OpenAIChatAdapterOptions = {
   readonly timeoutMs?: number;
   /** 未给出时按 OpenAI 官方接口处理。 */
   readonly dialect?: ChatDialect;
+  /** 在 WebView 中经凭据代理运行（见 AnthropicAdapterOptions.viaCredentialProxy）。 */
+  readonly viaCredentialProxy?: boolean;
 };
 
 /**
@@ -53,6 +55,7 @@ export class OpenAIChatAdapter implements LlmPort {
       ...(options.fetch !== undefined && { fetch: options.fetch }),
       maxRetries: options.maxRetries ?? 2,
       ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+      ...(options.viaCredentialProxy === true && { dangerouslyAllowBrowser: true }),
     });
   }
 

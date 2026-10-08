@@ -8,7 +8,7 @@ import { createAppService, type WorkView } from './service';
 const roots: TestDeps[] = [];
 afterEach(async () => {
   for (const d of roots.splice(0)) {
-    await d.opener.close();
+    await d.dispose();
     rmSync(d.root, { recursive: true, force: true });
   }
 });

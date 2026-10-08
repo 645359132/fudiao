@@ -1,5 +1,6 @@
 import type { Result } from '@fudiao/shared';
-import type { OpenError, OpenReport, SqlPort } from '@fudiao/store';
+import type { LlmPort } from '@fudiao/llm';
+import type { OpenError, OpenReport, Provider, SqlPort } from '@fudiao/store';
 
 /** 文件夹探测结果（Rust 命令 `project_probe`）。 */
 export type Probe = { readonly exists: boolean; readonly isDir: boolean; readonly hasProject: boolean };
@@ -68,6 +69,31 @@ export interface BackupPort {
   restore(name: string, now: string): Promise<Result<BackupInfo, string>>;
 }
 
+/** 应用设置库 app.sqlite（Rust 命令 `app_db_open`、`app_db_query`、`app_db_tx`），位于应用数据目录。 */
+export interface SettingsDbPort {
+  open(now: string): Promise<Result<SqlPort, string>>;
+}
+
+/** 认证头的写法：Anthropic 用 x-api-key，其余用 Authorization: Bearer；null 表示本地端点，不需要密钥。 */
+export type KeyHeader = 'x_api_key' | 'bearer';
+
+/** 凭据在系统凭据管理器中的状态；明文从不返回。 */
+export type CredentialStatus = { readonly stored: boolean; readonly origin: string | null; readonly hasSecret: boolean };
+
+/** 凭据（Rust 命令 `credential_*`）与凭据代理的并发上限（`net_set_limits`）。 */
+export interface CredentialPort {
+  /** 保存凭据并与服务地址的源绑定；更改地址须重新给出密钥。 */
+  set(providerId: string, baseUrl: string, keyHeader: KeyHeader | null, secret: string | null): Promise<Result<CredentialStatus, string>>;
+  status(providerId: string): Promise<Result<CredentialStatus, string>>;
+  remove(providerId: string): Promise<Result<void, string>>;
+  setLimits(limits: readonly (readonly [string, number])[]): Promise<void>;
+}
+
+/** 为一个服务建立模型端口：桌面端经凭据代理转发，测试中用不联网的 fetch。 */
+export interface LlmFactory {
+  forProvider(provider: Provider): LlmPort;
+}
+
 export interface Clock {
   /** UTC ISO 字符串。 */
   now(): string;
@@ -85,6 +111,9 @@ export type AppDeps = {
   readonly exporter: ExportPort;
   readonly transfer: TransferPort;
   readonly backups: BackupPort;
+  readonly settingsDb: SettingsDbPort;
+  readonly credentials: CredentialPort;
+  readonly llm: LlmFactory;
   readonly clock: Clock;
   readonly ids: Ids;
 };

@@ -38,6 +38,7 @@ export function LibraryScreen() {
   const chooseLibraryDir = useApp((s) => s.chooseLibraryDir);
   const startTextImport = useApp((s) => s.startTextImport);
   const importProject = useApp((s) => s.importProject);
+  const openModelServices = useApp((s) => s.openModelServices);
   const busy = useApp((s) => s.busy);
   const [creating, setCreating] = useState(false);
 
@@ -68,6 +69,10 @@ export function LibraryScreen() {
         </button>
         <button type="button" disabled={busy} onClick={() => void importProject()}>
           导入作品包
+        </button>
+        <span className="spacer" />
+        <button type="button" disabled={busy} onClick={() => void openModelServices()}>
+          模型服务
         </button>
       </div>
       {creating && <TextForm label="作品名" submitText="创建" onSubmit={createWork} onCancel={() => setCreating(false)} />}

@@ -3,8 +3,8 @@
 use std::{fs, path::Path};
 
 use fudiao_lib::db::{
-    migrate::{Applied, Migration, EMBEDDED},
-    Database, OpenError, OpenReport, Statement, PROJECT_DB_FILE,
+    migrate::{Applied, Migration, APP_EMBEDDED, EMBEDDED},
+    Database, OpenError, OpenReport, Statement, APP_DB_FILE, PROJECT_DB_FILE,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde_json::json;
@@ -304,4 +304,37 @@ fn bundled_sqlite_supports_trigram_full_text_search() {
         )
         .unwrap();
     assert_eq!(json!(stale), json!([]));
+}
+
+#[test]
+fn app_settings_database_uses_its_own_migrations_and_file() {
+    // 应用设置库（M2-02）：迁移目录 packages/store/app-migrations，文件 app.sqlite，与作品库互不影响。
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../packages/store/app-migrations");
+    let mut files: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .filter(|f| f.ends_with(".sql"))
+        .collect();
+    files.sort();
+    let embedded: Vec<String> = APP_EMBEDDED
+        .iter()
+        .map(|m| format!("{:04}_{}.sql", m.version, m.name))
+        .collect();
+    assert_eq!(embedded, files);
+
+    let data = tempfile::tempdir().unwrap();
+    let (db, report) = Database::open_file(data.path(), APP_DB_FILE, APP_EMBEDDED, NOW).unwrap();
+    assert_eq!(
+        report.schema_version,
+        APP_EMBEDDED.last().map_or(0, |m| m.version)
+    );
+    assert!(data.path().join(APP_DB_FILE).exists());
+    assert!(!data.path().join(PROJECT_DB_FILE).exists());
+    let tables = db
+        .query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name", &[])
+        .unwrap();
+    assert_eq!(
+        json!(tables),
+        json!([{ "name": "model_profile" }, { "name": "provider" }, { "name": "schema_migrations" }, { "name": "task_routing" }])
+    );
 }

@@ -362,6 +362,9 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 - 能力自检（B57）：对选定模型发送一个固定的结构化输出测试（含嵌套对象、枚举与数组），连续三次通过才标记为可用于结构化任务。自检结果、时间与失败原因写入 `self_test`。
 - 任务分配（B58，P1）：首版只设一个默认模型，所有任务共用；P1 加入按任务分配与三套预设。一个任务只能分配给满足其能力要求的模型：需要结构化输出的任务只列出自检通过的模型。
 - 凭据代理的主机白名单由 `provider.base_url` 推导；本地端点只允许回环地址。删除服务时同时删除凭据管理器中的对应条目。
+- 实现（M2-02）：`app.sqlite` 位于应用数据目录，迁移在 `packages/store/app-migrations`（Rust 编译期嵌入为 `APP_EMBEDDED`，命令 `app_db_open`、`app_db_query`、`app_db_tx`），仓储在 `packages/store/src/app/model-services.ts`；首版的 `task_routing` 只有 `task = 'default'` 一行，`routing_preset` 在 P1 以新迁移加入。凭据管理器中每个服务一条（目标名 `com.fudiao.desktop` 加服务标识），内容是 JSON：绑定的源、认证头写法与密钥（`src-tauri/src/credentials.rs`）；`credential_status` 只返回是否已保存、绑定的源与是否有密钥。保存服务时先写凭据，地址检查不通过则服务也不保存；源不变时可以不重新填写 API Key。服务的并发上限经 `net_set_limits` 交给凭据代理。
+- 适配器在 WebView 中运行时以 `viaCredentialProxy` 开启 SDK 的浏览器模式（SDK 默认拒绝，以免 API Key 暴露在页面中；经代理时 SDK 里只有占位值）。
+- 模型服务页（应用级，作品列表与作品界面都可进入）：添加、编辑、删除服务，填写 API Key，添加模型（作者填写模型标识；M2-02b 起可从服务获取列表），设默认模型，连接测试。新添加的模型按保守能力处理。
 
 ### Rust 命令
 

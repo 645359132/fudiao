@@ -20,12 +20,20 @@ async function call<T, E>(promise: Promise<T>, fallback: (detail: string) => E):
 
 const sqlFallback = (detail: string): SqlError => ({ code: 'sql_error', index: 0, detail });
 
-/** SqlPort 的桌面实现：经 Rust 命令 `db_query`、`db_tx` 访问当前打开的作品库。 */
-export function tauriSqlPort(invoke: Invoke): SqlPort {
+/**
+ * SqlPort 的桌面实现：经 Rust 命令 `db_query`、`db_tx` 访问当前打开的作品库；
+ * prefix 为 `app_db` 时访问应用设置库（`app_db_query`、`app_db_tx`）。
+ */
+export function tauriSqlPort(invoke: Invoke, prefix: 'db' | 'app_db' = 'db'): SqlPort {
   return {
-    query: (sql, params) => call(invoke<Row[]>('db_query', { sql, params: params ?? [] }), sqlFallback),
-    transaction: (statements) => call(invoke<StatementResult[]>('db_tx', { statements }), sqlFallback),
+    query: (sql, params) => call(invoke<Row[]>(`${prefix}_query`, { sql, params: params ?? [] }), sqlFallback),
+    transaction: (statements) => call(invoke<StatementResult[]>(`${prefix}_tx`, { statements }), sqlFallback),
   };
+}
+
+/** 打开应用设置库 app.sqlite（应用数据目录）。 */
+export function openAppDb(invoke: Invoke, now: string): Promise<Result<OpenReport, OpenError>> {
+  return call(invoke<OpenReport>('app_db_open', { now }), (detail): OpenError => ({ code: 'io_error', detail }));
 }
 
 /** 打开或创建作品库并执行迁移；`now` 来自时钟端口（UTC ISO 字符串）。 */

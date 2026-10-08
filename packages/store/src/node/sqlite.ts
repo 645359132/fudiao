@@ -23,9 +23,12 @@ import {
 
 /** 作品库文件名（施工文档第四章：每部作品一个项目文件夹）。 */
 export const PROJECT_DB_FILE = 'project.sqlite';
+/** 应用设置库（模型服务、模型与任务分配），位于应用数据目录。 */
+export const APP_DB_FILE = 'app.sqlite';
 
 // 用文件路径而不是 new URL 计算：jsdom 测试环境会替换全局 URL，Node 的 fileURLToPath 不接受它。
 export const defaultMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
+export const appMigrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'app-migrations');
 
 export function migrationChecksum(sql: string): string {
   return createHash('sha256').update(normalizeMigration(sql)).digest('hex');
@@ -57,12 +60,12 @@ export type ProjectDb = SqlPort & {
  */
 export function openProjectDb(
   projectDir: string,
-  options: { readonly migrations: readonly Migration[]; readonly now: string },
+  options: { readonly migrations: readonly Migration[]; readonly now: string; readonly file?: string },
 ): Result<{ readonly db: ProjectDb; readonly report: OpenReport }, OpenError> {
   let writer: Database.Database;
   try {
     mkdirSync(projectDir, { recursive: true });
-    writer = new Database(join(projectDir, PROJECT_DB_FILE));
+    writer = new Database(join(projectDir, options.file ?? PROJECT_DB_FILE));
     writer.pragma('journal_mode = WAL');
     writer.pragma('synchronous = NORMAL');
     writer.pragma('foreign_keys = ON');
@@ -77,7 +80,7 @@ export function openProjectDb(
     return migrated;
   }
   // 只读连接在迁移完成后打开，读到的总是最新结构。
-  const reader = new Database(join(projectDir, PROJECT_DB_FILE), { readonly: true, fileMustExist: true });
+  const reader = new Database(join(projectDir, options.file ?? PROJECT_DB_FILE), { readonly: true, fileMustExist: true });
   reader.pragma('busy_timeout = 5000');
   return ok({ db: port(writer, reader), report: migrated.value });
 }

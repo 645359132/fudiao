@@ -5,16 +5,31 @@ fn main() {
     tauri_build::build()
 }
 
-/// 把 packages/store/migrations 下的迁移文件编译期嵌入程序：安装后的程序不依赖源码目录，
-/// 与 Node 端读取的是同一批文件（施工文档第四章）。
+/// 把迁移文件编译期嵌入程序：安装后的程序不依赖源码目录，与 Node 端读取的是同一批文件（施工文档第四章）。
+/// 作品库用 packages/store/migrations（EMBEDDED），应用设置库 app.sqlite 用 packages/store/app-migrations（APP_EMBEDDED）。
 fn embed_migrations() {
     let manifest = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let dir = Path::new(&manifest).join("../../../packages/store/migrations");
+    let out = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("migrations.rs");
+    let code = [
+        embed_dir(
+            &Path::new(&manifest).join("../../../packages/store/migrations"),
+            "EMBEDDED",
+        ),
+        embed_dir(
+            &Path::new(&manifest).join("../../../packages/store/app-migrations"),
+            "APP_EMBEDDED",
+        ),
+    ]
+    .concat();
+    fs::write(out, code).expect("无法写出迁移列表");
+}
+
+fn embed_dir(dir: &Path, list: &str) -> String {
     println!("cargo:rerun-if-changed={}", dir.display());
 
     let mut entries: Vec<(u32, String, String)> = Vec::new();
     if dir.exists() {
-        for entry in fs::read_dir(&dir).expect("无法读取迁移目录") {
+        for entry in fs::read_dir(dir).expect("无法读取迁移目录") {
             let path = entry.expect("无法读取迁移文件").path();
             let file = path
                 .file_name()
@@ -40,12 +55,7 @@ fn embed_migrations() {
             format!("    Migration {{ version: {version}, name: {name:?}, sql: include_str!({path:?}) }},\n")
         })
         .collect();
-    let out = Path::new(&env::var("OUT_DIR").expect("OUT_DIR")).join("migrations.rs");
-    fs::write(
-        out,
-        format!("pub static EMBEDDED: &[Migration<'static>] = &[\n{items}];\n"),
-    )
-    .expect("无法写出迁移列表");
+    format!("pub static {list}: &[Migration<'static>] = &[\n{items}];\n")
 }
 
 /// 与 packages/store/src/sql.ts 的 parseMigrationName 相同：`NNNN_名称.sql`，名称只用小写字母、数字与下划线。

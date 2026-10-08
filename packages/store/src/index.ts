@@ -8,3 +8,4 @@ export { exportData, fromJsonl, importData, toJsonl, UPGRADES } from './data-exp
 export type { TableSpec } from './schema';
 export { DERIVED_TABLES, TABLES } from './schema';
 export * from './repos';
+export * from './app/model-services';

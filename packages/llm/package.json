@@ -5,7 +5,8 @@
   "description": "模型端口、适配器、结构化输出管线、预算守卫、录制回放",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

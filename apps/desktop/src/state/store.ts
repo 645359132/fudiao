@@ -5,6 +5,8 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
+import type { ConnectionReport } from '@fudiao/llm';
+import type { ModelServicesView, ProviderForm, ProviderView } from '../app/model-services';
 import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from '../app/service';
 import { splitText, type SplitRule } from '../app/text-import';
 
@@ -53,6 +55,11 @@ export type AppState = {
   readonly wordCount: number;
   /** 段落来源统计（打开“段落来源”时读取）。 */
   readonly sourceStats: SourceStats | null;
+  /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
+  readonly modelServicesOpen: boolean;
+  readonly modelServices: ModelServicesView | null;
+  /** 各模型最近一次连接测试：进行中或结果。 */
+  readonly connectionTests: Readonly<Record<string, ConnectionReport | 'testing'>>;
   /** 查找页的查询与结果；回到正文后保留，再打开查找页时接着看。 */
   readonly searchQuery: string;
   readonly searchResult: SearchResult | null;
@@ -145,6 +152,16 @@ export type AppState = {
   /** 打开结果所在的章节，选中这一处。 */
   readonly revealHit: (hit: SearchHit) => Promise<void>;
   readonly clearReveal: () => void;
+
+  /** 保存正文后打开模型服务页。 */
+  readonly openModelServices: () => Promise<void>;
+  readonly closeModelServices: () => void;
+  readonly saveProvider: (provider: ProviderView | null, form: ProviderForm) => Promise<boolean>;
+  readonly deleteProvider: (provider: ProviderView) => Promise<void>;
+  readonly addModel: (providerId: string, modelId: string) => Promise<boolean>;
+  readonly deleteModel: (modelId: string) => Promise<void>;
+  readonly setDefaultModel: (modelId: string) => Promise<void>;
+  readonly testConnection: (modelId: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -221,6 +238,9 @@ export function createAppStore(service: AppService): AppStore {
       searchQuery: '',
       searchResult: null,
       reveal: null,
+      modelServicesOpen: false,
+      modelServices: null,
+      connectionTests: {},
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -529,6 +549,34 @@ export function createAppStore(service: AppService): AppStore {
         await get().selectChapter(hit.chapterId);
       },
       clearReveal: () => set({ reveal: null }),
+      async openModelServices() {
+        if (!(await get().leaveChapter())) return;
+        // 作品界面回来时从库中重新读取正文。
+        set({ modelServicesOpen: true, chapterContent: null, drawerEntityId: null });
+        await run(service.loadModelServices(), (modelServices) => ({ modelServices }));
+      },
+      closeModelServices: () => set({ modelServicesOpen: false }),
+      saveProvider: (provider, form) => run(service.saveProvider(provider, form), (modelServices) => ({ modelServices })),
+      async deleteProvider(provider) {
+        await run(service.deleteProvider(provider), (modelServices) => ({ modelServices }));
+      },
+      addModel: (providerId, modelId) => run(service.addModel(providerId, modelId), (modelServices) => ({ modelServices })),
+      async deleteModel(modelId) {
+        const model = get().modelServices?.models.find((m) => m.id === modelId);
+        if (model !== undefined) await run(service.deleteModel(model), (modelServices) => ({ modelServices }));
+      },
+      async setDefaultModel(modelId) {
+        await run(service.setDefaultModel(modelId), (modelServices) => ({ modelServices }));
+      },
+      async testConnection(modelId) {
+        set({ connectionTests: { ...get().connectionTests, [modelId]: 'testing' } });
+        const result = await service.testConnection(modelId);
+        if (result.ok) set({ connectionTests: { ...get().connectionTests, [modelId]: result.value } });
+        else {
+          const { [modelId]: _dropped, ...rest } = get().connectionTests;
+          set({ connectionTests: rest, message: describeError(result.error) });
+        }
+      },
       async setShowParagraphSource(show) {
         await run(service.setPreferences({ showParagraphSource: show }), (library) => ({ library }));
       },

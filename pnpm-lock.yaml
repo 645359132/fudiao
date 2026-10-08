@@ -208,6 +208,9 @@ importers:
       '@fudiao/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@fudiao/prompts':
+        specifier: workspace:*
+        version: link:../../packages/prompts
       '@fudiao/shared':
         specifier: workspace:*
         version: link:../../packages/shared

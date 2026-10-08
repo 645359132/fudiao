@@ -523,7 +523,9 @@ textarea {
 
 /* 菜单、导入预览与备份 */
 
-.work-bar .spacer {
+.work-bar .spacer,
+.toolbar .spacer,
+.provider-head .spacer {
   flex: 1;
 }
 
@@ -992,3 +994,114 @@ fieldset.plain {
 .entity-head .spacer {
   flex: 1;
 }
+
+/* 模型服务 */
+.model-services {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.model-services .work-bar h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.provider-card {
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.provider-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.provider-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.provider-head .confirm {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.model-list {
+  padding: 0;
+  margin: 8px 0;
+  list-style: none;
+}
+
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-row .model-name {
+  min-width: 180px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+.model-row .badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.model-row .report {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
+.model-row .report.failed {
+  color: var(--danger);
+}
+
+.provider-form {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.provider-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.provider-form label.check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.provider-form input,
+.provider-form select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.provider-form .form-actions {
+  display: flex;
+  gap: 8px;
+}
+

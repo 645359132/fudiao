@@ -38,6 +38,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(db::commands::DbState::default())
+        .manage(db::commands::AppDbState::default())
         .manage(transfer::ImportState::default())
         .manage(net::NetState { proxy })
         .manage(credentials::CredentialState { credentials })
@@ -47,6 +48,9 @@ pub fn run() {
             db::commands::db_close,
             db::commands::db_query,
             db::commands::db_tx,
+            db::commands::app_db_open,
+            db::commands::app_db_query,
+            db::commands::app_db_tx,
             library::library_read,
             library::library_write,
             library::library_default_dir,

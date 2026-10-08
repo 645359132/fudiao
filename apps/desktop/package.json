@@ -13,6 +13,7 @@
   "dependencies": {
     "@fudiao/editor": "workspace:*",
     "@fudiao/llm": "workspace:*",
+    "@fudiao/prompts": "workspace:*",
     "@fudiao/shared": "workspace:*",
     "@fudiao/store": "workspace:*",
     "@tauri-apps/api": "^2.12.1",

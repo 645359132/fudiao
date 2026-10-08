@@ -4,8 +4,9 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { err, ok, ulid, type Result } from '@fudiao/shared';
 import { createProxyFetch, type NetEvent } from '@fudiao/llm';
 import { tauriNet } from '../adapters/tauri-net';
-import { closeProjectDb, openProjectDb, tauriSqlPort } from '../adapters/tauri-sql';
-import type { AppDeps, BackupInfo, DecodedText, PackageFile, Probe } from '../app/ports';
+import { closeProjectDb, openAppDb, openProjectDb, tauriSqlPort } from '../adapters/tauri-sql';
+import { buildAdapter } from '../app/model-services';
+import type { AppDeps, BackupInfo, CredentialStatus, DecodedText, PackageFile, Probe } from '../app/ports';
 
 /** Rust 命令失败时以 `{ code, detail }` 拒绝；转为给作者看的说明。 */
 async function call<T>(promise: Promise<T>): Promise<Result<T, string>> {
@@ -27,8 +28,33 @@ export function providerFetch(providerId: string): typeof fetch {
   return createProxyFetch(net, providerId, () => ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))));
 }
 
+/** Rust 的 CredentialError 转为错误码（应用层的 describeCredentialError 给出说明）。 */
+async function credential<T>(promise: Promise<T>): Promise<Result<T, string>> {
+  try {
+    return ok(await promise);
+  } catch (e) {
+    const { code, reason, detail } = e as { code?: unknown; reason?: { code?: unknown }; detail?: unknown };
+    if (code === 'invalid' && typeof reason?.code === 'string') return err(reason.code);
+    if (code === 'store') return err(`store:${typeof detail === 'string' ? detail : ''}`);
+    return err(typeof code === 'string' ? code : String(e));
+  }
+}
+
 export function tauriDeps(): AppDeps {
   return {
+    settingsDb: {
+      async open(now) {
+        const opened = await openAppDb(invoke, now);
+        return opened.ok ? ok(tauriSqlPort(invoke, 'app_db')) : err(opened.error.code === 'io_error' ? opened.error.detail : opened.error.code);
+      },
+    },
+    credentials: {
+      set: (providerId, baseUrl, keyHeader, secret) => credential(invoke<CredentialStatus>('credential_set', { providerId, baseUrl, keyHeader, secret })),
+      status: (providerId) => credential(invoke<CredentialStatus>('credential_status', { providerId })),
+      remove: (providerId) => credential(invoke<void>('credential_delete', { providerId })),
+      setLimits: (limits) => invoke<void>('net_set_limits', { limits }),
+    },
+    llm: { forProvider: (provider) => buildAdapter(provider, providerFetch(provider.id)) },
     library: {
       read: () => call(invoke<string | null>('library_read')),
       write: (content) => call(invoke<void>('library_write', { content })),

@@ -22,6 +22,7 @@ export function WorkScreen() {
   const openFacts = useApp((s) => s.openFacts);
   const openSourceStats = useApp((s) => s.openSourceStats);
   const openSearch = useApp((s) => s.openSearch);
+  const openModelServices = useApp((s) => s.openModelServices);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
 
@@ -76,6 +77,9 @@ export function WorkScreen() {
             </button>
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openSourceStats()}>
               段落来源
+            </button>
+            <button type="button" role="menuitem" disabled={busy} onClick={() => void openModelServices()}>
+              模型服务
             </button>
           </div>
         </details>

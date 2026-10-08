@@ -9,10 +9,12 @@ use std::{
 use serde_json::Value;
 use tauri::State;
 
+use tauri::{AppHandle, Manager};
+
 use super::{
     backup::{self, BackupInfo},
-    migrate::EMBEDDED,
-    Database, OpenError, OpenReport, Row, SqlError, Statement, StatementResult,
+    migrate::{APP_EMBEDDED, EMBEDDED},
+    Database, OpenError, OpenReport, Row, SqlError, Statement, StatementResult, APP_DB_FILE,
 };
 
 /// 同一时间只打开一部作品。
@@ -155,4 +157,58 @@ pub async fn backup_restore(
             Err(error)
         }
     }
+}
+
+/// 应用设置库（M2-02）：模型服务、模型与任务分配。启动时由界面打开一次，与作品库互不影响。
+#[derive(Default)]
+pub struct AppDbState(DbState);
+
+#[tauri::command]
+pub async fn app_db_open(
+    app: AppHandle,
+    state: State<'_, AppDbState>,
+    now: String,
+) -> Result<OpenReport, OpenError> {
+    let dir = app.path().app_data_dir().map_err(|e| OpenError::IoError {
+        detail: e.to_string(),
+    })?;
+    let opened = tauri::async_runtime::spawn_blocking(move || {
+        Database::open_file(&dir, APP_DB_FILE, APP_EMBEDDED, &now)
+    })
+    .await
+    .map_err(|e| OpenError::IoError {
+        detail: e.to_string(),
+    })??;
+    let (db, report) = opened;
+    *state.0 .0.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(db));
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn app_db_query(
+    state: State<'_, AppDbState>,
+    sql: String,
+    params: Option<Vec<Value>>,
+) -> Result<Vec<Row>, SqlError> {
+    let db = state.0.current()?;
+    tauri::async_runtime::spawn_blocking(move || db.query(&sql, &params.unwrap_or_default()))
+        .await
+        .map_err(|e| SqlError::SqlError {
+            index: 0,
+            detail: e.to_string(),
+        })?
+}
+
+#[tauri::command]
+pub async fn app_db_tx(
+    state: State<'_, AppDbState>,
+    statements: Vec<Statement>,
+) -> Result<Vec<StatementResult>, SqlError> {
+    let db = state.0.current()?;
+    tauri::async_runtime::spawn_blocking(move || db.transaction(&statements))
+        .await
+        .map_err(|e| SqlError::SqlError {
+            index: 0,
+            detail: e.to_string(),
+        })?
 }

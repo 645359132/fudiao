@@ -56,6 +56,7 @@ import {
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
 import { toMarkdown, toTxt, type ExportChapter } from './text-export';
+import { modelServices } from './model-services';
 import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type Preferences, type WorkEntry } from './library';
 import { describeError, type AppError } from './errors';
 import type { AppDeps, BackupInfo } from './ports';
@@ -251,6 +252,8 @@ export function createAppService(deps: AppDeps) {
   }
 
   return {
+    ...modelServices(deps),
+
     loadLibrary,
 
     /** 在作品库下新建作品文件夹；文件夹名取自标题，重名时加序号。 */

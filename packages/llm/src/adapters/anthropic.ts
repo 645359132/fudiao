@@ -13,6 +13,11 @@ export type AnthropicAdapterOptions = {
   /** 重试只做一层，由 SDK 负责（网络错误、429、5xx，遵守 Retry-After）。 */
   readonly maxRetries?: number;
   readonly timeoutMs?: number;
+  /**
+   * 在 WebView 中运行。SDK 默认拒绝在浏览器环境使用，以免 API Key 暴露在页面中；
+   * 只有经凭据代理（apiKey 为占位值，真实凭据在 Rust 中注入）时才可开启。
+   */
+  readonly viaCredentialProxy?: boolean;
 };
 
 // 拒答时由服务端按拒答类别改用推荐的模型重试；该形式对应的 beta 头。
@@ -29,6 +34,7 @@ export class AnthropicAdapter implements LlmPort {
       ...(options.fetch !== undefined && { fetch: options.fetch }),
       maxRetries: options.maxRetries ?? 2,
       ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+      ...(options.viaCredentialProxy === true && { dangerouslyAllowBrowser: true }),
     });
   }
 

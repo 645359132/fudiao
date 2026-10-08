@@ -3,6 +3,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { anthropicChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '../App';
 import { createAppService } from '../app/service';
@@ -21,7 +22,7 @@ const all: TestDeps[] = [];
 afterEach(async () => {
   cleanup();
   for (const d of all.splice(0)) {
-    await d.opener.close();
+    await d.dispose();
     rmSync(d.root, { recursive: true, force: true });
   }
 });
@@ -583,5 +584,44 @@ describe('全文查找', () => {
     await user.clear(screen.getByRole('searchbox', { name: '查找内容' }));
     await user.type(screen.getByRole('searchbox', { name: '查找内容' }), '没有的词{Enter}');
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('没有找到“没有的词”。'));
+  });
+});
+
+describe('模型服务', () => {
+  it('添加服务并填写 API Key；添加模型成为默认；连接测试显示结果；API Key 不出现在界面上', async () => {
+    const { deps, user } = start();
+    await user.click(await screen.findByRole('button', { name: '模型服务' }));
+    expect(await screen.findByText('还没有模型服务。')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '添加服务' }));
+    const form = screen.getByRole('form', { name: '添加服务' });
+    expect(within(form).getByRole('textbox', { name: '服务地址' })).toHaveProperty('value', 'https://api.anthropic.com');
+    await user.type(within(form).getByLabelText('API Key'), 'sk-ant-secret-123');
+    await user.click(within(form).getByRole('button', { name: '保存' }));
+
+    const card = await screen.findByRole('region', { name: 'Anthropic' });
+    expect(within(card).getByText(/API Key 已保存在系统凭据管理器/)).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain('sk-ant-secret-123');
+    expect(deps.secrets.size).toBe(1);
+
+    await user.type(within(card).getByRole('textbox', { name: 'Anthropic 的模型名称' }), 'model-a{Enter}');
+    expect(await within(card).findByText('默认模型')).toBeTruthy();
+
+    deps.llmResponses.push({ chunks: anthropicChunks('model-a', { text: ['好'], end: 'stop', usage: { input: 9, output: 1, cacheRead: 0 } }) });
+    await user.click(within(card).getByRole('button', { name: '连接测试' }));
+    await waitFor(() => expect(within(card).getByRole('status', { name: 'model-a 的连接测试' }).textContent).toMatch(/^连接正常：[\d,]+ 毫秒，模型 model-a$/));
+
+    // 编辑时地址改了却没填 API Key：提示须重新填写，服务不变。
+    await user.click(within(card).getByRole('button', { name: '编辑' }));
+    const edit = screen.getByRole('form', { name: '编辑 Anthropic' });
+    expect(within(edit).getByLabelText('API Key')).toHaveProperty('placeholder', '已保存；不更改请留空');
+    const url = within(edit).getByRole('textbox', { name: '服务地址' });
+    await user.clear(url);
+    await user.type(url, 'https://proxy.example.test');
+    await user.click(within(edit).getByRole('button', { name: '保存' }));
+    expect(await screen.findByText('更改服务地址后须重新填写 API Key')).toBeTruthy();
+
+    await user.click(within(edit).getByRole('button', { name: '取消' }));
+    await user.click(screen.getByRole('button', { name: '返回' }));
+    expect(await screen.findByRole('button', { name: '新建作品' })).toBeTruthy();
   });
 });

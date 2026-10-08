@@ -43,6 +43,7 @@
 - M1-11 已完成：迁移 `0002_paragraph_search.sql`（FTS5 trigram 索引，触发器维护，派生表不导出）；`searchParagraphs`（3 字及以上走索引，1 至 2 字扫描段落）；查找页与 Ctrl+F，结果跳转并选中；较旧结构版本的作品包按 `UPGRADES` 转换后导入。
 - M1-12 已完成：`tools/bench` 的测试集生成器（基础集 10 万字 40 章、连载规模集 200 万字 800 章，固定种子）与性能基准 `pnpm bench`；开发机上两档全部达标，结果见 `tools/bench/README.md`。
 - M2-01 已完成：Rust 凭据代理 `src-tauri/src/net.rs`（`net_fetch` 流式转发、`net_cancel`、凭据与源绑定、只允许 https 或回环地址、不跟随重定向、按源限制并发；reqwest 用 native-tls）；`packages/llm` 的 `createProxyFetch` 与 `testConnection`、`connection_test` 模板；桌面端传输层 `adapters/tauri-net.ts`。凭据的系统存储在 M2-02。
+- M2-02 已完成：凭据存储 `src-tauri/src/credentials.rs`（Windows 凭据管理器，凭据与源一起保存）；应用设置库 `app.sqlite`（`packages/store/app-migrations`、`packages/store/src/app/model-services.ts`）；应用层 `apps/desktop/src/app/model-services.ts`（服务、凭据、模型、默认模型、连接测试）与“模型服务”页。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

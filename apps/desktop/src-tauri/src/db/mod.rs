@@ -24,6 +24,8 @@ pub use migrate::{Migration, OpenError, OpenReport};
 
 /// 作品库文件名（与 packages/store/src/node/sqlite.ts 的 PROJECT_DB_FILE 相同）。
 pub const PROJECT_DB_FILE: &str = "project.sqlite";
+/// 应用设置库文件名，位于应用数据目录（与 Node 端的 APP_DB_FILE 相同）。
+pub const APP_DB_FILE: &str = "app.sqlite";
 const READERS: usize = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -83,11 +85,21 @@ impl Database {
         migrations: &[Migration<'_>],
         now: &str,
     ) -> Result<(Database, OpenReport), OpenError> {
+        Database::open_file(project_dir, PROJECT_DB_FILE, migrations, now)
+    }
+
+    /// 同 `open`，库文件名由调用方给出（应用设置库 `app.sqlite`）。迁移前的备份同样写在该目录的 `backups/` 中。
+    pub fn open_file(
+        project_dir: &Path,
+        file: &str,
+        migrations: &[Migration<'_>],
+        now: &str,
+    ) -> Result<(Database, OpenReport), OpenError> {
         let io = |e: &dyn std::fmt::Display| OpenError::IoError {
             detail: e.to_string(),
         };
         fs::create_dir_all(project_dir).map_err(|e| io(&e))?;
-        let path = project_dir.join(PROJECT_DB_FILE);
+        let path = project_dir.join(file);
 
         let writer = Connection::open(&path).map_err(|e| io(&e))?;
         writer
