@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
-import type { Chapter, CurrentParagraph, ProjectPatch, SavedParagraph, StructuralEdits } from '@fudiao/store';
+import type { Chapter, CurrentParagraph, ProjectPatch, SavedParagraph, Snapshot, SnapshotSummary, StructuralEdits } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -16,13 +16,18 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
   /** 当前章节的正文（载入后）。 */
   readonly chapterContent: ChapterContent | null;
   readonly saveStatus: SaveStatus;
+  /** 正文内容的版次：恢复快照后加一，编辑器据此换成新内容。 */
+  readonly contentRevision: number;
+  /** 当前章节的快照列表与正在预览的快照。 */
+  readonly snapshots: readonly SnapshotSummary[] | null;
+  readonly previewSnapshot: Snapshot | null;
   readonly wordCount: number;
 
   readonly init: () => Promise<void>;
@@ -66,6 +71,13 @@ export type AppState = {
   readonly setWordCount: (count: number) => void;
   readonly copyText: (text: string) => Promise<void>;
   readonly exportText: (title: string, text: string) => Promise<void>;
+  /** 保存正文后为当前章节建立快照。 */
+  readonly createSnapshot: () => Promise<void>;
+  /** 保存正文后打开当前章节的快照列表。 */
+  readonly openHistory: () => Promise<void>;
+  readonly previewSnapshotById: (id: string) => Promise<void>;
+  /** 恢复到快照（现稿先存为快照），回到正文。 */
+  readonly restoreSnapshot: (id: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -115,6 +127,9 @@ export function createAppStore(service: AppService): AppStore {
       chapterContent: null,
       saveStatus: { kind: 'saved' },
       wordCount: 0,
+      contentRevision: 0,
+      snapshots: null,
+      previewSnapshot: null,
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
@@ -193,11 +208,16 @@ export function createAppStore(service: AppService): AppStore {
       async selectChapter(id) {
         if (get().selectedChapterId === id && get().panel === 'chapter') return;
         if (!(await get().leaveChapter())) return;
-        set({ selectedChapterId: id, panel: 'chapter' });
+        set({ selectedChapterId: id, panel: 'chapter', snapshots: null, previewSnapshot: null });
       },
       async showPanel(panel) {
-        if (panel !== 'chapter' && !(await get().leaveChapter())) return;
-        set({ panel });
+        if (panel === 'chapter') {
+          set({ panel });
+          return;
+        }
+        if (!(await get().leaveChapter())) return;
+        // 离开正文后丢掉缓存的内容，回来时从库中重新读取。
+        set({ panel, chapterContent: null });
       },
       dismissMessage: () => set({ message: null }),
 
@@ -215,7 +235,13 @@ export function createAppStore(service: AppService): AppStore {
           get().selectedChapterId === chapterId ? { chapterContent: content, saveStatus: { kind: 'saved' } } : {},
         );
       },
-      saveChapter: (chapterId, saved, current, edits) => service.saveChapter(chapterId, saved, current, edits),
+      async saveChapter(chapterId, saved, current, edits) {
+        const result = await service.saveChapter(chapterId, saved, current, edits);
+        // 缓存的内容跟着保存结果更新：编辑器重新挂载时以最新保存的内容为准。
+        const content = get().chapterContent;
+        if (result.ok && content !== null && content.chapterId === chapterId) set({ chapterContent: { ...content, saved: result.value } });
+        return result;
+      },
       writeDraft(chapterId, paragraphs) {
         void service.writeDraft(chapterId, paragraphs);
       },
@@ -230,6 +256,34 @@ export function createAppStore(service: AppService): AppStore {
       async copyText(text) {
         const result = await service.copyText(text);
         set({ message: result.ok ? null : `复制失败：${result.error}` });
+      },
+      async createSnapshot() {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null || !(await get().leaveChapter())) return;
+        await run(service.createSnapshot(chapterId), (summary) => ({
+          snapshots: [summary, ...(get().snapshots ?? [])],
+          message: null,
+        }));
+      },
+      async openHistory() {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null || !(await get().leaveChapter())) return;
+        await run(service.listSnapshots(chapterId), (snapshots) => ({ snapshots, previewSnapshot: null, panel: 'history', chapterContent: null }));
+      },
+      async previewSnapshotById(id) {
+        await run(service.getSnapshot(id), (previewSnapshot) => ({ previewSnapshot }));
+      },
+      async restoreSnapshot(id) {
+        if (!(await get().leaveChapter())) return;
+        const ok = await run(service.restoreSnapshot(id), (content) => ({
+          chapterContent: content,
+          contentRevision: get().contentRevision + 1,
+          previewSnapshot: null,
+          panel: 'chapter',
+          saveStatus: { kind: 'saved' },
+        }));
+        const chapterId = get().selectedChapterId;
+        if (ok && chapterId !== null) await run(service.listSnapshots(chapterId), (snapshots) => ({ snapshots }));
       },
       async exportText(title, text) {
         const result = await service.exportText(`${title}.txt`, text);

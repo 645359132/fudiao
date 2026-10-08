@@ -36,6 +36,10 @@ export function ChapterPanel() {
   const chapter = useApp((s) => s.work?.chapters.find((c) => c.id === s.selectedChapterId) ?? null);
   const content = useApp((s) => s.chapterContent);
   const loadChapter = useApp((s) => s.loadChapter);
+  const revision = useApp((s) => s.contentRevision);
+  const createSnapshot = useApp((s) => s.createSnapshot);
+  const openHistory = useApp((s) => s.openHistory);
+  const busy = useApp((s) => s.busy);
   const chapterId = chapter?.id ?? null;
   const loaded = content !== null && content.chapterId === chapterId;
 
@@ -46,8 +50,17 @@ export function ChapterPanel() {
   if (chapter === null) return <p className="muted">在左侧选择或新建一个章节。</p>;
   return (
     <section aria-label="章节" className="chapter-panel">
-      <h2>{chapter.title}</h2>
-      {loaded ? <ChapterEditor key={chapter.id} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
+      <div className="chapter-head">
+        <h2>{chapter.title}</h2>
+        <button type="button" disabled={busy} onClick={() => void createSnapshot()}>
+          保存快照
+        </button>
+        <button type="button" disabled={busy} onClick={() => void openHistory()}>
+          版本快照
+        </button>
+      </div>
+      {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}
+      {loaded ? <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
       <details className="chapter-notes">
         <summary>梗概与写作备注</summary>
         {/* 以版本作为 key：保存或在别处修改后，表单换成最新内容。 */}

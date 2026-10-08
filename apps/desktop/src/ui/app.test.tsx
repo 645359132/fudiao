@@ -159,6 +159,23 @@ describe('正文编辑', () => {
     await waitFor(() => expect(editorText()).toBe('雨下得更紧了。'));
   });
 
+  it('去作品信息再回到本章：显示最新保存的正文，接着写也不会留下多余段落', async () => {
+    const { store, user } = start();
+    await chapterWithText(user, '第一句。');
+    await user.click(screen.getByRole('button', { name: '雨夜' }));
+    await screen.findByRole('region', { name: '作品信息' });
+    await user.click(screen.getByRole('button', { name: '第一章' }));
+    await waitFor(() => expect(editorText()).toBe('第一句。'));
+    await user.click(screen.getByRole('textbox', { name: '正文' }));
+    await user.keyboard('第二句。');
+    await waitFor(() => expect(editorText()).toBe('第二句。第一句。'));
+    await waitForSaved();
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    await waitFor(() => expect(editorText()).toBe('第二句。第一句。'));
+    expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['第二句。第一句。']);
+  });
+
   it('关闭作品后重新打开，正文从库中读回', async () => {
     const { user } = start();
     await chapterWithText(user, '他没有回头。');
@@ -209,5 +226,63 @@ describe('正文编辑', () => {
     await user.click(screen.getByRole('button', { name: '作品列表' }));
     expect((await screen.findByRole('alert')).textContent).toContain('没有保存成功');
     expect(screen.getByRole('textbox', { name: '正文' })).toBeTruthy();
+  });
+});
+
+describe('章节快照', () => {
+  const editorText = () => screen.getByRole('textbox', { name: '正文' }).textContent;
+
+  async function typeAndSave(user: ReturnType<typeof userEvent.setup>, text: string, expected: string) {
+    await user.click(screen.getByRole('textbox', { name: '正文' }));
+    await user.keyboard(text);
+    await waitFor(() => expect(editorText()).toBe(expected));
+  }
+
+  it('保存快照、继续写、预览并恢复；恢复前的现稿成为快照，可以再恢复回来', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await typeAndSave(user, '初稿。', '初稿。');
+    // “保存快照”先保存正文再建快照，不必等自动保存。
+    await user.click(screen.getByRole('button', { name: '保存快照' }));
+    // jsdom 不排版，点击后光标在段首。
+    await typeAndSave(user, '加一句。', '加一句。初稿。');
+
+    await user.click(screen.getByRole('button', { name: '版本快照' }));
+    const list = await screen.findByRole('list', { name: '快照列表' });
+    const entries = within(list).getAllByRole('button');
+    expect(entries).toHaveLength(1);
+    await user.click(entries[0] as HTMLElement);
+    const preview = await screen.findByRole('region', { name: '快照内容' });
+    expect(within(preview).getByText('初稿。')).toBeTruthy();
+    expect(within(preview).getByText(/手动保存/)).toBeTruthy();
+
+    await user.click(within(preview).getByRole('button', { name: '恢复到这个版本' }));
+    await user.click(within(preview).getByRole('button', { name: '确定恢复' }));
+    await waitFor(() => expect(editorText()).toBe('初稿。'));
+
+    // 恢复前的现稿存成了快照。
+    await user.click(screen.getByRole('button', { name: '版本快照' }));
+    const after = within(await screen.findByRole('list', { name: '快照列表' })).getAllByRole('button');
+    expect(after.map((b) => b.textContent)).toEqual([expect.stringContaining('恢复前自动保存'), expect.stringContaining('手动保存')]);
+    await user.click(after[0] as HTMLElement);
+    await user.click(await screen.findByRole('button', { name: '恢复到这个版本' }));
+    await user.click(screen.getByRole('button', { name: '确定恢复' }));
+    await waitFor(() => expect(editorText()).toBe('加一句。初稿。'));
+  });
+
+  it('取消恢复时什么也不变；返回正文', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await typeAndSave(user, '一句。', '一句。');
+    await user.click(screen.getByRole('button', { name: '保存快照' }));
+    await user.click(screen.getByRole('button', { name: '版本快照' }));
+    await user.click(within(await screen.findByRole('list', { name: '快照列表' })).getAllByRole('button')[0] as HTMLElement);
+    await user.click(await screen.findByRole('button', { name: '恢复到这个版本' }));
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.getByRole('button', { name: '恢复到这个版本' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '返回正文' }));
+    await waitFor(() => expect(editorText()).toBe('一句。'));
   });
 });

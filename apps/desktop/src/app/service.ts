@@ -8,6 +8,10 @@ import {
   listChapters,
   listParagraphs,
   saveChapterParagraphs,
+  createSnapshot,
+  getSnapshot,
+  listSnapshots,
+  restoreSnapshot,
   moveChapter,
   renameChapter,
   restoreChapter,
@@ -21,6 +25,8 @@ import {
   type CurrentParagraph,
   type SavedParagraph,
   type SqlPort,
+  type Snapshot,
+  type SnapshotSummary,
   type StructuralEdits,
 } from '@fudiao/store';
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
@@ -267,6 +273,36 @@ export function createAppService(deps: AppDeps) {
     async discardDraft(chapterId: string): Promise<void> {
       if (session === null) return;
       await deps.drafts.remove(session.entry.path, chapterId);
+    },
+
+    /** 一章的快照，最近的在前（B06）。 */
+    async listSnapshots(chapterId: string): Promise<Result<SnapshotSummary[], AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const list = await listSnapshots(session.port, chapterId);
+      return list.ok ? list : err(repo(list.error));
+    },
+
+    async getSnapshot(snapshotId: string): Promise<Result<Snapshot, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const snapshot = await getSnapshot(session.port, snapshotId);
+      return snapshot.ok ? snapshot : err(repo(snapshot.error));
+    },
+
+    /** 为当前已保存的正文建立快照；调用前界面已先保存编辑器中的内容。 */
+    async createSnapshot(chapterId: string): Promise<Result<SnapshotSummary, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const created = await createSnapshot(session.port, { id: deps.ids.next(), chapterId, reason: 'manual' }, ctx());
+      return created.ok ? created : err(repo(created.error));
+    },
+
+    /** 恢复到快照；现稿先存为“恢复前”快照。恢复后草稿已无意义，一并删除。 */
+    async restoreSnapshot(snapshotId: string): Promise<Result<ChapterContent, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const restored = await restoreSnapshot(session.port, { snapshotId, backupId: deps.ids.next() }, ctx());
+      if (!restored.ok) return err(repo(restored.error));
+      const chapterId = restored.value.backup.chapterId;
+      await deps.drafts.remove(session.entry.path, chapterId);
+      return ok({ chapterId, saved: restored.value.paragraphs, draft: null });
     },
 
     exportText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),

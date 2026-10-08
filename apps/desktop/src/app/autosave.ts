@@ -88,6 +88,10 @@ export class AutosaveController {
   async flush(): Promise<boolean> {
     this.cancelTimer();
     if (this.inFlight !== null) await this.inFlight;
+    // 点按钮时输入法组合通常随即结束：稍等片刻，避免把正在结束的组合当成保存失败。
+    for (let waited = 0; this.deps.isComposing() && waited < 1_500; waited += 100) {
+      await new Promise<void>((resolve) => this.deps.timers.set(resolve, 100));
+    }
     return this.saveNow();
   }
 

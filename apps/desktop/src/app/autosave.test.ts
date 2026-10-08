@@ -158,6 +158,24 @@ describe('自动保存', () => {
     expect(s.saves).toHaveLength(1);
   });
 
+  it('立即保存时若输入法组合正在结束，稍等后保存；组合一直不结束时报告未保存', async () => {
+    const s = setup();
+    s.compose(true);
+    s.edit([p('a', '雨下')]);
+    const flushed = s.controller.flush();
+    await s.clock.advance(300);
+    s.compose(false);
+    await s.clock.advance(100);
+    expect(await flushed).toBe(true);
+    expect(s.saves).toHaveLength(1);
+
+    s.compose(true);
+    s.edit([p('a', '雨下得')]);
+    const stuck = s.controller.flush();
+    await s.clock.advance(2_000);
+    expect(await stuck).toBe(false);
+  });
+
   it('编辑约 1 秒后写草稿，内容与已保存的相同时不写', async () => {
     const s = setup({ slow: true });
     s.edit([p('a', '雨下')]);

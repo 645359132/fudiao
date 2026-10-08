@@ -1,4 +1,5 @@
 import { ChapterSidebar } from './ChapterSidebar';
+import { HistoryPanel } from './HistoryPanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -19,7 +20,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

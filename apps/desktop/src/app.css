@@ -454,3 +454,63 @@ textarea {
   color: var(--muted);
   cursor: pointer;
 }
+
+/* 版本快照 */
+
+.chapter-head,
+.history-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chapter-head h2,
+.history-head h2 {
+  flex: 1;
+  margin: 0 0 12px;
+}
+
+.history-body {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 24px;
+}
+
+.snapshot-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.snapshot-list button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 4px;
+  text-align: left;
+}
+
+.snapshot-list button[aria-current='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.snapshot-preview h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.snapshot-preview .confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.snapshot-text {
+  min-height: 0;
+  margin-top: 16px;
+  color: var(--muted);
+}
