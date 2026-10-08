@@ -13,11 +13,13 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm depcheck && pnpm test",
     "m0": "tsx apps/m0-cli/src/main.ts",
-    "prompts:build": "tsx tools/prompts/build-templates.ts"
+    "prompts:build": "tsx tools/prompts/build-templates.ts",
+    "bench": "tsx tools/bench/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@fudiao/shared": "workspace:*",
+    "@fudiao/store": "workspace:*",
     "@types/node": "^22.20.5",
     "dependency-cruiser": "^18.5.0",
     "eslint": "^10.12.0",
