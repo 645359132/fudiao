@@ -4,21 +4,48 @@ import type { SqlPort, SqlValue, Statement } from '../sql';
 import { queryAll, type RepoError, type WriteContext } from './common';
 import { planParagraphSave, type CurrentParagraph, type SavedParagraph, type StructuralEdits } from './paragraph-plan';
 
+/** source_spans 列：AI 文字区间的 JSON 数组。 */
+export const SourceSpansColumn = z
+  .string()
+  .transform((text, ctx): unknown => {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      ctx.addIssue({ code: 'custom', message: '来源区间不是有效的 JSON' });
+      return z.NEVER;
+    }
+  })
+  .pipe(z.array(z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() }).refine((s) => s.end > s.start)));
+
+export const SourceKindColumn = z.enum(['handwritten', 'ai_generated', 'ai_modified', 'mixed']);
+
 const ParagraphRow = z
   .object({
     id: z.string(),
     order_key: z.string(),
     text: z.string(),
     version: z.number().int(),
-    source_kind: z.enum(['handwritten', 'ai_generated', 'ai_modified', 'mixed']),
+    source_kind: SourceKindColumn,
+    source_spans: SourceSpansColumn,
+    ai_origin_text: z.string().nullable(),
   })
-  .transform((r): SavedParagraph => ({ id: r.id, orderKey: r.order_key, text: r.text, version: r.version, source: r.source_kind }));
+  .transform(
+    (r): SavedParagraph => ({
+      id: r.id,
+      orderKey: r.order_key,
+      text: r.text,
+      version: r.version,
+      source: r.source_kind,
+      aiOriginText: r.ai_origin_text,
+      spans: r.source_spans,
+    }),
+  );
 
 export function listParagraphs(port: SqlPort, chapterId: string): Promise<Result<SavedParagraph[], RepoError>> {
   return queryAll(
     port,
     ParagraphRow,
-    'SELECT id, order_key, text, version, source_kind FROM paragraph WHERE chapter_id = ? ORDER BY order_key',
+    'SELECT id, order_key, text, version, source_kind, source_spans, ai_origin_text FROM paragraph WHERE chapter_id = ? ORDER BY order_key',
     [chapterId],
   );
 }
@@ -50,8 +77,8 @@ export async function saveChapterParagraphs(
   // 2. 新增段落。
   for (const p of plan.inserts) {
     statements.push({
-      sql: 'INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, split_from, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      params: [p.id, chapterId, p.orderKey, p.text, p.source, p.splitFrom, ctx.now, ctx.now],
+      sql: 'INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      params: [p.id, chapterId, p.orderKey, p.text, p.source, JSON.stringify(p.spans), p.aiOriginText, p.splitFrom, ctx.now, ctx.now],
     });
   }
   // 3. 修改：文本或来源变化时版本加一（锚点据此判断原文是否变化），只改排序键时不加。
@@ -65,6 +92,14 @@ export async function saveChapterParagraphs(
     if (u.source !== undefined) {
       sets.push('source_kind = ?');
       params.push(u.source);
+    }
+    if (u.spans !== undefined) {
+      sets.push('source_spans = ?');
+      params.push(JSON.stringify(u.spans));
+    }
+    if (u.aiOriginText !== undefined) {
+      sets.push('ai_origin_text = ?');
+      params.push(u.aiOriginText);
     }
     if (u.orderKey !== undefined) {
       sets.push('order_key = ?');

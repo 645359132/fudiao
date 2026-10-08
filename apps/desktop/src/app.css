@@ -8,6 +8,9 @@
   --accent: #8a5a2b;
   --accent-soft: #f1e6d8;
   --danger: #a23b2a;
+  --source-ai: #3f6fa8;
+  --source-modified: #4f8a80;
+  --source-mixed: #a8741a;
   font-family: 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif;
   font-size: 14px;
   color: var(--text);
@@ -25,6 +28,9 @@
     --accent: #d9a46b;
     --accent-soft: #3a3024;
     --danger: #e0806e;
+    --source-ai: #7aa7dc;
+    --source-modified: #6fb3a6;
+    --source-mixed: #d1a24a;
   }
 }
 
@@ -768,6 +774,95 @@ fieldset.plain {
 .form-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+/* 段落来源色条：段落左侧的细条，不占排版空间；手写段落没有色条。 */
+.chapter-text p.source {
+  position: relative;
+}
+
+.chapter-text p.source::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0.35em;
+  bottom: 0.35em;
+  width: 3px;
+  border-radius: 2px;
+}
+
+.source-ai_generated::before,
+.swatch.source-ai_generated {
+  background: var(--source-ai);
+}
+
+.source-ai_modified::before,
+.swatch.source-ai_modified {
+  background: var(--source-modified);
+}
+
+.source-mixed::before,
+.swatch.source-mixed {
+  background: var(--source-mixed);
+}
+
+.source-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 0;
+  margin: 8px 0 16px;
+  list-style: none;
+  color: var(--muted);
+}
+
+.source-legend li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.swatch {
+  display: inline-block;
+  width: 4px;
+  height: 1.1em;
+  border-radius: 2px;
+}
+
+.source-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.source-table th,
+.source-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.source-table th:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+.source-table thead th {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.source-table tfoot th,
+.source-table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+}
+
+.sources .check {
+  display: flex;
+  gap: 6px;
   align-items: center;
 }
 

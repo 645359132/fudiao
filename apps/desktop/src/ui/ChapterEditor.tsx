@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
-import { chapterExtensions, EntityHighlight, fromDoc, setHighlightEntities, structuralLog, toDoc } from '@fudiao/editor';
+import { chapterExtensions, EntityHighlight, fromDoc, setHighlightEntities, setParagraphSources, setSourceMarksEnabled, SourceMarks, structuralLog, toDoc } from '@fudiao/editor';
 import { countWords, ulid } from '@fudiao/shared';
 import { AutosaveController, type SaveStatus } from '../app/autosave';
 import type { ChapterContent } from '../app/service';
@@ -85,11 +85,14 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   const registerEditor = useApp((s) => s.registerEditor);
   const entities = useApp((s) => s.entities);
   const openEntityDrawer = useApp((s) => s.openEntityDrawer);
+  const showSource = useApp((s) => s.library?.preferences.showParagraphSource ?? true);
+  // 保存后的段落（来源由保存时推导）；保存成功后状态中的这一份会更新。
+  const savedParagraphs = useApp((s) => (s.chapterContent?.chapterId === content.chapterId ? s.chapterContent.saved : content.saved));
   const chapterId = content.chapterId;
 
   const editor = useEditor(
     {
-      extensions: [...chapterExtensions({ newId }), EntityHighlight.configure({ onOpen: openEntityDrawer })],
+      extensions: [...chapterExtensions({ newId }), EntityHighlight.configure({ onOpen: openEntityDrawer }), SourceMarks],
       content: toDoc(content.saved, newId),
       shouldRerenderOnTransaction: false,
       editorProps: { attributes: { class: 'chapter-text', 'aria-label': '正文', spellcheck: 'false' } },
@@ -138,6 +141,29 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   useEffect(() => {
     if (editor !== null) setHighlightEntities(editor, entities);
   }, [editor, entities]);
+
+  // 段落来源色条（只改装饰，不改文档）。输入法组合期间不改动正文的 DOM，组合结束后再更新。
+  useEffect(() => {
+    if (editor === null) return;
+    const apply = () => setParagraphSources(editor, new Map(savedParagraphs.map((p) => [p.id, p.source])));
+    if (!editor.view.composing) {
+      apply();
+      return;
+    }
+    const dom = editor.view.dom;
+    let timer = 0;
+    const later = () => {
+      timer = window.setTimeout(apply, 0);
+    };
+    dom.addEventListener('compositionend', later, { once: true });
+    return () => {
+      dom.removeEventListener('compositionend', later);
+      window.clearTimeout(timer);
+    };
+  }, [editor, savedParagraphs]);
+  useEffect(() => {
+    if (editor !== null) setSourceMarksEnabled(editor, showSource);
+  }, [editor, showSource]);
 
   if (editor === null) return null;
   return (

@@ -37,7 +37,7 @@ function fakeTimers() {
 }
 
 const p = (id: string, text: string): CurrentParagraph => ({ id, text, source: 'handwritten' });
-const asSaved = (ps: readonly CurrentParagraph[], version = 1): SavedParagraph[] => ps.map((x, i) => ({ ...x, orderKey: `a${i}`, version }));
+const asSaved = (ps: readonly CurrentParagraph[], version = 1): SavedParagraph[] => ps.map((x, i) => ({ ...x, orderKey: `a${i}`, version, aiOriginText: null, spans: [] }));
 
 function setup(options: { failTimes?: number; slow?: boolean } = {}) {
   const clock = fakeTimers();

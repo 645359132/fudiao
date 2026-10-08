@@ -11,16 +11,25 @@ export const WorkEntry = z.object({
 });
 export type WorkEntry = z.infer<typeof WorkEntry>;
 
+/** 对所有作品生效的偏好。新增字段一律带默认值，旧文件不必迁移。 */
+export const Preferences = z.object({
+  /** 正文左侧的段落来源色条（需求 B33）。 */
+  showParagraphSource: z.boolean().default(true),
+});
+export type Preferences = z.infer<typeof Preferences>;
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true };
+
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({
   version: z.literal(1),
   /** 新建作品的位置；null 时用默认作品库（文档\复调）。 */
   libraryDir: z.string().nullable(),
   works: z.array(WorkEntry),
+  preferences: Preferences.default(DEFAULT_PREFERENCES),
 });
 export type LibraryFile = z.infer<typeof LibraryFile>;
 
-export const EMPTY_LIBRARY: LibraryFile = { version: 1, libraryDir: null, works: [] };
+export const EMPTY_LIBRARY: LibraryFile = { version: 1, libraryDir: null, works: [], preferences: DEFAULT_PREFERENCES };
 
 /** 列表显示顺序：最近打开的在前，从未打开的按标题。 */
 export function sortWorks(works: readonly WorkEntry[]): WorkEntry[] {

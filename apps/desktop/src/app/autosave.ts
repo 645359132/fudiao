@@ -27,10 +27,13 @@ export type AutosaveDeps = {
   readonly retryMs?: readonly number[];
 };
 
-/** 内容是否与已保存的一致。空章节里只有一个空段落时视为没有内容。 */
+/**
+ * 内容是否与已保存的一致。空章节里只有一个空段落时视为没有内容。
+ * 不比较来源：已有段落的来源由保存时推导，编辑器里的标记可能是旧的。
+ */
 export function sameContent(saved: readonly SavedParagraph[], current: readonly CurrentParagraph[]): boolean {
   if (saved.length === 0) return current.every((p) => p.text === '') && current.length <= 1;
-  return saved.length === current.length && saved.every((s, i) => s.id === current[i]?.id && s.text === current[i]?.text && s.source === current[i]?.source);
+  return saved.length === current.length && saved.every((s, i) => s.id === current[i]?.id && s.text === current[i]?.text);
 }
 
 export class AutosaveController {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // 用真实的用例与作品库（Node 的 SqlPort）驱动界面，覆盖 B01、B02 的主要流程。
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,9 +29,10 @@ afterEach(async () => {
 function start() {
   const deps = fsDeps();
   all.push(deps);
-  const store = createAppStore(createAppService(deps));
+  const service = createAppService(deps);
+  const store = createAppStore(service);
   render(<App store={store} />);
-  return { deps, store, user: userEvent.setup() };
+  return { deps, service, store, user: userEvent.setup() };
 }
 
 const chapterTitles = () =>
@@ -507,5 +508,47 @@ describe('事实', () => {
     expect(screen.getByText('没有符合的事实。')).toBeTruthy();
     await user.click(screen.getByRole('tab', { name: '世界事实' }));
     expect(within(screen.getByRole('list', { name: '事实列表' })).getAllByRole('button')).toHaveLength(1);
+  });
+});
+
+describe('段落来源', () => {
+  it('统计每章与全书的 AI 参与比例；正文中 AI 段落有来源色条，可在段落来源页关闭', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('雨夜。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['雨夜。']));
+    const chapterId = store.getState().selectedChapterId ?? '';
+
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
+    await screen.findByRole('table', { name: '来源统计' });
+    // M2 接受候选稿之前，用保存用例写入一段 AI 生成的段落。
+    const opened = await service.openChapter(chapterId);
+    if (!opened.ok) throw new Error('无法读取本章');
+    const saved = await service.saveChapter(chapterId, opened.value.saved, [...opened.value.saved, { id: 'ai-1', text: '雨很大。', source: 'ai_generated' }], {
+      splits: [],
+      merges: [],
+    });
+    expect(saved.ok).toBe(true);
+
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
+    const table = await screen.findByRole('table', { name: '来源统计' });
+    await waitFor(() => expect(within(table).getByRole('row', { name: /第一章/ }).textContent).toContain('57.1%'));
+    expect(within(table).getByRole('row', { name: /全书/ }).textContent).toBe('全书757.1%3400');
+
+    await user.click(screen.getByRole('button', { name: '第一章' }));
+    await waitFor(() => expect(document.querySelector('.chapter-text p.source-ai_generated')?.textContent).toBe('雨很大。'));
+    expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(1);
+
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
+    await user.click(await screen.findByRole('checkbox', { name: /显示来源色条/ }));
+    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false }));
+    await user.click(screen.getByRole('button', { name: '第一章' }));
+    await screen.findByRole('textbox', { name: '正文' });
+    expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(0);
   });
 });

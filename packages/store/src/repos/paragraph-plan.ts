@@ -1,7 +1,8 @@
 // 章节正文的保存计划：比较上次保存的段落与编辑器当前段落，得出最少的写入。纯函数，不访问数据库。
 import { keysBetween } from '@fudiao/shared';
+import { deriveProvenance, type AiSpan, type SourceKind } from './paragraph-source';
 
-export type SourceKind = 'handwritten' | 'ai_generated' | 'ai_modified' | 'mixed';
+export type { SourceKind };
 
 export type SavedParagraph = {
   readonly id: string;
@@ -9,8 +10,13 @@ export type SavedParagraph = {
   readonly text: string;
   readonly version: number;
   readonly source: SourceKind;
+  /** 生成原文（见 paragraph-source.ts）。 */
+  readonly aiOriginText: string | null;
+  /** 来自 AI 的文字区间。 */
+  readonly spans: readonly AiSpan[];
 };
 
+/** 编辑器中的段落。source 只对没有来历的新段落生效，已有段落的来源由保存时推导。 */
 export type CurrentParagraph = { readonly id: string; readonly text: string; readonly source: SourceKind };
 
 /** 编辑器记录的结构变化（自上次保存以来）：拆分出的新段落及其来源段落、被合并的段落及并入的段落。 */
@@ -20,9 +26,25 @@ export type StructuralEdits = {
 };
 
 export type ParagraphSavePlan = {
-  readonly inserts: readonly { id: string; orderKey: string; text: string; source: SourceKind; splitFrom: string | null }[];
+  readonly inserts: readonly {
+    id: string;
+    orderKey: string;
+    text: string;
+    source: SourceKind;
+    spans: readonly AiSpan[];
+    aiOriginText: string | null;
+    splitFrom: string | null;
+  }[];
   /** 只列出变化的字段。排序键变化不提升版本（锚点只关心文本），但仍以版本作为并发守卫。 */
-  readonly updates: readonly { id: string; expectedVersion: number; text?: string; source?: SourceKind; orderKey?: string }[];
+  readonly updates: readonly {
+    id: string;
+    expectedVersion: number;
+    text?: string;
+    source?: SourceKind;
+    spans?: readonly AiSpan[];
+    aiOriginText?: string | null;
+    orderKey?: string;
+  }[];
   readonly deletes: readonly { id: string; expectedVersion: number }[];
   /** 事件关联的复制：拆分时从来源段落复制到新段落，合并时从被合并的段落复制到保留的段落。 */
   readonly linkCopies: readonly { from: string; to: string }[];
@@ -48,6 +70,8 @@ function longestIncreasing(keys: readonly string[]): Set<number> {
   for (let i = tails.at(-1) ?? -1; i >= 0; i = prev[i] ?? -1) kept.add(i);
   return kept;
 }
+
+const sameSpans = (a: readonly AiSpan[], b: readonly AiSpan[]) => a.length === b.length && a.every((s, i) => s.start === b[i]?.start && s.end === b[i]?.end);
 
 export function planParagraphSave(saved: readonly SavedParagraph[], current: readonly CurrentParagraph[], edits: StructuralEdits): ParagraphSavePlan {
   const savedById = new Map(saved.map((p) => [p.id, p]));
@@ -82,18 +106,22 @@ export function planParagraphSave(saved: readonly SavedParagraph[], current: rea
   const inserts: ParagraphSavePlan['inserts'][number][] = [];
   const updates: ParagraphSavePlan['updates'][number][] = [];
   const splitFrom = new Map(edits.splits.map((s) => [s.id, s.from]));
+  const provenance = deriveProvenance(saved, current, edits);
   current.forEach((p, i) => {
     const key = keys[i] ?? '';
     const before = savedById.get(p.id);
+    const derived = provenance.get(p.id) ?? { source: 'handwritten', spans: [], aiOriginText: null };
     if (before === undefined) {
-      inserts.push({ id: p.id, orderKey: key, text: p.text, source: p.source, splitFrom: splitFrom.get(p.id) ?? null });
+      inserts.push({ id: p.id, orderKey: key, text: p.text, ...derived, splitFrom: splitFrom.get(p.id) ?? null });
       return;
     }
     const update = {
       id: p.id,
       expectedVersion: before.version,
       ...(p.text !== before.text && { text: p.text }),
-      ...(p.source !== before.source && { source: p.source }),
+      ...(derived.source !== before.source && { source: derived.source }),
+      ...(!sameSpans(derived.spans, before.spans) && { spans: derived.spans }),
+      ...(derived.aiOriginText !== before.aiOriginText && { aiOriginText: derived.aiOriginText }),
       ...(key !== before.orderKey && { orderKey: key }),
     };
     if (Object.keys(update).length > 2) updates.push(update);

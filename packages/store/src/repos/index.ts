@@ -6,6 +6,10 @@ export { createProject, DEFAULT_GOALS, getProject, updateProject, WorkGoals } fr
 export type { CurrentParagraph, ParagraphSavePlan, SavedParagraph, SourceKind, StructuralEdits } from './paragraph-plan';
 export { planParagraphSave } from './paragraph-plan';
 export { listParagraphs, saveChapterParagraphs } from './paragraph';
+export type { AiSpan, DerivedProvenance } from './paragraph-source';
+export { aiCharacters, classify, MODIFIED_RATIO } from './paragraph-source';
+export type { ChapterSourceStats, SourceStats, SourceTally, WordsBySource } from './source-stats';
+export { sourceStats } from './source-stats';
 export type { Snapshot, SnapshotParagraph, SnapshotReason, SnapshotSummary } from './snapshot';
 export { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
 export type { ImportChapter } from './import';

@@ -7,7 +7,7 @@ const NONE: StructuralEdits = { splits: [], merges: [] };
 
 function saved(...texts: string[]): SavedParagraph[] {
   const keys = keysBetween(null, null, texts.length);
-  return texts.map((text, i) => ({ id: `p${i}`, orderKey: keys[i] ?? '', text, version: 1, source: 'handwritten' }));
+  return texts.map((text, i) => ({ id: `p${i}`, orderKey: keys[i] ?? '', text, version: 1, source: 'handwritten', aiOriginText: null, spans: [] }));
 }
 
 const cur = (id: string, text: string): CurrentParagraph => ({ id, text, source: 'handwritten' });
@@ -21,9 +21,11 @@ function apply(before: readonly SavedParagraph[], plan: ReturnType<typeof planPa
     if (!row) throw new Error(`更新了不存在的段落 ${u.id}`);
     if (u.text !== undefined) row.text = u.text;
     if (u.source !== undefined) row.source = u.source;
+    if (u.spans !== undefined) row.spans = u.spans;
+    if (u.aiOriginText !== undefined) row.aiOriginText = u.aiOriginText;
     if (u.orderKey !== undefined) row.orderKey = u.orderKey;
   }
-  for (const i of plan.inserts) rows.set(i.id, { id: i.id, orderKey: i.orderKey, text: i.text, version: 1, source: i.source });
+  for (const i of plan.inserts) rows.set(i.id, { id: i.id, orderKey: i.orderKey, text: i.text, version: 1, source: i.source, aiOriginText: i.aiOriginText, spans: i.spans });
   const list = [...rows.values()].sort((a, b) => (a.orderKey < b.orderKey ? -1 : a.orderKey > b.orderKey ? 1 : 0));
   return list;
 }
@@ -111,10 +113,23 @@ describe('段落保存计划', () => {
     expect(undone.linkCopies).toEqual([]);
   });
 
-  it('来源变化也写入', () => {
+  it('已有段落的来源由保存时推导，编辑器标记不改变它', () => {
     const s = saved('甲');
     const plan = planParagraphSave(s, [{ id: 'p0', text: '甲', source: 'ai_modified' }], NONE);
-    expect(plan.updates).toEqual([{ id: 'p0', expectedVersion: 1, source: 'ai_modified' }]);
+    expect(plan.updates).toEqual([]);
+  });
+
+  it('合并 AI 段落与手写段落：写入混合与字符区间，原文清空', () => {
+    const [a, b] = saved('雨很大。', '他没有回头。');
+    if (a === undefined || b === undefined) throw new Error('样本');
+    const s = [{ ...a, source: 'ai_generated' as const, aiOriginText: '雨很大。', spans: [{ start: 0, end: 4 }] }, b];
+    const plan = planParagraphSave(s, [cur('p0', '雨很大。他没有回头。')], { splits: [], merges: [{ removed: 'p1', into: 'p0' }] });
+    expect(plan.updates).toEqual([{ id: 'p0', expectedVersion: 1, text: '雨很大。他没有回头。', source: 'mixed', aiOriginText: null }]);
+  });
+
+  it('新段落带编辑器标记的来源与区间（接受候选稿）', () => {
+    const plan = planParagraphSave([], [{ id: 'x', text: '雨很大。', source: 'ai_generated' }], NONE);
+    expect(plan.inserts).toMatchObject([{ id: 'x', source: 'ai_generated', spans: [{ start: 0, end: 4 }], aiOriginText: '雨很大。' }]);
   });
 
   it('当前段落标识重复时报错', () => {

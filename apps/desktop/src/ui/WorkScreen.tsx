@@ -3,6 +3,7 @@ import { BackupsPanel } from './BackupsPanel';
 import { FactsPanel } from './FactsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SettingsPanel } from './SettingsPanel';
+import { SourcesPanel } from './SourcesPanel';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -17,6 +18,7 @@ export function WorkScreen() {
   const openBackups = useApp((s) => s.openBackups);
   const openSettings = useApp((s) => s.openSettings);
   const openFacts = useApp((s) => s.openFacts);
+  const openSourceStats = useApp((s) => s.openSourceStats);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
   return (
@@ -53,12 +55,15 @@ export function WorkScreen() {
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openBackups()}>
               备份与恢复
             </button>
+            <button type="button" role="menuitem" disabled={busy} onClick={() => void openSourceStats()}>
+              段落来源
+            </button>
           </div>
         </details>
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

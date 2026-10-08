@@ -21,6 +21,7 @@ import {
   listChapters,
   listParagraphs,
   saveChapterParagraphs,
+  sourceStats,
   createSnapshot,
   getSnapshot,
   listSnapshots,
@@ -47,12 +48,13 @@ import {
   type Snapshot,
   type SnapshotSummary,
   type ImportChapter,
+  type SourceStats,
   type StructuralEdits,
 } from '@fudiao/store';
 import { draftDiffers, draftJson, parseDraft, type DraftFile } from './draft';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
 import { toMarkdown, toTxt, type ExportChapter } from './text-export';
-import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type WorkEntry } from './library';
+import { EMPTY_LIBRARY, folderName, joinPath, LibraryFile, samePath, sortWorks, type Preferences, type WorkEntry } from './library';
 import { describeError, type AppError } from './errors';
 import type { AppDeps, BackupInfo } from './ports';
 
@@ -62,7 +64,7 @@ const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export type { AppError } from './errors';
 
 export type LibraryWork = WorkEntry & { readonly missing: boolean };
-export type LibraryView = { readonly libraryDir: string; readonly works: readonly LibraryWork[] };
+export type LibraryView = { readonly libraryDir: string; readonly works: readonly LibraryWork[]; readonly preferences: Preferences };
 
 /** 打开的章节：库中的段落，以及与之不同的未保存草稿（若有）。 */
 export type ChapterContent = {
@@ -243,7 +245,7 @@ export function createAppService(deps: AppDeps) {
     const works = await Promise.all(
       sortWorks(file.works).map(async (w) => ({ ...w, missing: !(await deps.library.probe(w.path)).hasProject })),
     );
-    return ok({ libraryDir: dir.value, works });
+    return ok({ libraryDir: dir.value, works, preferences: file.preferences });
   }
 
   return {
@@ -466,6 +468,19 @@ export function createAppService(deps: AppDeps) {
       if (latest !== undefined && Date.parse(now) - Date.parse(latest) < AUTO_BACKUP_INTERVAL_MS) return ok(false);
       const created = await deps.backups.create('auto', now);
       return created.ok ? ok(true) : err({ code: 'library', detail: created.error });
+    },
+
+    /** 修改对所有作品生效的偏好。 */
+    async setPreferences(patch: Partial<Preferences>): Promise<Result<LibraryView, AppError>> {
+      const saved = await save({ ...file, preferences: { ...file.preferences, ...patch } });
+      return saved.ok ? loadLibrary() : saved;
+    },
+
+    /** 段落来源统计（需求 B33）：每章与全书的 AI 参与比例。 */
+    async sourceStats(): Promise<Result<SourceStats, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const stats = await sourceStats(session.port);
+      return stats.ok ? stats : err(repo(stats.error));
     },
 
     /** 恢复到备份（现稿先存为恢复前备份），重新读取作品。 */

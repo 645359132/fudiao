@@ -63,7 +63,7 @@ describe('章节快照', () => {
     const full = value(await getSnapshot(db, 's1'));
     expect(full.paragraphs).toEqual([
       { id: 'a', text: '雨下得更紧了。', source: 'handwritten', sourceSpans: [], aiOriginText: null, links: [{ eventId: 'e1', mode: 'flashback' }] },
-      { id: 'b', text: '他没有回头。', source: 'ai_modified', sourceSpans: [], aiOriginText: null, links: [] },
+      { id: 'b', text: '他没有回头。', source: 'ai_modified', sourceSpans: [{ start: 0, end: 6 }], aiOriginText: null, links: [] },
     ]);
   });
 

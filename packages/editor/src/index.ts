@@ -6,3 +6,4 @@ export type { EntityHighlightOptions } from './entity-highlight';
 export { EntityHighlight, entityHighlightKey, setHighlightEntities } from './entity-highlight';
 export type { EntityMatch, MatchableEntity } from './entity-matcher';
 export { createEntityMatcher, MIN_MATCH_LENGTH } from './entity-matcher';
+export { setParagraphSources, setSourceMarksEnabled, SOURCE_LABELS, SourceMarks, sourceMarksKey } from './source-marks';

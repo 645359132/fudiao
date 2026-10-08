@@ -33,7 +33,7 @@ const sample: Statement[] = [
   s("INSERT INTO chapter (id, order_key, title, status, trashed_at, created_at, updated_at) VALUES ('01C2', 'a1', '废稿', 'trashed', ?, ?, ?)", NOW, ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),
   s(
-    "INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, version, created_at, updated_at) VALUES ('01G2', '01C1', 'a1', '他没有回头。', 'ai_modified', '[{\"start\":0,\"end\":6,\"kind\":\"ai_generated\"}]', '他始终没有回头。', '01G1', 3, ?, ?)",
+    "INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, version, created_at, updated_at) VALUES ('01G2', '01C1', 'a1', '他没有回头。', 'ai_modified', '[{\"start\":0,\"end\":6}]', '他始终没有回头。', '01G1', 3, ?, ?)",
     ...T,
   ),
   s("INSERT INTO chapter_snapshot (id, chapter_id, reason, title, paragraphs, created_at) VALUES ('01S1', '01C1', 'manual', '第一章 雨夜', '[{\"id\":\"01G1\",\"text\":\"雨下得更紧了。\"}]', ?)", NOW),
