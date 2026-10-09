@@ -265,6 +265,12 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
       }
     }
     deps.console.out(`运行 ${runId} 开始。`);
+    // 因模型服务出错（限流、余额不足、网络）而暂停的运行，续跑时先恢复；失败的那一步没有完成记录，会重新调用。
+    // 其他暂停原因（提案或裁决不合法、作者暂停）需要作者处理，原样返回。
+    if (resume !== undefined) {
+      const current = await engine.status(runId, scene);
+      if (current.ok && current.value.phase === 'Paused' && current.value.state.pause?.reason === 'llm_error') await engine.resume(runId, scene);
+    }
     let status = await engine.run(runId, scene);
     while (status.ok) {
       const s = status.value;

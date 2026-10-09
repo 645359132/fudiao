@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeModel, waitProposal } from '@fudiao/engine/testing';
+import type { LlmPort } from '@fudiao/llm';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args';
 import { main, type CliDeps } from './cli';
@@ -168,6 +169,25 @@ describe('命令（测试模型）', () => {
     expect(await main(['run', 'm0/scenes/pawnshop.yaml', '--out', out, '--resume', 'TESTRUN0000'], d)).toBe(0);
     expect(model.calls.length).toBe(before);
   });
+
+  it('run --resume 恢复因模型服务出错而暂停的运行（例如余额不足），失败的那一步重新调用', async () => {
+    const flaky = fakeModel();
+    let failing = true;
+    const port: LlmPort = {
+      complete: (request, options) =>
+        failing ? Promise.resolve({ ok: false, error: { code: 'bad_request', status: 402, message: '402 Insufficient Balance' } }) : flaky.port.complete(request, options),
+    };
+    const flakyOut = join(out, 'flaky');
+    const first = deps({ port });
+    expect(await main(['run', 'm0/scenes/warehouse.yaml', '--out', flakyOut, '--runs', '1'], first.d)).toBe(0);
+    const id = first.lines.find((l) => l.endsWith('开始。'))?.match(/运行 (\S+) 开始/)?.[1] ?? '';
+    expect(first.lines.at(-1)).toMatch(/暂停：llm_error/);
+    failing = false;
+    const again = deps({ port });
+    expect(await main(['run', 'm0/scenes/warehouse.yaml', '--out', flakyOut, '--resume', id], again.d)).toBe(0);
+    expect(again.lines.at(-1)).toMatch(new RegExp(`^运行 ${id}：Ended`));
+    expect(flaky.calls.length).toBeGreaterThan(0);
+  }, 30_000);
 
   it('narrate 由运行记录生成节拍表与候选稿', async () => {
     const { d, lines } = deps({ port: model.port });

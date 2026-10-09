@@ -1,5 +1,6 @@
 ﻿# M0-13 第二轮收尾（2026-10-10）：批量实验中途 DeepSeek 余额用尽，五次雨夜推演暂停；仓库“张力曲线导演”两次因导演模板第 3 版的格式问题暂停。
-# 本脚本：续跑五次雨夜推演（已完成的调用按步骤键跳过，不重复计费）；用导演模板第 4 版补跑两次仓库张力曲线导演（替换暂停的两次）。
+# 本脚本：续跑五次雨夜推演（已完成的调用按步骤键跳过，不重复计费）；续跑两次用导演模板第 4 版新建的仓库张力曲线导演（替换因格式问题暂停的两次）。
+# 因模型服务出错（限流、余额不足）而暂停的运行，run --resume 会先恢复再继续。
 # 余额不足时服务会降低并发上限，这里最多同时 3 个。
 # 先给 DeepSeek 账户充值，再在同一个 PowerShell 窗口里设置 $env:DEEPSEEK_API_KEY，在仓库根目录运行：
 #   powershell -ExecutionPolicy Bypass -File m0/experiments/deepseek-round2-finish.ps1
@@ -18,11 +19,16 @@ $exp = 'm0/experiments/deepseek.yaml'
 $log = "m0/runs/batch-finish-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $resume = @('01M4GJFJMDM8F2V20JN8K778WP', '01M4GJFJMEJW9SVWP7TSKNJ0XD', '01M4GJR4XDGZ2QP4CVNEPPSQK8', '01M4GJR4XC1ESWJGENP1BDT06X', '01M4GJR4XDHEPR2JWYMEV7DN9F')
 
+# 补跑的两次仓库张力曲线导演已在 2026-10-09 23:25 建立（导演模板第 4 版），因余额不足停在第 1 回合，同样续跑。
+$warehouse = @('01M4GMADB0PZXSZDG09ND2T5AE', '01M4GMADB1H4K163TJKSTS5F5J')
+
 $steps = @()
 foreach ($id in $resume) {
   $steps += @{ title = "续跑 雨夜 $id"; args = @('run', 'm0/scenes/rainy-night.yaml', '--resume', $id) }
 }
-$steps += @{ title = '补跑 仓库 导演（张力曲线）两次'; args = @('run', 'm0/scenes/warehouse.yaml', '--runs', '2', '--parallel', '2', '--seed', '11', '--director', 'curve', '--curve', '前两轮试探，第四轮爆发，之后收束') }
+foreach ($id in $warehouse) {
+  $steps += @{ title = "续跑 仓库 导演（张力曲线）$id"; args = @('run', 'm0/scenes/warehouse.yaml', '--resume', $id) }
+}
 
 # 子作业继承本进程的环境变量（含 API Key），Key 不写进任何参数或日志。
 $job = {
