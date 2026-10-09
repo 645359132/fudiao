@@ -51,5 +51,18 @@ while (@($running | Where-Object { $_.State -in 'Running', 'NotStarted' }).Count
 }
 foreach ($j in $running) { Receive-Job $j | ForEach-Object { Write-Output $_; "$_" | Out-File -FilePath $log -Append -Encoding utf8 } }
 $running | Remove-Job
-"全部完成，日志：$log" | Out-File -FilePath $log -Append -Encoding utf8
-Write-Output "全部完成，日志：$log"
+
+# 按各运行的摘要报告结果：脚本跑完不等于推演跑完（例如余额不足时每个请求都会失败）。
+$paused = @()
+foreach ($id in $resume + $warehouse) {
+  $info = Get-Content "m0/runs/$id/summary.json" -Raw -Encoding utf8 | ConvertFrom-Json
+  if ($info.phase -ne 'Ended') { $paused += "$id（$($info.pause)）" }
+}
+$total = $resume.Count + $warehouse.Count
+if ($paused.Count -eq 0) {
+  $line = "全部 $total 次已结束，日志：$log"
+} else {
+  $line = "未完成：$($paused.Count) / $total 次仍暂停：$($paused -join '、')。如果原因是 llm_error，请查看 DeepSeek 余额后重新运行本脚本。日志：$log"
+}
+$line | Out-File -FilePath $log -Append -Encoding utf8
+Write-Output $line
