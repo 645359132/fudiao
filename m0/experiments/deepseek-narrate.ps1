@@ -3,11 +3,11 @@
 # 当铺只用僵局判断第 3 版之后的重跑；雨夜“僵局后导演”用补跑的那一次替换被提前结束的运行。
 # 先在同一个 PowerShell 窗口里设置 $env:DEEPSEEK_API_KEY，再在仓库根目录运行：
 #   powershell -ExecutionPolicy Bypass -File m0/experiments/deepseek-narrate.ps1
-# 第二轮起用 -BatchLog 指定批量实验的日志，从中读出运行标识（场景取自各运行的摘要）：
+# 第二轮起用 -BatchLog 指定批量实验的日志（可给多个，用逗号分隔），从中读出运行标识（场景取自各运行的摘要，只取已结束的运行）：
 #   powershell -ExecutionPolicy Bypass -File m0/experiments/deepseek-narrate.ps1 -BatchLog m0/runs/batch-<时间>.log
 # 已有候选稿的运行自动跳过，中断后重新运行即可续上。
 
-param([int]$Concurrency = 6, [string]$BatchLog = '')
+param([int]$Concurrency = 6, [string[]]$BatchLog = @())
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -39,13 +39,17 @@ $runs = [ordered]@{
     '01M4F4XKZ2DCAEPCTBB3GEMB4Z', '01M4F4XKZ3F6AKJSMBYN2W4SNG', '01M4F4XKZ3J051N6YX803A0FR6')
 }
 
-if ($BatchLog) {
+# 经 -File 调用时 -BatchLog a,b 会作为一个字符串传入，按逗号拆开。
+$BatchLog = @($BatchLog | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+if ($BatchLog.Count -gt 0) {
   $runs = [ordered]@{ 'warehouse' = @(); 'pawnshop' = @(); 'rainy-night' = @() }
   $ids = Select-String -Path $BatchLog -Pattern '运行 (\w+) 开始' -Encoding utf8 | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -Unique
   foreach ($id in $ids) {
     $summary = "m0/runs/$id/summary.json"
     if (-not (Test-Path $summary)) { Write-Output "跳过 $id（没有摘要，运行未结束）"; continue }
-    $scene = [System.IO.Path]::GetFileNameWithoutExtension((Get-Content $summary -Raw -Encoding utf8 | ConvertFrom-Json).scene)
+    $info = Get-Content $summary -Raw -Encoding utf8 | ConvertFrom-Json
+    if ($info.phase -ne 'Ended') { Write-Output "跳过 $id（$($info.phase)：$($info.pause)）"; continue }
+    $scene = [System.IO.Path]::GetFileNameWithoutExtension($info.scene)
     if ($runs.Contains($scene)) { $runs[$scene] += $id }
   }
 }
