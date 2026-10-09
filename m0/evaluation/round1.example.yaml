@@ -10,6 +10,9 @@ seed: 20261007
 evaluators: [评价者A, 评价者B, 评价者C, 评价者D, 评价者E]
 # 每位评价者阅读的样本数：控制阅读量。
 perEvaluator: 6
+# 可选：只发梗概或正文、只打部分评分项（characters、intel、twist、adopt、edits）。省略时全部。
+# layers: [梗概]
+# dimensions: [twist, adopt]
 samples:
   - { scene: warehouse, condition: baseline, dir: m0/runs/baseline-<标识> }
   - { scene: warehouse, condition: simulation, dir: m0/runs/<运行标识>/narration-shen_yan }

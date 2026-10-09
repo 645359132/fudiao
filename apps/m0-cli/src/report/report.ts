@@ -29,6 +29,9 @@ export const DIMENSIONS = [
 ] as const;
 
 export const LAYERS = ['梗概', '正文'] as const;
+type Layer = (typeof LAYERS)[number];
+type Dimension = (typeof DIMENSIONS)[number];
+const DIMENSION_KEYS = DIMENSIONS.map((d) => d.key) as [Dimension['key'], ...Dimension['key'][]];
 
 export const Manifest = z.object({
   id: z.string().min(1),
@@ -36,6 +39,9 @@ export const Manifest = z.object({
   evaluators: z.array(z.string().min(1)).min(1),
   /** 每位评价者阅读的样本数，控制阅读量。 */
   perEvaluator: z.number().int().positive(),
+  /** 只发给评价者的层面与评分项（精简评估：例如只看梗概、只打转折与采纳意愿）；省略时全部。 */
+  layers: z.array(z.enum(LAYERS)).min(1).optional(),
+  dimensions: z.array(z.enum(DIMENSION_KEYS)).min(1).optional(),
   samples: z
     .array(z.object({ scene: z.string().min(1), condition: z.enum(CONDITIONS), dir: z.string().min(1) }))
     .min(1),
@@ -155,13 +161,13 @@ export function loadSamples(manifest: Manifest, resolve: (p: string) => string):
   return ok(samples);
 }
 
-const EVALUATOR_README = (perEvaluator: number) => `# 评价说明
+const EVALUATOR_README = (perEvaluator: number, layers: readonly Layer[], dimensions: readonly Dimension[]) => `# 评价说明
 
-你会读到 ${perEvaluator} 份样本。每份都是同一类局面下的一场戏，包含“事件梗概”与“正文”两部分。样本的来源已经隐藏，请不要猜测或打听它们是怎么写出来的。
+你会读到 ${perEvaluator} 份样本。每份都是同一类局面下的一场戏，${layers.length === LAYERS.length ? '包含“事件梗概”与“正文”两部分' : `只有“${layers[0] === '梗概' ? '事件梗概' : '正文'}”`}。样本的来源已经隐藏，请不要猜测或打听它们是怎么写出来的。
 
-请在“评分表.csv”中为每份样本的梗概与正文分别打分：
+请在“评分表.csv”中为每份样本${layers.length === LAYERS.length ? '的梗概与正文分别' : ''}打分：
 
-${DIMENSIONS.map((d) => `- ${d.label}`).join('\n')}
+${dimensions.map((d) => `- ${d.label}`).join('\n')}
 
 “备注”中可以写下值得采用的转折、违和之处或需要修改的地方。每份样本请独立评价，不必互相比较。各份样本篇幅长短不一，请按内容评分，不因篇幅长短加分或减分。
 
@@ -170,6 +176,8 @@ ${DIMENSIONS.map((d) => `- ${d.label}`).join('\n')}
 
 /** 生成评估包：每位评价者一个文件夹（样本与评分表），答案键单独存放。 */
 export function writePackets(outDir: string, manifest: Manifest, samples: readonly Sample[]): AnswerKey {
+  const layers = LAYERS.filter((l) => manifest.layers?.includes(l) ?? true);
+  const dimensions = DIMENSIONS.filter((d) => manifest.dimensions?.includes(d.key) ?? true);
   const assignments = assign(
     manifest,
     samples.map((s) => s.code),
@@ -179,17 +187,21 @@ export function writePackets(outDir: string, manifest: Manifest, samples: readon
   for (const [evaluator, codes] of Object.entries(assignments)) {
     const dir = join(outDir, evaluator);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, '评价说明.md'), EVALUATOR_README(codes.length));
+    writeFileSync(join(dir, '评价说明.md'), EVALUATOR_README(codes.length, layers, dimensions));
     for (const code of codes) {
       const s = byCode.get(code);
       if (s === undefined) continue;
-      writeFileSync(join(dir, `${code}.md`), `# 样本 ${code}\n\n## 事件梗概\n\n${s.synopsis}\n\n## 正文\n\n${s.text}\n`);
+      const parts = [
+        ...(layers.includes('梗概') ? [`## 事件梗概\n\n${s.synopsis}`] : []),
+        ...(layers.includes('正文') ? [`## 正文\n\n${s.text}`] : []),
+      ];
+      writeFileSync(join(dir, `${code}.md`), `# 样本 ${code}\n\n${parts.join('\n\n')}\n`);
     }
     writeFileSync(
       join(dir, '评分表.csv'),
       toCsv([
-        ['样本', '层面', ...DIMENSIONS.map((d) => d.label), '备注'],
-        ...codes.flatMap((code) => LAYERS.map((layer) => [code, layer, ...DIMENSIONS.map(() => ''), ''])),
+        ['样本', '层面', ...dimensions.map((d) => d.label), '备注'],
+        ...codes.flatMap((code) => layers.map((layer) => [code, layer, ...dimensions.map(() => ''), ''])),
       ]),
     );
   }
@@ -218,12 +230,17 @@ export function analyze(outDir: string): Result<string, string> {
   for (const evaluator of readdirSync(outDir).filter((d) => d !== '_key' && existsSync(join(outDir, d, '评分表.csv')))) {
     const [header, ...data] = parseCsv(readFileSync(join(outDir, evaluator, '评分表.csv'), 'utf8'));
     if (header === undefined) continue;
+    // 按表头识别评分项：精简评估包只含部分评分项。
+    const columns = DIMENSIONS.flatMap((d) => {
+      const index = header.indexOf(d.label);
+      return index < 0 ? [] : [{ d, index }];
+    });
     for (const row of data) {
       const [code = '', layer = ''] = row;
       const condition = conditionOf.get(code);
       if (condition === undefined) continue;
-      DIMENSIONS.forEach((d, i) => {
-        const raw = row[2 + i]?.trim() ?? '';
+      columns.forEach(({ d, index }) => {
+        const raw = row[index]?.trim() ?? '';
         if (raw === '') return;
         const value = Number(raw);
         if (!Number.isFinite(value)) return;

@@ -116,6 +116,56 @@ describe('评估包与汇总', () => {
   });
 });
 
+describe('精简评估包（只看梗概、只打部分评分项）', () => {
+  const out = join(root, 'packets-lite');
+  const lite: Manifest = { ...manifest, id: 'lite', layers: ['梗概'], dimensions: ['twist', 'adopt'] };
+  const samples = loadSamples(lite, (p) => p);
+  if (!samples.ok) throw new Error(samples.error);
+  const key = writePackets(out, lite, samples.value);
+
+  it('样本只含梗概，评分表只有梗概一行与选定的评分项', () => {
+    const files = readdirSync(join(out, 'e1')).filter((f) => /^S\d+\.md$/.test(f));
+    for (const f of files) {
+      const text = readFileSync(join(out, 'e1', f), 'utf8');
+      expect(text).toContain('## 事件梗概');
+      expect(text).not.toContain('## 正文');
+      expect(text).not.toContain('的正文');
+    }
+    const rows = parseCsv(readFileSync(join(out, 'e1', '评分表.csv'), 'utf8'));
+    expect(rows[0]).toEqual(['样本', '层面', '意外但合理的转折（1-5）', '采纳意愿（1-5）', '备注']);
+    expect(rows).toHaveLength(1 + 6);
+    expect(rows.slice(1).every((r) => r[1] === '梗概')).toBe(true);
+    const readme = readFileSync(join(out, 'e1', '评价说明.md'), 'utf8');
+    expect(readme).toContain('事件梗概');
+    expect(readme).not.toContain('采纳前修改量');
+  });
+
+  it('汇总按表头识别评分项，未出现的评分项与层面显示为空', () => {
+    for (const evaluator of lite.evaluators) {
+      const file = join(out, evaluator, '评分表.csv');
+      const [header, ...rows] = parseCsv(readFileSync(file, 'utf8'));
+      const condition = new Map(key.samples.map((s) => [s.code, s.condition]));
+      const filled = rows.map((r) => {
+        const score = condition.get(r[0] ?? '') === 'simulation' ? '5' : '3';
+        return [r[0] ?? '', r[1] ?? '', score, score, ''];
+      });
+      writeFileSync(file, toCsv([header ?? [], ...filled]));
+    }
+    const report = analyze(out);
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    expect(report.value).toContain('| 角色推演 | — | — | 5.00（15） | 5.00（15） | — |');
+    expect(report.value).toContain('| 单次提示词对照组 | — | — | 3.00（15） | 3.00（15） | — |');
+  });
+
+  it('清单中未知的层面或评分项报错', () => {
+    const base = 'id: x\nevaluators: [a]\nperEvaluator: 1\nsamples:\n  - { scene: s, condition: baseline, dir: d }\n';
+    expect(loadManifest(`${base}layers: [大纲]\n`).ok).toBe(false);
+    expect(loadManifest(`${base}dimensions: [nope]\n`).ok).toBe(false);
+    expect(loadManifest(`${base}layers: [梗概]\ndimensions: [twist]\n`).ok).toBe(true);
+  });
+});
+
 describe('作者挑选的样本', () => {
   it('与原属条件是同一篇时，同一位评价者不会读到两次', () => {
     const samples: Manifest['samples'] = [

@@ -59,7 +59,7 @@ M0 回答一个问题：多角色推演能否比直接让模型写一场同类�
      ```
 
    归类文件写在 `m0/runs/outcomes-<标识>.md`，列出每种结局的次数、对应的运行与代表运行的关键转折（物品易手、伤势变化、离场、机关触发、导演事件）。僵局检测默认开启，摘要与查看页中会标出检测到的僵局。
-6. **生成评估包**：按 `evaluation/round1.example.yaml` 写好清单，生成评估包。每位评价者一个文件夹，答案键在 `_key/`，不要分发。
+6. **生成评估包**：按 `evaluation/round1.example.yaml` 写好清单，生成评估包。每位评价者一个文件夹，答案键在 `_key/`，不要分发。清单可用 `layers`（如 `[梗概]`）与 `dimensions`（如 `[twist, adopt]`）生成只看梗概、只打部分评分项的精简评估包；第一轮的评价方式见 `DECISION.md` 第〇节。
 
    ```bash
    pnpm m0 report m0/evaluation/round1.yaml
