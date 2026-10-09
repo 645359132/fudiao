@@ -1,6 +1,6 @@
 ---
 id: semantic_ruling
-version: 4
+version: 5
 task: semantic_ruling
 output: SemanticRulingOutput
 ---
@@ -15,13 +15,14 @@ output: SemanticRulingOutput
 
 输出一个 JSON 对象：
 - rationale：一两句话说明裁决依据。
-- effects：状态变化，只能涉及下面列出的人与物。可用的变化：
-  - moveActor：{actor, to}，只能移到相邻区域
-  - transferItem：{item, toActor, toZone}，二者填一个，另一个为 null
-  - adjustCounter：{item, counter, delta}
-  - setInjury：{actor, level}，level 为 none、light、severe、incapacitated
-  - setActorStatus：{actor, status}，status 为 present 或 withdrawn
-  - setFlag：{flag, value}
+- effects：状态变化，只能涉及下面列出的人与物。每条是一个对象，type 写变化的种类，其余字段与 type 并列，形如 {"type": "transferItem", "item": "物品标识", "toActor": "人物标识", "toZone": null}。可用的变化：
+  - moveActor：actor、to，只能移到相邻区域
+  - transferItem：item、toActor、toZone，二者填一个，另一个为 null；把东西递给对方查看也是交到对方手里
+  - adjustCounter：item、counter、delta（整数）
+  - setInjury：actor、level，level 为 none、light、severe、incapacitated
+  - setActorStatus：actor、status，status 为 present 或 withdrawn
+  - setFlag：flag、value（true 或 false），只能用下面“场景标记”中列出的标记；没有列出场景标记时不要用 setFlag
+  报价、承诺、出示、表态等已经体现在台词与具体动作中，不需要另设状态；没有状态变化时 effects 为空数组。
 - occurrences：这次裁决产生的、旁人可能察觉的事，每条含 participants（当事人标识）、zones（发生的区域标识）、visible（能否被看见）、loudness（响度，0 为无声，2 约等于正常说话，5 可传遍全场）、visual（旁人看见的样子，不能看见时为 null）、sound（旁人听见的声音，无声时为 null）。描述只写看得见、听得见的现象，不写人物的内心。
 - uncertainties：需要作者核实的问题，没有则为空数组。
 @@system cache

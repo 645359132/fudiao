@@ -221,6 +221,7 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
     { model: config0.models.character_action, calls: counts.proposals * total },
     { model: config0.models.semantic_ruling, calls: counts.rulings * total },
     { model: config0.models.belief_update, calls: counts.beliefs * total },
+    { model: config0.models.judgement, calls: counts.evidence * total },
     // 按上限估算：窗口填满后每回合都可能请求僵局判断；导演不在最后一回合之后询问。
     ...(config0.models.stalemate && config0.stalemate.enabled
       ? [{ model: config0.models.stalemate, calls: Math.max(0, rounds - config0.stalemate.window + 1) * total }]

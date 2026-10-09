@@ -58,7 +58,7 @@ describe('默认实验配置与费用估算', () => {
     expect(experiment.ok).toBe(true);
   });
 
-  it('仓库场景 8 回合约 40 次调用，费用落在施工文档估算的 2 至 5 美元附近', () => {
+  it('仓库场景 8 回合的提案、裁决与认知更新约 45 次调用（含一成修正），费用约 3 至 6.5 美元', () => {
     if (!experiment.ok) return;
     const scene = loadSceneFile(readFileSync(join(root, 'm0/scenes/warehouse.yaml'), 'utf8'));
     if (!scene.ok) throw new Error('场景无效');
@@ -69,9 +69,9 @@ describe('默认实验配置与费用估算', () => {
       { model: config.models.semantic_ruling, calls: counts.rulings },
       { model: config.models.belief_update, calls: counts.beliefs },
     ]);
-    expect(estimate.calls).toBe(40);
-    expect(estimate.lowUsd).toBeGreaterThan(1.5);
-    expect(estimate.highUsd).toBeLessThan(5);
+    expect(estimate.calls).toBe(45);
+    expect(estimate.lowUsd).toBeGreaterThan(3);
+    expect(estimate.highUsd).toBeLessThan(6.5);
   });
 
   it('OpenAI 写法的示例配置：按服务的写法发送请求', async () => {
@@ -127,7 +127,7 @@ describe('真实调用前的费用确认', () => {
     const { d, lines } = deps({ answers: [false] });
     const code = await main(['run', 'm0/scenes/warehouse.yaml', '--out', out], d);
     expect(code).toBe(1);
-    expect(lines.join('\n')).toMatch(/预计调用 46 次，费用约 \$\d+\.\d\d 至 \$\d+\.\d\d；每次运行的预算上限 \$6\.00/);
+    expect(lines.join('\n')).toMatch(/预计调用 61 次，费用约 \$\d+\.\d\d 至 \$\d+\.\d\d；每次运行的预算上限 \$6\.00/);
     expect(lines).toContain('已取消。');
   });
 
@@ -252,8 +252,8 @@ describe('命令（测试模型）', () => {
       d,
     );
     expect(code).toBe(0);
-    // 3 次运行 × 20 回合；导演按张力曲线在 19 个回合边界各请求一次，计入估算。
-    expect(lines[0]).toMatch(/^预计调用 351 次/);
+    // 3 次运行 × 20 回合；导演按张力曲线在 19 个回合边界各请求一次，连同证据链判断与一成修正计入估算。
+    expect(lines[0]).toMatch(/^预计调用 453 次/);
     const runs = readdirSync(batch).filter((f) => f.startsWith('TESTRUN')).sort();
     expect(runs).toEqual(['TESTRUN0000', 'TESTRUN0001', 'TESTRUN0002']);
     for (const run of runs) {
