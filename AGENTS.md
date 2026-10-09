@@ -52,6 +52,7 @@
 - M2-06 已完成：迁移 `0004_candidate.sql`；候选稿仓储 `candidate.ts` 与按范围替换 `paragraph-range.ts`（版本守卫、事件关联、来源区间）；逐字差异 `textDiff`（`packages/shared`）；应用层 `candidates.ts`（存为候选稿、修改、放弃、接受时检查过期、快照、写入来源）；“AI 写作”抽屉中的候选稿（差异、修改、接受、放弃）。
 - M2-07 已完成：任务记录 `apps/desktop/src/app/tasks.ts`（进度、部分结果、已知用量与费用）；选区操作登记为任务；顶栏“任务”与任务页（取消、复制部分结果、清除）。M2 的任务已全部完成，待作者执行手工清单与真实模型的验证。
 - M0-13 进行中（分支 `m0-13-experiment`）：DeepSeek flash 的真实实验已完成（三个场景各 4 种条件、每种 3 次，共 $14.65），27 次推演已生成正文；实验中修正的问题、实测费用与等待见 `m0/DECISION.md`。评估清单 `m0/evaluation/round1.yaml`（39 篇，`batch_pick` 由作者委托 Claude 代选）已备好，`m0/DECISION.md` 附门槛建议值。作者决定（2026-10-09）第一轮以作者本人盲评为主（`m0/packets/round1-self/`，12 篇梗概），外部写作者补充（`round1-external`，招募文案 `m0/evaluation/external-recruit.md`）；评估包支持只看梗概、只打部分评分项。实际由 4 个模型评了梗概层，推演组未达门槛、低于对照组；作者确认 M0 结论为“调整”（2026-10-09），调整清单见 `m0/DECISION.md` 第五节；第 1 至 5 项已实施（场景时钟 `clock`、角色行动模板第 8 版与 `triggered`、反复拉锯 `circling`、梗概取舍、仓库后墙），第二轮实验待作者确认费用后进行。
+- 作者决定（2026-10-09）：新增写手代理与审核代理以快速成书（需求 B59 至 B66，需求文档 v0.8、施工文档 v0.4）。新的 M3 为写手与审核，原 M3 角色推演原型顺延为 M4；写手写入草稿章节不经候选稿，以来源标记与写入前快照保证可追溯、可回退（硬性规则 21 已相应修改）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式
@@ -81,6 +82,7 @@ packages/shared     标识、时间、Result、错误类型
 packages/domain     领域内核：纯函数，禁止任何 IO
 packages/engine     推演编排
 packages/context    上下文构建与信息权限过滤
+packages/writing    写手与审核的纯函数（M3 创建）
 packages/prompts    提示词模板与输出 schema
 packages/llm        模型适配器、结构化输出管线、预算守卫
 packages/store      迁移、仓储、事件存储
@@ -88,7 +90,7 @@ packages/editor     TipTap 扩展
 m0/                 M0 场景、实验配置、评估材料与结论
 ```
 
-依赖只能向内：`apps → engine / context / store / llm → domain → shared`。`packages/domain` 不得导入 IO 模块、Tauri、数据库或网络库。依赖边界由 dependency-cruiser 在持续集成中检查。
+依赖只能向内：`apps → engine / context / writing / store / llm → domain → shared`。`packages/domain` 不得导入 IO 模块、Tauri、数据库或网络库。依赖边界由 dependency-cruiser 在持续集成中检查。
 
 ## 常用命令
 
@@ -232,7 +234,7 @@ pnpm --filter @fudiao/desktop tauri build
 
 19. 原文定位使用段落标识加锚点，不使用全文字符偏移。
 20. 数据库结构变更必须附带迁移脚本与导出导入往返测试。
-21. 派生结论（事实、分析、候选稿）必须记录来源与来源版本；未经作者接受的内容不得写入作品。
+21. 派生结论（事实、分析、审核问题、候选稿）必须记录来源与来源版本；事实与分析未经作者接受不得写入作品。写手代理写入草稿章节的正文（需求 B60）必须带段落来源标记，并在写入前保存章节快照，作者可直接修改或一键回退。
 22. 持久记录（作品、章节、段落、推演运行、事件、调用记录等）的标识用 ULID；推演场景内的实体（角色、区域、物品、机关）使用作者可读的键，在一个场景内唯一。系统时间用 UTC ISO 字符串；故事时间是独立的领域类型，不与系统时间混用。
 
 ## 编码约定
