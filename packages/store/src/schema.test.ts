@@ -68,6 +68,28 @@ const sample: Statement[] = [
   s("INSERT INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES ('01V1', '01G2', 'implied', ?)", NOW),
   s("INSERT INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES ('01V2', '01G1', 'flashback', ?)", NOW),
   s("INSERT INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES ('01V2', '01G2', 'retold', ?)", NOW),
+  s("INSERT INTO chapter_snapshot (id, chapter_id, reason, title, paragraphs, created_at) VALUES ('01S2', '01C1', 'writer', '第一章 雨夜', '[]', ?)", NOW),
+  s(
+    "INSERT INTO foreshadow (id, title, content, reveal, plant_chapter_id, plant_anchor, payoff_chapter_id, payoff_anchor, status, version, created_at, updated_at) VALUES ('01H1', '玉佩的来历', '掌柜多看了玉佩一眼', '玉佩是王家失物的仿品', '01C1', '{\"paragraphId\":\"01G1\",\"paragraphVersion\":1,\"start\":0,\"end\":2,\"quote\":\"雨下\"}', '01C2', NULL, 'planted', 2, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO foreshadow (id, title, created_at, updated_at) VALUES ('01H2', '赌债的债主', ?, ?)", ...T),
+  s(
+    "INSERT INTO chapter_plan (chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, status, version, created_at, updated_at) VALUES ('01C1', '林舟当出玉佩', '[\"01E1\"]', '[\"讨价还价\",\"掌柜起疑\"]', '[\"01H1\"]', '[]', '讨价略写，起疑展开', 3000, 'written', 3, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO chapter_plan (chapter_id, created_at, updated_at) VALUES ('01C2', ?, ?)", ...T),
+  s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W1', 'foreshadow', '伏笔埋设与回收', '', 1, '1', ?, ?)", ...T),
+  s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
+  s(
+    "INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at) VALUES ('01C1', '林舟深夜当玉，掌柜起疑', '{\"01E1\":\"急需用钱\"}', '{\"01H1\":\"planted\"}', '{\"01G1\":1,\"01G2\":3}', 'stale', '01L1', ?, ?)",
+    ...T,
+  ),
+  s(
+    "INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, evidence, description, suggestion, status, source, llm_call_id, created_at, updated_at) VALUES ('01I1', '01C1', 'setting_conflict', 'high', '{\"paragraphId\":\"01G2\",\"paragraphVersion\":3,\"start\":0,\"end\":3,\"quote\":\"他没有\"}', '[{\"type\":\"entity\",\"id\":\"01E1\"}]', '沈砚的年龄与设定不符', '改为二十八岁', 'pending', 'model', '01L1', ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, description, source, created_at, updated_at) VALUES ('01I2', '01C1', 'ai_tone', 'low', '{\"paragraphId\":\"01G1\",\"paragraphVersion\":1,\"start\":0,\"end\":2,\"quote\":\"雨下\"}', '命中规避词', 'program', ?, ?)", ...T),
 ];
 
 async function seeded(): Promise<ProjectDb> {
@@ -145,6 +167,42 @@ describe('第一版迁移的约束', () => {
   it('仍有认知或说法的人物不能删除', async () => {
     const db = await seeded();
     expect(await rejects(db, "DELETE FROM entity WHERE id = '01E1'")).toMatchObject({ code: 'constraint' });
+  });
+});
+
+describe('写手与审核的约束（迁移 0005）', () => {
+  it('快照可以记为写手写入；写手写入之前的旧原因仍然有效', async () => {
+    const db = await seeded();
+    await rejects(db, "INSERT INTO chapter_snapshot (id, chapter_id, reason, title, paragraphs, created_at) VALUES ('x', '01C1', 'robot', 't', '[]', ?)", NOW);
+  });
+
+  it('枚举、JSON 数组与依据约束', async () => {
+    const db = await seeded();
+    await rejects(db, "INSERT INTO foreshadow (id, title, status, created_at, updated_at) VALUES ('x', 't', 'forgotten', ?, ?)", ...T);
+    await rejects(db, "INSERT INTO chapter_plan (chapter_id, cast_ids, created_at, updated_at) VALUES ('01C2', '{}', ?, ?)", ...T);
+    await rejects(db, "UPDATE chapter_plan SET target_words = 0 WHERE chapter_id = '01C1'");
+    await rejects(db, "INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, description, source, created_at, updated_at) VALUES ('x', '01C1', 'typo', 'low', '{}', 'd', 'program', ?, ?)", ...T);
+    // 程序检查出的问题没有模型调用。
+    await rejects(db, "INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, description, source, llm_call_id, created_at, updated_at) VALUES ('x', '01C1', 'pacing', 'low', '{}', 'd', 'program', '01L1', ?, ?)", ...T);
+    await rejects(db, "INSERT INTO chapter_memory (chapter_id, summary, based_on, created_at, updated_at) VALUES ('01C2', 's', '[]', ?, ?)", ...T);
+  });
+
+  it('作者自定义的技能必须写明说明，技能键唯一', async () => {
+    const db = await seeded();
+    await rejects(db, "INSERT INTO writing_skill (id, key, name, created_at, updated_at) VALUES ('x', 'empty', '空技能', ?, ?)", ...T);
+    await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, created_at, updated_at) VALUES ('x', 'foreshadow', '重复', '1', ?, ?)", ...T);
+  });
+
+  it('删除章节时计划、记忆与审核问题级联删除，伏笔的章节置空', async () => {
+    const db = await seeded();
+    const result = await db.transaction([s("DELETE FROM chapter WHERE id = '01C1'")]);
+    expect(result.ok).toBe(true);
+    for (const table of ['chapter_plan', 'chapter_memory', 'review_issue']) {
+      const rows = await db.query(`SELECT count(*) AS n FROM ${table} WHERE chapter_id = '01C1'`);
+      expect(rows.ok && rows.value[0]).toEqual({ n: 0 });
+    }
+    const f = await db.query("SELECT plant_chapter_id, payoff_chapter_id FROM foreshadow WHERE id = '01H1'");
+    expect(f.ok && f.value[0]).toEqual({ plant_chapter_id: null, payoff_chapter_id: '01C2' });
   });
 });
 

@@ -26,3 +26,14 @@ export type { RangeInsert, RangePlan, TextPosition, TextRange } from './paragrap
 export { applyRangeReplace, planRangeReplace, textInRange } from './paragraph-range';
 export type { Candidate, CandidateInput, CandidateOperation, CandidateStatus } from './candidate';
 export { CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
+export type { ParagraphAnchor } from './common';
+export type { Foreshadow, ForeshadowFields, ForeshadowStatus } from './foreshadow';
+export { createForeshadow, deleteForeshadow, FORESHADOW_STATUSES, getForeshadow, listForeshadows, updateForeshadow } from './foreshadow';
+export type { ChapterPlan, PlanFields, PlanStatus } from './chapter-plan';
+export { getChapterPlan, listChapterPlans, PLAN_STATUSES, saveChapterPlan, setPlanStatus } from './chapter-plan';
+export type { BuiltinSkill, WritingSkill } from './writing-skill';
+export { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
+export type { ChapterMemory, MemoryInput } from './chapter-memory';
+export { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
+export type { IssueEvidence, IssueInput, IssueKind, IssueSeverity, IssueStatus, ReviewIssue } from './review-issue';
+export { addIssues, ISSUE_KINDS, ISSUE_STATUSES, listIssues, reviewStaleIssues, setIssueStatus } from './review-issue';

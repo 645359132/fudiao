@@ -8,6 +8,7 @@ const REASON: Record<SnapshotReason, string> = {
   before_restore: '恢复前自动保存',
   accept_candidate: '接受候选稿前自动保存',
   import: '导入',
+  writer: '写手写入前自动保存',
 };
 
 const time = (iso: string) => new Date(iso).toLocaleString('zh-CN');

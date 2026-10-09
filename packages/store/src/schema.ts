@@ -141,6 +141,36 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['id'],
     json: ['target', 'base_versions'],
   },
+  {
+    name: 'foreshadow',
+    columns: ['id', 'title', 'content', 'reveal', 'plant_chapter_id', 'plant_anchor', 'payoff_chapter_id', 'payoff_anchor', 'status', ...VERSIONED],
+    primaryKey: ['id'],
+    json: ['plant_anchor', 'payoff_anchor'],
+  },
+  {
+    name: 'chapter_plan',
+    columns: ['chapter_id', 'goal', 'cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'treatment', 'target_words', 'status', ...VERSIONED],
+    primaryKey: ['chapter_id'],
+    json: ['cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff'],
+  },
+  {
+    name: 'writing_skill',
+    columns: ['id', 'key', 'name', 'instruction', 'enabled', 'builtin_version', ...VERSIONED],
+    primaryKey: ['id'],
+    json: [],
+  },
+  {
+    name: 'chapter_memory',
+    columns: ['chapter_id', 'summary', 'cast_state', 'foreshadow_progress', 'based_on', 'status', 'llm_call_id', ...VERSIONED],
+    primaryKey: ['chapter_id'],
+    json: ['cast_state', 'foreshadow_progress', 'based_on'],
+  },
+  {
+    name: 'review_issue',
+    columns: ['id', 'chapter_id', 'kind', 'severity', 'anchor', 'evidence', 'description', 'suggestion', 'status', 'source', 'llm_call_id', ...VERSIONED],
+    primaryKey: ['id'],
+    json: ['anchor', 'evidence'],
+  },
 ];
 
 /**

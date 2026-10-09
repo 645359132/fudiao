@@ -1,5 +1,5 @@
 import { err, ok, type Result } from '@fudiao/shared';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { Row, SqlError, SqlPort, Statement } from '../sql';
 
 export type RepoError =
@@ -37,7 +37,7 @@ export async function queryOne<T>(port: SqlPort, schema: z.ZodType<T>, sql: stri
 }
 
 /**
- * 带版本守卫的更新：语句须为 `UPDATE … WHERE id = ? AND version = ? RETURNING *`。
+ * 带版本守卫的更新：语句须为 `UPDATE … WHERE <主键> = ? AND version = ? RETURNING *`。
  * 影响行数不是 1 时区分“记录不存在”与“版本不符”。
  */
 export async function guardedUpdate<T>(
@@ -46,11 +46,13 @@ export async function guardedUpdate<T>(
   table: string,
   id: string,
   statement: Statement,
+  /** 主键列名：章节计划、长篇记忆以章节标识为主键。 */
+  key = 'id',
 ): Promise<Result<T, RepoError>> {
   const result = await port.transaction([{ ...statement, expectChanges: 1 }]);
   if (!result.ok) {
     if (result.error.code !== 'guard_failed') return err({ code: 'sql', error: result.error });
-    const exists = await port.query(`SELECT 1 AS present FROM ${table} WHERE id = ?`, [id]);
+    const exists = await port.query(`SELECT 1 AS present FROM ${table} WHERE ${key} = ?`, [id]);
     if (!exists.ok) return err({ code: 'sql', error: exists.error });
     return err(exists.value.length === 0 ? { code: 'not_found' } : { code: 'conflict' });
   }
@@ -68,3 +70,26 @@ export async function insertReturning<T>(port: SqlPort, schema: z.ZodType<T>, st
   const row = rows.value[0];
   return row === undefined ? err({ code: 'invalid', detail: '插入后没有返回记录' }) : ok(row);
 }
+
+/** 存为 JSON 文本的列：读出时解析并校验，格式不符时报告为无效数据。 */
+export const jsonColumn = <T>(schema: z.ZodType<T>) =>
+  z.string().transform((text, ctx): T => {
+    try {
+      const parsed = schema.safeParse(JSON.parse(text));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // 落到下面的错误
+    }
+    ctx.addIssue({ code: 'custom', message: 'JSON 列的格式无效' });
+    return z.NEVER;
+  });
+
+/** 原文锚点（施工文档“段落标识与锚点”）：段落标识、段落版本、段内起止与引文。 */
+export const ParagraphAnchor = z.object({
+  paragraphId: z.string(),
+  paragraphVersion: z.number().int(),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  quote: z.string(),
+});
+export type ParagraphAnchor = z.infer<typeof ParagraphAnchor>;

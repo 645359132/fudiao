@@ -7,7 +7,7 @@ import { insertReturning, queryAll, queryOne, type RepoError, type WriteContext 
 import { listParagraphs } from './paragraph';
 import type { SavedParagraph } from './paragraph-plan';
 
-export type SnapshotReason = 'manual' | 'before_restore' | 'accept_candidate' | 'import';
+export type SnapshotReason = 'manual' | 'before_restore' | 'accept_candidate' | 'import' | 'writer';
 
 const SnapshotParagraph = z.object({
   id: z.string(),
@@ -20,12 +20,12 @@ const SnapshotParagraph = z.object({
 export type SnapshotParagraph = z.infer<typeof SnapshotParagraph>;
 
 const SnapshotSummaryRow = z
-  .object({ id: z.string(), chapter_id: z.string(), reason: z.enum(['manual', 'before_restore', 'accept_candidate', 'import']), title: z.string(), created_at: z.string(), count: z.number().int() })
+  .object({ id: z.string(), chapter_id: z.string(), reason: z.enum(['manual', 'before_restore', 'accept_candidate', 'import', 'writer']), title: z.string(), created_at: z.string(), count: z.number().int() })
   .transform((r) => ({ id: r.id, chapterId: r.chapter_id, reason: r.reason, title: r.title, createdAt: r.created_at, paragraphCount: r.count }));
 export type SnapshotSummary = z.output<typeof SnapshotSummaryRow>;
 
 const SnapshotRow = z
-  .object({ id: z.string(), chapter_id: z.string(), reason: z.enum(['manual', 'before_restore', 'accept_candidate', 'import']), title: z.string(), created_at: z.string(), paragraphs: z.string() })
+  .object({ id: z.string(), chapter_id: z.string(), reason: z.enum(['manual', 'before_restore', 'accept_candidate', 'import', 'writer']), title: z.string(), created_at: z.string(), paragraphs: z.string() })
   .transform((r, ctx) => {
     let paragraphs: SnapshotParagraph[] = [];
     try {

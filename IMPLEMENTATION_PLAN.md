@@ -141,11 +141,11 @@ fudiao/
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
 | `candidate` | id、chapter_id、operation、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
 | `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
-| `chapter_plan` | chapter_id、goal、cast（人物设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、version；迁移 0005 | B65 |
+| `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、version；迁移 0005 | B65 |
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key、name、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能的文字在 `packages/prompts/templates/skills/`，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
-| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
+| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
 | `evaluation` | id、run_id 或 batch_id、answers（JSON） | B46 |
 | `paragraph_fts` | FTS5 trigram 虚拟表，内容来自 `paragraph.text`；rowid 取自 `paragraph_search_key` 的整数主键（`paragraph` 的隐式 rowid 在 VACUUM 后可能改变）；由触发器随段落的插入、修改与删除维护，是派生数据，不导出（迁移 0002） | B04 |
 
