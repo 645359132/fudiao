@@ -1,6 +1,7 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
 import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
+import type { SkillsView } from '../app/writing-skills';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -49,7 +50,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -75,6 +76,8 @@ export type AppState = {
   readonly wordCount: number;
   /** 段落来源统计（打开“段落来源”时读取）。 */
   readonly sourceStats: SourceStats | null;
+  /** 写作技能与规避词表（打开“写作技能”时读取，B61、B37）。 */
+  readonly skills: SkillsView | null;
   /** AI 上下文清单（B18）：抽屉是否打开、最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
   readonly contextDrawerOpen: boolean;
   readonly writingContext: ContextManifest | null;
@@ -175,6 +178,12 @@ export type AppState = {
   readonly setEntityLocked: (id: string, locked: boolean) => Promise<void>;
   readonly deleteEntity: (id: string) => Promise<boolean>;
   readonly openEntityDrawer: (id: string | null) => void;
+
+  readonly openSkills: () => Promise<void>;
+  readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string }) => Promise<boolean>;
+  readonly addCustomSkill: (name: string, instruction: string) => Promise<boolean>;
+  readonly deleteCustomSkill: (id: string) => Promise<boolean>;
+  readonly setAvoidPhrases: (phrases: readonly string[] | null) => Promise<boolean>;
 
   readonly openFacts: (factId?: string) => Promise<void>;
   readonly selectFact: (id: string | null) => void;
@@ -305,6 +314,7 @@ export function createAppStore(service: AppService): AppStore {
       facts: [],
       selectedFactId: null,
       sourceStats: null,
+      skills: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -350,7 +360,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -604,6 +614,20 @@ export function createAppStore(service: AppService): AppStore {
       },
       // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
       openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false }),
+      async openSkills() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.listWritingSkills(), (skills) => ({ skills, panel: 'skills', chapterContent: null, drawerEntityId: null }));
+      },
+      async updateWritingSkill(id, patch) {
+        const skill = get().skills?.skills.find((s) => s.skill.id === id)?.skill;
+        return skill === undefined ? false : run(service.updateWritingSkill(skill, patch), (skills) => ({ skills }));
+      },
+      addCustomSkill: (name, instruction) => run(service.addCustomSkill(name, instruction), (skills) => ({ skills })),
+      async deleteCustomSkill(id) {
+        const skill = get().skills?.skills.find((s) => s.skill.id === id)?.skill;
+        return skill === undefined ? false : run(service.deleteCustomSkill(skill), (skills) => ({ skills }));
+      },
+      setAvoidPhrases: (phrases) => run(service.setAvoidPhrases(phrases), (skills) => ({ skills })),
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;
         set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawerEntityId: null });

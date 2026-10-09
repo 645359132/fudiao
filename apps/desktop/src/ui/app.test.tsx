@@ -839,3 +839,44 @@ describe('任务中心', () => {
   });
 });
 
+
+describe('写作技能界面（B61、B37）', () => {
+  it('停用技能、改写并恢复说明、添加与删除自己的技能、编辑规避词表', async () => {
+    const { user, service } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByRole('menuitem', { name: '写作技能' }));
+    const hook = await screen.findByRole('listitem', { name: '章末钩子' });
+
+    await user.click(within(hook).getByRole('checkbox', { name: '章末钩子' }));
+    await waitFor(() => expect(within(screen.getByRole('listitem', { name: '章末钩子' })).getByRole('checkbox')).toHaveProperty('checked', false));
+
+    const box = within(screen.getByRole('listitem', { name: '章末钩子' })).getByRole('textbox');
+    await user.clear(box);
+    await user.type(box, '停在悬念上，不要总结。');
+    await user.click(within(screen.getByRole('listitem', { name: '章末钩子' })).getByRole('button', { name: '保存说明' }));
+    expect(await within(screen.getByRole('listitem', { name: '章末钩子' })).findByText('内置（已修改）')).toBeTruthy();
+    await user.click(within(screen.getByRole('listitem', { name: '章末钩子' })).getByRole('button', { name: '恢复内置说明' }));
+    expect(await within(screen.getByRole('listitem', { name: '章末钩子' })).findByText('内置')).toBeTruthy();
+
+    const add = screen.getByRole('form', { name: '添加技能' });
+    await user.type(within(add).getByRole('textbox', { name: '名称' }), '对话节奏');
+    await user.type(within(add).getByRole('textbox', { name: '说明（写给写手的要求）' }), '对话三句内要有动作。');
+    await user.click(within(add).getByRole('button', { name: '添加' }));
+    const mine = await screen.findByRole('listitem', { name: '对话节奏' });
+    expect(within(mine).getByText('自定义')).toBeTruthy();
+    await user.click(within(mine).getByRole('button', { name: '删除' }));
+    await waitFor(() => expect(screen.queryByRole('listitem', { name: '对话节奏' })).toBeNull());
+
+    const avoid = screen.getByRole('textbox', { name: '规避表达词表' });
+    await user.clear(avoid);
+    await user.type(avoid, '不禁{Enter}一抹');
+    await user.click(screen.getByRole('button', { name: '保存词表' }));
+    await waitFor(async () => {
+      const view = await service.listWritingSkills();
+      expect(view.ok && view.value.avoidPhrases).toEqual(['不禁', '一抹']);
+    });
+    await user.click(await screen.findByRole('button', { name: '恢复默认词表' }));
+    expect(await screen.findByText(/现在用的是默认词表/)).toBeTruthy();
+  });
+});

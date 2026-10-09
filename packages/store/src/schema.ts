@@ -15,9 +15,9 @@ const VERSIONED = ['version', 'created_at', 'updated_at'] as const;
 export const TABLES: readonly TableSpec[] = [
   {
     name: 'project',
-    columns: ['id', 'singleton', 'title', 'genre', 'synopsis', 'outline', 'goals', ...VERSIONED],
+    columns: ['id', 'singleton', 'title', 'genre', 'synopsis', 'outline', 'goals', ...VERSIONED, 'avoid_phrases'],
     primaryKey: ['id'],
-    json: ['goals'],
+    json: ['goals', 'avoid_phrases'],
   },
   {
     name: 'chapter',

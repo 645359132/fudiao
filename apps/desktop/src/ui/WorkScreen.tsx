@@ -5,6 +5,7 @@ import { FactsPanel } from './FactsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
+import { SkillsPanel } from './SkillsPanel';
 import { SourcesPanel } from './SourcesPanel';
 import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
@@ -27,6 +28,7 @@ export function WorkScreen() {
   const openModelServices = useApp((s) => s.openModelServices);
   const openUsage = useApp((s) => s.openUsage);
   const openTasks = useApp((s) => s.openTasks);
+  const openSkills = useApp((s) => s.openSkills);
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
@@ -83,6 +85,9 @@ export function WorkScreen() {
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openBackups()}>
               备份与恢复
             </button>
+            <button type="button" role="menuitem" disabled={busy} onClick={() => void openSkills()}>
+              写作技能
+            </button>
             <button type="button" role="menuitem" disabled={busy} onClick={() => void openSourceStats()}>
               段落来源
             </button>
@@ -97,7 +102,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

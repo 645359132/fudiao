@@ -55,6 +55,7 @@
 - 作者决定（2026-10-09）：新增写手代理与审核代理以快速成书（需求 B59 至 B66，需求文档 v0.8、施工文档 v0.4）。新的 M3 为写手与审核，原 M3 角色推演原型顺延为 M4；写手写入草稿章节不经候选稿，以来源标记与写入前快照保证可追溯、可回退（硬性规则 21 已相应修改）。
 - M3-01 已完成：迁移 `0005_writing.sql`（伏笔账本、章节计划、写作技能、长篇记忆、审核问题；快照增加“写手写入”原因）；仓储 `foreshadow.ts`、`chapter-plan.ts`、`writing-skill.ts`（内置技能登记 `ensureBuiltinSkills`）、`chapter-memory.ts`（`reviewStaleMemories`）、`review-issue.ts`（`reviewStaleIssues`）；导出导入往返与 Rust 迁移测试已更新。
 - M3-02 已完成：`packages/writing`（纯函数，依赖边界与 ESLint 规则同领域内核）：`foreshadowsForChapter`（本章要埋、要收、不得说破的伏笔）、`checkPlan`、`nextChapterToWrite`；`composeSkills`（内置技能按模板顺序、作者改动优先、记录来源与版本）；审核的程序检查 `runProgramChecks`（规避表达、揭晓内容提前说破、到期未回收的伏笔、计划中的人物未出场）。
+- M3-03 已完成：八项内置写作技能（`packages/prompts/templates/skills/`，`BUILTIN_SKILLS`，版本锁记为 `skill:键`）；作品的规避词表 `project.avoid_phrases`（为空时用 `DEFAULT_AVOID_PHRASES`）；用例 `apps/desktop/src/app/writing-skills.ts` 与“作品 → 写作技能”页（启用、改写、恢复、自定义技能、规避词表）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

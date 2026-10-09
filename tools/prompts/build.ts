@@ -7,6 +7,8 @@ export type Lock = Readonly<Record<string, { readonly version: string; readonly 
 export type Sources = {
   readonly templates: Readonly<Record<string, string>>;
   readonly partials: Readonly<Record<string, string>>;
+  /** 内置写作技能（需求 B61）：文件名为技能键，文件头声明版本、名称与顺序。版本锁中记为 skill:键。 */
+  readonly skills?: Readonly<Record<string, string>>;
 };
 
 const versionOf = (source: string): string | undefined => /^version:\s*(\S+)\s*$/m.exec(source)?.[1];
@@ -47,6 +49,22 @@ export function build(sources: Sources, previous: Lock): { generated: string; lo
     lock[id] = { version, sha256: hash };
   }
 
+  for (const [key, source] of Object.entries(sources.skills ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const id = `skill:${key}`;
+    const version = versionOf(source);
+    if (version === undefined) {
+      errors.push(`${id}：缺少版本号`);
+      continue;
+    }
+    if (!/^name:\s*\S/m.test(source) || !/^order:\s*\d+\s*$/m.test(source)) errors.push(`${id}：文件头须有 name 与 order`);
+    const hash = sha256(source);
+    const before = previous[id];
+    if (before !== undefined && before.sha256 !== hash && before.version === version) {
+      errors.push(`${id}：内容已修改，请提升版本号（当前 ${version}）`);
+    }
+    lock[id] = { version, sha256: hash };
+  }
+
   const literal = (record: Readonly<Record<string, string>>) =>
     Object.entries(record)
       .sort(([a], [b]) => (a < b ? -1 : 1))
@@ -61,6 +79,10 @@ export function build(sources: Sources, previous: Lock): { generated: string; lo
     '',
     'export const PARTIAL_SOURCES: Readonly<Record<string, string>> = {',
     literal(sources.partials),
+    '};',
+    '',
+    'export const SKILL_SOURCES: Readonly<Record<string, string>> = {',
+    literal(sources.skills ?? {}),
     '};',
     '',
   ].join('\n');

@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL('../../packages/prompts/', import.meta.url));
 export const paths = {
   templates: join(root, 'templates'),
   partials: join(root, 'templates', 'partials'),
+  skills: join(root, 'templates', 'skills'),
   generated: join(root, 'src', 'generated', 'templates.ts'),
   lock: join(root, 'templates.lock.json'),
 };
@@ -26,6 +27,7 @@ const trimFinalNewline = (record: Record<string, string>) =>
 export const readSources = (): Sources => ({
   templates: readDir(paths.templates),
   partials: trimFinalNewline(readDir(paths.partials)),
+  skills: existsSync(paths.skills) ? readDir(paths.skills) : {},
 });
 
 export const readLock = (): Lock =>

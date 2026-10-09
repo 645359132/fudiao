@@ -62,5 +62,37 @@
   "structured_repair": {
     "version": "1",
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
+  },
+  "skill:cliffhanger": {
+    "version": "1",
+    "sha256": "82e962cd85b4fc743066ffcac354fc2feacd11097173cf76a94cfd6fde499c05"
+  },
+  "skill:dialogue": {
+    "version": "1",
+    "sha256": "23459b2751b8dbe4fe113c0367e62d0d7e7f25a7f01af7e65d1e8a8ba60e7c80"
+  },
+  "skill:foreshadow": {
+    "version": "1",
+    "sha256": "bc22a63772d6d7d5c89c4b3c11581aa16fe798634e4875e26b2db9e817b06e77"
+  },
+  "skill:pacing": {
+    "version": "1",
+    "sha256": "e6ae52c1a1d4bdff86cd509187a424cc002045562bae71c442c8a159b8ec8f2d"
+  },
+  "skill:polish": {
+    "version": "1",
+    "sha256": "0938019a49f15e51b1a6c3dd81c1f8b632bfba55e38b09cbadefe7cffe1687e5"
+  },
+  "skill:pov": {
+    "version": "1",
+    "sha256": "04a9e5df15d7de98ec8d09d465a0becc99128e28b039026f5343271b558b1051"
+  },
+  "skill:scene": {
+    "version": "1",
+    "sha256": "a516311fd3080382d6f64bd1412f661da7fb6881a6d9148d9d59b08e28e6fea0"
+  },
+  "skill:tension": {
+    "version": "1",
+    "sha256": "e424cdf1d0c9aad0ae6329f96081006de47661317a6c44340f0141fe862f0def"
   }
 }

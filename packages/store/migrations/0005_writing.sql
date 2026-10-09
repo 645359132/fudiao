@@ -17,6 +17,9 @@ DROP TABLE chapter_snapshot;
 ALTER TABLE chapter_snapshot_new RENAME TO chapter_snapshot;
 CREATE INDEX chapter_snapshot_by_chapter ON chapter_snapshot (chapter_id, created_at);
 
+-- 规避表达词表（B37，审核的程序检查用）：为空（NULL）时用默认词表；作者清空后为空数组，表示不检查。
+ALTER TABLE project ADD COLUMN avoid_phrases TEXT CHECK (avoid_phrases IS NULL OR (json_valid(avoid_phrases) AND json_type(avoid_phrases) = 'array'));
+
 -- 伏笔账本（B63）：揭晓前不得说破 reveal 中的内容；埋设与回收的位置用段落锚点（JSON）。
 CREATE TABLE foreshadow (
   id TEXT PRIMARY KEY,

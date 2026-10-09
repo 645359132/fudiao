@@ -17,6 +17,7 @@
     "@fudiao/prompts": "workspace:*",
     "@fudiao/shared": "workspace:*",
     "@fudiao/store": "workspace:*",
+    "@fudiao/writing": "workspace:*",
     "@tauri-apps/api": "^2.12.1",
     "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tiptap/core": "^3.31.4",

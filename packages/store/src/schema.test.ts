@@ -28,7 +28,7 @@ const T = [NOW, NOW] as const;
 
 /** 覆盖每张表与各种取值的样本作品。 */
 const sample: Statement[] = [
-  s("INSERT INTO project (id, title, genre, goals, created_at, updated_at) VALUES ('01P', '雨夜', '武侠', '{\"words\":300000}', ?, ?)", ...T),
+  s("INSERT INTO project (id, title, genre, goals, avoid_phrases, created_at, updated_at) VALUES ('01P', '雨夜', '武侠', '{\"words\":300000}', '[\"不禁\",\"仿佛\"]', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, summary, created_at, updated_at) VALUES ('01C1', 'a0', '第一章 雨夜', '两人在当铺重逢', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, status, trashed_at, created_at, updated_at) VALUES ('01C2', 'a1', '废稿', 'trashed', ?, ?, ?)", NOW, ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),

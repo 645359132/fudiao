@@ -42,6 +42,12 @@ describe('作品信息', () => {
     const updated = value(await updateProject(db, '01P', 1, { title: '  雨夜行 ', genre: '武侠', goals: { totalWords: 300_000, note: '年底完稿' } }, later));
     expect(updated).toMatchObject({ title: '雨夜行', genre: '武侠', goals: { totalWords: 300_000 }, version: 2, updatedAt: later.now });
     expect(value(await getProject(db))).toEqual(updated);
+    // 规避词表：null 为默认词表；作者的词表去掉空白项，清空后为空数组（不检查）。
+    expect(created.avoidPhrases).toBeNull();
+    const avoid = value(await updateProject(db, '01P', 2, { avoidPhrases: [' 不禁 ', '', '仿佛'] }, later));
+    expect(avoid.avoidPhrases).toEqual(['不禁', '仿佛']);
+    expect(value(await updateProject(db, '01P', 3, { avoidPhrases: [] }, later)).avoidPhrases).toEqual([]);
+    expect(value(await updateProject(db, '01P', 4, { avoidPhrases: null }, later)).avoidPhrases).toBeNull();
   });
 
   it('版本不符时返回冲突，标题不能为空', async () => {

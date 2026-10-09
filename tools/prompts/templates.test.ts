@@ -33,6 +33,16 @@ describe('版本锁规则', () => {
     expect(build({ templates: { t: template('新', '2') }, partials }, previous).errors).toEqual([]);
   });
 
+  it('内置写作技能同样要求修改后提升版本号，文件头须有名称与顺序', () => {
+    const skill = (body: string, version = '1') => `---\nversion: ${version}\nname: 章末钩子\norder: 1\n---\n${body}`;
+    const first = build({ templates: {}, partials, skills: { hook: skill('旧') } }, {});
+    expect(first.errors).toEqual([]);
+    expect(Object.keys(first.lock)).toEqual(['skill:hook']);
+    expect(build({ templates: {}, partials, skills: { hook: skill('新') } }, first.lock).errors).toEqual(['skill:hook：内容已修改，请提升版本号（当前 1）']);
+    expect(build({ templates: {}, partials, skills: { hook: skill('新', '2') } }, first.lock).errors).toEqual([]);
+    expect(build({ templates: {}, partials, skills: { bad: '---\nversion: 1\n---\n文字' } }, {}).errors).toEqual(['skill:bad：文件头须有 name 与 order']);
+  });
+
   it('局部模板的改动计入引用它的模板', () => {
     const source = template('{{> p}}');
     expect(templateHash(source, { p: 'P1' })).not.toBe(templateHash(source, { p: 'P2' }));

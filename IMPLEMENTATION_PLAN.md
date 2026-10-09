@@ -125,7 +125,7 @@ fudiao/
 
 | 表 | 关键字段 | 相关需求 |
 | --- | --- | --- |
-| `project` | id、title、genre、synopsis、outline、goals；每个作品库只有一行，结构版本记录在 `schema_migrations` | B01 |
+| `project` | id、title、genre、synopsis、outline、goals、avoid_phrases（规避词表，为空时用默认词表；迁移 0005）；每个作品库只有一行，结构版本记录在 `schema_migrations` | B01、B37 |
 | `chapter` | id、order_key、title、summary、notes、status（正常、回收站）、trashed_at | B02 |
 | `paragraph` | id、chapter_id、order_key（章内唯一）、text、version、source_kind（手写、AI 生成、AI 生成后修改、混合）、source_spans、ai_origin_text、split_from | B04、B33 |
 | `chapter_snapshot` | id、chapter_id、reason（手动、恢复前、接受候选稿、导入、写手写入）、title、created_at、paragraphs（JSON） | B06、B17 |
@@ -348,7 +348,7 @@ stateDiagram-v2
 写手成章（B59、B60、B61）：
 
 - 上下文沿用写作上下文的构建方式（`packages/context`），增加章节计划、本章要埋与要收的伏笔（含揭晓前不得说破的内容）、前面章节的长篇记忆（从近到远）、出场人物的设定与状态、作者指定的文风样本与规避词表。超出预算时先裁远处章节的记忆，章节计划与伏笔条目必需。
-- 写作技能是 `packages/prompts/templates/skills/` 下带版本的模板片段，写手模板按作品中启用的技能组合写作指令（`packages/writing` 决定顺序与冲突，如“略写”与“展开”作用于不同情节点）。作者改过的技能说明保存在作品中，调用记录写明用到的技能及其版本。
+- 写作技能是 `packages/prompts/templates/skills/` 下带版本的模板片段（文件名为技能键，文件头声明版本、名称与顺序；`pnpm prompts:build` 一并生成并在版本锁中记为 `skill:键`，内容变了而版本没变时失败），写手模板按作品中启用的技能组合写作指令（`packages/writing` 决定顺序与冲突，如“略写”与“展开”作用于不同情节点）。作者改过的技能说明保存在作品中，调用记录写明用到的技能及其版本。
 - 按章节计划的情节点分段生成，每段一次调用，流式显示；段与段之间带上已写的结尾，避免单次输出过长被截断。
 - 写入：先保存“写手写入”快照，再按范围替换写入本章（沿用 `paragraph-range.ts`），段落记为 AI 生成并以自身为生成原文。作者在写手运行时编辑了本章，写手停在当前段并提示，不覆盖作者的修改。
 

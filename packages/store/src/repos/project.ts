@@ -1,7 +1,7 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort, SqlValue } from '../sql';
-import { guardedUpdate, insertReturning, queryOne, type RepoError, type WriteContext } from './common';
+import { guardedUpdate, insertReturning, jsonColumn, queryOne, type RepoError, type WriteContext } from './common';
 
 /** 写作目标（B01）。 */
 export const WorkGoals = z.object({
@@ -31,6 +31,7 @@ const ProjectRow = z
     synopsis: z.string(),
     outline: z.string(),
     goals: goalsColumn,
+    avoid_phrases: jsonColumn(z.array(z.string())).nullable(),
     version: z.number().int(),
     created_at: z.string(),
     updated_at: z.string(),
@@ -42,15 +43,17 @@ const ProjectRow = z
     synopsis: r.synopsis,
     outline: r.outline,
     goals: r.goals,
+    /** 规避表达词表（B37）；null 表示使用默认词表。 */
+    avoidPhrases: r.avoid_phrases,
     version: r.version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 export type Project = z.output<typeof ProjectRow>;
 
-export type ProjectPatch = Partial<Pick<Project, 'title' | 'genre' | 'synopsis' | 'outline' | 'goals'>>;
+export type ProjectPatch = Partial<Pick<Project, 'title' | 'genre' | 'synopsis' | 'outline' | 'goals' | 'avoidPhrases'>>;
 
-const COLUMNS = 'id, title, genre, synopsis, outline, goals, version, created_at, updated_at';
+const COLUMNS = 'id, title, genre, synopsis, outline, goals, avoid_phrases, version, created_at, updated_at';
 
 export function getProject(port: SqlPort): Promise<Result<Project | null, RepoError>> {
   return queryOne(port, ProjectRow, `SELECT ${COLUMNS} FROM project`);
@@ -84,6 +87,10 @@ export async function updateProject(
   if (patch.goals !== undefined) {
     sets.push('goals = ?');
     params.push(JSON.stringify(patch.goals));
+  }
+  if (patch.avoidPhrases !== undefined) {
+    sets.push('avoid_phrases = ?');
+    params.push(patch.avoidPhrases === null ? null : JSON.stringify(patch.avoidPhrases.map((p) => p.trim()).filter((p) => p !== '')));
   }
   if (sets.length === 0) {
     const current = await getProject(port);

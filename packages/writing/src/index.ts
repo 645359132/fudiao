@@ -5,3 +5,4 @@ export type { BuiltinSkillText, ComposedSkill, SkillSetting } from './skills';
 export { composeSkills } from './skills';
 export type { ProgramCheckInput } from './checks';
 export { avoidPhraseHits, MIN_REVEAL_LENGTH, missingCast, overdueForeshadows, revealLeaks, runProgramChecks } from './checks';
+export { DEFAULT_AVOID_PHRASES, effectiveAvoidPhrases } from './avoid';
