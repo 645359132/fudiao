@@ -1,6 +1,6 @@
 ---
 id: director_proposal
-version: 3
+version: 4
 task: director
 output: DirectorProposalOutput
 ---
@@ -16,7 +16,7 @@ output: DirectorProposalOutput
 输出一个 JSON 对象：
 - propose：是否提议一件外部事件。
 - rationale：一两句话说明理由。
-- event：不提议时为 null；提议时写明发生的区域（zone，用区域标识）、能否被看见（visible）、响度（loudness，0 为无声，2 约等于正常说话，5 可传遍全场）、旁人看见的样子（visual）与听见的声音（sound），以及要改变的场景标记（setFlags，只能用下面列出的标记）。
+- event：不提议时为 null；提议时写明发生的区域（zone，用区域标识）、能否被看见（visible）、响度（loudness，0 为无声，2 约等于正常说话，5 可传遍全场）、旁人看见的样子（visual）与听见的声音（sound），以及要改变的场景标记（setFlags）。setFlags 是数组，每项形如 {"flag": "标记", "value": true}，只能用下面列出的标记；不改变标记时为空数组 []。
 @@system cache
 场地：
 {{#zones}}

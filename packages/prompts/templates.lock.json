@@ -28,8 +28,8 @@
     "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
   },
   "director_proposal": {
-    "version": "3",
-    "sha256": "85a820b7df514cad37ee2ef43e46917137149458118dd6d86aea850ea1d462f8"
+    "version": "4",
+    "sha256": "cba95f9faaf15da4da1bb34fd488bc173d454feee85a13abb1aa363c6cbe3bb2"
   },
   "evidence_judgement": {
     "version": "4",

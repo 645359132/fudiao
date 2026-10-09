@@ -269,6 +269,8 @@ describe('金丝雀泄露测试（提示词）', () => {
     );
     expect(text).toContain('前三轮蓄势，第五轮爆发');
     expect(text).toContain('office_open（现在为 false）');
+    // 场景有标记时须写明 setFlags 每项的格式（M0-13 第二轮中导演连续写错格式而暂停）。
+    expect(text).toContain('每项形如 {"flag": "标记", "value": true}');
     // 物品位置属于全局局面，导演可以看到；角色卡与认知、秘密、场景元信息不可以。
     expect(text).toContain(`${CANARY}-ITEM-letter`);
     for (const marker of [`${CANARY}-CARD-`, `${CANARY}-SECRET-`, `${CANARY}-META-`]) expect(text).not.toContain(marker);
