@@ -143,7 +143,7 @@ describe('命令（测试模型）', () => {
   const model = fakeModel({
     character_action: (ctx) =>
       ctx.round === 1
-        ? waitProposal({ kind: 'speak', utterance: { sentences: ['你来晚了。'], volume: 'normal' }, innerThought: '他怎么会在这里' })
+        ? waitProposal({ kind: 'speak', utterance: { sentences: ['你来晚了。'], volume: 'normal' }, innerThought: '他怎么会在这里', triggered: 'emotion' })
         : waitProposal({ kind: 'observe' }),
   });
 
@@ -154,8 +154,10 @@ describe('命令（测试模型）', () => {
     const dir = join(out, 'TESTRUN0000');
     expect(existsSync(join(dir, 'events.jsonl'))).toBe(true);
     expect(existsSync(join(dir, 'calls.jsonl'))).toBe(true);
-    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as { phase: string; endReason: string; calls: number };
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as { phase: string; endReason: string; calls: number; triggered: number };
     expect(summary).toMatchObject({ phase: 'Ended', endReason: 'max_rounds' });
+    // 第 1 回合林舟开口、钱四当场回应，两次模型提案都自报情绪被触发；回应留到下回合执行时不再计。
+    expect(summary.triggered).toBe(2);
     expect(summary.calls).toBeGreaterThan(0);
     expect(lines.at(-1)).toMatch(/^运行 TESTRUN0000：Ended（max_rounds），20 回合/);
   }, 30_000);

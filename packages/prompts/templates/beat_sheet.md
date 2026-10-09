@@ -1,6 +1,6 @@
 ---
 id: beat_sheet
-version: 3
+version: 4
 task: beat_sheet
 output: BeatSheetOutput
 ---
@@ -14,6 +14,8 @@ output: BeatSheetOutput
 - flashback：推迟到后文，以回忆或揭示呈现
 - blank：留白，写出现象，不解释原因
 withhold 为 true 表示这条信息暂不向读者说明。
+
+来回重复、没有新东西的拉锯只保留最能说明变化的一两拍，其余标为 omit；把 expand 留给改变局面的时刻。
 
 输出一个 JSON 对象，beats 按叙述顺序排列，每个节拍的 ref 填下面材料的标识，note 写这一拍要达到的效果。
 @@user

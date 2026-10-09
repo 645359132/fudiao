@@ -46,6 +46,7 @@ export const waitProposal = (overrides: Partial<ActionProposal> = {}): ActionPro
   rationale: '不知道对方的底细，先观望',
   beliefRefs: [],
   innerThought: '心里发紧',
+  triggered: null,
   inferences: [],
   ...overrides,
 });

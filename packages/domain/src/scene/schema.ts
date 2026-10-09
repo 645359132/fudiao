@@ -201,6 +201,8 @@ export const SceneSpec = z.object({
   flags: z.record(FlagKey, z.boolean()).default({}),
   /** 可以撤离的区域；为空时任意区域都可撤离。 */
   exits: z.array(ZoneId).default([]),
+  /** 场景时钟：从第几回合起是什么时辰，按回合递增。公开信息，进入每个人的视图。 */
+  clock: z.array(z.object({ fromRound: z.number().int().min(1), label: z.string().min(1) })).default([]),
   rules: z
     .object({
       consumption: z.array(ConsumptionRule).default([]),

@@ -84,6 +84,7 @@ export function viewModel(view: CharacterView): RenderContext {
   return {
     actorId: viewer,
     round: view.round,
+    time: view.time,
     self: {
       name: view.self.name,
       zone: names(view.self.zone) ?? '',

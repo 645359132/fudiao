@@ -13,7 +13,7 @@ export type SceneError = {
     | 'unknown_ref'
     | 'self_loop'
     | 'duplicate_edge'
-    /** 二阶认知必须指向另一个角色，一阶认知不能指定 concerning。 */
+    /** 二阶认知必须指向另一个角色，一阶认知不能指定 concerning；场景时钟的时点须按回合递增。 */
     | 'invalid_order';
   readonly path: readonly (string | number)[];
   readonly ref?: string;
@@ -83,6 +83,11 @@ function checkReferences(spec: SceneSpec): SceneError[] {
         errors.push({ code: 'invalid_order', path });
       }
     });
+  });
+
+  spec.clock.forEach((point, i) => {
+    const previous = spec.clock[i - 1];
+    if (previous !== undefined && point.fromRound <= previous.fromRound) errors.push({ code: 'invalid_order', path: ['clock', i] });
   });
 
   spec.secrets.forEach((s, i) => {

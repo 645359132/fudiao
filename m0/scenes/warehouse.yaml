@@ -30,7 +30,17 @@ scene:
     - { between: [loft, shelves], adjacent: false, visible: true, sound: 2 }
     - { between: [back_wall, center], adjacent: false, visible: false, sound: 2 }
 
-  exits: [south_gate, back_wall]
+  # 后墙破口不是直接放行的出口：先扒开碎砖、再钻出去，两步都由语义裁决按场景规则判定（M0-13 第一轮九次都从后墙轻易脱身）。
+  exits: [south_gate]
+
+  flags:
+    breach_cleared: false
+
+  # 公开的时辰：在场的人都听得见更鼓与巡夜人的梆子。
+  clock:
+    - { fromRound: 1, label: 二更，巡夜人刚走过去 }
+    - { fromRound: 4, label: 二更过半，巡夜人该往回走了 }
+    - { fromRound: 7, label: 三更，巡夜人的梆子声已经到了街口 }
 
   actors:
     - id: shen_yan
@@ -72,6 +82,7 @@ scene:
           - { text: 我在南门门槛下布了绊索，踩上去会被绊倒受伤, about: [tripwire, south_gate] }
           - { text: 弩里只剩最后一支箭，射空了就再没有了, about: [crossbow] }
           - { text: 沈砚左肩有旧伤, modality: heard, confidence: 0.6, about: [shen_yan] }
+          - { text: 东家说过，信若被带出这座仓库，我也活不成, modality: heard, confidence: 0.9, about: [letter] }
           - text: 沈砚以为我是来杀他的
             modality: inferred
             confidence: 0.5
@@ -91,6 +102,12 @@ scene:
     - { id: rope, name: 麻绳, location: { kind: zone, zone: loft } }
 
   mechanisms:
+    - id: loose_bricks
+      name: 后墙下的碎砖
+      zone: back_wall
+      trigger: enter
+      hidden: false
+      effect: { injury: 0, loudness: 3 }
     - id: tripwire
       name: 南门绊索
       zone: south_gate
@@ -113,5 +130,5 @@ scene:
     narrativeRules:
       - 弩在十步以内射向没有防备、没有遮挡的人，大多能命中；对方有防备、在移动或有货架遮挡时，命中困难。
       - 短刀只能近身使用；双方同处一个区域、一方攻击另一方时，防备的一方大多能躲开第一下。
-      - 后墙破口很窄，带伤的人需要两个回合才能钻过去，期间无法做别的事。
-      - 离开仓库即视为脱身，推演对该角色结束。
+      - 后墙破口被碎砖堵了大半：要先在破口处花一个回合把碎砖扒开（扒开后 breach_cleared 为 true），扒砖的声响仓库里都听得见；扒开之后，下一回合才能从破口钻出去，钻出去时用 setActorStatus 记为离开。左肩带伤的人扒砖与钻出时都无法同时防备。
+      - 从南门或钻出后墙破口离开仓库，即视为脱身，推演对该角色结束。

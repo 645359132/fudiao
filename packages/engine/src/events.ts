@@ -14,7 +14,7 @@ import type { RunConfig } from './config';
 export type EndReason = 'max_rounds' | 'actors_left' | 'budget' | 'author_stop' | 'stalemate';
 
 /** 僵局类型（需求第五章“戏剧性与导演层”）。 */
-export type StalemateKind = 'standoff' | 'repetition' | 'polite_resolution' | 'goal_unreachable';
+export type StalemateKind = 'standoff' | 'repetition' | 'circling' | 'polite_resolution' | 'goal_unreachable';
 
 export type PauseReason =
   | 'author'

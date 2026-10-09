@@ -1,6 +1,6 @@
 ---
 id: semantic_ruling
-version: 5
+version: 6
 task: semantic_ruling
 output: SemanticRulingOutput
 ---
@@ -41,7 +41,7 @@ output: SemanticRulingOutput
 {{/narrativeRules}}
 {{/hasNarrativeRules}}
 @@system
-第 {{round}} 回合。涉及的人：
+第 {{round}} 回合{{#time}}（大约{{time}}）{{/time}}。涉及的人：
 {{#actors}}
 - {{name}}[{{id}}]：在{{zone}}，{{> injury}}{{#withdrawn}}，已离开现场{{/withdrawn}}；持有：{{#items}}{{name}}[{{id}}]{{#counters}}（{{name}} {{value}}）{{/counters}}；{{/items}}{{^items}}无{{/items}}
 {{/actors}}

@@ -28,6 +28,13 @@ scene:
 
   exits: [gate]
 
+  # 公开的时辰：宵禁之前总得有个了断。
+  clock:
+    - { fromRound: 1, label: 天刚黑，雨停了一阵 }
+    - { fromRound: 8, label: 雨又下起来了 }
+    - { fromRound: 14, label: 夜深了，巷口的灯一盏盏灭了 }
+    - { fromRound: 18, label: 快到宵禁了 }
+
   actors:
     # 周砚开门后，两人隔着门槛站在屋檐下：台词只有同一区域才能听清。
     - id: a_qing

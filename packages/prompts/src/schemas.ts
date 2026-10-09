@@ -21,6 +21,8 @@ export const ActionProposal = z.object({
   rationale: z.string(),
   beliefRefs: z.array(z.string()),
   innerThought: z.string(),
+  /** 本回合被触发的情绪阈值或失控条件；只记录，不参与裁决。 */
+  triggered: z.enum(['emotion', 'loss_of_control']).nullable(),
   inferences: z.array(
     z.object({
       content: z.string(),
@@ -199,7 +201,7 @@ export type BaselineOutput = z.infer<typeof BaselineOutput>;
 
 /** 僵局判断（M0-07）：程序判断不了的两类僵局。 */
 export const StalemateJudgementOutput = z.object({
-  type: z.enum(['polite_resolution', 'goal_unreachable', 'none']),
+  type: z.enum(['circling', 'polite_resolution', 'goal_unreachable', 'none']),
   explanation: z.string(),
 });
 export type StalemateJudgementOutput = z.infer<typeof StalemateJudgementOutput>;

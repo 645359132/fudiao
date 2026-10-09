@@ -1,6 +1,7 @@
 import type { ActorId, ItemId, MechanismId, ZoneId } from '../ids';
 import type { CharacterCard, InjuryLevel } from '../scene/schema';
 import type { Scene } from '../scene/validate';
+import { clockAt } from '../scene/clock';
 import type { ActorStatus, SimState } from '../world';
 import { canSee } from '../zone-graph';
 import type { Claim, KnowledgeItem } from './types';
@@ -14,6 +15,8 @@ declare const lens: unique symbol;
 export type CharacterView = {
   readonly actorId: ActorId;
   readonly round: number;
+  /** 场景时钟给出的时辰，公开信息；没有时钟时为 null。 */
+  readonly time: string | null;
   readonly self: {
     readonly name: string;
     readonly zone: ZoneId;
@@ -81,6 +84,7 @@ export function buildCharacterView(scene: Scene, state: SimState, actor: ActorId
   const view: Omit<CharacterView, typeof lens | 'names'> = {
     actorId: actor,
     round: state.round,
+    time: clockAt(scene, state.round),
     self: {
       name: spec.name,
       zone: me.zone,

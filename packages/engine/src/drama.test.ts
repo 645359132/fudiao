@@ -127,6 +127,24 @@ describe('僵局分类', () => {
     expect(result.state.sim.round).toBe(3);
   });
 
+  it('反复拉锯：第一次记录并继续，第二次在自动模式下以僵局结束', async () => {
+    const s = setup({ ...talking, stalemate: () => ({ type: 'circling', explanation: '双方反复重申同样的价钱' }) });
+    const result = await start(s, scene, stalemateConfig({ maxRounds: 10 }));
+    expect(ofType(await s.events(), 'StalemateDetected').map((e) => [e.round, e.kind])).toEqual([
+      [3, 'circling'],
+      [6, 'circling'],
+    ]);
+    expect(result.state.endReason).toBe('stalemate');
+    expect(result.state.sim.round).toBe(6);
+  });
+
+  it('反复拉锯几次结束可以配置', async () => {
+    const s = setup({ ...talking, stalemate: () => ({ type: 'circling', explanation: '原地打转' }) });
+    const result = await start(s, scene, stalemateConfig({ maxRounds: 10, stalemate: { enabled: true, window: 3, maxCircling: 1 } }));
+    expect(result.state.endReason).toBe('stalemate');
+    expect(result.state.sim.round).toBe(3);
+  });
+
   it('交互模式检测到僵局时暂停，作者可以继续', async () => {
     const s = setup();
     const paused = await start(s, scene, stalemateConfig({ mode: 'interactive' }));
@@ -198,6 +216,17 @@ describe('导演提议', () => {
     expect(s.calls.filter((c) => c.step === 'director').map((c) => c.round)).toEqual([3]);
     const request = s.calls.find((c) => c.step === 'director');
     expect(request?.text).toContain('观望');
+  });
+
+  it('反复拉锯之后导演介入（stalemate 触发），提示词说明局面在原地打转', async () => {
+    const s = setup({ ...talking, stalemate: () => ({ type: 'circling', explanation: '原地打转' }), director: () => tilesNoise });
+    await start(
+      s,
+      scene,
+      director({ trigger: 'stalemate' }, { maxRounds: 4, stalemate: { enabled: true, window: 3 }, models: { ...testConfig().models, director: model, stalemate: model } }),
+    );
+    expect(s.calls.filter((c) => c.step === 'director').map((c) => c.round)).toEqual([3]);
+    expect(s.calls.find((c) => c.step === 'director')?.text).toContain('局面在原地打转');
   });
 
   it('交互模式等待作者；拒绝时不改变局面，采用时注入', async () => {

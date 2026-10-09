@@ -41,6 +41,7 @@ export function detectStalemate(records: readonly RoundRecord[], window: number,
 export const STALEMATE_SUGGESTION: Readonly<Record<StalemateKind, string>> = {
   standoff: 'inject_event',
   repetition: 'adjust_goal',
+  circling: 'inject_event',
   polite_resolution: 'raise_pressure',
   goal_unreachable: 'end_scene',
 };

@@ -128,6 +128,8 @@ type Summary = {
   readonly waitMs: number;
   readonly stalemates: number;
   readonly directorEvents: number;
+  /** 角色自报情绪阈值或失控条件被触发的次数；轮流对话中预备的回应会再出现一次，只按模型提案计。 */
+  readonly triggered: number;
 };
 
 function summarize(outDir: string, scenePath: string, status: RunStatus, stored: readonly StoredEvent[]): Summary {
@@ -153,6 +155,7 @@ function summarize(outDir: string, scenePath: string, status: RunStatus, stored:
     evidenceGaps: events.filter((e) => e.type === 'EvidenceGapFlagged').length,
     stalemates: events.filter((e) => e.type === 'StalemateDetected').length,
     directorEvents: events.filter((e) => e.type === 'DirectorDecided' && e.accepted).length,
+    triggered: events.filter((e) => e.type === 'ProposalSubmitted' && e.source === 'model' && (e.proposal?.triggered ?? null) !== null).length,
     waitMs: stored.length > 0 ? Date.parse(stored.at(-1)?.at ?? '') - Date.parse(stored[0]?.at ?? '') : 0,
   };
 }
@@ -298,7 +301,8 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
         (summary.needsReview > 0 ? `，${summary.needsReview} 条裁决待复核` : '') +
         (summary.evidenceGaps > 0 ? `，${summary.evidenceGaps} 处缺少证据链的命中` : '') +
         (summary.stalemates > 0 ? `，${summary.stalemates} 次僵局` : '') +
-        (summary.directorEvents > 0 ? `，${summary.directorEvents} 个导演事件` : ''),
+        (summary.directorEvents > 0 ? `，${summary.directorEvents} 个导演事件` : '') +
+        (summary.triggered > 0 ? `，${summary.triggered} 次情绪或失控触发` : ''),
     );
     return 0;
   };
@@ -322,6 +326,7 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
 const STALEMATE_LABEL: Readonly<Record<string, string>> = {
   standoff: '双方观望，建议注入事件',
   repetition: '重复相同动作，建议调整目标',
+  circling: '反复拉锯，建议注入事件或结束场景',
   polite_resolution: '冲突被礼貌化解，建议提高情绪压力',
   goal_unreachable: '目标已无法达成，建议结束场景',
 };
@@ -481,7 +486,7 @@ export async function narrateCommand(args: Args, deps: CliDeps): Promise<number>
     if (e.type === 'StateChanged') rounds.set(e.round, [...(rounds.get(e.round) ?? []), ...e.occurrences]);
   }
   const synopsisPrompt = unwrap(
-    renderRunSynopsis(scene, state.value.sim, [...rounds].map(([round, occurrences]) => ({ round, occurrences }))),
+    renderRunSynopsis(scene, initialState(scene, 0), state.value.sim, [...rounds].map(([round, occurrences]) => ({ round, occurrences }))),
   );
   const synopsis = await structured(llm, SynopsisOutput, request(experiment, 'candidate_text', synopsisPrompt, `narrate:${runId}:synopsis`), {
     maxRepairs: experiment.run.maxRepairs,

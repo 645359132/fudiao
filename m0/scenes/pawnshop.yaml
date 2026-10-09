@@ -28,6 +28,13 @@ scene:
 
   exits: [street]
 
+  # 公开的时辰：林舟要在天亮前凑够三十两。
+  clock:
+    - { fromRound: 1, label: 三更 }
+    - { fromRound: 7, label: 四更 }
+    - { fromRound: 13, label: 五更，街上有了动静 }
+    - { fromRound: 17, label: 天快亮了 }
+
   actors:
     - id: lin_zhou
       name: 林舟

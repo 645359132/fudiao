@@ -8,36 +8,36 @@
     "sha256": "86a1b1b567a37fb155f5007a0f0e0c7bbeee40cbe8739cfc361712c24f179268"
   },
   "beat_sheet": {
-    "version": "3",
-    "sha256": "a12b3da7964f1fe8bda7e791ae7d8dd2fb949da29fb9969d73aa965014b35e50"
+    "version": "4",
+    "sha256": "9b0ea95440af8859eacdfa38087b34c478afc721ed26f07e505e1fe9b437e059"
   },
   "belief_update": {
-    "version": "5",
-    "sha256": "6c29a0943715a05f9dd82efb0d3b9ca668491b084af17b89aed8727c458b29c2"
+    "version": "6",
+    "sha256": "5b4c64a4a2321bc715fb71c9e8794214cb677f7aef537de62e950a6fb748d1cd"
   },
   "candidate_text": {
     "version": "3",
     "sha256": "3f89bc243ddc830115dcdb720ddeee4c8ce8e42c81bef7a91c72e9402f73d3ff"
   },
   "character_action": {
-    "version": "7",
-    "sha256": "31e78bb380ce00870a7a791d2badea2a30eae1a83424105dc1fa50c4f01da8c1"
+    "version": "8",
+    "sha256": "ec0be1a728b9c0026c07ba46b5edc4ce9e52acef1444a6272436f113e99935f7"
   },
   "connection_test": {
     "version": "1",
     "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
   },
   "director_proposal": {
-    "version": "2",
-    "sha256": "b8e5efbcfc50a3564bcd66bfef70fc9dd3b6ae288bc5e2f71e27949dcb9adbcd"
+    "version": "3",
+    "sha256": "85a820b7df514cad37ee2ef43e46917137149458118dd6d86aea850ea1d462f8"
   },
   "evidence_judgement": {
     "version": "4",
     "sha256": "264e34c849f1c12ceb9cdc8f5d01a3d12f1fce16aec43a4e6b5e6b28eb10ace1"
   },
   "run_synopsis": {
-    "version": "2",
-    "sha256": "4b98027c3944279a06f0c2cc676abef8ea4b1c63fd51148f3ab47486025bac05"
+    "version": "3",
+    "sha256": "f3217db2960d38e02534528fda0a92d8474fed7d420449ddd2abd4bac6aa8e51"
   },
   "scene_draft": {
     "version": "1",
@@ -52,12 +52,12 @@
     "sha256": "1dc06375e372c9779462baa375268c459e8f8eac5ec1afb9632074a7061b0eb8"
   },
   "semantic_ruling": {
-    "version": "5",
-    "sha256": "f71acd3a563e830961b99762c88346d2a68dce4209b0a2aa3ef4e9b4c365dc07"
+    "version": "6",
+    "sha256": "3b43548b218211f4e35d097f696d671ea57a9bad46a4ee7c7bc3b3c534eb98ea"
   },
   "stalemate_judgement": {
-    "version": "3",
-    "sha256": "a2ed36cf7817230b0401a6ec2efb6b3c2e8dbfb66a3128dfd9277cdd3df70dba"
+    "version": "4",
+    "sha256": "3e89bbfaf5dc4291b02197a382de8f659eafbfc4a6e309afeecdf7bae60a286a"
   },
   "structured_repair": {
     "version": "1",

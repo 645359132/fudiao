@@ -58,6 +58,7 @@ export {
 export type { SceneSpecInput } from './scene/schema';
 export type { Scene, SceneError } from './scene/validate';
 export { parseScene } from './scene/validate';
+export { clockAt } from './scene/clock';
 export type {
   ActorState,
   ActorStatus,

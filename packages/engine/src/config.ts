@@ -47,12 +47,14 @@ export const RunConfig = z.object({
   maxProposalAttempts: z.number().int().positive().default(2),
   /** 结构化输出的修正次数上限（B35）。 */
   maxRepairs: z.number().int().nonnegative().default(2),
-  /** 僵局分类（M0-07）：程序判定观望与重复，配置了模型时再判断礼貌化解与目标无法达成。 */
+  /** 僵局分类（M0-07）：程序判定观望与重复，配置了模型时再判断反复拉锯、礼貌化解与目标无法达成。 */
   stalemate: z
     .object({
       enabled: z.boolean().default(true),
       /** 观察最近几回合。 */
       window: z.number().int().min(2).default(3),
+      /** 自动模式下第几次检测到反复拉锯时以僵局结束；省略为 2。 */
+      maxCircling: z.number().int().positive().optional(),
     })
     .prefault({}),
   /** 导演提议（B47 简化形式）：stalemate 只在僵局后提议，curve 按张力曲线在回合边界主动提议。 */

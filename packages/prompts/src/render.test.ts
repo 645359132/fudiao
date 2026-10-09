@@ -20,6 +20,7 @@ import {
   simulate,
   staticForbidden,
   tapeArb,
+  warehouse,
   withEffects,
   zone,
 } from '@fudiao/domain/testing';
@@ -34,6 +35,7 @@ import {
   renderCharacterAction,
   renderDirectorProposal,
   renderEvidenceJudgement,
+  renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,
   renderStalemateJudgement,
@@ -58,8 +60,23 @@ describe('角色行动提案', () => {
     expect(prompt.system[1]?.text).toContain('带着密信从南门脱身');
     expect(prompt.system[1]?.text).toContain('仓库中央[center]');
     expect(prompt.system[2]?.text).toContain('现在是第 1 回合');
-    expect(prompt.template).toEqual({ id: 'character_action', version: '7' });
+    expect(prompt.template).toEqual({ id: 'character_action', version: '8' });
     expect(prompt.output?.name).toBe('ActionProposal');
+  });
+
+  it('写出场景时钟给出的时辰，以及压力与取舍的规则', () => {
+    const timed = warehouse((s) => {
+      s.clock = [
+        { fromRound: 1, label: '三更' },
+        { fromRound: 3, label: '五更，天快亮了' },
+      ];
+    });
+    const text = fullText(unwrap(renderCharacterAction(buildCharacterView(timed, { ...initialState(timed, 1), round: 3 }, P), { protocol: 'simultaneous' })));
+    expect(text).toContain('现在是第 3 回合，大约五更，天快亮了。');
+    expect(text).toContain('不要重复你已经说过的条件或理由');
+    expect(text).toContain('triggered');
+    const untimed = fullText(prompt);
+    expect(untimed).toContain('现在是第 1 回合。');
   });
 
   it('列出本人的认知，包括错误信念与二阶推测', () => {
@@ -204,6 +221,17 @@ describe('其他模板', () => {
     expect(text).not.toContain('主角能否发现南门的绊索');
   });
 
+  it('事件梗概写出开场时的状态，并要求合并重复的拉锯、写清同一回合的先后', () => {
+    const hurt = warehouse((s) => {
+      s.actors[0]!.injury = 'light';
+    });
+    const text = fullText(unwrap(renderRunSynopsis(hurt, initialState(hurt, 1), { ...initialState(hurt, 1), round: 2 }, [])));
+    expect(text).toContain('开场时：');
+    expect(text).toMatch(/开场时：\n- 主角在仓库中央，轻伤/);
+    expect(text).toContain('来回重复、没有新东西的拉锯合并成一条');
+    expect(text).toContain('说话发生在他移动之前所在的地方');
+  });
+
   it('场景配置草稿包含作者的描述', () => {
     expect(fullText(unwrap(renderSceneDraft('当铺里，掌柜与落魄书生讨价还价。')))).toContain('落魄书生');
   });
@@ -254,10 +282,11 @@ describe('金丝雀泄露测试（提示词）', () => {
     expect(text).not.toContain(`${CANARY}-META-`);
   });
 
-  it('僵局判断说明目标互相冲突不算目标无法达成，只有局面中的事实才能排除目标', () => {
+  it('僵局判断说明目标互相冲突不算目标无法达成，同样的话来回说算反复拉锯', () => {
     const text = fullText(unwrap(renderStalemateJudgement(canary, [])));
-    expect(text).toContain('人物的目标互相冲突是推演的前提，不是僵局');
+    expect(text).toContain('人物的目标互相冲突是推演的前提，不是“目标已无法达成”');
     expect(text).toContain('只有局面中的事实排除了目标时，才判为 goal_unreachable');
+    expect(text).toContain('同样的话来回说、没有任何新东西时，判为 circling');
   });
 
   it('裁决提示词不含场景元信息与任何角色卡', () => {

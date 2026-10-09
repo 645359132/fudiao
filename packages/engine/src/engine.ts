@@ -606,6 +606,10 @@ export function createEngine(deps: EngineDeps) {
     else if (presentActors(sim).length < 2) ended = 'actors_left';
     // 自动模式记录僵局后继续，只有目标已无法达成时结束；交互模式一律暂停，交给作者。
     else if (found === 'goal_unreachable' && config.mode === 'auto') ended = 'stalemate';
+    // 反复拉锯第一次记录并交给导演，再次出现说明局面推不动了，不再空转到回合上限。
+    else if (found === 'circling' && config.mode === 'auto' && state.stalemates.filter((x) => x.kind === 'circling').length + 1 >= (config.stalemate.maxCircling ?? 2)) {
+      ended = 'stalemate';
+    }
     if (ended !== null) events.push({ type: 'RunEnded', reason: ended });
     else if (found !== null && config.mode === 'interactive') events.push({ type: 'RunPaused', reason: 'stalemate', detail: found });
     return events;

@@ -1,4 +1,4 @@
-现在是第 {{round}} 回合。你在{{self.zone}}，伤势：{{#self}}{{> injury}}{{/self}}。
+现在是第 {{round}} 回合{{#time}}，大约{{time}}{{/time}}。你在{{self.zone}}，伤势：{{#self}}{{> injury}}{{/self}}。
 {{#self.withdrawn}}你已经离开现场。
 {{/self.withdrawn}}
 你身上带着：{{#self.items}}{{name}}[{{id}}]{{#counters}}（{{name}}剩 {{value}}）{{/counters}}；{{/self.items}}{{^self.items}}没有东西{{/self.items}}

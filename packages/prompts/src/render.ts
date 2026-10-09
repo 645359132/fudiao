@@ -12,7 +12,7 @@ import type {
   SecretCandidate,
   SimState,
 } from '@fudiao/domain';
-import { deliveredSentences } from '@fudiao/domain';
+import { clockAt, deliveredSentences } from '@fudiao/domain';
 import type { JsonValue } from '@fudiao/shared';
 import { err, ok, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
@@ -171,6 +171,7 @@ export function renderSemanticRuling(input: RulingInput): Result<RenderedPrompt,
 
   return renderTemplate('semantic_ruling', {
     round: state.round,
+    time: clockAt(scene, state.round),
     zones: scene.zones.map((z) => ({ id: z.id, name: z.name })),
     edges: scene.edges.map((e) => ({ a: names(e.between[0]) ?? '', b: names(e.between[1]) ?? '', adjacent: e.adjacent, visible: e.visible })),
     narrativeRules: scene.rules.narrativeRules,
@@ -398,12 +399,14 @@ export function renderConnectionTest(): Result<RenderedPrompt, string> {
  */
 export function renderRunSynopsis(
   scene: Scene,
+  start: SimState,
   final: SimState,
   rounds: readonly { readonly round: number; readonly occurrences: readonly Occurrence[] }[],
 ): Result<RenderedPrompt, string> {
   const names = sceneNames(scene);
   return renderTemplate('run_synopsis', {
     actors: scene.actors.map((a) => ({ name: a.name })),
+    start: actorStates(scene, start, names),
     rounds: globalRounds(rounds, names),
     final: actorStates(scene, final, names),
   });
@@ -468,7 +471,7 @@ export type DirectorInput = {
   readonly tensionCurve: string;
   readonly maxRounds: number;
   /** 触发方式为僵局时，检测到的僵局类型。 */
-  readonly stalemate?: 'standoff' | 'repetition' | 'polite_resolution';
+  readonly stalemate?: 'standoff' | 'repetition' | 'circling' | 'polite_resolution';
 };
 
 /**
@@ -485,6 +488,7 @@ export function renderDirectorProposal(input: DirectorInput): Result<RenderedPro
     hasFlags: flags.length > 0,
     curve: input.tensionCurve,
     round: state.round,
+    time: clockAt(scene, state.round),
     maxRounds: input.maxRounds,
     stalemate: input.stalemate === undefined ? null : flag(input.stalemate),
     actors: actorStates(scene, state, names),
