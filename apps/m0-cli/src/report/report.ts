@@ -8,13 +8,14 @@ import { parseCsv, toCsv } from './csv';
 
 // M0 评估材料（需求第八章“M0 推演验证”）：按局面与条件均衡分配，隐藏来源，答案键单独保存。
 
-export const CONDITIONS = ['baseline', 'simulation', 'director', 'batch_pick'] as const;
+export const CONDITIONS = ['baseline', 'simulation', 'director_stalemate', 'director_curve', 'batch_pick'] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
 export const CONDITION_LABEL: Readonly<Record<Condition, string>> = {
   baseline: '单次提示词对照组',
   simulation: '角色推演',
-  director: '角色推演 + 导演提议',
+  director_stalemate: '角色推演 + 导演提议（僵局后）',
+  director_curve: '角色推演 + 导演提议（按张力曲线）',
   batch_pick: '批量推演后由作者挑选',
 };
 
@@ -104,16 +105,19 @@ export function assign(manifest: Manifest, codes: readonly string[]): Record<str
       if (manifest.samples.some((s) => s.scene === scene && s.condition === condition)) ordered.push({ scene, condition });
     }
     const mine: string[] = [];
+    const mineDirs = new Set<string>();
     for (let pass = 0; mine.length < manifest.perEvaluator && pass < manifest.perEvaluator * 2; pass++) {
       for (const cell of ordered) {
         if (mine.length >= manifest.perEvaluator) break;
         const candidates = manifest.samples
           .map((s, i) => ({ s, code: codes[i]! }))
-          .filter(({ s, code }) => s.scene === cell.scene && s.condition === cell.condition && !mine.includes(code))
+          // “批量推演后由作者挑选”的样本与它原属条件的样本是同一篇（同一目录），同一位评价者只读一次。
+          .filter(({ s, code }) => s.scene === cell.scene && s.condition === cell.condition && !mine.includes(code) && !mineDirs.has(s.dir))
           .sort((a, b) => (count.get(a.code) ?? 0) - (count.get(b.code) ?? 0) || (a.code < b.code ? -1 : 1));
         const pick = candidates[0];
         if (pick === undefined) continue;
         mine.push(pick.code);
+        mineDirs.add(pick.s.dir);
         count.set(pick.code, (count.get(pick.code) ?? 0) + 1);
       }
     }
@@ -159,7 +163,7 @@ const EVALUATOR_README = (perEvaluator: number) => `# 评价说明
 
 ${DIMENSIONS.map((d) => `- ${d.label}`).join('\n')}
 
-“备注”中可以写下值得采用的转折、违和之处或需要修改的地方。每份样本请独立评价，不必互相比较。
+“备注”中可以写下值得采用的转折、违和之处或需要修改的地方。每份样本请独立评价，不必互相比较。各份样本篇幅长短不一，请按内容评分，不因篇幅长短加分或减分。
 
 判定门槛已在实验前与评价者一同确定，记录在 m0/DECISION.md 中，实验后不调整。
 `;

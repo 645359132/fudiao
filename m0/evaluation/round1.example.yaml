@@ -2,7 +2,8 @@
 #   pnpm m0 report m0/evaluation/round1.yaml
 # 每个样本目录含 text.md（正文）、synopsis.md（事件梗概）与 meta.json（费用与等待，只进答案键）。
 # condition：baseline（单次提示词对照组）、simulation（角色推演）、
-#            director（角色推演 + 导演提议）、batch_pick（批量推演后由作者挑选）。
+#            director_stalemate（角色推演 + 僵局后的导演提议）、director_curve（角色推演 + 按张力曲线的导演提议）、
+#            batch_pick（批量推演后由作者挑选）。
 
 id: round1
 seed: 20261007

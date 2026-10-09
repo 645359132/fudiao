@@ -116,11 +116,39 @@ describe('评估包与汇总', () => {
   });
 });
 
+describe('作者挑选的样本', () => {
+  it('与原属条件是同一篇时，同一位评价者不会读到两次', () => {
+    const samples: Manifest['samples'] = [
+      ...makeSamples(),
+      ...scenes.map((scene) => ({ scene, condition: 'batch_pick' as const, dir: join(root, 'samples', `${scene}-simulation-0`) })),
+    ];
+    const manifest: Manifest = { id: 'pick', seed: 3, evaluators: ['甲', '乙', '丙', '丁', '戊'], perEvaluator: 9, samples };
+    const codes = samples.map((_, i) => `S${String(i + 1).padStart(2, '0')}`);
+    const dirOf = new Map(codes.map((c, i) => [c, samples[i]!.dir]));
+    for (const mine of Object.values(assign(manifest, codes))) {
+      const dirs = mine.map((c) => dirOf.get(c));
+      expect(new Set(dirs).size).toBe(dirs.length);
+    }
+  });
+});
+
 describe('清单校验', () => {
   it('阅读量大于样本数时报错', () => {
     expect(loadManifest('id: x\nevaluators: [a]\nperEvaluator: 5\nsamples:\n  - { scene: s, condition: baseline, dir: d }\n')).toEqual({
       ok: false,
       error: 'perEvaluator 不能大于样本数',
     });
+  });
+
+  it('两种导演触发方式是两个条件（m0/README.md），笼统的 director 不再接受', () => {
+    const manifest = (condition: string) => `id: x
+evaluators: [a]
+perEvaluator: 1
+samples:
+  - { scene: s, condition: ${condition}, dir: d }
+`;
+    expect(loadManifest(manifest('director_stalemate')).ok).toBe(true);
+    expect(loadManifest(manifest('director_curve')).ok).toBe(true);
+    expect(loadManifest(manifest('director')).ok).toBe(false);
   });
 });
