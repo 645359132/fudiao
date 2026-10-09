@@ -254,6 +254,12 @@ describe('金丝雀泄露测试（提示词）', () => {
     expect(text).not.toContain(`${CANARY}-META-`);
   });
 
+  it('僵局判断说明目标互相冲突不算目标无法达成，只有局面中的事实才能排除目标', () => {
+    const text = fullText(unwrap(renderStalemateJudgement(canary, [])));
+    expect(text).toContain('人物的目标互相冲突是推演的前提，不是僵局');
+    expect(text).toContain('只有局面中的事实排除了目标时，才判为 goal_unreachable');
+  });
+
   it('裁决提示词不含场景元信息与任何角色卡', () => {
     const state = { ...initialState(canary, 1), round: 1 };
     const adjudication = adjudicate(canary, state, [{ actor: A, kind: 'attack', target: P, item: item('crossbow') }]);

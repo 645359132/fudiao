@@ -56,8 +56,8 @@
     "sha256": "fea14a50468d2b1cf7c071cb5178bced13d90ebaef1254e9bf1dbc3fee60d441"
   },
   "stalemate_judgement": {
-    "version": "2",
-    "sha256": "491903088612aa65545e530886142c7256d05de9a27224a8d644de9ad4532020"
+    "version": "3",
+    "sha256": "a2ed36cf7817230b0401a6ec2efb6b3c2e8dbfb66a3128dfd9277cdd3df70dba"
   },
   "structured_repair": {
     "version": "1",
