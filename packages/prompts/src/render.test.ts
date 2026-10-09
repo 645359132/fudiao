@@ -35,6 +35,7 @@ import {
   renderCharacterAction,
   renderDirectorProposal,
   renderEvidenceJudgement,
+  renderPlanDraft,
   renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,
@@ -299,5 +300,38 @@ describe('金丝雀泄露测试（提示词）', () => {
     expect(text).not.toContain(`${CANARY}-META-`);
     expect(text).not.toContain(`${CANARY}-CARD-`);
     expect(text).not.toContain(`${CANARY}-SECRET-`);
+  });
+});
+
+describe('章节计划草稿（B65）', () => {
+  it('写出作品大纲、人物、已有章节与伏笔、章数与字数；可选部分没有时省略', () => {
+    const text = fullText(
+      unwrap(
+        renderPlanDraft({
+          title: '当铺夜谈',
+          genre: '古代市井',
+          synopsis: '',
+          outline: '林舟深夜当玉，掌柜起疑；三章后真相揭晓。',
+          characters: ['林舟', '钱四'],
+          chapters: ['第一章 夜叩'],
+          foreshadows: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是仿品' }],
+          chapterCount: 5,
+          wordsPerChapter: 3000,
+        }),
+      ),
+    );
+    expect(text).toContain('拆成 5 章');
+    expect(text).toContain('约 3000 字');
+    expect(text).toContain('作品：当铺夜谈（古代市井）');
+    expect(text).not.toContain('简介：');
+    expect(text).toContain('人物：林舟；钱四；');
+    expect(text).toContain('已有的章节：第一章 夜叩；');
+    expect(text).toContain('- 玉佩的来历：掌柜多看了一眼（揭晓：玉佩是仿品）');
+    const empty = fullText(
+      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], chapters: [], foreshadows: [], chapterCount: 1, wordsPerChapter: 2000 })),
+    );
+    expect(empty).toContain('还没有人物设定');
+    expect(empty).not.toContain('已有的章节：');
+    expect(empty).not.toContain('已有的伏笔：');
   });
 });

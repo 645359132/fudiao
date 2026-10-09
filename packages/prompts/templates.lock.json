@@ -35,6 +35,10 @@
     "version": "4",
     "sha256": "264e34c849f1c12ceb9cdc8f5d01a3d12f1fce16aec43a4e6b5e6b28eb10ace1"
   },
+  "plan_draft": {
+    "version": "1",
+    "sha256": "6ccbc960aa5c6f0e8e43b0cb9152467f7f4604eb54d66351de71bdb522a59c78"
+  },
   "run_synopsis": {
     "version": "3",
     "sha256": "f3217db2960d38e02534528fda0a92d8474fed7d420449ddd2abd4bac6aa8e51"

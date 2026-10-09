@@ -1,0 +1,116 @@
+import { rmSync } from 'node:fs';
+import type { PlanDraftOutput } from '@fudiao/prompts';
+import { afterEach, describe, expect, it } from 'vitest';
+import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { addTestedModel, reply } from '../testing/models';
+import { createAppService } from './service';
+
+const all: TestDeps[] = [];
+afterEach(async () => {
+  for (const d of all.splice(0)) {
+    await d.dispose();
+    rmSync(d.root, { recursive: true, force: true });
+  }
+});
+
+function value<T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T {
+  if (!r.ok) throw new Error(JSON.stringify(r.error));
+  return r.value;
+}
+
+async function setup() {
+  const deps = fsDeps();
+  all.push(deps);
+  const app = createAppService(deps);
+  value(await app.loadLibrary());
+  value(await app.createWork('当铺夜谈'));
+  value(await app.updateWorkInfo({ outline: '林舟深夜当玉，掌柜钱四起疑压价；第三章真相揭晓，玉是父亲的遗物。' }));
+  value(await app.createChapter('第一章 夜叩'));
+  const lin = value(await app.createEntity('character', '林舟')).created;
+  value(await app.updateEntity(lin, { aliases: ['林相公'] }));
+  value(await app.createEntity('character', '钱四'));
+  return { deps, app };
+}
+
+const draft: PlanDraftOutput = {
+  chapters: [
+    { title: '夜叩', goal: '林舟当玉被压价', cast: ['林相公', '钱四'], beats: ['叩门', ' 压价 ', ''], plant: ['玉佩的来历'], payoff: [], treatment: '压价略写', targetWords: 3000 },
+    { title: '第二章 夜雨', goal: '林舟另寻门路', cast: ['林舟', '阿青'], beats: ['雨中奔走'], plant: [], payoff: [], treatment: '', targetWords: null },
+    { title: '第三章 揭晓', goal: '真相揭晓', cast: ['林舟'], beats: ['对质'], plant: [], payoff: ['玉佩的来历'], treatment: '对质展开', targetWords: 4000 },
+  ],
+  foreshadows: [{ title: '玉佩的来历', content: '钱四多看了玉佩一眼', reveal: '玉佩是林舟父亲的遗物' }],
+};
+
+describe('章节计划草稿', () => {
+  it('由大纲生成草稿，不写入作品', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    deps.llmResponses.push(reply(JSON.stringify(draft)));
+    const result = value(await app.draftPlans({ chapterCount: 3, wordsPerChapter: 3000 }));
+    expect(result.chapters).toHaveLength(3);
+    const view = value(await app.planningView());
+    expect(view.chapters.map((c) => c.plan)).toEqual([null]);
+    expect(view.foreshadows).toEqual([]);
+  });
+
+  it('没有大纲时说明原因，不调用模型', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    value(await app.updateWorkInfo({ outline: ' ' }));
+    expect(await app.draftPlans({ chapterCount: 3, wordsPerChapter: 3000 })).toMatchObject({ ok: false, error: { code: 'settings' } });
+  });
+});
+
+describe('采用草稿', () => {
+  it('已有章节对应草稿的前几章（章名不改），多出的章节在末尾新建；伏笔记入账本并定好埋设与回收章节', async () => {
+    const { app } = await setup();
+    const applied = value(await app.applyPlanDraft(draft));
+    const { view } = applied;
+    expect(view.chapters.map((c) => c.chapter.title)).toEqual(['第一章 夜叩', '第二章 夜雨', '第三章 揭晓']);
+    const [first, second, third] = view.chapters;
+    const jade = view.foreshadows[0]!;
+    expect(jade).toMatchObject({ title: '玉佩的来历', status: 'planned', plantChapterId: first!.chapter.id, payoffChapterId: third!.chapter.id });
+    expect(first!.plan).toMatchObject({ goal: '林舟当玉被压价', beats: ['叩门', '压价'], foreshadowPlant: [jade.id], targetWords: 3000, status: 'todo' });
+    expect(third!.plan).toMatchObject({ foreshadowPayoff: [jade.id] });
+    // 人物按名字与别名对应；找不到的名字列出来，不新建设定。
+    const names = new Map(view.characters.map((c) => [c.id, c.name]));
+    expect(first!.plan!.castIds.map((id) => names.get(id))).toEqual(['林舟', '钱四']);
+    expect(second!.plan!.castIds.map((id) => names.get(id))).toEqual(['林舟']);
+    expect(applied.unmatchedCast).toEqual(['阿青']);
+    expect(view.chapters.every((c) => c.problems.length === 0)).toBe(true);
+  });
+
+  it('再次采用时沿用已有的伏笔、更新已有的计划', async () => {
+    const { app } = await setup();
+    value(await app.applyPlanDraft(draft));
+    const again = value(await app.applyPlanDraft({ ...draft, chapters: draft.chapters.map((c) => ({ ...c, goal: `${c.goal}（改）` })) })).view;
+    expect(again.foreshadows).toHaveLength(1);
+    expect(again.chapters).toHaveLength(3);
+    expect(again.chapters[0]!.plan).toMatchObject({ goal: '林舟当玉被压价（改）', version: 2 });
+  });
+});
+
+describe('计划与伏笔账本的编辑', () => {
+  it('保存计划；回收章节在埋设章节之前时列出问题', async () => {
+    const { app } = await setup();
+    const view = value(await app.applyPlanDraft(draft)).view;
+    const jade = view.foreshadows[0]!;
+    const first = view.chapters[0]!;
+    const saved = value(await app.savePlan(first.chapter.id, { ...first.plan!, foreshadowPlant: [], foreshadowPayoff: [jade.id] }));
+    // 玉佩的埋设章节是第一章，在第一章回收没有问题；把埋设改到第三章后，第一章的回收就在埋设之前。
+    expect(saved.chapters[0]!.problems).toEqual([]);
+    const moved = value(await app.updateForeshadow(jade, { ...jade, plantChapterId: view.chapters[2]!.chapter.id }));
+    expect(moved.chapters[0]!.problems).toEqual([{ code: 'payoff_before_plant', foreshadowId: jade.id }]);
+  });
+
+  it('伏笔的新建、修改与删除', async () => {
+    const { app } = await setup();
+    const fields = { title: '债主', content: '', reveal: '债主是钱四的表兄', plantChapterId: null, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' as const };
+    const added = value(await app.addForeshadow(fields));
+    const debt = added.foreshadows[0]!;
+    const edited = value(await app.updateForeshadow(debt, { ...fields, status: 'dropped' }));
+    expect(edited.foreshadows[0]).toMatchObject({ status: 'dropped', version: 2 });
+    expect(await app.updateForeshadow(debt, fields)).toMatchObject({ ok: false, error: { code: 'repo', error: { code: 'conflict' } } });
+    expect(value(await app.deleteForeshadow(edited.foreshadows[0]!)).foreshadows).toEqual([]);
+  });
+});

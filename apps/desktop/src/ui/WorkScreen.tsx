@@ -6,6 +6,7 @@ import { HistoryPanel } from './HistoryPanel';
 import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SkillsPanel } from './SkillsPanel';
+import { PlanningPanel } from './PlanningPanel';
 import { SourcesPanel } from './SourcesPanel';
 import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
@@ -29,6 +30,7 @@ export function WorkScreen() {
   const openUsage = useApp((s) => s.openUsage);
   const openTasks = useApp((s) => s.openTasks);
   const openSkills = useApp((s) => s.openSkills);
+  const openPlanning = useApp((s) => s.openPlanning);
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
@@ -57,6 +59,9 @@ export function WorkScreen() {
         <span className="spacer" />
         <button type="button" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
           任务{running > 0 ? `（${running} 进行中）` : ''}
+        </button>
+        <button type="button" aria-pressed={panel === 'planning'} onClick={() => void openPlanning()}>
+          计划
         </button>
         <button type="button" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
           查找
@@ -102,7 +107,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

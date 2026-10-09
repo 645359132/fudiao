@@ -10,6 +10,7 @@ import { App } from '../App';
 import { createAppService } from '../app/service';
 import { createAppStore } from '../state/store';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { addTestedModel, reply } from '../testing/models';
 
 // jsdom 不做排版，ProseMirror 把选区滚入视野时要用到的几何接口给空实现。
 const noRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
@@ -878,5 +879,47 @@ describe('写作技能界面（B61、B37）', () => {
     });
     await user.click(await screen.findByRole('button', { name: '恢复默认词表' }));
     expect(await screen.findByText(/现在用的是默认词表/)).toBeTruthy();
+  });
+});
+
+describe('成书计划界面（B63、B65）', () => {
+  it('由大纲生成计划草稿并采用；修改一章的计划；在账本中加一条伏笔', async () => {
+    const { user, service, deps } = start();
+    await createWork(user, '当铺夜谈');
+    expect((await service.updateWorkInfo({ outline: '林舟深夜当玉，掌柜起疑；第二章真相揭晓。' })).ok).toBe(true);
+    expect((await service.createEntity('character', '林舟')).ok).toBe(true);
+    await addTestedModel(service, deps);
+    const draft = {
+      chapters: [
+        { title: '第一章 夜叩', goal: '林舟当玉被压价', cast: ['林舟'], beats: ['叩门', '压价'], plant: ['玉佩的来历'], payoff: [], treatment: '', targetWords: 3000 },
+        { title: '第二章 揭晓', goal: '真相揭晓', cast: ['林舟'], beats: ['对质'], plant: [], payoff: ['玉佩的来历'], treatment: '', targetWords: 3000 },
+      ],
+      foreshadows: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物' }],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(draft)));
+
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await user.click(await screen.findByRole('button', { name: '生成计划草稿' }));
+    const preview = await screen.findByLabelText('草稿内容');
+    expect(within(preview).getByText('第二章 揭晓')).toBeTruthy();
+    await user.click(within(preview).getByRole('button', { name: '采用草稿' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 揭晓']));
+
+    const first = await screen.findByRole('listitem', { name: '第一章 夜叩' });
+    await user.click(within(first).getByText('第一章 夜叩'));
+    const form = within(first).getByRole('form', { name: '第一章 夜叩的计划' });
+    const goal = within(form).getByRole('textbox', { name: '本章目标' });
+    await user.clear(goal);
+    await user.type(goal, '林舟当玉未成');
+    await user.click(within(form).getByRole('button', { name: '保存计划' }));
+    expect(await screen.findByText('：林舟当玉未成')).toBeTruthy();
+
+    const ledger = screen.getByRole('region', { name: '伏笔账本' });
+    expect(within(ledger).getByText('玉佩的来历')).toBeTruthy();
+    await user.click(within(ledger).getByRole('button', { name: '新伏笔' }));
+    const create = within(ledger).getByRole('form', { name: '新伏笔' });
+    await user.type(within(create).getByRole('textbox', { name: '名称' }), '债主是谁');
+    await user.click(within(create).getByRole('button', { name: '加入账本' }));
+    expect(await within(ledger).findByText('债主是谁')).toBeTruthy();
   });
 });

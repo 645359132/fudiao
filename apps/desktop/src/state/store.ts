@@ -2,6 +2,8 @@
 import type { Result } from '@fudiao/shared';
 import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
+import type { PlanDraft, PlanningView } from '../app/planning';
+import type { ForeshadowFields, PlanFields } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -50,7 +52,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -78,6 +80,11 @@ export type AppState = {
   readonly sourceStats: SourceStats | null;
   /** 写作技能与规避词表（打开“写作技能”时读取，B61、B37）。 */
   readonly skills: SkillsView | null;
+  /** 成书计划（B63、B65）：章节计划、伏笔账本，以及尚未采用的计划草稿与草稿中没对上的人物。 */
+  readonly planning: PlanningView | null;
+  readonly planDraft: PlanDraft | null;
+  readonly planUnmatched: readonly string[];
+  readonly planDrafting: boolean;
   /** AI 上下文清单（B18）：抽屉是否打开、最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
   readonly contextDrawerOpen: boolean;
   readonly writingContext: ContextManifest | null;
@@ -178,6 +185,15 @@ export type AppState = {
   readonly setEntityLocked: (id: string, locked: boolean) => Promise<void>;
   readonly deleteEntity: (id: string) => Promise<boolean>;
   readonly openEntityDrawer: (id: string | null) => void;
+
+  readonly openPlanning: () => Promise<void>;
+  readonly draftPlans: (chapterCount: number, wordsPerChapter: number) => Promise<void>;
+  readonly applyPlanDraft: () => Promise<boolean>;
+  readonly discardPlanDraft: () => void;
+  readonly savePlan: (chapterId: string, fields: PlanFields) => Promise<boolean>;
+  readonly addForeshadow: (fields: ForeshadowFields) => Promise<boolean>;
+  readonly updateForeshadow: (id: string, fields: ForeshadowFields) => Promise<boolean>;
+  readonly deleteForeshadow: (id: string) => Promise<boolean>;
 
   readonly openSkills: () => Promise<void>;
   readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string }) => Promise<boolean>;
@@ -315,6 +331,10 @@ export function createAppStore(service: AppService): AppStore {
       selectedFactId: null,
       sourceStats: null,
       skills: null,
+      planning: null,
+      planDraft: null,
+      planUnmatched: [],
+      planDrafting: false,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -360,7 +380,7 @@ export function createAppStore(service: AppService): AppStore {
       async closeWork() {
         if (!(await get().leaveChapter())) return;
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -614,6 +634,48 @@ export function createAppStore(service: AppService): AppStore {
       },
       // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
       openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false }),
+      async openPlanning() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawerEntityId: null }));
+      },
+      async draftPlans(chapterCount, wordsPerChapter) {
+        const taskId = `task-${++taskSeq}`;
+        const abort = new AbortController();
+        taskAborts.set(taskId, abort);
+        task({ type: 'started', task: { id: taskId, kind: 'plan_draft', title: '生成章节计划草稿', chapterId: null, startedAt: new Date().toISOString() } });
+        set({ planDrafting: true, planUnmatched: [] });
+        const result = await service.draftPlans({ chapterCount, wordsPerChapter }, { signal: abort.signal, onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })) });
+        taskAborts.delete(taskId);
+        if (result.ok) {
+          set({ planDraft: result.value, planDrafting: false, message: null });
+          task({ type: 'finished', id: taskId, status: 'done', finishedAt: new Date().toISOString() });
+        } else {
+          const status = abort.signal.aborted ? 'cancelled' : 'failed';
+          set({ planDrafting: false, message: describeError(result.error) });
+          task({ type: 'finished', id: taskId, status, finishedAt: new Date().toISOString(), error: describeError(result.error) });
+        }
+      },
+      async applyPlanDraft() {
+        const draft = get().planDraft;
+        if (draft === null) return false;
+        const done = await run(service.applyPlanDraft(draft), (r) => ({ planning: r.view, planDraft: null, planUnmatched: r.unmatchedCast }));
+        if (done) {
+          const work = await service.reloadWork();
+          if (work.ok) set({ work: work.value });
+        }
+        return done;
+      },
+      discardPlanDraft: () => set({ planDraft: null }),
+      savePlan: (chapterId, fields) => run(service.savePlan(chapterId, fields), (planning) => ({ planning })),
+      addForeshadow: (fields) => run(service.addForeshadow(fields), (planning) => ({ planning })),
+      async updateForeshadow(id, fields) {
+        const f = get().planning?.foreshadows.find((x) => x.id === id);
+        return f === undefined ? false : run(service.updateForeshadow(f, fields), (planning) => ({ planning }));
+      },
+      async deleteForeshadow(id) {
+        const f = get().planning?.foreshadows.find((x) => x.id === id);
+        return f === undefined ? false : run(service.deleteForeshadow(f), (planning) => ({ planning }));
+      },
       async openSkills() {
         if (!(await get().leaveChapter())) return;
         await run(service.listWritingSkills(), (skills) => ({ skills, panel: 'skills', chapterContent: null, drawerEntityId: null }));

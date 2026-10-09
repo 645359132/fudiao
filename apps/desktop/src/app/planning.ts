@@ -1,0 +1,204 @@
+// 章节计划与伏笔账本的用例（需求 B63、B65，施工文档第五章“写手与审核”）。
+// 计划草稿由模型从作品大纲拆出，只是草稿：作者看过、修改后“采用”，才写入章节计划与伏笔账本。
+import type { CallOptions } from '@fudiao/llm';
+import { PlanDraftOutput, renderPlanDraft } from '@fudiao/prompts';
+import { err, ok, type Result } from '@fudiao/shared';
+import {
+  createChapter,
+  createForeshadow,
+  deleteForeshadow,
+  getChapterPlan,
+  getProject,
+  listChapterPlans,
+  listChapters,
+  listEntities,
+  listForeshadows,
+  saveChapterPlan,
+  updateForeshadow,
+  type Chapter,
+  type ChapterPlan,
+  type Entity,
+  type Foreshadow,
+  type ForeshadowFields,
+  type PlanFields,
+  type RepoError,
+  type SqlPort,
+} from '@fudiao/store';
+import { checkPlan, type PlanProblem } from '@fudiao/writing';
+import type { AppError } from './errors';
+import type { modelRunner } from './model-runner';
+import type { AppDeps } from './ports';
+
+export type PlanChapterView = { readonly chapter: Chapter; readonly plan: ChapterPlan | null; readonly problems: readonly PlanProblem[] };
+
+export type PlanningView = {
+  readonly outline: string;
+  readonly chapters: readonly PlanChapterView[];
+  readonly foreshadows: readonly Foreshadow[];
+  /** 可以选作出场人物的设定（人物类）。 */
+  readonly characters: readonly Entity[];
+};
+
+export type PlanDraft = PlanDraftOutput;
+
+export type PlanDraftRequest = { readonly chapterCount: number; readonly wordsPerChapter: number };
+
+/** 采用草稿的结果：草稿中写了、但人物设定里找不到的名字（没有建设定，作者可以自己补）。 */
+export type AppliedDraft = { readonly view: PlanningView; readonly unmatchedCast: readonly string[] };
+
+const repo = (error: RepoError): AppError => ({ code: 'repo', error });
+
+/** 计划草稿的输出上限：每章约 400 字的计划，留出思考的余量。 */
+const draftOutputTokens = (chapters: number) => Math.min(32_000, 4_000 + chapters * 1_200);
+
+export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, runner: ReturnType<typeof modelRunner>) {
+  const ctx = () => ({ now: deps.clock.now() });
+
+  async function view(port: SqlPort): Promise<Result<PlanningView, AppError>> {
+    const [work, chapters, plans, foreshadows, entities] = await Promise.all([
+      getProject(port),
+      listChapters(port, 'normal'),
+      listChapterPlans(port),
+      listForeshadows(port),
+      listEntities(port),
+    ]);
+    if (!work.ok) return err(repo(work.error));
+    if (!chapters.ok) return err(repo(chapters.error));
+    if (!plans.ok) return err(repo(plans.error));
+    if (!foreshadows.ok) return err(repo(foreshadows.error));
+    if (!entities.ok) return err(repo(entities.error));
+    const order = new Map(chapters.value.map((c, i) => [c.id, i]));
+    const byChapter = new Map(plans.value.map((p) => [p.chapterId, p]));
+    return ok({
+      outline: work.value?.outline ?? '',
+      chapters: chapters.value.map((chapter) => {
+        const plan = byChapter.get(chapter.id) ?? null;
+        return { chapter, plan, problems: plan === null ? [] : checkPlan(plan, foreshadows.value, order) };
+      }),
+      foreshadows: foreshadows.value,
+      characters: entities.value.filter((e) => e.kind === 'character'),
+    });
+  }
+
+  async function change(f: (port: SqlPort) => Promise<Result<unknown, RepoError>>): Promise<Result<PlanningView, AppError>> {
+    const port = project();
+    if (port === null) return err({ code: 'no_work' });
+    const done = await f(port);
+    return done.ok ? view(port) : err(repo(done.error));
+  }
+
+  return {
+    async planningView(): Promise<Result<PlanningView, AppError>> {
+      const port = project();
+      return port === null ? err({ code: 'no_work' }) : view(port);
+    },
+
+    /** 由作品大纲拆出章节计划草稿（不写入作品）。 */
+    async draftPlans(request: PlanDraftRequest, options: CallOptions = {}): Promise<Result<PlanDraft, AppError>> {
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const current = await view(port);
+      if (!current.ok) return current;
+      const work = await getProject(port);
+      if (!work.ok) return err(repo(work.error));
+      if (current.value.outline.trim() === '') return err({ code: 'settings', detail: '请先在作品信息中写下作品大纲' });
+      const prompt = renderPlanDraft({
+        title: work.value?.title ?? '',
+        genre: work.value?.genre ?? '',
+        synopsis: work.value?.synopsis ?? '',
+        outline: current.value.outline,
+        characters: current.value.characters.map((c) => c.name),
+        chapters: current.value.chapters.map((c) => c.chapter.title),
+        foreshadows: current.value.foreshadows.filter((f) => f.status !== 'dropped').map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+        chapterCount: request.chapterCount,
+        wordsPerChapter: request.wordsPerChapter,
+      });
+      if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: draftOutputTokens(request.chapterCount), effort: 'medium' }, PlanDraftOutput, options);
+      return result.ok ? ok(result.value.value) : result;
+    },
+
+    /**
+     * 采用草稿：已有章节按顺序对应草稿的前几章（章名不改），多出的章节在末尾新建；
+     * 新伏笔记入账本（计划状态），埋设与回收的章节取草稿中列出它的章；人物按名字与别名对应到人物设定。
+     */
+    async applyPlanDraft(draft: PlanDraft): Promise<Result<AppliedDraft, AppError>> {
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const chapters = await listChapters(port, 'normal');
+      if (!chapters.ok) return err(repo(chapters.error));
+      const ids = chapters.value.map((c) => c.id);
+      for (const planned of draft.chapters.slice(ids.length)) {
+        const created = await createChapter(port, { id: deps.ids.next(), title: planned.title.trim() || '未命名章节', ...(ids.length > 0 && { after: ids.at(-1)! }) }, ctx());
+        if (!created.ok) return err(repo(created.error));
+        ids.push(created.value.id);
+      }
+
+      const existing = await listForeshadows(port);
+      if (!existing.ok) return err(repo(existing.error));
+      const byTitle = new Map(existing.value.map((f) => [f.title.trim(), f.id]));
+      const chapterOf = (title: string, field: 'plant' | 'payoff') => {
+        const i = draft.chapters.findIndex((c) => c[field].some((t) => t.trim() === title));
+        return i < 0 ? null : (ids[i] ?? null);
+      };
+      for (const f of draft.foreshadows) {
+        const title = f.title.trim();
+        if (title === '' || byTitle.has(title)) continue;
+        const fields: ForeshadowFields = {
+          title,
+          content: f.content,
+          reveal: f.reveal,
+          plantChapterId: chapterOf(title, 'plant'),
+          plantAnchor: null,
+          payoffChapterId: chapterOf(title, 'payoff'),
+          payoffAnchor: null,
+          status: 'planned',
+        };
+        const created = await createForeshadow(port, { id: deps.ids.next(), ...fields }, ctx());
+        if (!created.ok) return err(repo(created.error));
+        byTitle.set(title, created.value.id);
+      }
+
+      const entities = await listEntities(port);
+      if (!entities.ok) return err(repo(entities.error));
+      const characterOf = new Map(entities.value.filter((e) => e.kind === 'character').flatMap((e) => [e.name, ...e.aliases].map((n) => [n.trim(), e.id] as const)));
+      const unmatched = new Set<string>();
+      const foreshadowIds = (titles: readonly string[]) => titles.flatMap((t) => byTitle.get(t.trim()) ?? []);
+      for (const [i, planned] of draft.chapters.entries()) {
+        const chapterId = ids[i];
+        if (chapterId === undefined) continue;
+        const castIds = planned.cast.flatMap((name) => {
+          const id = characterOf.get(name.trim());
+          if (id === undefined && name.trim() !== '') unmatched.add(name.trim());
+          return id ?? [];
+        });
+        const fields: PlanFields = {
+          goal: planned.goal,
+          castIds: [...new Set(castIds)],
+          beats: planned.beats.map((b) => b.trim()).filter((b) => b !== ''),
+          foreshadowPlant: foreshadowIds(planned.plant),
+          foreshadowPayoff: foreshadowIds(planned.payoff),
+          treatment: planned.treatment,
+          targetWords: planned.targetWords,
+        };
+        const current = await getChapterPlan(port, chapterId);
+        if (!current.ok) return err(repo(current.error));
+        const saved = await saveChapterPlan(port, chapterId, current.value, fields, ctx());
+        if (!saved.ok) return err(repo(saved.error));
+      }
+      const result = await view(port);
+      return result.ok ? ok({ view: result.value, unmatchedCast: [...unmatched] }) : result;
+    },
+
+    async savePlan(chapterId: string, fields: PlanFields): Promise<Result<PlanningView, AppError>> {
+      return change(async (port) => {
+        const current = await getChapterPlan(port, chapterId);
+        return current.ok ? saveChapterPlan(port, chapterId, current.value, fields, ctx()) : current;
+      });
+    },
+
+    addForeshadow: (fields: ForeshadowFields) => change((port) => createForeshadow(port, { id: deps.ids.next(), ...fields }, ctx())),
+    updateForeshadow: (foreshadow: Foreshadow, fields: ForeshadowFields) => change((port) => updateForeshadow(port, foreshadow, fields, ctx())),
+    deleteForeshadow: (foreshadow: Foreshadow) => change((port) => deleteForeshadow(port, foreshadow)),
+  };
+}

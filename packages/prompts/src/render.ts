@@ -28,6 +28,7 @@ import {
   BeliefUpdateOutput,
   DirectorProposalOutput,
   EvidenceJudgementOutput,
+  PlanDraftOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
   StalemateJudgementOutput,
@@ -57,6 +58,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   EvidenceJudgementOutput,
   BeatSheetOutput,
   SceneDraftOutput,
+  PlanDraftOutput,
 };
 
 function renderTemplate(id: TemplateId, context: RenderContext): Result<RenderedPrompt, string> {
@@ -507,6 +509,35 @@ export function renderDirectorProposal(input: DirectorInput): Result<RenderedPro
 /** 场景配置草稿（B39）。 */
 export function renderSceneDraft(description: string): Result<RenderedPrompt, string> {
   return renderTemplate('scene_draft', { description });
+}
+
+export type PlanDraftInput = {
+  readonly title: string;
+  readonly genre: string;
+  readonly synopsis: string;
+  readonly outline: string;
+  readonly characters: readonly string[];
+  readonly chapters: readonly string[];
+  readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  readonly chapterCount: number;
+  readonly wordsPerChapter: number;
+};
+
+/** 章节计划草稿（B65）：作者侧的规划，材料是作者的大纲、设定与已有的伏笔。 */
+export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, string> {
+  return renderTemplate('plan_draft', {
+    title: input.title,
+    genre: input.genre,
+    synopsis: input.synopsis,
+    outline: input.outline,
+    characters: input.characters.map((name) => ({ name })),
+    chapters: input.chapters.map((title) => ({ title })),
+    hasChapters: input.chapters.length > 0,
+    foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+    hasForeshadows: input.foreshadows.length > 0,
+    chapterCount: input.chapterCount,
+    wordsPerChapter: input.wordsPerChapter,
+  });
 }
 
 export const TEMPLATE_IDS = Object.keys(TEMPLATE_SOURCES) as TemplateId[];

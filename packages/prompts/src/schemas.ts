@@ -191,6 +191,24 @@ export const SceneDraftOutput = z.object({
 });
 export type SceneDraftOutput = z.infer<typeof SceneDraftOutput>;
 
+/** 章节计划草稿（B65）：由作品大纲拆出，作者修改确认后才写入章节计划与伏笔账本。人物与伏笔用名字指代。 */
+export const PlanDraftOutput = z.object({
+  chapters: z.array(
+    z.object({
+      title: z.string(),
+      goal: z.string(),
+      cast: z.array(z.string()),
+      beats: z.array(z.string()),
+      plant: z.array(z.string()),
+      payoff: z.array(z.string()),
+      treatment: z.string(),
+      targetWords: z.number().int().positive().nullable(),
+    }),
+  ),
+  foreshadows: z.array(z.object({ title: z.string(), content: z.string(), reveal: z.string() })),
+});
+export type PlanDraftOutput = z.infer<typeof PlanDraftOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

@@ -6,7 +6,7 @@ export type TaskStatus = 'running' | 'done' | 'cancelled' | 'failed';
 
 export type TaskRecord = {
   readonly id: string;
-  readonly kind: 'selection_edit';
+  readonly kind: 'selection_edit' | 'plan_draft' | 'writer' | 'review' | 'memory';
   /** 给作者看的标题，例如“续写 · 第一章”。 */
   readonly title: string;
   readonly chapterId: string | null;
