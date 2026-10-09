@@ -50,6 +50,12 @@ describe('依赖边界规则', () => {
     expect(rulesFor('packages/domain/src/imports-npm.ts')).toEqual(['pure-core-npm-allowlist']);
   });
 
+  it('写手与审核的纯函数只能依赖 shared，不得导入 Node 内置模块', () => {
+    expect(rulesFor('packages/writing/src/allowed.ts')).toEqual([]);
+    expect(rulesFor('packages/writing/src/imports-engine.ts')).toEqual(['writing-depends-only-on-shared']);
+    expect(rulesFor('packages/writing/src/uses-node-builtin.ts')).toEqual(['pure-core-no-node-builtins']);
+  });
+
   it('shared 不得依赖其他工作区包', () => {
     expect(rulesFor('packages/shared/src/imports-engine.ts')).toEqual(['shared-is-leaf']);
   });

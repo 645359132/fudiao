@@ -1,5 +1,6 @@
 // 依赖边界检查。规则来源：AGENTS.md“仓库结构与依赖方向”、施工文档第三章。
-// 依赖只能向内：apps → engine / context / store / llm → domain → shared。
+// 依赖只能向内：apps → engine / context / writing / store / llm → domain → shared。
+// packages/writing（写手与审核的纯函数）与领域内核一样禁止 IO，只依赖 shared。
 
 // 测试文件与 src/testing/ 下的测试辅助代码（夹具、随机生成器）。
 const TEST_FILE = '(\\.test\\.tsx?$|/src/testing/)';
@@ -39,6 +40,13 @@ module.exports = {
       to: { path: '^(packages|apps)/', pathNot: '^packages/(domain|shared)/' },
     },
     {
+      name: 'writing-depends-only-on-shared',
+      severity: 'error',
+      comment: '写手与审核的纯函数（packages/writing）只能依赖 packages/shared；仓储与模型调用由应用服务层接上。',
+      from: { path: '^packages/writing/' },
+      to: { path: '^(packages|apps)/', pathNot: '^packages/(writing|shared)/' },
+    },
+    {
       name: 'packages-not-to-apps',
       severity: 'error',
       comment: '依赖只能向内，packages 不得依赖 apps。',
@@ -48,8 +56,8 @@ module.exports = {
     {
       name: 'pure-core-no-node-builtins',
       severity: 'error',
-      comment: '领域内核与 shared 禁止任何 IO，也要能在 WebView 中运行，不得导入 Node 内置模块。',
-      from: { path: '^packages/(domain|shared)/' },
+      comment: '领域内核、shared 与 writing 禁止任何 IO，也要能在 WebView 中运行，不得导入 Node 内置模块。',
+      from: { path: '^packages/(domain|shared|writing)/' },
       to: { dependencyTypes: ['core'] },
     },
     {
@@ -63,10 +71,10 @@ module.exports = {
       name: 'pure-core-npm-allowlist',
       severity: 'error',
       comment: `领域内核与 shared 只能使用白名单内的第三方包（${PURE_NPM_ALLOWLIST.join('、')}），防止引入 Tauri、数据库或网络库。`,
-      from: { path: '^packages/(domain|shared)/', pathNot: TEST_FILE },
+      from: { path: '^packages/(domain|shared|writing)/', pathNot: TEST_FILE },
       to: {
         dependencyTypesNot: ['local', 'core'],
-        pathNot: [`node_modules/(${PURE_NPM_ALLOWLIST.join('|')})/`, '^packages/(domain|shared)/'],
+        pathNot: [`node_modules/(${PURE_NPM_ALLOWLIST.join('|')})/`, '^packages/(domain|shared|writing)/'],
       },
     },
     {

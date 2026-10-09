@@ -456,6 +456,12 @@ importers:
         specifier: ^4.10.2
         version: 4.10.2
 
+  packages/writing:
+    dependencies:
+      '@fudiao/shared':
+        specifier: workspace:*
+        version: link:../shared
+
 packages:
 
   '@anthropic-ai/sdk@0.131.0':

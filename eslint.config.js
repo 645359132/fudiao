@@ -41,6 +41,7 @@ export default defineConfig(
     // 推演与上下文相关的包没有解析 JSON 的正当理由，在此直接禁止。
     files: [
       'packages/domain/src/**/*.ts',
+      'packages/writing/src/**/*.ts',
       'packages/engine/src/**/*.ts',
       'packages/context/src/**/*.ts',
       'packages/prompts/src/**/*.ts',
@@ -57,8 +58,8 @@ export default defineConfig(
     },
   },
   {
-    // 硬性规则 5、7、22：领域内核是纯函数，时间与随机数由调用方作为数据传入。
-    files: ['packages/domain/src/**/*.ts'],
+    // 硬性规则 5、7、22：领域内核是纯函数，时间与随机数由调用方作为数据传入；packages/writing 同样是纯函数。
+    files: ['packages/domain/src/**/*.ts', 'packages/writing/src/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: {
       'no-restricted-properties': [
