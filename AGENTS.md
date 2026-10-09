@@ -51,7 +51,7 @@
 - M2-05 已完成：`selection_edit` 模板（版本 1）与 `renderSelectionEdit`；应用层 `selection-ops.ts` 与用例 `runSelectionOperation`（按上下文清单组合提示词，经调用器流式生成）；章节旁的“AI 写作”抽屉（五种操作、附加要求、流式结果、取消、重试、复制）。
 - M2-06 已完成：迁移 `0004_candidate.sql`；候选稿仓储 `candidate.ts` 与按范围替换 `paragraph-range.ts`（版本守卫、事件关联、来源区间）；逐字差异 `textDiff`（`packages/shared`）；应用层 `candidates.ts`（存为候选稿、修改、放弃、接受时检查过期、快照、写入来源）；“AI 写作”抽屉中的候选稿（差异、修改、接受、放弃）。
 - M2-07 已完成：任务记录 `apps/desktop/src/app/tasks.ts`（进度、部分结果、已知用量与费用）；选区操作登记为任务；顶栏“任务”与任务页（取消、复制部分结果、清除）。M2 的任务已全部完成，待作者执行手工清单与真实模型的验证。
-- M0-13 进行中（分支 `m0-13-experiment`）：DeepSeek flash 的真实实验已完成（三个场景各 4 种条件、每种 3 次，共 $14.65），27 次推演已生成正文；实验中修正的问题、实测费用与等待见 `m0/DECISION.md`。评估清单 `m0/evaluation/round1.yaml`（39 篇，`batch_pick` 由作者委托 Claude 代选）已备好，`m0/DECISION.md` 附门槛建议值。作者决定（2026-10-09）第一轮以作者本人盲评为主（`m0/packets/round1-self/`，12 篇梗概），外部写作者补充（`round1-external`，招募文案 `m0/evaluation/external-recruit.md`）；评估包支持只看梗概、只打部分评分项。
+- M0-13 进行中（分支 `m0-13-experiment`）：DeepSeek flash 的真实实验已完成（三个场景各 4 种条件、每种 3 次，共 $14.65），27 次推演已生成正文；实验中修正的问题、实测费用与等待见 `m0/DECISION.md`。评估清单 `m0/evaluation/round1.yaml`（39 篇，`batch_pick` 由作者委托 Claude 代选）已备好，`m0/DECISION.md` 附门槛建议值。作者决定（2026-10-09）第一轮以作者本人盲评为主（`m0/packets/round1-self/`，12 篇梗概），外部写作者补充（`round1-external`，招募文案 `m0/evaluation/external-recruit.md`）；评估包支持只看梗概、只打部分评分项。实际由 4 个模型评了梗概层，推演组未达门槛、低于对照组；作者确认 M0 结论为“调整”（2026-10-09），调整清单见 `m0/DECISION.md` 第五节，第二轮在调整后进行。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式
