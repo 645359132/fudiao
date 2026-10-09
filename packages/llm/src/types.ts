@@ -84,6 +84,8 @@ export type LlmRequest = {
   readonly effort?: Effort;
   /** 确定的步骤键；有完成记录时直接复用，不再调用（硬性规则 10）。 */
   readonly stepKey?: string;
+  /** 修正请求：上一次输出未通过校验的原因。只写入调用记录，便于统计；不计入请求哈希（原因已在修正消息中）。 */
+  readonly repairOf?: readonly string[];
 };
 
 export type LlmUsage = {

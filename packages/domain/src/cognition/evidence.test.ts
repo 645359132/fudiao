@@ -45,6 +45,37 @@ describe('证据链筛选', () => {
     const [candidate] = screenSecretInferences(scene, state, P, items);
     expect(candidate?.evidence.length).toBeGreaterThan(0);
     const evidence = (state.knowledge[P] ?? []).filter((k) => candidate?.evidence.includes(k.id));
-    expect(evidence.every((k) => k.modality !== 'inferred')).toBe(true);
+    expect(evidence.some((k) => k.modality === 'observed')).toBe(true);
+  });
+
+  it('先前回合的推测也作为线索附上，推测可以顺着自己的旧推测往下推', () => {
+    const earlier = infer(start, P, '对手一直盯着南门', ['south_gate']);
+    const { state, items } = infer({ ...earlier.state, round: 2 }, P, '南门恐怕有埋伏', ['south_gate']);
+    const [candidate] = screenSecretInferences(scene, state, P, items);
+    expect(candidate?.evidence).toEqual([earlier.items[0]!.id]);
+  });
+
+  it('同一回合提出的其他推测不作为线索，避免几条猜测互相支撑；推测本身也不算', () => {
+    const planned = planBeliefUpdate(scene, start, P, {
+      add: [
+        { text: '对手一直盯着南门', confidence: 0.6, about: ['south_gate'] },
+        { text: '南门恐怕有埋伏', confidence: 0.6, about: ['south_gate'] },
+      ],
+    });
+    if (!planned.ok) throw new Error(JSON.stringify(planned.error));
+    const next = applyEvent(scene, start, planned.value);
+    if (!next.ok) throw new Error(JSON.stringify(next.error));
+    const candidates = screenSecretInferences(scene, next.value, P, planned.value.added);
+    expect(candidates.map((c) => c.evidence)).toEqual([[], []]);
+  });
+
+  it('撤回的旧推测不作为线索', () => {
+    const earlier = infer(start, P, '对手一直盯着南门', ['south_gate']);
+    const retracted = planBeliefUpdate(scene, { ...earlier.state, round: 2 }, P, { retract: [earlier.items[0]!.id] });
+    if (!retracted.ok) throw new Error(JSON.stringify(retracted.error));
+    const after = applyEvent(scene, { ...earlier.state, round: 2 }, retracted.value);
+    if (!after.ok) throw new Error(JSON.stringify(after.error));
+    const { state, items } = infer(after.value, P, '南门恐怕有埋伏', ['south_gate']);
+    expect(screenSecretInferences(scene, state, P, items)[0]?.evidence).toEqual([]);
   });
 });

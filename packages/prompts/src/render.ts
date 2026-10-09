@@ -224,6 +224,7 @@ export function renderEvidenceJudgement(
     const inference = byId.get(c.inference);
     return {
       inference: c.inference,
+      secretId: c.secret,
       text: inference?.body.kind === 'text' ? inference.body.text : '',
       secret: secrets[c.secret] ?? '',
       evidence: c.evidence.flatMap((id) => {

@@ -55,6 +55,7 @@ export async function structured<T>(
     current = {
       ...current,
       ...(request.stepKey !== undefined && { stepKey: `${request.stepKey}#repair${attempt + 1}` }),
+      repairOf: issues.error,
       messages: [
         ...current.messages,
         { role: 'assistant', content: result.text },

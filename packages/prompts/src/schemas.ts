@@ -78,7 +78,7 @@ export type BeliefUpdateOutput = z.infer<typeof BeliefUpdateOutput>;
 /** 证据链命中判断（B44）：结果只作为提示，不作为结论。 */
 export const EvidenceJudgementOutput = z.object({
   judgements: z.array(
-    z.object({ inference: z.string(), hit: z.boolean(), supported: z.boolean(), explanation: z.string() }),
+    z.object({ inference: z.string(), secret: z.string(), hit: z.boolean(), supported: z.boolean(), explanation: z.string() }),
   ),
 });
 export type EvidenceJudgementOutput = z.infer<typeof EvidenceJudgementOutput>;

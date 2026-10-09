@@ -32,8 +32,8 @@
     "sha256": "b8e5efbcfc50a3564bcd66bfef70fc9dd3b6ae288bc5e2f71e27949dcb9adbcd"
   },
   "evidence_judgement": {
-    "version": "3",
-    "sha256": "5eb646e6fe8839ed19bd7ce17bb460f0101a3f52d398e2c7d82de83399633dc5"
+    "version": "4",
+    "sha256": "264e34c849f1c12ceb9cdc8f5d01a3d12f1fce16aec43a4e6b5e6b28eb10ace1"
   },
   "run_synopsis": {
     "version": "2",

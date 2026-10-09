@@ -154,7 +154,7 @@ describe('其他模板', () => {
     const text = fullText(
       unwrap(renderEvidenceJudgement(buildCharacterView(scene, next.value, P), candidates, { tripwire_secret: '对手在南门布置了绊索' })),
     );
-    expect(text).toContain('南门恐怕有埋伏');
+    expect(text).toContain('推测 [protagonist:1:3] 对照秘密 [tripwire_secret]：南门恐怕有埋伏');
     expect(text).toContain('相关的秘密：对手在南门布置了绊索');
     expect(text).toContain('- 没有');
   });

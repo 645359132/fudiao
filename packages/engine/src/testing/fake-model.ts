@@ -66,8 +66,9 @@ const defaults: Required<Policy> = {
   semantic_ruling: () => ({ rationale: '按常理推断', effects: [], occurrences: [], uncertainties: [] }),
   belief_update: () => ({ add: [], revise: [], retract: [] }),
   judgement: (ctx) => ({
-    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\]/g)].map((m) => ({
+    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({
       inference: m[1] ?? '',
+      secret: m[2] ?? '',
       hit: false,
       supported: true,
       explanation: '有线索支持',

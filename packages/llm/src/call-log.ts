@@ -14,6 +14,8 @@ export type LlmCallRecord = {
   readonly templateId: string;
   readonly templateVersion: string;
   readonly params: { readonly maxOutputTokens: number; readonly effort?: Effort };
+  /** 修正调用：上一次输出未通过校验的原因。 */
+  readonly repairIssues?: readonly string[];
   readonly status: LlmOutcome | 'error';
   readonly result?: LlmResult;
   readonly error?: LlmError;
@@ -62,6 +64,7 @@ export function withCallLog(port: LlmPort, log: CallLog, now: () => string): Llm
           maxOutputTokens: request.maxOutputTokens,
           ...(request.effort !== undefined && { effort: request.effort }),
         },
+        ...(request.repairOf !== undefined && { repairIssues: request.repairOf }),
         status: result.ok ? result.value.outcome : 'error',
         ...(result.ok ? { result: result.value } : { error: result.error }),
         cost: result.ok ? costOf(result.value.usage, request.model.prices) : null,

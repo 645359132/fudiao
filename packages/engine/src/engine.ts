@@ -188,6 +188,7 @@ export function createEngine(deps: EngineDeps) {
     prompt: RenderedPrompt,
     stepKey: string,
     extra: readonly LlmMessage[] = [],
+    repairOf?: readonly string[],
   ): LlmRequest {
     return {
       task,
@@ -199,6 +200,7 @@ export function createEngine(deps: EngineDeps) {
       maxOutputTokens: model.maxOutputTokens,
       ...(model.effort !== undefined && { effort: model.effort }),
       stepKey,
+      ...(repairOf !== undefined && { repairOf }),
     };
   }
 
@@ -418,16 +420,19 @@ export function createEngine(deps: EngineDeps) {
     const { config, sim, runId } = state;
     const prompt = unwrapPrompt(renderSemanticRuling({ scene, state: sim, adjudication: adj, request: req }));
     const extra: LlmMessage[] = [];
+    let previousIssue: string | undefined;
     for (let attempt = 0; attempt <= config.maxRepairs; attempt++) {
       const stepKey = `${runId}:${sim.round}:rule:${req.id}:${attempt}`;
-      const outcome = await call(SemanticRulingOutput, request('semantic_ruling', config.models.semantic_ruling, prompt, stepKey, extra), config, signal);
+      const repairOf = previousIssue === undefined ? undefined : [previousIssue];
+      const outcome = await call(SemanticRulingOutput, request('semantic_ruling', config.models.semantic_ruling, prompt, stepKey, extra, repairOf), config, signal);
       if (outcome.kind !== 'ok') return outcome;
       const converted = rulingFromOutput(req.id, outcome.value);
       const issue = converted.ok ? rulingIssue(scene, state, adj, req, converted.value) : `effects[${converted.error.index}]: ${converted.error.issue}`;
       if (issue === null && converted.ok) {
         return { kind: 'ok', value: { ruling: converted.value, rationale: outcome.value.rationale, uncertainties: outcome.value.uncertainties } };
       }
-      extra.push({ role: 'assistant', content: JSON.stringify(outcome.value) }, { role: 'user', content: repairMessage([issue ?? '']) });
+      previousIssue = issue ?? '';
+      extra.push({ role: 'assistant', content: JSON.stringify(outcome.value) }, { role: 'user', content: repairMessage([previousIssue]) });
     }
     return { kind: 'stop', event: { type: 'RunPaused', reason: 'ruling_invalid', detail: req.id } };
   }
@@ -511,25 +516,32 @@ export function createEngine(deps: EngineDeps) {
     }
 
     // 证据链：本回合新增的推测与秘密有关时，请求命中判断；只作提示，不作结论（B44）。
+    // 各人的判断互不依赖，同时发出；结果按角色标识的顺序写入，与响应的到达顺序无关。
+    const secrets = Object.fromEntries(scene.secrets.map((s) => [s.id, s.text]));
+    const results = await Promise.all(
+      [...state.views].sort().map(async (actor) => {
+        const inferred = (sim.knowledge[actor] ?? []).filter((k) => k.round === round && k.modality === 'inferred' && k.status === 'active');
+        const candidates = screenSecretInferences(scene, sim, actor, inferred);
+        if (candidates.length === 0) return { actor, candidates, outcome: null };
+        const prompt = unwrapPrompt(renderEvidenceJudgement(buildCharacterView(scene, sim, actor), candidates, secrets));
+        const outcome = await call(
+          EvidenceJudgementOutput,
+          request('judgement', config.models.judgement, prompt, `${runId}:${round}:evidence:${actor}:0`),
+          config,
+          signal,
+          actor,
+        );
+        return { actor, candidates, outcome };
+      }),
+    );
     const events: RunEvent[] = [];
-    for (const actor of [...state.views].sort()) {
-      const inferred = (sim.knowledge[actor] ?? []).filter((k) => k.round === round && k.modality === 'inferred' && k.status === 'active');
-      const candidates = screenSecretInferences(scene, sim, actor, inferred);
-      if (candidates.length === 0) continue;
-      const view = buildCharacterView(scene, sim, actor);
-      const secrets = Object.fromEntries(scene.secrets.map((s) => [s.id, s.text]));
-      const prompt = unwrapPrompt(renderEvidenceJudgement(view, candidates, secrets));
-      const outcome = await call(
-        EvidenceJudgementOutput,
-        request('judgement', config.models.judgement, prompt, `${runId}:${round}:evidence:${actor}:0`),
-        config,
-        signal,
-        actor,
-      );
+    for (const { actor, candidates, outcome } of results) {
+      if (outcome === null) continue;
       if (outcome.kind === 'cancelled') return 'cancelled';
       if (outcome.kind === 'stop') return [...events, outcome.event];
       for (const j of outcome.value.judgements) {
-        const candidate = candidates.find((c) => c.inference === j.inference);
+        // 一条推测可能对照几个秘密，按推测与秘密一起对应。
+        const candidate = candidates.find((c) => c.inference === j.inference && c.secret === j.secret);
         if (candidate !== undefined && j.hit && !j.supported) {
           events.push({ type: 'EvidenceGapFlagged', round, actor, secret: candidate.secret, inference: j.inference, explanation: j.explanation });
         }

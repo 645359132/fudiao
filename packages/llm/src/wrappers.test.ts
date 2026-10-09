@@ -5,6 +5,7 @@ import { memoryCallLog, withCallLog } from './call-log';
 import { inspectRequests } from './inspect';
 import { routeByProvider } from './router';
 import { memorySamples, RecordingAdapter, ReplayAdapter } from './replay';
+import { requestHash } from './request-hash';
 import { parseModelJson, structured } from './structured';
 import { baseRequest, scriptedPort, usage } from './testing/scripted-port';
 import type { LlmStreamEvent } from './types';
@@ -87,6 +88,22 @@ describe('结构化输出管线', () => {
     expect(repair.stepKey).toBe('s1#repair1');
     expect(repair.messages.at(-2)).toEqual({ role: 'assistant', content: '{"kind":"run"}' });
     expect(repair.messages.at(-1)?.content).toMatch(/^修正：kind: .*；rationale: /);
+    expect(repair.repairOf).toEqual([expect.stringMatching(/^kind: /), expect.stringMatching(/^rationale: /)]);
+    expect(requests[0]?.repairOf).toBeUndefined();
+  });
+
+  it('修正调用在调用记录中写明上一次输出未通过校验的原因', async () => {
+    const log = memoryCallLog();
+    const { port } = scriptedPort([{ text: '{"kind":"run"}' }, { text: '{"kind":"move","rationale":"靠近南门"}' }]);
+    await structured(withCallLog(port, log, () => '2026-10-09T00:00:00.000Z'), Action, baseRequest({ stepKey: 's1' }), { maxRepairs: 2, repairMessage });
+    expect(log.records().map((r) => [r.stepKey, r.repairIssues])).toEqual([
+      ['s1', undefined],
+      ['s1#repair1', [expect.stringMatching(/^kind: /), expect.stringMatching(/^rationale: /)]],
+    ]);
+  });
+
+  it('修正原因不计入请求哈希（原因已在修正消息中），录制回放样本照常匹配', () => {
+    expect(requestHash(baseRequest({ repairOf: ['kind: 无效'] }))).toBe(requestHash(baseRequest({})));
   });
 
   it('超过修正次数时返回 invalid_output 与最后的错误', async () => {

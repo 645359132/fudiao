@@ -28,7 +28,13 @@ const policy: Policy = {
     uncertainties: [],
   }),
   judgement: (ctx) => ({
-    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\]/g)].map((m) => ({ inference: m[1] ?? '', hit: true, supported: false, explanation: '没有线索' })),
+    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({
+      inference: m[1] ?? '',
+      secret: m[2] ?? '',
+      hit: true,
+      supported: false,
+      explanation: '没有线索',
+    })),
   }),
 };
 

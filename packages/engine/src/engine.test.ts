@@ -182,6 +182,9 @@ describe('裁决', () => {
     expect(done.phase).toBe('Ended');
     const second = s.model.calls.find((c) => c.step === 'rule' && c.attempt === 1);
     expect(second?.request.messages.at(-1)?.content).toContain('not_adjacent');
+    // 调用记录写明修正原因，便于统计哪类裁决需要修正。
+    const logged = s.calls.records().filter((r) => r.stepKey?.includes(':rule:'));
+    expect(logged.map((r) => r.repairIssues)).toEqual([undefined, [expect.stringContaining('not_adjacent')]]);
   });
 });
 
@@ -253,13 +256,65 @@ describe('认知与证据链', () => {
           ? waitProposal({ inferences: [{ content: '南门门槛下多半有绊索', about: ['south_gate'], confidence: 0.6, concerning: null }] })
           : waitProposal(),
       judgement: (ctx) => ({
-        judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\]/g)].map((m) => ({ inference: m[1] ?? '', hit: true, supported: false, explanation: '没有任何观察' })),
+        judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({
+          inference: m[1] ?? '',
+          secret: m[2] ?? '',
+          hit: true,
+          supported: false,
+          explanation: '没有任何观察',
+        })),
       }),
     });
     await runToStop(s, scene, testConfig({ maxRounds: 1 }));
     expect(ofType(await s.events(), 'EvidenceGapFlagged')).toEqual([
       expect.objectContaining({ actor: P, secret: 'tripwire_secret', explanation: '没有任何观察' }),
     ]);
+  });
+
+  // 第二个秘密也涉及南门，且两人都不知情：一条关于南门的推测会对照两个秘密。
+  const twoSecrets = warehouse((sc) => {
+    sc.secrets!.push({ id: 'gate_watch', text: '巡夜人今晚不走南门', subjects: ['south_gate'], knownBy: [] });
+  });
+  const gateGuess = waitProposal({ inferences: [{ content: '南门有古怪', about: ['south_gate'], confidence: 0.6, concerning: null }] });
+  const pairs = (text: string) => [...text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({ inference: m[1] ?? '', secret: m[2] ?? '' }));
+
+  it('一条推测同时对照两个秘密时，命中记在判断所指的那个秘密上', async () => {
+    const s = setup({
+      character_action: (ctx) => (ctx.subject === 'protagonist' ? gateGuess : waitProposal()),
+      judgement: (ctx) => ({
+        judgements: pairs(ctx.text).map((c) => ({ ...c, hit: c.secret === 'gate_watch', supported: false, explanation: `对照 ${c.secret}` })),
+      }),
+    });
+    await runToStop(s, twoSecrets, testConfig({ maxRounds: 1 }));
+    expect(ofType(await s.events(), 'EvidenceGapFlagged')).toEqual([
+      expect.objectContaining({ actor: P, secret: 'gate_watch', explanation: '对照 gate_watch' }),
+    ]);
+  });
+
+  it('各人的证据链判断同时发出，事件按角色标识的顺序写入，与响应的到达顺序无关', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const s = setup(
+      {
+        character_action: () => gateGuess,
+        judgement: (ctx) => {
+          inFlight--;
+          return { judgements: pairs(ctx.text).map((c) => ({ ...c, hit: true, supported: false, explanation: ctx.subject })) };
+        },
+      },
+      {
+        // 先发出的主角判断最晚返回。
+        delay: (ctx) => {
+          if (ctx.step !== 'evidence') return 0;
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          return ctx.subject === 'protagonist' ? 30 : 5;
+        },
+      },
+    );
+    await runToStop(s, twoSecrets, testConfig({ maxRounds: 1 }));
+    expect(peak).toBe(2);
+    expect(ofType(await s.events(), 'EvidenceGapFlagged').map((e) => e.actor)).toEqual([A, P, P]);
   });
 });
 
