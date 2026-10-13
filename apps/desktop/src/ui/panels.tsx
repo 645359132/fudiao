@@ -3,6 +3,7 @@ import type { Chapter, Project } from '@fudiao/store';
 import { ChapterEditor } from './ChapterEditor';
 import { AiWriteDrawer } from './AiWriteDrawer';
 import { ContextDrawer } from './ContextDrawer';
+import { ReviewDrawer } from './ReviewDrawer';
 import { EntityDrawer } from './SettingsPanel';
 import { NO_CHAPTERS, useApp } from './store-context';
 
@@ -49,10 +50,14 @@ export function ChapterPanel() {
   const writerJob = useApp((s) => s.writerJob);
   const writeChapters = useApp((s) => s.writeChapters);
   const cancelWriting = useApp((s) => s.cancelWriting);
+  const openReview = useApp((s) => s.openReview);
+  const review = useApp((s) => s.review);
   const chapterId = chapter?.id ?? null;
   const loaded = content !== null && content.chapterId === chapterId;
   // 写手正在写这一章时正文只读：写手把段落接在章末，编辑器里的修改会与它冲突。
   const writingHere = writerJob !== null && writerJob.chapterId === chapterId;
+  // 写手修订一段时同样只读，写入后重新载入。
+  const revisingHere = review !== null && review.revisingId !== null && review.chapterId === chapterId;
 
   useEffect(() => {
     if (chapterId !== null && !loaded) void loadChapter(chapterId);
@@ -81,7 +86,15 @@ export function ChapterPanel() {
         <button type="button" disabled={busy || writerJob !== null} title="按本章的计划由写手写出正文，接在本章末尾" onClick={() => void writeChapters([chapter.id])}>
           让写手写这一章
         </button>
+        <button type="button" disabled={busy} title="检查本章与设定、事实、伏笔和章节计划不一致的地方" onClick={() => void openReview()}>
+          审核
+        </button>
       </div>
+      {revisingHere ? (
+        <div className="writer-banner" role="status" aria-label="写手修订">
+          <span>写手正在修订这一章的一段，完成之前正文只读。</span>
+        </div>
+      ) : null}
       {writingHere ? (
         <div className="writer-banner" role="status" aria-label="写手进度">
           <span>
@@ -96,7 +109,7 @@ export function ChapterPanel() {
       <div className="chapter-with-drawer">
         {!loaded ? (
           <p className="muted">正在载入……</p>
-        ) : writingHere ? (
+        ) : writingHere || revisingHere ? (
           <div className="chapter-text" aria-label="正文（只读）">
             {content.saved.map((p) => (
               <p key={p.id}>{p.text}</p>
@@ -108,6 +121,7 @@ export function ChapterPanel() {
         <EntityDrawer />
         <AiWriteDrawer />
         <ContextDrawer />
+        <ReviewDrawer />
       </div>
       <details className="chapter-notes">
         <summary>梗概与写作备注</summary>

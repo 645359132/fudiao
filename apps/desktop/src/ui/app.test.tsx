@@ -1036,3 +1036,80 @@ describe('写手成章界面（B59、B60）', () => {
     await waitFor(() => expect(screen.getByRole('group', { name: '第一章的长篇记忆' }).textContent).toContain('长篇记忆：有效'));
   });
 });
+
+describe('审核界面（B64）', () => {
+  const conflict = { paragraph: 'P1', quote: '用左手稳稳接过茶盏', kind: 'setting_conflict', severity: 'high', evidence: ['E1'], description: '林舟左手有伤，接不稳茶盏', suggestion: '改用右手' };
+
+  async function ready() {
+    const ctx = start();
+    const { service, store, user, deps } = ctx;
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('林舟不禁叹了口气，用左手稳稳接过茶盏。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['林舟不禁叹了口气，用左手稳稳接过茶盏。']));
+    const lin = await service.createEntity('character', '林舟');
+    if (!lin.ok) throw new Error('设定');
+    expect((await service.updateEntity(lin.value.created, { description: '落魄书生，左手有伤' })).ok).toBe(true);
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '审核' }));
+    const drawer = await screen.findByRole('complementary', { name: '审核' });
+    expect(within(drawer).getByRole('status').textContent).toContain('待处理的问题 0 条');
+    return { ...ctx, drawer };
+  }
+
+  it('审核本章：列出问题、引文、依据与建议；点引文在正文中定位；忽略；交给写手修订后正文更新', async () => {
+    const { deps, store, user, drawer } = await ready();
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [conflict, { ...conflict, quote: '正文里没有的话' }] })));
+    await user.click(within(drawer).getByRole('button', { name: '审核本章' }));
+    const issue = await within(drawer).findByRole('listitem', { name: '设定冲突问题' });
+    expect(within(drawer).getByRole('status').textContent).toContain('模型提出的 1 条问题定位不到原文或依据，没有列出');
+    expect(issue.textContent).toContain('严重 · 模型审核');
+    expect(issue.textContent).toContain('林舟左手有伤，接不稳茶盏');
+    expect(issue.textContent).toContain('建议：改用右手');
+    expect(within(within(issue).getByRole('list', { name: '依据' })).getByText('设定 林舟：落魄书生，左手有伤')).toBeTruthy();
+
+    await user.click(within(issue).getByRole('button', { name: '“用左手稳稳接过茶盏”' }));
+    await waitFor(() => expect(document.getSelection()?.toString()).toBe('用左手稳稳接过茶盏'));
+
+    // 程序检查的规避词问题：忽略后不再列出。
+    const tone = within(drawer).getByRole('listitem', { name: 'AI 腔问题' });
+    expect(tone.textContent).toContain('轻微 · 程序检查');
+    await user.click(within(tone).getByRole('button', { name: '忽略' }));
+    await waitFor(() => expect(within(drawer).queryByRole('listitem', { name: 'AI 腔问题' })).toBeNull());
+
+    deps.llmResponses.push(reply('林舟叹了口气，用右手接过茶盏。'));
+    await user.click(within(within(drawer).getByRole('listitem', { name: '设定冲突问题' })).getByRole('button', { name: '交给写手修订' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('林舟叹了口气，用右手接过茶盏。'));
+    expect(store.getState().chapterContent?.saved.map((p) => p.source)).toEqual(['ai_generated']);
+    await waitFor(() => expect(within(drawer).queryByRole('listitem', { name: '设定冲突问题' })).toBeNull());
+    expect(within(drawer).getByRole('status').textContent).toContain('写手已修订这一段');
+    expect(store.getState().tasks.map((t) => [t.kind, t.status])).toEqual(expect.arrayContaining([['review', 'done'], ['writer', 'done']]));
+  });
+
+  it('作者自己改了这一段：保存后它上面的问题不再列出', async () => {
+    const { deps, store, user, drawer } = await ready();
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [conflict] })));
+    await user.click(within(drawer).getByRole('button', { name: '审核本章' }));
+    await within(drawer).findByRole('listitem', { name: '设定冲突问题' });
+    await user.click(screen.getByRole('textbox', { name: '正文' }));
+    await user.keyboard('他');
+    await waitFor(() => expect(store.getState().chapterContent?.saved[0]?.text).toContain('他'));
+    await waitFor(() => expect(within(drawer).queryAllByRole('listitem')).toHaveLength(0));
+  });
+
+  it('没有模型时只做程序检查，并说明模型审核没有完成的原因', async () => {
+    const ctx = start();
+    const { store, user } = ctx;
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('林舟不禁叹了口气。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: '审核' }));
+    const drawer = await screen.findByRole('complementary', { name: '审核' });
+    await user.click(within(drawer).getByRole('button', { name: '审核本章' }));
+    expect(await within(drawer).findByRole('listitem', { name: 'AI 腔问题' })).toBeTruthy();
+    expect(within(drawer).getByRole('status').textContent).toContain('只做了程序检查，模型审核没有完成：还没有设置默认模型');
+  });
+});

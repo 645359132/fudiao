@@ -5,6 +5,8 @@ export type { BuiltinSkillText, ComposedSkill, SkillSetting } from './skills';
 export { composeSkills } from './skills';
 export type { ProgramCheckInput } from './checks';
 export { avoidPhraseHits, MIN_REVEAL_LENGTH, missingCast, overdueForeshadows, revealLeaks, runProgramChecks } from './checks';
+export type { DroppedIssue, ModelIssueDraft, ReviewRefs } from './review';
+export { dropHandled, paragraphLabel, resolveModelIssues } from './review';
 export { DEFAULT_AVOID_PHRASES, effectiveAvoidPhrases } from './avoid';
 export type { SegmentPlan } from './segments';
 export { DEFAULT_CHAPTER_WORDS, planSegments, SEGMENT_WORDS, splitParagraphs } from './segments';

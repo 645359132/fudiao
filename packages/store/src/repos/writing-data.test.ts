@@ -7,7 +7,7 @@ import { createChapter, trashChapter } from './chapter';
 import { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
 import { getChapterPlan, listChapterPlans, saveChapterPlan, setPlanStatus, type PlanFields } from './chapter-plan';
 import { createForeshadow, deleteForeshadow, getForeshadow, listForeshadows, updateForeshadow, type ForeshadowFields } from './foreshadow';
-import { addIssues, listIssues, reviewStaleIssues, setIssueStatus, type IssueInput } from './review-issue';
+import { addIssues, countPendingIssues, getIssue, listIssues, replacePendingIssues, reviewStaleIssues, setIssueStatus, type IssueInput } from './review-issue';
 import { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
 
 const ctx = { now: '2026-10-10T00:00:00.000Z' };
@@ -208,5 +208,20 @@ describe('审核问题', () => {
     value(await db.transaction([{ sql: "DELETE FROM paragraph WHERE id = 'g2'", params: [] }]));
     expect(value(await reviewStaleIssues(db, 'c1', later))).toEqual(['i2']);
     expect(value(await listIssues(db, 'c1', ['stale'])).map((i) => i.id)).toEqual(['i2']);
+  });
+
+  it('重新审核：同一来源仍待处理的旧问题过期，换成新的；另一来源的问题与作者处理过的问题不动', async () => {
+    const db = await fresh();
+    value(await addIssues(db, [issue('i1', { source: 'model' }), issue('i2', { source: 'model' }), issue('i3')], ctx));
+    value(await setIssueStatus(db, value(await getIssue(db, 'i2'))!, 'ignored', later));
+    value(await replacePendingIssues(db, 'c1', 'model', [issue('i4', { source: 'model' })], later));
+    expect(value(await listIssues(db, 'c1')).map((i) => i.id).sort()).toEqual(['i3', 'i4']);
+    expect(value(await getIssue(db, 'i1'))?.status).toBe('stale');
+    expect(value(await getIssue(db, 'i2'))?.status).toBe('ignored');
+    expect(value(await countPendingIssues(db))).toEqual(new Map([['c1', 2]]));
+    // 这一次没有问题：旧问题同样过期。
+    value(await replacePendingIssues(db, 'c1', 'model', [], later));
+    expect(value(await listIssues(db, 'c1')).map((i) => i.id)).toEqual(['i3']);
+    expect(value(await getIssue(db, 'none'))).toBeNull();
   });
 });

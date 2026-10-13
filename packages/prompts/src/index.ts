@@ -24,6 +24,8 @@ export {
   renderRunSynopsis,
   MEMORY_SUMMARY_WORDS,
   renderChapterMemory,
+  renderChapterReview,
+  renderWriterRevise,
   renderPlanDraft,
   renderWriterChapter,
   renderSceneDraft,
@@ -42,6 +44,7 @@ export {
   DirectorProposalOutput,
   EvidenceJudgementOutput,
   ChapterMemoryOutput,
+  ChapterReviewOutput,
   PlanDraftOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
@@ -50,6 +53,6 @@ export {
 } from './schemas';
 export type { RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
-export type { ChapterMemoryInput, PlanDraftInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';
+export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';

@@ -28,6 +28,7 @@ import {
   BeliefUpdateOutput,
   DirectorProposalOutput,
   EvidenceJudgementOutput,
+  ChapterReviewOutput,
   ChapterMemoryOutput,
   PlanDraftOutput,
   SceneDraftOutput,
@@ -59,6 +60,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   EvidenceJudgementOutput,
   BeatSheetOutput,
   SceneDraftOutput,
+  ChapterReviewOutput,
   ChapterMemoryOutput,
   PlanDraftOutput,
 };
@@ -605,6 +607,76 @@ export function renderChapterMemory(input: ChapterMemoryInput): Result<RenderedP
     hasForeshadows: input.foreshadows.length > 0,
     text: input.text,
     summaryWords: MEMORY_SUMMARY_WORDS,
+  });
+}
+
+export type ChapterReviewInput = {
+  readonly title: string;
+  readonly chapterTitle: string;
+  /** 带标签的设定：本章的出场人物与正文中提到的设定。state 是长篇记忆中最近的状态，没有时为空。 */
+  readonly entities: readonly { readonly label: string; readonly name: string; readonly kind: string; readonly locked: boolean; readonly description: string; readonly state: string }[];
+  readonly facts: readonly { readonly label: string; readonly content: string }[];
+  /** 前面章节的梗概，从远到近。 */
+  readonly memories: readonly { readonly title: string; readonly summary: string }[];
+  /** 章节计划；作者手写、没有计划的章节为 null。 */
+  readonly plan: { readonly goal: string; readonly cast: readonly string[]; readonly beats: readonly string[] } | null;
+  /** role：这条伏笔在本章的要求（要埋、要回收、不得说破）。 */
+  readonly foreshadows: readonly { readonly label: string; readonly title: string; readonly role: string; readonly content: string; readonly reveal: string }[];
+  readonly paragraphs: readonly { readonly label: string; readonly text: string }[];
+};
+
+/** 审核（B64）：作者侧的检查，材料是本章正文、章节计划、相关的设定、事实、伏笔与前文梗概。 */
+export function renderChapterReview(input: ChapterReviewInput): Result<RenderedPrompt, string> {
+  return renderTemplate('chapter_review', {
+    title: input.title,
+    chapterTitle: input.chapterTitle,
+    entities: input.entities.map((e) => ({ label: e.label, name: e.name, kind: e.kind, locked: e.locked, description: e.description.trim(), state: e.state.trim() })),
+    hasEntities: input.entities.length > 0,
+    facts: input.facts.map((f) => ({ label: f.label, content: f.content })),
+    hasFacts: input.facts.length > 0,
+    memories: input.memories.map((m) => ({ title: m.title, summary: m.summary })),
+    hasMemories: input.memories.length > 0,
+    hasPlan: input.plan !== null,
+    goal: input.plan?.goal ?? '',
+    cast: [...(input.plan?.cast ?? [])],
+    hasCast: (input.plan?.cast.length ?? 0) > 0,
+    beats: [...(input.plan?.beats ?? [])],
+    hasBeats: (input.plan?.beats.length ?? 0) > 0,
+    foreshadows: input.foreshadows.map((f) => ({ label: f.label, title: f.title, role: f.role, content: f.content, reveal: f.reveal.trim() })),
+    hasForeshadows: input.foreshadows.length > 0,
+    paragraphs: input.paragraphs.map((p) => ({ label: p.label, text: p.text })),
+  });
+}
+
+export type WriterReviseInput = {
+  readonly title: string;
+  readonly chapterTitle: string;
+  readonly avoidPhrases: readonly string[];
+  /** 问题引用的依据，已写成文字（例如“设定 林舟：落魄书生”）。 */
+  readonly evidence: readonly string[];
+  readonly mustNotReveal: readonly string[];
+  /** 前一段与后一段，没有时为空。 */
+  readonly before: string;
+  readonly paragraph: string;
+  readonly after: string;
+  readonly issues: readonly { readonly quote: string; readonly description: string; readonly suggestion: string }[];
+};
+
+/** 写手修订（B64）：只改审核问题所在的一段，输出纯文本。 */
+export function renderWriterRevise(input: WriterReviseInput): Result<RenderedPrompt, string> {
+  return renderTemplate('writer_revise', {
+    title: input.title,
+    chapterTitle: input.chapterTitle,
+    avoidPhrases: [...input.avoidPhrases],
+    hasAvoid: input.avoidPhrases.length > 0,
+    evidence: [...input.evidence],
+    hasEvidence: input.evidence.length > 0,
+    mustNotReveal: [...input.mustNotReveal],
+    hasMustNotReveal: input.mustNotReveal.length > 0,
+    before: input.before,
+    paragraph: input.paragraph,
+    after: input.after,
+    issues: input.issues.map((i) => ({ quote: i.quote, description: i.description, suggestion: i.suggestion.trim() })),
   });
 }
 

@@ -5,6 +5,7 @@ import { PlanDraftOutput, renderPlanDraft } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
+  countPendingIssues,
   createForeshadow,
   deleteForeshadow,
   getChapterPlan,
@@ -40,6 +41,8 @@ export type PlanChapterView = {
   /** 长篇记忆（B66）；正文在生成记忆后改过时状态为待复核。 */
   readonly memory: ChapterMemory | null;
   readonly hasText: boolean;
+  /** 待处理的审核问题数（B64）。 */
+  readonly pendingIssues: number;
 };
 
 export type PlanningView = {
@@ -69,7 +72,7 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
     // 先标出需要复核的记忆，列出的状态因此总是最新的。
     const reviewed = await reviewStaleMemories(port, ctx());
     if (!reviewed.ok) return err(repo(reviewed.error));
-    const [work, chapters, plans, foreshadows, entities, memories, withText] = await Promise.all([
+    const [work, chapters, plans, foreshadows, entities, memories, withText, issues] = await Promise.all([
       getProject(port),
       listChapters(port, 'normal'),
       listChapterPlans(port),
@@ -77,7 +80,9 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       listEntities(port),
       listChapterMemories(port),
       listChaptersWithText(port),
+      countPendingIssues(port),
     ]);
+    if (!issues.ok) return err(repo(issues.error));
     if (!memories.ok) return err(repo(memories.error));
     if (!withText.ok) return err(repo(withText.error));
     if (!work.ok) return err(repo(work.error));
@@ -99,6 +104,7 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
           problems: plan === null ? [] : checkPlan(plan, foreshadows.value, order),
           memory: memoryOf.get(chapter.id) ?? null,
           hasText: hasText.has(chapter.id),
+          pendingIssues: issues.value.get(chapter.id) ?? 0,
         };
       }),
       foreshadows: foreshadows.value,

@@ -1293,3 +1293,50 @@ fieldset.plain {
   gap: 8px;
   align-items: center;
 }
+
+.review-drawer {
+  width: 340px;
+}
+
+.issue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issue {
+  padding: 8px 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+}
+
+.issue-high {
+  border-left-color: var(--danger);
+}
+
+.issue-medium {
+  border-left-color: var(--accent);
+}
+
+.issue-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.issue-kind {
+  font-weight: 600;
+}
+
+.issue-quote {
+  display: block;
+  margin: 4px 0;
+  text-align: left;
+}
+
+.issue-evidence {
+  margin: 4px 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 13px;
+}

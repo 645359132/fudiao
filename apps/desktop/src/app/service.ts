@@ -67,6 +67,7 @@ import { candidateUseCases } from './candidates';
 import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
+import { reviewUseCases } from './review';
 import { writerUseCases } from './writer';
 import { modelRunner } from './model-runner';
 import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
@@ -305,6 +306,7 @@ export function createAppService(deps: AppDeps) {
   const planning = planningUseCases(deps, () => session?.port ?? null, runner);
   const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
+  const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
 
   return {
     ...services,
@@ -313,6 +315,7 @@ export function createAppService(deps: AppDeps) {
     ...planning,
     ...writer,
     ...memory,
+    ...review,
 
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {

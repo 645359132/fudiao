@@ -2,8 +2,8 @@
 // 段落修改后，仍待处理的问题由 reviewStaleIssues 标为过期。
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
-import type { SqlPort } from '../sql';
-import { guardedUpdate, jsonColumn, ParagraphAnchor, queryAll, type RepoError, type WriteContext } from './common';
+import type { SqlPort, Statement } from '../sql';
+import { guardedUpdate, jsonColumn, ParagraphAnchor, queryAll, queryOne, type RepoError, type WriteContext } from './common';
 
 export const ISSUE_KINDS = ['setting_conflict', 'timeline', 'pov_leak', 'foreshadow', 'character', 'off_plan', 'pacing', 'ai_tone'] as const;
 export type IssueKind = (typeof ISSUE_KINDS)[number];
@@ -66,30 +66,53 @@ export type IssueInput = {
   readonly source: 'program' | 'model';
 };
 
+const insert = (i: IssueInput, ctx: WriteContext): Statement => ({
+  sql: `INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, evidence, description, suggestion, source, llm_call_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  params: [i.id, i.chapterId, i.kind, i.severity, JSON.stringify(i.anchor), JSON.stringify(i.evidence), i.description, i.suggestion, i.source, i.llmCallId, ctx.now, ctx.now],
+});
+
 /** 一次审核的问题一并写入。 */
 export async function addIssues(port: SqlPort, issues: readonly IssueInput[], ctx: WriteContext): Promise<Result<void, RepoError>> {
   if (issues.length === 0) return ok(undefined);
-  const result = await port.transaction(
-    issues.map((i) => ({
-      sql: `INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, evidence, description, suggestion, source, llm_call_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [
-        i.id,
-        i.chapterId,
-        i.kind,
-        i.severity,
-        JSON.stringify(i.anchor),
-        JSON.stringify(i.evidence),
-        i.description,
-        i.suggestion,
-        i.source,
-        i.llmCallId,
-        ctx.now,
-        ctx.now,
-      ],
-    })),
-  );
+  const result = await port.transaction(issues.map((i) => insert(i, ctx)));
   return result.ok ? ok(undefined) : err({ code: 'sql', error: result.error });
+}
+
+/**
+ * 重新审核：这一章同一来源（程序或模型）仍待处理的旧问题标为过期，换成这一次的问题，在同一事务中完成。
+ * 作者已经处理的问题（忽略、已修改、已交写手）不动。
+ */
+export async function replacePendingIssues(
+  port: SqlPort,
+  chapterId: string,
+  source: IssueInput['source'],
+  issues: readonly IssueInput[],
+  ctx: WriteContext,
+): Promise<Result<void, RepoError>> {
+  const result = await port.transaction([
+    {
+      sql: "UPDATE review_issue SET status = 'stale', version = version + 1, updated_at = ? WHERE chapter_id = ? AND source = ? AND status = 'pending'",
+      params: [ctx.now, chapterId, source],
+    },
+    ...issues.map((i) => insert(i, ctx)),
+  ]);
+  return result.ok ? ok(undefined) : err({ code: 'sql', error: result.error });
+}
+
+export function getIssue(port: SqlPort, id: string): Promise<Result<ReviewIssue | null, RepoError>> {
+  return queryOne(port, IssueRow, `SELECT ${COLUMNS} FROM review_issue WHERE id = ?`, [id]);
+}
+
+/** 各章待处理的问题数（回收站以外的章节）。 */
+export async function countPendingIssues(port: SqlPort): Promise<Result<Map<string, number>, RepoError>> {
+  const rows = await queryAll(
+    port,
+    z.object({ id: z.string(), n: z.number().int() }),
+    `SELECT i.chapter_id AS id, count(*) AS n FROM review_issue i JOIN chapter c ON c.id = i.chapter_id
+     WHERE i.status = 'pending' AND c.status = 'normal' GROUP BY i.chapter_id`,
+  );
+  return rows.ok ? ok(new Map(rows.value.map((r) => [r.id, r.n]))) : rows;
 }
 
 /** 一章的问题，严重的在前；默认只列待处理的。 */

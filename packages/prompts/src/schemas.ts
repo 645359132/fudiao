@@ -217,6 +217,22 @@ export const ChapterMemoryOutput = z.object({
 });
 export type ChapterMemoryOutput = z.infer<typeof ChapterMemoryOutput>;
 
+/** 审核（B64）：问题列表。段落与依据用提示词中的标签指代，由 packages/writing 的 resolveModelIssues 换回标识并校验。 */
+export const ChapterReviewOutput = z.object({
+  issues: z.array(
+    z.object({
+      paragraph: z.string(),
+      quote: z.string(),
+      kind: z.enum(['setting_conflict', 'timeline', 'pov_leak', 'foreshadow', 'character', 'off_plan', 'pacing', 'ai_tone']),
+      severity: z.enum(['high', 'medium', 'low']),
+      evidence: z.array(z.string()),
+      description: z.string(),
+      suggestion: z.string(),
+    }),
+  ),
+});
+export type ChapterReviewOutput = z.infer<typeof ChapterReviewOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

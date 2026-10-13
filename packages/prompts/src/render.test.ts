@@ -36,6 +36,7 @@ import {
   renderDirectorProposal,
   renderEvidenceJudgement,
   renderChapterMemory,
+  renderChapterReview,
   renderPlanDraft,
   renderRunSynopsis,
   renderSceneDraft,
@@ -43,6 +44,7 @@ import {
   renderStalemateJudgement,
   renderStructuredRepair,
   renderWriterChapter,
+  renderWriterRevise,
   type RenderedPrompt,
 } from './render';
 
@@ -426,5 +428,92 @@ describe('长篇记忆（B66）', () => {
     const bare = fullText(unwrap(renderChapterMemory({ title: 't', chapterTitle: 'c', characters: [], foreshadows: [], text: '正文。' })));
     expect(bare).not.toContain('人物：');
     expect(bare).not.toContain('伏笔：\n');
+  });
+});
+
+describe('审核（B64）', () => {
+  const base = {
+    title: '当铺夜谈',
+    chapterTitle: '第二章 夜雨',
+    entities: [
+      { label: 'E1', name: '林舟', kind: '人物', locked: true, description: '落魄书生，左手有伤', state: '玉还在手里' },
+      { label: 'E2', name: '当铺', kind: '地点', locked: false, description: '', state: '' },
+    ],
+    facts: [{ label: 'F1', content: '林舟欠下赌债' }],
+    memories: [{ title: '第一章 夜叩', summary: '林舟当玉被压价' }],
+    plan: { goal: '林舟再访当铺', cast: ['林舟', '钱四'], beats: ['叩门', '对峙'] },
+    foreshadows: [
+      { label: 'S1', title: '玉佩的来历', role: '不得说破', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物' },
+      { label: 'S2', title: '巷口的人', role: '本章要埋', content: '有人盯梢', reveal: '' },
+    ],
+    paragraphs: [
+      { label: 'P1', text: '林舟又叩响了门。' },
+      { label: 'P2', text: '钱四没有抬头。' },
+    ],
+  };
+
+  it('列出带标签的设定、事实、伏笔、章节计划与正文段落，要求结构化输出', () => {
+    const prompt = unwrap(renderChapterReview(base));
+    expect(prompt.task).toBe('review');
+    expect(prompt.output?.name).toBe('ChapterReviewOutput');
+    const text = fullText(prompt);
+    for (const part of [
+      '- [E1] 林舟（人物，锁定）：落魄书生，左手有伤（前文中最近的状态：玉还在手里）',
+      '- [E2] 当铺（地点）\n',
+      '- [F1] 林舟欠下赌债',
+      '- 第一章 夜叩：林舟当玉被压价',
+      '章节计划 [plan]：\n本章目标：林舟再访当铺\n出场人物：林舟；钱四；\n情节点：\n- 叩门\n- 对峙',
+      '- [S1] 玉佩的来历（不得说破）：掌柜多看了一眼；揭晓的内容：玉佩是父亲的遗物',
+      '- [S2] 巷口的人（本章要埋）：有人盯梢\n',
+      '正文：\n[P1] 林舟又叩响了门。\n[P2] 钱四没有抬头。',
+    ]) {
+      expect(text).toContain(part);
+    }
+  });
+
+  it('没有计划、设定、事实、伏笔与前文时整段省略', () => {
+    const text = fullText(unwrap(renderChapterReview({ ...base, entities: [], facts: [], memories: [], plan: null, foreshadows: [] })));
+    for (const absent of ['设定：\n', '已确认的事实：', '前文梗概：', '章节计划 [plan]', '伏笔：\n']) expect(text).not.toContain(absent);
+    expect(text).toContain('[P1] 林舟又叩响了门。');
+  });
+});
+
+describe('写手修订（B64）', () => {
+  it('写出要修订的段落、前后段、问题、依据、规避词与不得说破的内容；输出纯文本', () => {
+    const prompt = unwrap(
+      renderWriterRevise({
+        title: '当铺夜谈',
+        chapterTitle: '第二章 夜雨',
+        avoidPhrases: ['不禁'],
+        evidence: ['设定 林舟：落魄书生，左手有伤'],
+        mustNotReveal: ['玉佩是父亲的遗物'],
+        before: '林舟又叩响了门。',
+        paragraph: '他用左手稳稳接过茶盏，不禁笑了。',
+        after: '钱四没有抬头。',
+        issues: [
+          { quote: '左手稳稳接过茶盏', description: '林舟左手有伤，接不稳茶盏', suggestion: '改用右手' },
+          { quote: '', description: '这一段没有推进情节', suggestion: '' },
+        ],
+      }),
+    );
+    expect(prompt.task).toBe('writer');
+    expect(prompt.output).toBeUndefined();
+    const text = fullText(prompt);
+    for (const part of [
+      '不要使用这些说法：“不禁”',
+      '依据：\n- 设定 林舟：落魄书生，左手有伤',
+      '不得说破：\n- 玉佩是父亲的遗物',
+      '前一段：\n林舟又叩响了门。',
+      '要修订的段落：\n他用左手稳稳接过茶盏，不禁笑了。',
+      '后一段：\n钱四没有抬头。',
+      '- “左手稳稳接过茶盏”：林舟左手有伤，接不稳茶盏（建议：改用右手）',
+      '- 这一段没有推进情节\n',
+    ]) {
+      expect(text).toContain(part);
+    }
+    const bare = fullText(
+      unwrap(renderWriterRevise({ title: 't', chapterTitle: 'c', avoidPhrases: [], evidence: [], mustNotReveal: [], before: '', paragraph: '一段。', after: '', issues: [{ quote: '', description: '问题', suggestion: '' }] })),
+    );
+    for (const absent of ['不要使用这些说法', '依据：', '不得说破', '前一段：', '后一段：']) expect(bare).not.toContain(absent);
   });
 });

@@ -3,6 +3,7 @@ import type { Result } from '@fudiao/shared';
 import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
+import type { ReviewIssueView } from '../app/review';
 import type { ForeshadowFields, PlanFields } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
@@ -38,6 +39,15 @@ export type EditorHandle = {
 };
 
 /** 一次选区操作：流式生成的文字与状态（B16）。 */
+/** 审核抽屉的状态：note 是最近一次审核或修订的说明。 */
+export type ReviewState = {
+  readonly chapterId: string;
+  readonly issues: readonly ReviewIssueView[];
+  readonly running: boolean;
+  readonly revisingId: string | null;
+  readonly note: string | null;
+};
+
 export type AiWriteJob = {
   readonly operation: SelectionOperation;
   readonly instruction: string;
@@ -201,6 +211,19 @@ export type AppState = {
   readonly writeChapters: (chapterIds: readonly string[]) => Promise<void>;
   readonly cancelWriting: () => void;
   readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
+  /** 审核（B64）：正文旁的审核抽屉。running 为正在审核，revisingId 为正交给写手修订的问题。 */
+  readonly reviewDrawerOpen: boolean;
+  readonly review: ReviewState | null;
+  readonly openReview: () => Promise<void>;
+  readonly closeReview: () => void;
+  readonly runReview: () => Promise<void>;
+  readonly cancelReview: () => void;
+  /** 正文保存后重新读取待处理的问题（段落改过的问题已过期）。 */
+  readonly refreshReview: () => Promise<void>;
+  readonly resolveIssue: (id: string, status: 'ignored' | 'fixed') => Promise<void>;
+  readonly reviseIssue: (id: string) => Promise<void>;
+  /** 在正文中选中问题所在的文字。 */
+  readonly revealIssue: (issue: ReviewIssueView) => void;
   /** 生成或重建一章的长篇记忆（B66）；memoryBuilding 是正在生成的章节。 */
   readonly memoryBuilding: string | null;
   readonly buildMemory: (chapterId: string) => Promise<boolean>;
@@ -274,6 +297,7 @@ export function createAppStore(service: AppService): AppStore {
     const taskAborts = new Map<string, AbortController>();
     let taskSeq = 0;
     let writerAbort: AbortController | null = null;
+    let reviewAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
     /** 生成一章的长篇记忆，登记为任务；失败时显示原因。返回是否成功。 */
@@ -368,6 +392,8 @@ export function createAppStore(service: AppService): AppStore {
       planDrafting: false,
       writerJob: null,
       memoryBuilding: null,
+      reviewDrawerOpen: false,
+      review: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -415,7 +441,7 @@ export function createAppStore(service: AppService): AppStore {
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -668,7 +694,7 @@ export function createAppStore(service: AppService): AppStore {
         return done;
       },
       // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
-      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false }),
+      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false, reviewDrawerOpen: false }),
       async openPlanning() {
         if (!(await get().leaveChapter())) return;
         await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawerEntityId: null }));
@@ -755,6 +781,113 @@ export function createAppStore(service: AppService): AppStore {
         set({ writerJob: null });
       },
       cancelWriting: () => writerAbort?.abort(),
+      async openReview() {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null) return;
+        const handle = editor?.chapterId === chapterId ? editor : null;
+        if (handle !== null && !(await handle.flush())) return;
+        const issues = await service.reviewIssues(chapterId);
+        if (!issues.ok) {
+          set({ message: describeError(issues.error) });
+          return;
+        }
+        // 换了章节才重置；同一章再次打开时保留正在进行的审核。
+        const current = get().review;
+        const review: ReviewState =
+          current !== null && current.chapterId === chapterId ? { ...current, issues: issues.value } : { chapterId, issues: issues.value, running: false, revisingId: null, note: null };
+        set({ reviewDrawerOpen: true, review, drawerEntityId: null, contextDrawerOpen: false, writeDrawerOpen: false });
+      },
+      closeReview: () => set({ reviewDrawerOpen: false }),
+      cancelReview: () => reviewAbort?.abort(),
+      async refreshReview() {
+        const current = get().review;
+        if (current === null || current.running || current.revisingId !== null) return;
+        const issues = await service.reviewIssues(current.chapterId);
+        const now = get().review;
+        if (issues.ok && now !== null && now.chapterId === current.chapterId && !now.running && now.revisingId === null) set({ review: { ...now, issues: issues.value } });
+      },
+      async runReview() {
+        const current = get().review;
+        if (current === null || current.running || current.revisingId !== null) return;
+        const chapterId = current.chapterId;
+        const handle = editor?.chapterId === chapterId ? editor : null;
+        if (handle !== null && !(await handle.flush())) return;
+        const abort = new AbortController();
+        reviewAbort = abort;
+        const taskId = `task-${++taskSeq}`;
+        taskAborts.set(taskId, abort);
+        task({ type: 'started', task: { id: taskId, kind: 'review', title: `审核 · ${chapter(chapterId)?.title ?? ''}`, chapterId, startedAt: new Date().toISOString() } });
+        set({ review: { ...current, running: true, note: null } });
+        const result = await service.reviewChapter(chapterId, {
+          signal: abort.signal,
+          onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+        });
+        taskAborts.delete(taskId);
+        if (reviewAbort === abort) reviewAbort = null;
+        const finishedAt = new Date().toISOString();
+        const patch = (issues: readonly ReviewIssueView[], note: string | null) => {
+          const now = get().review;
+          if (now !== null && now.chapterId === chapterId) set({ review: { ...now, issues, running: false, note } });
+        };
+        if (!result.ok) {
+          task({ type: 'finished', id: taskId, status: 'failed', finishedAt, error: describeError(result.error) });
+          patch(current.issues, describeError(result.error));
+          return;
+        }
+        const { issues, modelReviewed, reason, dropped } = result.value;
+        const note = !modelReviewed
+          ? `只做了程序检查，模型审核没有完成：${reason ?? ''}`
+          : dropped > 0
+            ? `模型提出的 ${dropped} 条问题定位不到原文或依据，没有列出`
+            : issues.length === 0
+              ? '审核完成，没有发现问题'
+              : null;
+        task({ type: 'finished', id: taskId, status: modelReviewed ? 'done' : abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: modelReviewed ? null : reason });
+        patch(issues, note);
+        const planning = get().planning === null ? null : await service.planningView();
+        if (planning?.ok === true) set({ planning: planning.value });
+      },
+      async resolveIssue(id, status) {
+        const current = get().review;
+        if (current === null) return;
+        const issues = await service.resolveIssue(id, status);
+        const now = get().review;
+        if (!issues.ok) set({ message: describeError(issues.error) });
+        else if (now !== null && now.chapterId === current.chapterId) set({ review: { ...now, issues: issues.value } });
+      },
+      async reviseIssue(id) {
+        const current = get().review;
+        if (current === null || current.running || current.revisingId !== null || get().writerJob !== null) return;
+        const chapterId = current.chapterId;
+        // 先保存；修订期间正文只读，写手写入后重新载入。
+        if (!(await get().leaveChapter())) return;
+        const abort = new AbortController();
+        reviewAbort = abort;
+        const taskId = `task-${++taskSeq}`;
+        taskAborts.set(taskId, abort);
+        task({ type: 'started', task: { id: taskId, kind: 'writer', title: `写手修订 · ${chapter(chapterId)?.title ?? ''}`, chapterId, startedAt: new Date().toISOString() } });
+        set({ review: { ...current, revisingId: id, note: null }, message: null });
+        const result = await service.reviseIssue(id, {
+          signal: abort.signal,
+          onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+        });
+        taskAborts.delete(taskId);
+        if (reviewAbort === abort) reviewAbort = null;
+        const finishedAt = new Date().toISOString();
+        const now = get().review;
+        const same = now !== null && now.chapterId === chapterId;
+        if (!result.ok) {
+          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+          if (same) set({ review: { ...now, revisingId: null, note: describeError(result.error) } });
+          return;
+        }
+        task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+        if (same) set({ review: { ...now, issues: result.value.issues, revisingId: null, note: '写手已修订这一段；写入前的正文在“版本快照”中' } });
+        if (get().selectedChapterId === chapterId) {
+          set({ chapterContent: { chapterId, saved: [...result.value.paragraphs], draft: null }, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
+        }
+      },
+      revealIssue: (issue) => set({ reveal: { chapterId: issue.chapterId, paragraphId: issue.anchor.paragraphId, start: issue.anchor.start, end: issue.anchor.end } }),
       async buildMemory(chapterId) {
         if (get().writerJob !== null || get().memoryBuilding !== null) return false;
         if (!(await get().leaveChapter())) return false;
@@ -817,6 +950,7 @@ export function createAppStore(service: AppService): AppStore {
           contextSelection: selection,
           contextDrawerOpen: true,
           writeDrawerOpen: false,
+          reviewDrawerOpen: false,
           drawerEntityId: null,
         }));
       },
@@ -839,7 +973,7 @@ export function createAppStore(service: AppService): AppStore {
         const selection = handle?.selection() ?? null;
         const selectedText = handle?.selectedText() ?? '';
         if (handle !== null && !(await handle.flush())) return;
-        set({ writeDrawerOpen: true, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection, drawerEntityId: null, contextDrawerOpen: false });
+        set({ writeDrawerOpen: true, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection, drawerEntityId: null, contextDrawerOpen: false, reviewDrawerOpen: false });
         await run(service.listCandidates(chapterId), (candidates) => ({ candidates }));
       },
       closeAiWrite: () => {

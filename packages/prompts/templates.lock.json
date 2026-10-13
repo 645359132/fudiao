@@ -23,6 +23,10 @@
     "version": "1",
     "sha256": "83eef0aeb675a9249cf206aeb40a8664bda163edd36c743b79bbabafcf58e4fd"
   },
+  "chapter_review": {
+    "version": "1",
+    "sha256": "9c6fdf07ea0d524446a961a74e766137bb2177306887affbed392362b65f68d6"
+  },
   "character_action": {
     "version": "8",
     "sha256": "ec0be1a728b9c0026c07ba46b5edc4ce9e52acef1444a6272436f113e99935f7"
@@ -74,6 +78,10 @@
   "writer_chapter": {
     "version": "2",
     "sha256": "e4dfb4bdded3896fa66cb8fab91d5fa43da09bbd3960e9be57cff114246a80ec"
+  },
+  "writer_revise": {
+    "version": "1",
+    "sha256": "91c3472389769a4fd222680c8b48f70331896f9a041e37e6128b492a26c71d80"
   },
   "skill:cliffhanger": {
     "version": "1",
