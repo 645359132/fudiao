@@ -60,6 +60,7 @@
 - M3-05 已完成：`writer_chapter` 模板（版本 1）；`packages/writing` 的 `planSegments`、`splitParagraphs`；`chapter_plan.progress` 与仓储 `writer-segment.ts`（一段的段落与进度在同一事务写入，以段落数与版本之和为守卫）；用例 `apps/desktop/src/app/writer.ts`（`writeChapter` 分段写、续写不重复调用，`rollbackWriter` 回退到写手写入前）；章节页“让写手写这一章”（写作期间正文只读），计划页的写手操作与连续写多章。
 - M3-06 已完成：`chapter_memory` 模板（版本 1，输出 `ChapterMemoryOutput`）；用例 `apps/desktop/src/app/memory.ts`（`buildMemory`：梗概、人物状态、伏笔进展，记录依据的段落版本与调用记录）；计划视图先标出待复核的记忆；写手模板升到版本 2，带人物最近的状态与要回收伏笔的进展；写手写完一章后自动生成记忆，计划页可查看、生成与重建。
 - M3-07 已完成：`chapter_review` 模板（版本 1，输出 `ChapterReviewOutput`）与 `writer_revise` 模板（版本 1）；`packages/writing` 的 `resolveModelIssues`（标签换回标识，定位不到原文或依据不存在的问题丢弃）与 `dropHandled`；仓储 `replacePendingIssues`、`countPendingIssues`；用例 `apps/desktop/src/app/review.ts`（`reviewChapter` 程序检查加模型审核、`resolveIssue`、`reviseIssue` 交给写手修订一段）；章节页的“审核”抽屉。
+- M3-08 已完成：成书流程看板 `apps/desktop/src/ui/PipelineBoard.tsx`（“计划”页的“成书进度”：按章显示计划、写作、长篇记忆与审核，写下一章、依次写完、排定一段章节、写完后审核、单章审核与查看问题）；状态层的 `writeChapters(ids, { review })`、`reviewFromBoard`、`openChapterReview`。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

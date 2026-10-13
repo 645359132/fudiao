@@ -98,7 +98,12 @@ export function ChapterPanel() {
       {writingHere ? (
         <div className="writer-banner" role="status" aria-label="写手进度">
           <span>
-            写手正在写这一章{writerJob.total > 0 ? `（已写 ${writerJob.done} / ${writerJob.total} 段）` : ''}，写完之前正文只读。
+            {writerJob.stage === 'writing'
+              ? `写手正在写这一章${writerJob.total > 0 ? `（已写 ${writerJob.done} / ${writerJob.total} 段）` : ''}`
+              : writerJob.stage === 'memory'
+                ? '这一章已写完，正在整理长篇记忆'
+                : '这一章已写完，正在审核'}
+            ，完成之前正文只读。
           </span>
           <button type="button" onClick={cancelWriting}>
             停下

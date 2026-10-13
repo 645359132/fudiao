@@ -1113,3 +1113,80 @@ describe('审核界面（B64）', () => {
     expect(within(drawer).getByRole('status').textContent).toContain('只做了程序检查，模型审核没有完成：还没有设置默认模型');
   });
 });
+
+describe('成书流程看板（B65）', () => {
+  const plan = { goal: '目标', castIds: [], beats: ['一'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 };
+  const memory = (summary: string) => reply(JSON.stringify({ summary, cast: [], foreshadows: [] }));
+  const cells = (title: string) => within(screen.getByRole('row', { name: title })).getAllByRole('cell').map((c) => c.textContent);
+
+  async function ready(titles: readonly string[]) {
+    const ctx = start();
+    const { service, store, user, deps } = ctx;
+    await createWork(user, '当铺夜谈');
+    for (const title of titles) await addChapter(user, title);
+    const ids = store.getState().work?.chapters.map((c) => c.id) ?? [];
+    for (const id of ids) expect((await service.savePlan(id, plan)).ok).toBe(true);
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await screen.findByRole('table', { name: '各章进度' });
+    return { ...ctx, ids };
+  }
+
+  it('按章显示计划、写作、长篇记忆与审核；排定一段章节并在写完后审核；从看板打开一章的问题', async () => {
+    const { deps, store, user } = await ready(['第一章', '第二章', '第三章']);
+    const board = screen.getByRole('region', { name: '成书进度' });
+    expect(within(board).getByRole('status').textContent).toBe('共 3 章：有计划 3 章，已写 0 章，已审核 0 章；待处理的审核问题 0 条。');
+    expect(cells('第一章').slice(0, 4)).toEqual(['有', '待写', '—', '—']);
+
+    await user.selectOptions(within(board).getByRole('combobox', { name: '写到哪一章' }), '第二章');
+    await user.click(within(board).getByRole('checkbox', { name: '写完后审核' }));
+    deps.llmResponses.push(
+      reply('林舟叩响了门。'),
+      memory('林舟叩门。'),
+      reply(JSON.stringify({ issues: [{ paragraph: 'P1', quote: '叩响了门', kind: 'pacing', severity: 'low', evidence: [], description: '开头太平', suggestion: '从门里的声音写起' }] })),
+      reply('门开了。'),
+      memory('门开了。'),
+      reply(JSON.stringify({ issues: [] })),
+    );
+    await user.click(within(board).getByRole('button', { name: '排定这 2 章' }));
+    await waitFor(() => expect(cells('第二章').slice(0, 4)).toEqual(['有', '已写', '有效', '已审核']));
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    expect(cells('第一章').slice(0, 4)).toEqual(['有', '已写', '有效', '待处理 1 条']);
+    expect(cells('第三章').slice(0, 4)).toEqual(['有', '待写', '—', '—']);
+    expect(within(board).getByRole('status').textContent).toBe('共 3 章：有计划 3 章，已写 2 章，已审核 2 章；待处理的审核问题 1 条。');
+    expect(store.getState().tasks.filter((t) => t.status === 'done').map((t) => t.kind).sort()).toEqual(['memory', 'memory', 'review', 'review', 'writer', 'writer']);
+    // 只剩一章待写：不再显示范围选择。
+    expect(within(board).queryByRole('combobox', { name: '写到哪一章' })).toBeNull();
+
+    await user.click(within(board).getByRole('button', { name: '查看第一章的问题' }));
+    const drawer = await screen.findByRole('complementary', { name: '审核' });
+    expect(within(drawer).getByRole('listitem', { name: '重复与节奏问题' }).textContent).toContain('开头太平');
+    expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('林舟叩响了门。');
+  });
+
+  it('审核没有完成时说明原因，不接着写后面的章节', async () => {
+    const { deps, store, user } = await ready(['第一章', '第二章']);
+    await user.click(screen.getByRole('checkbox', { name: '写完后审核' }));
+    deps.llmResponses.push(reply('第一章的正文。'), memory('梗概。'), reply('不是 JSON'), reply('不是 JSON'), reply('不是 JSON'));
+    await user.click(screen.getByRole('button', { name: '依次写完待写的 2 章' }));
+    expect(await screen.findByText(/“第一章”已写完，但审核没有完成.*后面的 1 章没有接着写/)).toBeTruthy();
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    expect(cells('第一章').slice(0, 4)).toEqual(['有', '已写', '有效', '未审核']);
+    expect(cells('第二章').slice(0, 4)).toEqual(['有', '待写', '—', '—']);
+  });
+
+  it('在看板上审核一章手写的正文：没有模型时只做程序检查，并说明原因', async () => {
+    const { store, user } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('林舟不禁叹了口气。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved).toHaveLength(1));
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await screen.findByRole('table', { name: '各章进度' });
+    expect(cells('第一章').slice(0, 4)).toEqual(['没有', '有正文', '没有', '未审核']);
+    await user.click(screen.getByRole('button', { name: '审核第一章' }));
+    await waitFor(() => expect(cells('第一章')[3]).toBe('待处理 1 条'));
+    expect(await screen.findByText(/只做了程序检查，模型审核没有完成：还没有设置默认模型/)).toBeTruthy();
+  });
+});
