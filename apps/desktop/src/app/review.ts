@@ -310,7 +310,7 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
         })),
         facts: factRefs.map(({ label, item }) => ({ label, content: factText(item) })),
         memories: earlier,
-        plan: m.plan === null ? null : { goal: m.plan.goal, cast: cast.map((c) => c.name), beats: m.plan.beats },
+        plan: m.plan === null ? null : { goal: m.plan.goal, treatment: m.plan.treatment, cast: cast.map((c) => c.name), beats: m.plan.beats },
         foreshadows: foreshadowRefs.map(({ label, item }) => ({
           label,
           title: item.f.title,

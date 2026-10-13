@@ -1,6 +1,6 @@
 ---
 id: chapter_review
-version: 1
+version: 2
 task: review
 output: ChapterReviewOutput
 ---
@@ -12,7 +12,7 @@ output: ChapterReviewOutput
 检查这些方面（kind 填括号里的英文）：
 - 与设定或已确认的事实冲突（setting_conflict）：正文与下面“设定”“已确认的事实”中的内容矛盾。标了“锁定”的设定不能被正文改写。
 - 时间线矛盾（timeline）：时间、先后顺序、人物所在的地点前后对不上。
-- 视角越界与信息提前泄露（pov_leak）：叙述写出了视角人物不可能知道的事，或人物说出、用上了他此时还不知道的信息。
+- 视角越界与信息提前泄露（pov_leak）：先从正文判断本章贴着谁的所见所想来写（视角人物）。叙述写出了视角人物看不到、不可能知道的事（例如别人心里的盘算），用全知的旁白交代了他不知道的事，或人物说出、用上了他此时还不知道的信息。
 - 伏笔（foreshadow）：本章要埋的伏笔没有埋下，要回收的没有回收，或“不得说破”的内容被说破、被写出能直接推出它的话。
 - 人物言行与此前不符（character）：与人物设定、前文中的状态或一贯的言行矛盾，而正文没有给出理由。
 - 偏离章节计划（off_plan）：本章目标没有达成，计划的情节点没有写到，或写了与计划矛盾的情节。
@@ -53,6 +53,9 @@ output: ChapterReviewOutput
 {{#hasPlan}}
 章节计划 [plan]：
 本章目标：{{goal}}
+{{#treatment}}
+详略与写法：{{treatment}}
+{{/treatment}}
 {{#hasCast}}
 出场人物：{{#cast}}{{.}}；{{/cast}}
 {{/hasCast}}

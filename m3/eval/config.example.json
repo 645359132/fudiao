@@ -1,0 +1,20 @@
+{
+  "provider": {
+    "kind": "openai_compatible",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com",
+    "apiKeyEnv": "DEEPSEEK_API_KEY"
+  },
+  "model": {
+    "id": "请填写模型名",
+    "capabilities": {
+      "structuredOutput": "json_object",
+      "promptCaching": false,
+      "reasoningControl": "none",
+      "refusalFallback": "none",
+      "contextWindow": 64000,
+      "maxOutputTokens": 8000
+    },
+    "prices": null
+  }
+}

@@ -619,7 +619,7 @@ export type ChapterReviewInput = {
   /** 前面章节的梗概，从远到近。 */
   readonly memories: readonly { readonly title: string; readonly summary: string }[];
   /** 章节计划；作者手写、没有计划的章节为 null。 */
-  readonly plan: { readonly goal: string; readonly cast: readonly string[]; readonly beats: readonly string[] } | null;
+  readonly plan: { readonly goal: string; readonly treatment: string; readonly cast: readonly string[]; readonly beats: readonly string[] } | null;
   /** role：这条伏笔在本章的要求（要埋、要回收、不得说破）。 */
   readonly foreshadows: readonly { readonly label: string; readonly title: string; readonly role: string; readonly content: string; readonly reveal: string }[];
   readonly paragraphs: readonly { readonly label: string; readonly text: string }[];
@@ -638,6 +638,7 @@ export function renderChapterReview(input: ChapterReviewInput): Result<RenderedP
     hasMemories: input.memories.length > 0,
     hasPlan: input.plan !== null,
     goal: input.plan?.goal ?? '',
+    treatment: input.plan?.treatment.trim() ?? '',
     cast: [...(input.plan?.cast ?? [])],
     hasCast: (input.plan?.cast.length ?? 0) > 0,
     beats: [...(input.plan?.beats ?? [])],

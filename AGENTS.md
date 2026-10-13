@@ -61,6 +61,7 @@
 - M3-06 已完成：`chapter_memory` 模板（版本 1，输出 `ChapterMemoryOutput`）；用例 `apps/desktop/src/app/memory.ts`（`buildMemory`：梗概、人物状态、伏笔进展，记录依据的段落版本与调用记录）；计划视图先标出待复核的记忆；写手模板升到版本 2，带人物最近的状态与要回收伏笔的进展；写手写完一章后自动生成记忆，计划页可查看、生成与重建。
 - M3-07 已完成：`chapter_review` 模板（版本 1，输出 `ChapterReviewOutput`）与 `writer_revise` 模板（版本 1）；`packages/writing` 的 `resolveModelIssues`（标签换回标识，定位不到原文或依据不存在的问题丢弃）与 `dropHandled`；仓储 `replacePendingIssues`、`countPendingIssues`；用例 `apps/desktop/src/app/review.ts`（`reviewChapter` 程序检查加模型审核、`resolveIssue`、`reviseIssue` 交给写手修订一段）；章节页的“审核”抽屉。
 - M3-08 已完成：成书流程看板 `apps/desktop/src/ui/PipelineBoard.tsx`（“计划”页的“成书进度”：按章显示计划、写作、长篇记忆与审核，写下一章、依次写完、排定一段章节、写完后审核、单章审核与查看问题）；状态层的 `writeChapters(ids, { review })`、`reviewFromBoard`、`openChapterReview`。
+- M3-09 的工具已完成、真实评估待作者执行：评估脚本 `tools/m3-eval/`（`pnpm m3:eval`，走完全流程并统计植入问题的检出率，运行前显示预计费用并确认）；短篇材料与植入的问题 `m3/eval/book.json`，步骤见 `m3/README.md`，结果记入 `m3/RESULTS.md`；`chapter_review` 模板升到版本 2（先判断视角人物，带上详略说明）。M3 的任务代码已全部完成，待作者执行真实评估与手工清单。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式
@@ -96,6 +97,7 @@ packages/llm        模型适配器、结构化输出管线、预算守卫
 packages/store      迁移、仓储、事件存储
 packages/editor     TipTap 扩展
 m0/                 M0 场景、实验配置、评估材料与结论
+m3/                 M3 评估的短篇材料、配置示例与结果
 ```
 
 依赖只能向内：`apps → engine / context / writing / store / llm → domain → shared`。`packages/domain` 不得导入 IO 模块、Tauri、数据库或网络库。依赖边界由 dependency-cruiser 在持续集成中检查。
@@ -146,6 +148,12 @@ pnpm check
 
 ```bash
 pnpm bench serial
+```
+
+M3 评估（调用真实模型，运行前显示预计费用并请你确认；配置与步骤见 `m3/README.md`，运行记录写在 `m3/runs/`，不入库）：
+
+```bash
+pnpm m3:eval --config m3/eval/config.json --chapters 2
 ```
 
 M0 命令行（真实调用前会显示预计费用并请你确认；API Key 从实验配置指定的环境变量读取）：

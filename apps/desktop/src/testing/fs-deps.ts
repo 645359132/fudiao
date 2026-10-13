@@ -1,4 +1,5 @@
-// 测试用的应用依赖：作品列表与文件夹用临时目录，作品库用 Node 的 SqlPort（better-sqlite3）。仅供测试使用。
+// 测试用的应用依赖：作品列表与文件夹用临时目录，作品库用 Node 的 SqlPort（better-sqlite3）。供测试使用；
+// M3 评估（tools/m3-eval）在本机手动运行时也用它，换上真实的网络请求与时钟。
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,7 +51,14 @@ export type TestDeps = AppDeps & {
   dispose(): Promise<void>;
 };
 
-export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-'))): TestDeps {
+export type FsDepsOptions = {
+  /** 到达模型服务的请求改用这个函数发出（M3 评估用真实的 fetch）；不给时取预设的响应。 */
+  readonly fetch?: typeof fetch;
+  /** 用真实的时间与随机的标识；默认是确定的时钟与标识，测试结果可以复现。 */
+  readonly realTime?: boolean;
+};
+
+export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), options: FsDepsOptions = {}): TestDeps {
   const libraryFile = join(root, 'appdata', 'library.json');
   const documents = join(root, 'Documents', '复调');
   const picks: (string | null)[] = [];
@@ -71,6 +79,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-'))): TestD
   let settings: ProjectDb | null = null;
   // 模型服务：每次请求取下一个预设响应，并记下到达服务的请求。
   const service = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    if (options.fetch !== undefined) return options.fetch(input, init);
     const { fetch, requests } = fakeFetch([llmResponses.shift() ?? { networkError: true }]);
     const response = fetch(input, init);
     llmRequests.push(...requests);
@@ -271,7 +280,10 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-'))): TestD
       },
     },
     llm: { forProvider: (provider) => buildAdapter(provider, createProxyFetch(proxy, provider.id, () => 'req')) },
-    clock: { now: () => new Date(Date.UTC(2026, 9, 7, 0, 0, tick++)).toISOString() },
-    ids: { next: () => ulid(1_790_000_000_000 + seq, new Uint8Array(10).fill(seq++ % 256)) },
+    clock: { now: () => (options.realTime === true ? new Date().toISOString() : new Date(Date.UTC(2026, 9, 7, 0, 0, tick++)).toISOString()) },
+    ids: {
+      next: () =>
+        options.realTime === true ? ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))) : ulid(1_790_000_000_000 + seq, new Uint8Array(10).fill(seq++ % 256)),
+    },
   };
 }
