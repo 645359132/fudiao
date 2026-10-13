@@ -41,6 +41,7 @@ import {
   renderSemanticRuling,
   renderStalemateJudgement,
   renderStructuredRepair,
+  renderWriterChapter,
   type RenderedPrompt,
 } from './render';
 
@@ -333,5 +334,69 @@ describe('章节计划草稿（B65）', () => {
     expect(empty).toContain('还没有人物设定');
     expect(empty).not.toContain('已有的章节：');
     expect(empty).not.toContain('已有的伏笔：');
+  });
+});
+
+describe('写手成章（B59）', () => {
+  const base = {
+    title: '当铺夜谈',
+    genre: '古代市井',
+    chapterTitle: '第二章 夜雨',
+    goal: '林舟另寻门路',
+    treatment: '奔走略写，对峙展开',
+    skills: [{ name: '章末钩子', text: '结尾停在未解的问题上。' }],
+    avoidPhrases: ['不禁', '仿佛'],
+    cast: [
+      { name: '林舟', description: '落魄书生' },
+      { name: '钱四', description: '' },
+    ],
+    facts: ['林舟欠下赌债'],
+    memories: [{ title: '第一章 夜叩', summary: '林舟当玉被压价' }],
+    toPlant: [{ title: '债主', content: '巷口有人盯梢' }],
+    toPayoff: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物' }],
+    mustNotReveal: ['债主是钱四的表兄'],
+    beatsBefore: ['雨中奔走'],
+    beatsNow: ['再访当铺', '对峙'],
+    beatsAfter: ['离开'],
+    previousEnding: '门在他身后合上了。',
+    written: '雨下了一夜。',
+    words: 1500,
+    isLast: false,
+  };
+
+  it('写出技能、规避词、人物、事实、前文、伏笔、不得说破的内容与情节点的进度', () => {
+    const prompt = unwrap(renderWriterChapter(base));
+    expect(prompt.task).toBe('writer');
+    expect(prompt.output).toBeUndefined();
+    const text = fullText(prompt);
+    for (const part of [
+      '【章末钩子】结尾停在未解的问题上。',
+      '不要使用这些说法：“不禁”“仿佛”',
+      '- 林舟：落魄书生',
+      '- 钱四\n',
+      '- 林舟欠下赌债',
+      '- 第一章 夜叩：林舟当玉被压价',
+      '- 债主：巷口有人盯梢',
+      '- 玉佩的来历：前文埋下的是“掌柜多看了一眼”，本章揭晓：玉佩是父亲的遗物',
+      '不得说破：\n- 债主是钱四的表兄',
+      '- （已写）雨中奔走\n- （这次写）再访当铺\n- （这次写）对峙\n- （以后写）离开',
+      '上一章的结尾：\n门在他身后合上了。',
+      '本章已经写到这里：\n雨下了一夜。',
+      '请接着写标为“这次写”的情节点，约 1500 字。这不是本章的结尾',
+    ]) {
+      expect(text).toContain(part);
+    }
+  });
+
+  it('没有的部分整段省略；最后一段要求写到本章结束；没有情节点时按本章目标写', () => {
+    const text = fullText(
+      unwrap(
+        renderWriterChapter({ ...base, skills: [], avoidPhrases: [], cast: [], facts: [], memories: [], toPlant: [], toPayoff: [], mustNotReveal: [], beatsBefore: [], beatsNow: [], beatsAfter: [], previousEnding: '', written: '', isLast: true }),
+      ),
+    );
+    for (const absent of ['写作技能：', '不要使用这些说法', '出场人物：', '已确认的事实：', '前文梗概：', '要埋的伏笔', '要回收的伏笔', '不得说破', '本章的情节点：', '上一章的结尾', '本章已经写到这里']) {
+      expect(text).not.toContain(absent);
+    }
+    expect(text).toContain('请接着写本章的正文，达成本章目标，约 1500 字。这是本章的最后一段，写到本章结束。');
   });
 });

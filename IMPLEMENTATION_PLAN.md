@@ -141,7 +141,7 @@ fudiao/
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
 | `candidate` | id、chapter_id、operation、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
 | `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
-| `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、version；迁移 0005 | B65 |
+| `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、progress（写手的进度 JSON：这次写作的标识、情节点的分段与每段字数、已写入的段数、写入前快照的标识；没让写手写过时为空）、version；迁移 0005 | B65、B59 |
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key、name、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能的文字在 `packages/prompts/templates/skills/`，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
@@ -349,10 +349,13 @@ stateDiagram-v2
 
 写手成章（B59、B60、B61）：
 
-- 上下文沿用写作上下文的构建方式（`packages/context`），增加章节计划、本章要埋与要收的伏笔（含揭晓前不得说破的内容）、前面章节的长篇记忆（从近到远）、出场人物的设定与状态、作者指定的文风样本与规避词表。超出预算时先裁远处章节的记忆，章节计划与伏笔条目必需。
+- 上下文由用例 `apps/desktop/src/app/writer.ts` 按章节计划收集：本章的目标、详略说明与情节点，本章要埋与要收的伏笔（含揭晓前不得说破的内容），前面章节的梗概（优先用长篇记忆，没有时用作者写的章节梗概；从近到远选入，超出 6,000 字时去掉最远的），出场人物的设定，涉及出场人物的已确认事实（最多 30 条），上一章的结尾与本章已写的结尾（各 1,500 字），规避词表。章节计划与伏笔条目必需。文风样本待 B39 实现后加入。
 - 写作技能是 `packages/prompts/templates/skills/` 下带版本的模板片段（文件名为技能键，文件头声明版本、名称与顺序；`pnpm prompts:build` 一并生成并在版本锁中记为 `skill:键`，内容变了而版本没变时失败），写手模板按作品中启用的技能组合写作指令（`packages/writing` 决定顺序与冲突，如“略写”与“展开”作用于不同情节点）。作者改过的技能说明保存在作品中，调用记录写明用到的技能及其版本。
-- 按章节计划的情节点分段生成，每段一次调用，流式显示；段与段之间带上已写的结尾，避免单次输出过长被截断。
-- 写入：先保存“写手写入”快照，再按范围替换写入本章（沿用 `paragraph-range.ts`），段落记为 AI 生成并以自身为生成原文。作者在写手运行时编辑了本章，写手停在当前段并提示，不覆盖作者的修改。
+- 按章节计划的情节点分段生成（`packages/writing` 的 `planSegments`：每段约 1,500 字，情节点按顺序均分到各段），每段一次调用（`writer_chapter` 模板），流式显示；段与段之间带上已写的结尾，避免单次输出过长被截断。
+- 写入（`packages/store/src/repos/writer-segment.ts`）：写第一段之前保存“写手写入”快照并在章节计划中记下进度；每写完一段，在一个事务中把段落接在章末（记为 AI 生成并以自身为生成原文）、把进度加一，全部写完时计划状态改为已写。事务以本章的段落数与段落版本之和为守卫：作者在写手运行时改了本章，写手停下并提示，不覆盖作者的修改。本章有未保存的草稿时不开始写。
+- 续写与幂等：每段的步骤键为“章节 + 这次写作的标识 + 段号”。中断、取消或失败后再写同一章，已写入的段跳过，已完成而没写入的调用复用调用记录，不重复计费。
+- 回退：恢复“写手写入”快照（现稿先存为恢复前快照），清除进度，计划回到待写，可以重写。
+- 界面：章节页的“让写手写这一章”，计划页每章的“写这一章”“接着写”“回退到写手写入前”与“写下一章”“依次写完待写的章节”；连续写多章时一章没写完就停下，不接着写后面的章节。写手正在写的章节在编辑器中只读并显示进度。
 
 审核（B64）：
 

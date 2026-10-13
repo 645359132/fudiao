@@ -57,6 +57,7 @@
 - M3-02 已完成：`packages/writing`（纯函数，依赖边界与 ESLint 规则同领域内核）：`foreshadowsForChapter`（本章要埋、要收、不得说破的伏笔）、`checkPlan`、`nextChapterToWrite`；`composeSkills`（内置技能按模板顺序、作者改动优先、记录来源与版本）；审核的程序检查 `runProgramChecks`（规避表达、揭晓内容提前说破、到期未回收的伏笔、计划中的人物未出场）。
 - M3-03 已完成：八项内置写作技能（`packages/prompts/templates/skills/`，`BUILTIN_SKILLS`，版本锁记为 `skill:键`）；作品的规避词表 `project.avoid_phrases`（为空时用 `DEFAULT_AVOID_PHRASES`）；用例 `apps/desktop/src/app/writing-skills.ts` 与“作品 → 写作技能”页（启用、改写、恢复、自定义技能、规避词表）。
 - M3-04 已完成：`plan_draft` 模板（版本 1，输出 `PlanDraftOutput`）；用例 `apps/desktop/src/app/planning.ts`（计划视图与问题、生成草稿、采用草稿、计划与伏笔的编辑）；顶栏“计划”页（草稿、章节计划、伏笔账本）；任务种类增加 `plan_draft` 等；测试辅助 `src/testing/models.ts`。
+- M3-05 已完成：`writer_chapter` 模板（版本 1）；`packages/writing` 的 `planSegments`、`splitParagraphs`；`chapter_plan.progress` 与仓储 `writer-segment.ts`（一段的段落与进度在同一事务写入，以段落数与版本之和为守卫）；用例 `apps/desktop/src/app/writer.ts`（`writeChapter` 分段写、续写不重复调用，`rollbackWriter` 回退到写手写入前）；章节页“让写手写这一章”（写作期间正文只读），计划页的写手操作与连续写多章。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

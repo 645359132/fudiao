@@ -269,15 +269,80 @@ function Ledger() {
   );
 }
 
+const PLAN_STATUS = { todo: '待写', writing: '写作中', written: '已写', reviewed: '已审核' } as const;
+
+/** 一章的写作状态与写手操作：写这一章、接着写、回退到写手写入前。 */
+function WriterActions({ item }: { readonly item: PlanChapterView }) {
+  const writerJob = useApp((s) => s.writerJob);
+  const write = useApp((s) => s.writeChapters);
+  const rollback = useApp((s) => s.rollbackWriter);
+  const cancel = useApp((s) => s.cancelWriting);
+  const busy = useApp((s) => s.busy);
+  const [confirming, setConfirming] = useState(false);
+  const plan = item.plan;
+  if (plan === null) return null;
+  const here = writerJob?.chapterId === item.chapter.id;
+  const queued = writerJob?.queued.includes(item.chapter.id) === true;
+  const progress = plan.progress;
+  return (
+    <div className="skill-actions" role="group" aria-label={`${item.chapter.title}的写作`}>
+      <span className="muted">
+        {here ? `写手正在写${writerJob.total > 0 ? `（${writerJob.done} / ${writerJob.total} 段）` : ''}` : queued ? '排队中' : PLAN_STATUS[plan.status]}
+        {!here && plan.status === 'writing' && progress !== null ? `（已写 ${progress.done} / ${progress.segments.length} 段）` : ''}
+      </span>
+      {here ? (
+        <button type="button" onClick={cancel}>
+          停下
+        </button>
+      ) : null}
+      {writerJob === null && (plan.status === 'todo' || plan.status === 'writing') ? (
+        <button type="button" disabled={busy} onClick={() => void write([item.chapter.id])}>
+          {plan.status === 'writing' ? '接着写' : '写这一章'}
+        </button>
+      ) : null}
+      {writerJob === null && progress !== null ? (
+        confirming ? (
+          <>
+            <span>回退后，写手写入的段落与之后的修改都会撤掉；现稿会先存为一个快照。</span>
+            <button type="button" disabled={busy} onClick={() => void rollback(item.chapter.id).then(() => setConfirming(false))}>
+              确定回退
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              取消
+            </button>
+          </>
+        ) : (
+          <button type="button" disabled={busy} onClick={() => setConfirming(true)}>
+            回退到写手写入前
+          </button>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 /** 成书计划：章节计划与伏笔账本（需求 B63、B65）。 */
 export function PlanningPanel() {
   const planning = useApp((s) => s.planning);
+  const writerJob = useApp((s) => s.writerJob);
+  const write = useApp((s) => s.writeChapters);
+  const busy = useApp((s) => s.busy);
   if (planning === null) return <p className="muted">正在读取成书计划…</p>;
+  // 从第一章待写或没写完的章节起，按顺序排到最后。
+  const pending = planning.chapters.filter((c) => c.plan !== null && (c.plan.status === 'todo' || c.plan.status === 'writing')).map((c) => c.chapter.id);
   return (
     <section aria-label="成书计划" className="skills">
       <h2>成书计划</h2>
       <DraftSection />
       <h3>章节计划</h3>
+      <div className="skill-actions">
+        <button type="button" disabled={busy || writerJob !== null || pending.length === 0} onClick={() => void write(pending.slice(0, 1))}>
+          写下一章
+        </button>
+        <button type="button" disabled={busy || writerJob !== null || pending.length === 0} onClick={() => void write(pending)}>
+          依次写完待写的 {pending.length} 章
+        </button>
+      </div>
       <ol className="skill-list">
         {planning.chapters.map((item) => (
           <li key={`${item.chapter.id}:${item.plan?.version ?? 0}`} className="skill" aria-label={item.chapter.title}>
@@ -288,6 +353,7 @@ export function PlanningPanel() {
               </summary>
               <PlanEditor item={item} />
             </details>
+            <WriterActions item={item} />
             {item.problems.map((p) => (
               <p key={`${p.code}:${p.foreshadowId}`} className="field-error">
                 {PROBLEM[p.code]}：{planning.foreshadows.find((f) => f.id === p.foreshadowId)?.title ?? p.foreshadowId}

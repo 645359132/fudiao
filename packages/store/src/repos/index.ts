@@ -37,3 +37,6 @@ export type { ChapterMemory, MemoryInput } from './chapter-memory';
 export { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
 export type { IssueEvidence, IssueInput, IssueKind, IssueSeverity, IssueStatus, ReviewIssue } from './review-issue';
 export { addIssues, ISSUE_KINDS, ISSUE_STATUSES, listIssues, reviewStaleIssues, setIssueStatus } from './review-issue';
+export type { WriterProgress } from './chapter-plan';
+export type { SegmentWrite } from './writer-segment';
+export { appendWrittenSegment, resetWriterRun, startWriterRun } from './writer-segment';

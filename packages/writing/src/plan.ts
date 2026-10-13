@@ -3,14 +3,15 @@ import type { ChapterOrder, ForeshadowItem, PlanItem } from './types';
 
 const CLOSED = new Set<ForeshadowItem['status']>(['paid_off', 'dropped']);
 
-export type ChapterForeshadows = {
-  readonly toPlant: readonly ForeshadowItem[];
-  readonly toPayoff: readonly ForeshadowItem[];
+export type ChapterForeshadows<F extends ForeshadowItem = ForeshadowItem> = {
+  readonly toPlant: readonly F[];
+  readonly toPayoff: readonly F[];
   /** 揭晓内容在本章不得说破的伏笔：尚未回收、不在本章回收、写明了揭晓内容。 */
-  readonly mustNotReveal: readonly ForeshadowItem[];
+  readonly mustNotReveal: readonly F[];
 };
 
-export function foreshadowsForChapter(plan: PlanItem, foreshadows: readonly ForeshadowItem[], order: ChapterOrder): ChapterForeshadows {
+/** 传入的伏笔原样返回（调用方的记录可以带更多字段）。 */
+export function foreshadowsForChapter<F extends ForeshadowItem>(plan: PlanItem, foreshadows: readonly F[], order: ChapterOrder): ChapterForeshadows<F> {
   const byId = new Map(foreshadows.map((f) => [f.id, f]));
   const pick = (ids: readonly string[]) => ids.flatMap((id) => byId.get(id) ?? []);
   const here = order.get(plan.chapterId);

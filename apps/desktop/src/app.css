@@ -398,6 +398,17 @@ textarea {
   flex: 1;
 }
 
+.writer-banner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
 .chapter-text {
   min-height: 60vh;
   outline: none;
@@ -1278,5 +1289,7 @@ fieldset.plain {
 
 .skill-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
 }

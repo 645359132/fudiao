@@ -149,9 +149,9 @@ export const TABLES: readonly TableSpec[] = [
   },
   {
     name: 'chapter_plan',
-    columns: ['chapter_id', 'goal', 'cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'treatment', 'target_words', 'status', ...VERSIONED],
+    columns: ['chapter_id', 'goal', 'cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'treatment', 'target_words', 'status', 'progress', ...VERSIONED],
     primaryKey: ['chapter_id'],
-    json: ['cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff'],
+    json: ['cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'progress'],
   },
   {
     name: 'writing_skill',

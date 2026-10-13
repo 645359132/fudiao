@@ -6,3 +6,5 @@ export { composeSkills } from './skills';
 export type { ProgramCheckInput } from './checks';
 export { avoidPhraseHits, MIN_REVEAL_LENGTH, missingCast, overdueForeshadows, revealLeaks, runProgramChecks } from './checks';
 export { DEFAULT_AVOID_PHRASES, effectiveAvoidPhrases } from './avoid';
+export type { SegmentPlan } from './segments';
+export { DEFAULT_CHAPTER_WORDS, planSegments, SEGMENT_WORDS, splitParagraphs } from './segments';

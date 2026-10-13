@@ -511,6 +511,72 @@ export function renderSceneDraft(description: string): Result<RenderedPrompt, st
   return renderTemplate('scene_draft', { description });
 }
 
+export type WriterChapterInput = {
+  readonly title: string;
+  readonly genre: string;
+  readonly chapterTitle: string;
+  readonly goal: string;
+  readonly treatment: string;
+  /** 启用的写作技能（已按顺序组合）。 */
+  readonly skills: readonly { readonly name: string; readonly text: string }[];
+  readonly avoidPhrases: readonly string[];
+  readonly cast: readonly { readonly name: string; readonly description: string }[];
+  readonly facts: readonly string[];
+  /** 前面章节的梗概，从远到近。 */
+  readonly memories: readonly { readonly title: string; readonly summary: string }[];
+  readonly toPlant: readonly { readonly title: string; readonly content: string }[];
+  readonly toPayoff: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  /** 本章不得说破的揭晓内容。 */
+  readonly mustNotReveal: readonly string[];
+  readonly beatsBefore: readonly string[];
+  readonly beatsNow: readonly string[];
+  readonly beatsAfter: readonly string[];
+  readonly previousEnding: string;
+  /** 本章已有正文的结尾部分。 */
+  readonly written: string;
+  readonly words: number;
+  readonly isLast: boolean;
+};
+
+/**
+ * 写手成章（B59）：作者侧的写作，材料是作者的计划、设定、伏笔账本与前文，输出纯文本。
+ * 从角色推演写成的单视角正文不走这个模板（那里只能用视角角色的认知，硬性规则 3）。
+ */
+export function renderWriterChapter(input: WriterChapterInput): Result<RenderedPrompt, string> {
+  return renderTemplate('writer_chapter', {
+    title: input.title,
+    genre: input.genre,
+    chapterTitle: input.chapterTitle,
+    goal: input.goal,
+    treatment: input.treatment.trim(),
+    skills: input.skills.map((s) => ({ name: s.name, text: s.text })),
+    hasSkills: input.skills.length > 0,
+    avoidPhrases: [...input.avoidPhrases],
+    hasAvoid: input.avoidPhrases.length > 0,
+    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim() })),
+    hasCast: input.cast.length > 0,
+    facts: [...input.facts],
+    hasFacts: input.facts.length > 0,
+    memories: input.memories.map((m) => ({ title: m.title, summary: m.summary })),
+    hasMemories: input.memories.length > 0,
+    toPlant: input.toPlant.map((f) => ({ title: f.title, content: f.content })),
+    hasToPlant: input.toPlant.length > 0,
+    toPayoff: input.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+    hasToPayoff: input.toPayoff.length > 0,
+    mustNotReveal: [...input.mustNotReveal],
+    hasMustNotReveal: input.mustNotReveal.length > 0,
+    beatsBefore: [...input.beatsBefore],
+    beatsNow: [...input.beatsNow],
+    beatsAfter: [...input.beatsAfter],
+    hasBeats: input.beatsBefore.length + input.beatsNow.length + input.beatsAfter.length > 0,
+    hasBeatsNow: input.beatsNow.length > 0,
+    previousEnding: input.previousEnding,
+    written: input.written,
+    words: input.words,
+    isLast: input.isLast,
+  });
+}
+
 export type PlanDraftInput = {
   readonly title: string;
   readonly genre: string;

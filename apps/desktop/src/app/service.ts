@@ -66,6 +66,7 @@ import { buildWritingContext, type ContextManifest, type ContextOverrides } from
 import { candidateUseCases } from './candidates';
 import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
+import { writerUseCases } from './writer';
 import { modelRunner } from './model-runner';
 import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
 import { maxOutputTokens, needsSelection, promptParts, targetLength } from './selection-ops';
@@ -301,12 +302,14 @@ export function createAppService(deps: AppDeps) {
   /** 模型调用：用默认模型，调用记录写入当前作品库（M2-05 起由选区操作等使用）。 */
   const runner = modelRunner({ deps, project: () => session?.port ?? null, defaultModel: () => services.defaultModel() });
   const planning = planningUseCases(deps, () => session?.port ?? null, runner);
+  const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
 
   return {
     ...services,
     ...candidates,
     ...writingSkills,
     ...planning,
+    ...writer,
 
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {

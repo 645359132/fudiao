@@ -67,6 +67,10 @@
     "version": "1",
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
   },
+  "writer_chapter": {
+    "version": "1",
+    "sha256": "99b0c0d9f6424bb03c850245ab34672509484ee8b8dd7b1cd3928aea1430ac6e"
+  },
   "skill:cliffhanger": {
     "version": "1",
     "sha256": "82e962cd85b4fc743066ffcac354fc2feacd11097173cf76a94cfd6fde499c05"

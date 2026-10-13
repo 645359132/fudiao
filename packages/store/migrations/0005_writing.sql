@@ -47,6 +47,8 @@ CREATE TABLE chapter_plan (
   treatment TEXT NOT NULL DEFAULT '',
   target_words INTEGER CHECK (target_words IS NULL OR target_words > 0),
   status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'writing', 'written', 'reviewed')),
+  -- 写手的进度（B59）：这次写作的标识、开始时定下的分段、已写入的段数与写入前的快照；与写入的段落在同一事务中更新。
+  progress TEXT CHECK (progress IS NULL OR (json_valid(progress) AND json_type(progress) = 'object')),
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

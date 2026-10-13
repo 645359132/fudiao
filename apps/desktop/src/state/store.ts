@@ -85,6 +85,8 @@ export type AppState = {
   readonly planDraft: PlanDraft | null;
   readonly planUnmatched: readonly string[];
   readonly planDrafting: boolean;
+  /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
+  readonly writerJob: { readonly chapterId: string; readonly done: number; readonly total: number; readonly queued: readonly string[] } | null;
   /** AI 上下文清单（B18）：抽屉是否打开、最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
   readonly contextDrawerOpen: boolean;
   readonly writingContext: ContextManifest | null;
@@ -195,6 +197,11 @@ export type AppState = {
   readonly updateForeshadow: (id: string, fields: ForeshadowFields) => Promise<boolean>;
   readonly deleteForeshadow: (id: string) => Promise<boolean>;
 
+  /** 让写手依次写这些章节；一章没有写完（取消、失败、被修改）就停下，后面的不再写。 */
+  readonly writeChapters: (chapterIds: readonly string[]) => Promise<void>;
+  readonly cancelWriting: () => void;
+  readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
+
   readonly openSkills: () => Promise<void>;
   readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string }) => Promise<boolean>;
   readonly addCustomSkill: (name: string, instruction: string) => Promise<boolean>;
@@ -263,6 +270,7 @@ export function createAppStore(service: AppService): AppStore {
     /** 各个进行中的任务，任务中心据此取消。 */
     const taskAborts = new Map<string, AbortController>();
     let taskSeq = 0;
+    let writerAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
@@ -335,6 +343,7 @@ export function createAppStore(service: AppService): AppStore {
       planDraft: null,
       planUnmatched: [],
       planDrafting: false,
+      writerJob: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -379,8 +388,10 @@ export function createAppStore(service: AppService): AppStore {
       },
       async closeWork() {
         if (!(await get().leaveChapter())) return;
+        // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
+        writerAbort?.abort();
         await service.closeWork();
-        set({ work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -666,6 +677,68 @@ export function createAppStore(service: AppService): AppStore {
         return done;
       },
       discardPlanDraft: () => set({ planDraft: null }),
+      async writeChapters(chapterIds) {
+        if (get().writerJob !== null || chapterIds.length === 0) return;
+        // 先保存编辑器里的内容：写手不会覆盖未保存的修改。
+        if (!(await get().leaveChapter())) return;
+        const abort = new AbortController();
+        writerAbort = abort;
+        const refresh = async (chapterId: string) => {
+          const planning = get().planning === null ? null : await service.planningView();
+          if (planning?.ok === true) set({ planning: planning.value });
+          if (get().selectedChapterId === chapterId) {
+            const content = await service.openChapter(chapterId);
+            if (content.ok) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
+          }
+        };
+        for (const [i, chapterId] of chapterIds.entries()) {
+          const taskId = `task-${++taskSeq}`;
+          taskAborts.set(taskId, abort);
+          const title = chapter(chapterId)?.title ?? '';
+          task({ type: 'started', task: { id: taskId, kind: 'writer', title: `写手 · ${title}`, chapterId, startedAt: new Date().toISOString() } });
+          set({ writerJob: { chapterId, done: 0, total: 0, queued: chapterIds.slice(i + 1) }, message: null });
+          const result = await service.writeChapter(chapterId, {
+            signal: abort.signal,
+            onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+            onSegment: (done, total) => {
+              set({ writerJob: { chapterId, done, total, queued: chapterIds.slice(i + 1) } });
+              void refresh(chapterId);
+            },
+          });
+          taskAborts.delete(taskId);
+          await refresh(chapterId);
+          const finishedAt = new Date().toISOString();
+          if (!result.ok) {
+            set({ message: describeError(result.error) });
+            task({ type: 'finished', id: taskId, status: 'failed', finishedAt, error: describeError(result.error) });
+            break;
+          }
+          const { status, reason, segmentsDone, segmentsTotal } = result.value;
+          if (status === 'written') {
+            task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+            continue;
+          }
+          const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
+          set({ message: note });
+          task({ type: 'finished', id: taskId, status: status === 'cancelled' ? 'cancelled' : 'failed', finishedAt, error: note });
+          break;
+        }
+        if (writerAbort === abort) writerAbort = null;
+        set({ writerJob: null });
+      },
+      cancelWriting: () => writerAbort?.abort(),
+      async rollbackWriter(chapterId) {
+        if (get().writerJob !== null || !(await get().leaveChapter())) return false;
+        const done = await run(service.rollbackWriter(chapterId), () => ({}));
+        if (!done) return false;
+        const planning = await service.planningView();
+        if (planning.ok) set({ planning: planning.value });
+        if (get().selectedChapterId === chapterId) {
+          const content = await service.openChapter(chapterId);
+          if (content.ok) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
+        }
+        return true;
+      },
       savePlan: (chapterId, fields) => run(service.savePlan(chapterId, fields), (planning) => ({ planning })),
       addForeshadow: (fields) => run(service.addForeshadow(fields), (planning) => ({ planning })),
       async updateForeshadow(id, fields) {

@@ -46,8 +46,13 @@ export function ChapterPanel() {
   const openAiWrite = useApp((s) => s.openAiWrite);
   const exportChapter = useApp((s) => s.exportChapter);
   const busy = useApp((s) => s.busy);
+  const writerJob = useApp((s) => s.writerJob);
+  const writeChapters = useApp((s) => s.writeChapters);
+  const cancelWriting = useApp((s) => s.cancelWriting);
   const chapterId = chapter?.id ?? null;
   const loaded = content !== null && content.chapterId === chapterId;
+  // 写手正在写这一章时正文只读：写手把段落接在章末，编辑器里的修改会与它冲突。
+  const writingHere = writerJob !== null && writerJob.chapterId === chapterId;
 
   useEffect(() => {
     if (chapterId !== null && !loaded) void loadChapter(chapterId);
@@ -73,10 +78,33 @@ export function ChapterPanel() {
         <button type="button" disabled={busy} title="查看 AI 会用到的章节、设定与事实" onClick={() => void openContext()}>
           AI 上下文
         </button>
+        <button type="button" disabled={busy || writerJob !== null} title="按本章的计划由写手写出正文，接在本章末尾" onClick={() => void writeChapters([chapter.id])}>
+          让写手写这一章
+        </button>
       </div>
+      {writingHere ? (
+        <div className="writer-banner" role="status" aria-label="写手进度">
+          <span>
+            写手正在写这一章{writerJob.total > 0 ? `（已写 ${writerJob.done} / ${writerJob.total} 段）` : ''}，写完之前正文只读。
+          </span>
+          <button type="button" onClick={cancelWriting}>
+            停下
+          </button>
+        </div>
+      ) : null}
       {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}
       <div className="chapter-with-drawer">
-        {loaded ? <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} /> : <p className="muted">正在载入……</p>}
+        {!loaded ? (
+          <p className="muted">正在载入……</p>
+        ) : writingHere ? (
+          <div className="chapter-text" aria-label="正文（只读）">
+            {content.saved.map((p) => (
+              <p key={p.id}>{p.text}</p>
+            ))}
+          </div>
+        ) : (
+          <ChapterEditor key={`${chapter.id}:${revision}`} content={content} title={chapter.title} />
+        )}
         <EntityDrawer />
         <AiWriteDrawer />
         <ContextDrawer />

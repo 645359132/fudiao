@@ -923,3 +923,54 @@ describe('成书计划界面（B63、B65）', () => {
     expect(await within(ledger).findByText('债主是谁')).toBeTruthy();
   });
 });
+
+describe('写手成章界面（B59、B60）', () => {
+  it('让写手写这一章：写作期间正文只读并显示进度；停下后可在计划中接着写；回退到写手写入前', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章 夜叩');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('作者写的开头。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['作者写的开头。']));
+    const chapterId = store.getState().selectedChapterId ?? '';
+    // 四个情节点、三千字：分两段写。
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [], beats: ['叩门', '压价', '起疑', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+
+    // 第一段写完，第二段的调用挂起。
+    deps.llmResponses.push(reply('林舟又叩响了门。'), { chunks: openaiChunks('m', { text: ['钱四'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    await user.click(screen.getByRole('button', { name: '让写手写这一章' }));
+    const banner = await screen.findByRole('status', { name: '写手进度' });
+    await waitFor(() => expect(banner.textContent).toContain('已写 1 / 2 段'));
+    expect(screen.queryByRole('textbox', { name: '正文' })).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText('正文（只读）').textContent).toBe('作者写的开头。林舟又叩响了门。'));
+
+    await user.click(within(banner).getByRole('button', { name: '停下' }));
+    expect(await screen.findByText(/已取消：“第一章 夜叩”写了 1 \/ 2 段，可以接着写/)).toBeTruthy();
+    // 停下后正文可以编辑，没写完的那一段没有写入。
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('作者写的开头。林舟又叩响了门。'));
+
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    const actions = await screen.findByRole('group', { name: '第一章 夜叩的写作' });
+    expect(actions.textContent).toContain('写作中（已写 1 / 2 段）');
+    deps.llmResponses.push(reply('林舟转身走进雨里。'));
+    await user.click(within(actions).getByRole('button', { name: '接着写' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的写作' }).textContent).toContain('已写'));
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    const written = await service.openChapter(chapterId);
+    expect(written.ok && written.value.saved.map((p) => [p.text, p.source])).toEqual([
+      ['作者写的开头。', 'handwritten'],
+      ['林舟又叩响了门。', 'ai_generated'],
+      ['林舟转身走进雨里。', 'ai_generated'],
+    ]);
+    // 写完的章节不再有“写这一章”，只能回退。
+    const done = screen.getByRole('group', { name: '第一章 夜叩的写作' });
+    expect(within(done).queryByRole('button', { name: /写这一章|接着写/ })).toBeNull();
+
+    await user.click(within(done).getByRole('button', { name: '回退到写手写入前' }));
+    await user.click(within(screen.getByRole('group', { name: '第一章 夜叩的写作' })).getByRole('button', { name: '确定回退' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的写作' }).textContent).toContain('待写'));
+    const back = await service.openChapter(chapterId);
+    expect(back.ok && back.value.saved.map((p) => p.text)).toEqual(['作者写的开头。']);
+  });
+});

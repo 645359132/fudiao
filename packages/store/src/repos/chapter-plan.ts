@@ -9,7 +9,22 @@ export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
 const ids = jsonColumn(z.array(z.string()));
 
-const PlanRow = z
+/** 写手的进度：一次写作开始时定下分段，之后每写入一段更新 done（与段落同一事务）。 */
+export const WriterProgress = z.object({
+  /** 这次写作的标识，步骤键的一部分：续写时复用已完成的调用，不重复计费。 */
+  runId: z.string(),
+  /** 每段要写的情节点。 */
+  segments: z.array(z.array(z.string())),
+  /** 每段的目标字数。 */
+  words: z.array(z.number().int().positive()),
+  /** 已写入正文的段数。 */
+  done: z.number().int().nonnegative(),
+  /** 写入前的“写手写入”快照，一键回退用。 */
+  snapshotId: z.string(),
+});
+export type WriterProgress = z.infer<typeof WriterProgress>;
+
+export const PlanRow = z
   .object({
     chapter_id: z.string(),
     goal: z.string(),
@@ -20,6 +35,7 @@ const PlanRow = z
     treatment: z.string(),
     target_words: z.number().int().nullable(),
     status: z.enum(PLAN_STATUSES),
+    progress: jsonColumn(WriterProgress).nullable(),
     version: z.number().int(),
     created_at: z.string(),
     updated_at: z.string(),
@@ -34,13 +50,15 @@ const PlanRow = z
     treatment: r.treatment,
     targetWords: r.target_words,
     status: r.status,
+    progress: r.progress,
     version: r.version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 export type ChapterPlan = z.output<typeof PlanRow>;
 
-const COLUMNS = 'chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, status, version, created_at, updated_at';
+export const PLAN_COLUMNS = 'chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, status, progress, version, created_at, updated_at';
+const COLUMNS = PLAN_COLUMNS;
 
 export type PlanFields = {
   readonly goal: string;
