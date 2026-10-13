@@ -110,6 +110,14 @@ describe('经凭据代理的 fetch', () => {
     sent[0]?.emit({ event: 'head', status: 200, headers: [] });
     await (await pending).body?.cancel();
     expect(cancelled).toEqual([sent[0]?.request.id]);
+    // 取消与服务的结束是并发的：代理在停下之前可能还会送来已经在路上的数据与结束事件，这些都要丢掉。
+    // （SDK 读到流的结束标记后就放弃响应体，真实服务随后才关闭连接。）
+    expect(() => {
+      sent[0]?.emit({ event: 'chunk', data: [1] });
+      sent[0]?.emit({ event: 'end', cancelled: false });
+      sent[0]?.emit({ event: 'failed', message: '迟到的失败' });
+    }).not.toThrow();
+    expect(cancelled).toEqual([sent[0]?.request.id]);
 
     const empty = fetch('https://a.test/y');
     await tick();

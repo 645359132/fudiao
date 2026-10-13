@@ -65,8 +65,12 @@ export function createProxyFetch(transport: NetTransport, providerId: string, ne
           controller = c;
         },
         cancel() {
-          // SDK 不再读取响应体（例如自己中止）时，让代理也停下。
-          if (!finished) void transport.cancel(id);
+          // SDK 不再读取响应体（读到流的结束标记，或自己中止）时，让代理也停下。
+          // 流这时已经关闭：代理停下之前送来的数据与结束事件都要丢掉，再往里写会抛错。
+          if (finished) return;
+          finished = true;
+          signal.removeEventListener('abort', onAbort);
+          void transport.cancel(id);
         },
       });
       const finish = (error: Error | null) => {
