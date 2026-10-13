@@ -205,9 +205,15 @@ importers:
       '@fudiao/context':
         specifier: workspace:*
         version: link:../../packages/context
+      '@fudiao/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@fudiao/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@fudiao/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@fudiao/llm':
         specifier: workspace:*
         version: link:../../packages/llm

@@ -90,6 +90,23 @@ const sample: Statement[] = [
     ...T,
   ),
   s("INSERT INTO review_issue (id, chapter_id, kind, severity, anchor, description, source, created_at, updated_at) VALUES ('01I2', '01C1', 'ai_tone', 'low', '{\"paragraphId\":\"01G1\",\"paragraphVersion\":1,\"start\":0,\"end\":2,\"quote\":\"雨下\"}', '命中规避词', 'program', ?, ?)", ...T),
+  s(
+    "INSERT INTO sim_scene (id, chapter_id, title, config, config_version, protocol, max_rounds, first_speaker, version, created_at, updated_at) VALUES ('01N1', '01C1', '当铺谈判', '{\"zones\":[{\"id\":\"shop\",\"name\":\"当铺\"}]}', 2, 'turn_based', 8, 'lin_zhou', 3, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO sim_scene (id, title, config, protocol, max_rounds, created_at, updated_at) VALUES ('01N2', '仓库', '{}', 'simultaneous', 6, ?, ?)", ...T),
+  s(
+    "INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, status, end_reason, round, last_seq, created_at, updated_at) VALUES ('01U1', '01N1', '{\"zones\":[]}', 1, 'auto', 'ended', 'max_rounds', 8, 3, ?, ?)",
+    ...T,
+  ),
+  s(
+    "INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, status, pause_reason, round, last_seq, created_at, updated_at) VALUES ('01U2', '01N1', '{\"zones\":[]}', 1, 'interactive', '01B1', '01U1', 2, 'paused', 'author', 1, 2, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, type, payload, created_at) VALUES ('01U1', 1, 1, 0, 1, 'RunStarted', '{\"type\":\"RunStarted\",\"sceneHash\":\"h\"}', ?)", NOW),
+  s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, type, actor, payload, created_at) VALUES ('01U1', 2, 2, 0, 2, 'ProposalSubmitted', 'lin_zhou', '{\"type\":\"ProposalSubmitted\",\"actor\":\"lin_zhou\"}', ?)", NOW),
+  s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, payload, created_at) VALUES ('01U1', 3, 2, 1, 2, '[1,\"无类型的内容\"]', ?)", NOW),
+  s("INSERT INTO sim_snapshot (run_id, seq, state, state_hash, created_at) VALUES ('01U1', 3, '{\"round\":8}', 'abc123', ?)", NOW),
 ];
 
 async function seeded(): Promise<ProjectDb> {
@@ -203,6 +220,51 @@ describe('写手与审核的约束（迁移 0005）', () => {
     }
     const f = await db.query("SELECT plant_chapter_id, payoff_chapter_id FROM foreshadow WHERE id = '01H1'");
     expect(f.ok && f.value[0]).toEqual({ plant_chapter_id: null, payoff_chapter_id: '01C2' });
+  });
+});
+
+describe('角色推演的约束（迁移 0006）', () => {
+  it('推演事件只追加：不能修改，也不能删除', async () => {
+    const db = await seeded();
+    expect(await rejects(db, "UPDATE sim_event SET payload = '{}' WHERE run_id = '01U1' AND seq = 1")).toMatchObject({ detail: expect.stringContaining('只追加') });
+    expect(await rejects(db, "DELETE FROM sim_event WHERE run_id = '01U1' AND seq = 3")).toMatchObject({ detail: expect.stringContaining('只追加') });
+    const rows = await db.query("SELECT count(*) AS n FROM sim_event WHERE run_id = '01U1'");
+    expect(rows.ok && rows.value[0]).toEqual({ n: 3 });
+  });
+
+  it('事件必须属于已有的运行，序号从 1 起，批次信息与序号一致，内容是合法的 JSON', async () => {
+    const db = await seeded();
+    const insert = "INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, payload, created_at) VALUES";
+    await rejects(db, `${insert} ('none', 1, 1, 0, 1, '{}', ?)`, NOW);
+    await rejects(db, `${insert} ('01U2', 0, 0, 0, 1, '{}', ?)`, NOW);
+    await rejects(db, `${insert} ('01U2', 1, 1, 1, 1, '{}', ?)`, NOW);
+    await rejects(db, `${insert} ('01U2', 2, 1, 0, 2, '{}', ?)`, NOW);
+    await rejects(db, `${insert} ('01U2', 1, 1, 0, 1, '不是 JSON', ?)`, NOW);
+    // 同一序号不能写两次。
+    await rejects(db, `${insert} ('01U1', 3, 3, 0, 1, '{}', ?)`, NOW);
+  });
+
+  it('运行的状态、结束原因与分支来源互相一致；有运行的场景不能删除', async () => {
+    const db = await seeded();
+    const run = "INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, status, end_reason, pause_reason, parent_run_id, branch_from_seq, created_at, updated_at) VALUES";
+    await rejects(db, `${run} ('x', '01N1', '{}', 1, 'auto', 'ended', NULL, NULL, NULL, NULL, ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', '01N1', '{}', 1, 'auto', 'running', 'max_rounds', NULL, NULL, NULL, ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', '01N1', '{}', 1, 'auto', 'running', NULL, 'author', NULL, NULL, ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', '01N1', '{}', 1, 'auto', 'created', NULL, NULL, '01U1', NULL, ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', '01N1', '{}', 1, 'batch', 'created', NULL, NULL, NULL, NULL, ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', 'none', '{}', 1, 'auto', 'created', NULL, NULL, NULL, NULL, ?, ?)`, ...T);
+    await rejects(db, "DELETE FROM sim_scene WHERE id = '01N1'");
+    await rejects(db, "DELETE FROM sim_run WHERE id = '01U1'");
+  });
+
+  it('快照必须对应一条已有的事件；场景的配置是 JSON 对象；删除章节后场景保留', async () => {
+    const db = await seeded();
+    await rejects(db, "INSERT INTO sim_snapshot (run_id, seq, state, state_hash, created_at) VALUES ('01U1', 9, '{}', 'h', ?)", NOW);
+    await rejects(db, "INSERT INTO sim_scene (id, title, config, protocol, max_rounds, created_at, updated_at) VALUES ('x', 't', '[]', 'turn_based', 3, ?, ?)", ...T);
+    await rejects(db, "INSERT INTO sim_scene (id, title, config, protocol, max_rounds, created_at, updated_at) VALUES ('x', 't', '{}', 'turn_based', 0, ?, ?)", ...T);
+    expect((await db.transaction([s("DELETE FROM chapter WHERE id = '01C1'")])).ok).toBe(true);
+    const scene = await db.query("SELECT chapter_id FROM sim_scene WHERE id = '01N1'");
+    expect(scene.ok && scene.value[0]).toEqual({ chapter_id: null });
   });
 });
 

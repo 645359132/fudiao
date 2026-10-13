@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { createEngine, type RunConfig } from '@fudiao/engine';
 import { fakeModel, testConfig, waitProposal, type Policy } from '@fudiao/engine/testing';
 import { memoryCallLog, memorySamples, RecordingAdapter, ReplayAdapter } from '@fudiao/llm';
-import { memoryEventStore } from '@fudiao/store';
-import { jsonlCallLog, jsonlEventStore } from '@fudiao/store/node';
+import { createSimRun, createSimScene, memoryEventStore, sqlEventStore } from '@fudiao/store';
+import { jsonlCallLog, jsonlEventStore, loadMigrations, openProjectDb } from '@fudiao/store/node';
 import { afterAll, describe, expect, it } from 'vitest';
 import { loadSceneFile } from './scene-file';
 
@@ -57,5 +57,23 @@ describe.each(readdirSync(dir).filter((f) => f.endsWith('.yaml')))('%s', (file) 
     const payloads = async (store: { read(id: string): Promise<readonly { payload: unknown }[]> }) =>
       (await store.read('run1')).map((e) => e.payload);
     expect(await payloads(replayStore)).toEqual(await payloads(recordingStore));
+
+    // 桌面端的 SQLite 事件存储（M4-01）：同样的样本回放，事件与 JSONL 记录逐条一致，批次信息也相同。
+    const opened = openProjectDb(join(root, `${file}-db`), { migrations: loadMigrations(), now: AT });
+    if (!opened.ok) throw new Error(JSON.stringify(opened.error));
+    const db = opened.value.db;
+    try {
+      const stored = await createSimScene(db, { id: 'scene', chapterId: null, title: file, config: {}, protocol: run.protocol, maxRounds: config.maxRounds, firstSpeaker: null }, { now: AT });
+      const registered = await createSimRun(db, { id: 'run1', sceneId: 'scene', sceneConfig: {}, sceneConfigVersion: 1, mode: 'auto' }, { now: AT });
+      expect(stored.ok && registered.ok).toBe(true);
+      const sqlStore = sqlEventStore(db);
+      const onSqlite = createEngine({ llm: new ReplayAdapter(samples), events: sqlStore, calls: memoryCallLog(), now: () => AT });
+      await onSqlite.start('run1', scene, config);
+      const finished = await onSqlite.run('run1', scene);
+      expect(finished.ok && finished.value.phase).toBe('Ended');
+      expect(await sqlStore.read('run1')).toEqual(await recordingStore.read('run1'));
+    } finally {
+      db.close();
+    }
   });
 });

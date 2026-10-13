@@ -171,6 +171,47 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['id'],
     json: ['anchor', 'evidence'],
   },
+  {
+    name: 'sim_scene',
+    columns: ['id', 'chapter_id', 'title', 'config', 'config_version', 'protocol', 'max_rounds', 'first_speaker', ...VERSIONED],
+    primaryKey: ['id'],
+    json: ['config'],
+  },
+  {
+    // 分支的运行在它的来源之后建立，标识（ULID）也在其后，按主键导出时来源在前。
+    name: 'sim_run',
+    columns: [
+      'id',
+      'scene_id',
+      'scene_config',
+      'scene_config_version',
+      'mode',
+      'batch_id',
+      'parent_run_id',
+      'branch_from_seq',
+      'status',
+      'end_reason',
+      'pause_reason',
+      'round',
+      'last_seq',
+      'created_at',
+      'updated_at',
+    ],
+    primaryKey: ['id'],
+    json: ['scene_config'],
+  },
+  {
+    name: 'sim_event',
+    columns: ['run_id', 'seq', 'batch_first', 'batch_index', 'batch_size', 'type', 'actor', 'payload', 'created_at'],
+    primaryKey: ['run_id', 'seq'],
+    json: ['payload'],
+  },
+  {
+    name: 'sim_snapshot',
+    columns: ['run_id', 'seq', 'state', 'state_hash', 'created_at'],
+    primaryKey: ['run_id', 'seq'],
+    json: ['state'],
+  },
 ];
 
 /**

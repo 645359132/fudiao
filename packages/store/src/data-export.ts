@@ -40,6 +40,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   4: (tables) => tables,
   // 0005：新增写手与审核的五张表；快照表重建只放宽了原因的取值，旧数据原样有效。
   5: (tables) => tables,
+  // 0006：新增角色推演的四张表，旧版本导出的数据中没有，导入为空。
+  6: (tables) => tables,
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

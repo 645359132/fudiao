@@ -266,6 +266,10 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "writing_skill",
         "chapter_memory",
         "review_issue",
+        "sim_scene",
+        "sim_run",
+        "sim_event",
+        "sim_snapshot",
         "schema_migrations",
         // 全文查找的派生表（schema.ts 的 DERIVED_TABLES）。
         "paragraph_search_key",

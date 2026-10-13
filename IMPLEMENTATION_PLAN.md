@@ -110,7 +110,7 @@ fudiao/
 | 端口 | 职责 | 桌面实现 | Node 实现（M0 与测试） |
 | --- | --- | --- | --- |
 | `SqlPort` | 执行查询与事务。事务是一批语句一次提交，不提供跨调用的交互式事务；先读后写用影响行数守卫（`expectChanges`）表达乐观并发。两端行为由 `packages/store/contract/sql-cases.json` 的契约用例保证一致 | Tauri 命令 `db_open`、`db_query`、`db_tx`、`db_close` | better-sqlite3 |
-| `EventStore` | 按批次追加与读取推演事件，序号冲突检查 | 基于 `SqlPort` | 内存版（测试）与 JSONL 文件版（`packages/store/src/node`） |
+| `EventStore` | 按批次追加与读取推演事件，序号冲突检查 | `sqlEventStore`（`packages/store/src/sql-event-store.ts`，基于 `SqlPort`，一批事件一个事务） | 内存版（测试）与 JSONL 文件版（`packages/store/src/node`） |
 | `LlmPort` | 发起模型调用、流式接收、取消 | 同一套 TypeScript 适配器，网络请求经 Rust 凭据代理 | 同一套适配器直连 HTTP；录制回放 |
 | `Clock` / `Rng` | 时间与可记录的随机数 | 系统时钟、带种子的随机数 | 固定时钟、固定种子 |
 | `FilePort` | 导入、导出、备份 | Tauri 命令 | Node fs |
@@ -134,10 +134,10 @@ fudiao/
 | `source_ref` | from_type、from_id、to_type、to_id、to_version、anchor | B12、来源定位 |
 | `story_event` | id、故事时间（标签与排序键）、summary、participants、location_id、perceptions、origin_run_id、origin_seq | B55、I07 |
 | `event_paragraph_link` | event_id、paragraph_id、mode（正面叙述、回忆、转述、暗示） | B55 |
-| `sim_scene` | id、chapter_id、config（JSON）、config_version、protocol | B22、B39 至 B41 |
-| `sim_run` | id、scene_id、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、status、end_reason | B28、B48 |
-| `sim_event` | run_id、seq、round、phase、type、actor、payload、created_at；主键 (run_id, seq)，只追加 | B28、B30 |
-| `sim_snapshot` | run_id、seq、state（JSON）、state_hash | B30 |
+| `sim_scene` | id、chapter_id、title、config（场景配置 JSON）、config_version（配置每改一次加一）、protocol、max_rounds、first_speaker、version；迁移 0006 | B22、B39 至 B41 |
+| `sim_run` | id、scene_id、scene_config 与 scene_config_version（开始时的场景配置：场景之后再改，这次运行仍按当时的配置继续与回放）、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq；status、end_reason、pause_reason、round、last_seq 是由事件得出的缓存，以事件为准；迁移 0006 | B28、B48 |
+| `sim_event` | run_id、seq、batch_first / batch_index / batch_size（同一次追加为一批，与 M0 的 JSONL 记录一一对应）、type 与 actor（取自事件内容，便于查询）、payload、created_at；主键 (run_id, seq)；只追加，表上的触发器拒绝修改与删除。回合与阶段由回放得到，不另存列；迁移 0006 | B28、B30 |
+| `sim_snapshot` | run_id、seq、state（JSON）、state_hash、created_at；在等待作者、暂停与结束处记下，用来校验回放；迁移 0006 | B30 |
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
 | `candidate` | id、chapter_id、operation、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
 | `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
@@ -340,6 +340,8 @@ stateDiagram-v2
 写手与审核（M3）的设计见下一节。
 
 写作类任务（选区操作、候选稿）的上下文（M2-04，`packages/context/src/writing-context.ts`，纯函数）：候选条目为作品信息、本章梗概与备注、选区与前后的正文（前 2,000 字、后 600 字，必需）、前面章节的梗概（从近到远）、本章出现的设定（提及次数用编辑器的设定名匹配器计算，选区前后 300 字内出现的优先）与相关事实（与出现的设定有关，适用章节包含本章；只用已确认的，待复核与未确认的列出原因）。选入顺序为必需 → 作者加入（超出预算也纳入并标明）→ 按相关性在预算内；Token 按字符数估算。预算取默认模型上下文长度的 60%，最多 32,000，没有默认模型时 8,000。章节头部的“AI 上下文”显示清单，作者可以加入或移除条目，增减在本次打开作品期间按章节保留。
+
+桌面端的推演（M4-01，`apps/desktop/src/app/simulation.ts`）：引擎与领域内核原样使用，桌面端只做接线。事件经 `sqlEventStore` 写入作品库的 `sim_event`：一批事件一个事务，第一条插入带“最后序号仍是调用方读到的那个”的守卫，不满足时整批回滚并返回序号冲突；运行必须先登记在 `sim_run` 中。模型端口按请求里的服务标识找到桌面端的适配器（经凭据代理）；调用记录写入 `llm_call`，步骤键查重沿用 `projectCallLog`。运行配置里各类任务的模型取“模型服务”的默认模型（须通过能力自检），输出上限为任务所需加思考的余量、按模型的最大输出封顶。用例有保存场景（先经 `parseScene` 校验）、开始、单步、继续、暂停、恢复、停止、读取状态与事件、校验回放（按快照处的哈希）；每次引擎操作之后把阶段、回合与结束原因写回 `sim_run`。待核实裁决的确认、作者介入与分支在 M4-05，界面在 M4-02 至 M4-04。
 
 ### 写手与审核（M3）
 

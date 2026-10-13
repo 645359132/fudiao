@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@fudiao/context": "workspace:*",
+    "@fudiao/domain": "workspace:*",
     "@fudiao/editor": "workspace:*",
+    "@fudiao/engine": "workspace:*",
     "@fudiao/llm": "workspace:*",
     "@fudiao/prompts": "workspace:*",
     "@fudiao/shared": "workspace:*",

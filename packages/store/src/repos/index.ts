@@ -40,3 +40,18 @@ export { addIssues, countPendingIssues, getIssue, ISSUE_KINDS, ISSUE_STATUSES, l
 export type { WriterProgress } from './chapter-plan';
 export type { SegmentWrite } from './writer-segment';
 export { appendWrittenSegment, resetWriterRun, startWriterRun } from './writer-segment';
+export type { SimProtocol, SimRun, SimRunInput, SimRunProgress, SimRunStatus, SimScene, SimSceneFields, SimSnapshot } from './sim';
+export {
+  createSimRun,
+  createSimScene,
+  getSimRun,
+  getSimScene,
+  listSimRuns,
+  listSimScenes,
+  listSimSnapshots,
+  saveSimSnapshot,
+  setSimRunProgress,
+  SIM_PROTOCOLS,
+  SIM_RUN_STATUSES,
+  updateSimScene,
+} from './sim';

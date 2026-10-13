@@ -16,8 +16,8 @@ const cardCanaries = (id: string) => ({
   speechStyle: `${CANARY}-CARD-${id}-speech`,
 });
 
-/** 废仓库加巡夜人，所有私有文本都带有标记。 */
-export function canaryScene(): Scene {
+/** 废仓库加巡夜人，所有私有文本都带有标记。返回场景配置（未校验的输入形式），供需要保存配置的测试使用。 */
+export function canarySpec(): SceneSpecInput {
   const spec: SceneSpecInput = warehouseSpec();
   spec.meta = {
     title: `${CANARY}-META-title`,
@@ -39,8 +39,10 @@ export function canaryScene(): Scene {
   for (const i of spec.items ?? []) {
     if (i.id === 'letter' || i.id === 'ledger') i.name = `${CANARY}-ITEM-${i.id}`;
   }
-  return sceneOf(spec);
+  return spec;
 }
+
+export const canaryScene = (): Scene => sceneOf(canarySpec());
 
 /** 任何时候都不得出现在 actor 视图中的标记：场景元信息、秘密、他人的角色卡。 */
 export function staticForbidden(scene: Scene, actor: ActorId): string[] {

@@ -68,6 +68,7 @@ import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
 import { reviewUseCases } from './review';
+import { simulationUseCases } from './simulation';
 import { writerUseCases } from './writer';
 import { modelRunner } from './model-runner';
 import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
@@ -307,6 +308,15 @@ export function createAppService(deps: AppDeps) {
   const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
+  const simulation = simulationUseCases({
+    deps,
+    project: () => session?.port ?? null,
+    defaultModel: () => services.defaultModel(),
+    provider: async (id) => {
+      const view = await services.loadModelServices();
+      return view.ok ? (view.value.providers.find((p) => p.id === id) ?? null) : null;
+    },
+  });
 
   return {
     ...services,
@@ -316,6 +326,7 @@ export function createAppService(deps: AppDeps) {
     ...writer,
     ...memory,
     ...review,
+    ...simulation,
 
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {
