@@ -17,7 +17,7 @@ M3 评估回答两个问题（施工文档 M3-09）：
 
 ## 步骤
 
-1. 把 `eval/config.example.json` 复制为 `eval/config.json`，填上模型名、能力与价格（美元 / 百万 Token，按服务商文档核对）。API Key 不写进文件，只写环境变量的名字。
+1. 把 `eval/config.example.json` 复制为 `eval/config.json`，核对模型名、能力与价格（美元 / 百万 Token）。示例取自 `m0/experiments/deepseek.yaml`（M0 实验用的 DeepSeek 配置，价格为当时的高峰价），换别的服务时按服务商文档填写。API Key 不写进文件，只写环境变量的名字。
 2. 在自己的终端里设置环境变量（PowerShell）：
 
    ```powershell

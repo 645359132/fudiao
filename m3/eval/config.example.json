@@ -6,15 +6,15 @@
     "apiKeyEnv": "DEEPSEEK_API_KEY"
   },
   "model": {
-    "id": "请填写模型名",
+    "id": "deepseek-flash",
     "capabilities": {
       "structuredOutput": "json_object",
       "promptCaching": false,
       "reasoningControl": "none",
       "refusalFallback": "none",
-      "contextWindow": 64000,
-      "maxOutputTokens": 8000
+      "contextWindow": 1000000,
+      "maxOutputTokens": 384000
     },
-    "prices": null
+    "prices": { "input": 0.3, "output": 1.2 }
   }
 }

@@ -17,11 +17,11 @@ import {
   type SqlPort,
 } from '@fudiao/store';
 import type { AppError } from './errors';
-import type { modelRunner } from './model-runner';
+import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
 /** 输出上限：梗概、人物状态与伏笔进展合计约一千字，另留出思考的余量。 */
-export const MEMORY_OUTPUT_TOKENS = 6_000;
+export const MEMORY_OUTPUT_TOKENS = 2_000 + THINKING_ALLOWANCE;
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });

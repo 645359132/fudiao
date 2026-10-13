@@ -49,7 +49,7 @@ import {
   type ProgramIssue,
 } from '@fudiao/writing';
 import type { AppError } from './errors';
-import type { modelRunner } from './model-runner';
+import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
 /** 带给审核的设定与事实的上限；出场人物优先，其余按在正文中出现的次数。 */
@@ -58,7 +58,7 @@ export const MAX_REVIEW_FACTS = 40;
 /** 前文梗概最多带多少字，超出时先去掉最远的章节。 */
 export const REVIEW_MEMORY_CHARS = 6000;
 /** 审核的输出上限：每条问题约一百字，另留出思考的余量。 */
-export const REVIEW_OUTPUT_TOKENS = 12_000;
+export const REVIEW_OUTPUT_TOKENS = 8_000 + THINKING_ALLOWANCE;
 
 const ENTITY_KIND: Readonly<Record<Entity['kind'], string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
 
@@ -395,7 +395,7 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
         issues: group.map((i) => ({ quote: i.anchor.quote, description: i.description, suggestion: i.suggestion })),
       });
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.text({ prompt: prompt.value, maxOutputTokens: paragraph.text.length * 2 + 4096, effort: 'medium' }, options);
+      const result = await runner.text({ prompt: prompt.value, maxOutputTokens: paragraph.text.length * 2 + THINKING_ALLOWANCE, effort: 'medium' }, options);
       if (!result.ok) return result;
       if (result.value.outcome === 'cancelled') return err(settings('已取消'));
       if (result.value.outcome === 'refused') return err(settings(`模型拒绝了这次修订${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`));

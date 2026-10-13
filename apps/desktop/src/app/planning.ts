@@ -31,7 +31,7 @@ import {
 } from '@fudiao/store';
 import { checkPlan, type PlanProblem } from '@fudiao/writing';
 import type { AppError } from './errors';
-import type { modelRunner } from './model-runner';
+import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
 export type PlanChapterView = {
@@ -63,7 +63,7 @@ export type AppliedDraft = { readonly view: PlanningView; readonly unmatchedCast
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 
 /** 计划草稿的输出上限：每章约 400 字的计划，留出思考的余量。 */
-const draftOutputTokens = (chapters: number) => Math.min(32_000, 4_000 + chapters * 1_200);
+const draftOutputTokens = (chapters: number) => Math.min(64_000, chapters * 1_200 + THINKING_ALLOWANCE);
 
 export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, runner: ReturnType<typeof modelRunner>) {
   const ctx = () => ({ now: deps.clock.now() });

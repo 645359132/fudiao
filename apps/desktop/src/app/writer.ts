@@ -29,7 +29,7 @@ import {
 } from '@fudiao/store';
 import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, planSegments, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
-import type { modelRunner } from './model-runner';
+import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
 /** 带给写手的上文长度（字）：上一章的结尾与本章已写的结尾。 */
@@ -39,8 +39,8 @@ export const MEMORY_CHARS = 6000;
 /** 相关事实最多带多少条。 */
 export const MAX_FACTS = 30;
 
-/** 每段的输出上限：目标字数的两倍，另留出思考的余量（思考按输出计）。 */
-const segmentOutputTokens = (words: number) => words * 2 + 4096;
+/** 每段的输出上限：目标字数的两倍，另留出思考的余量。 */
+const segmentOutputTokens = (words: number) => words * 2 + THINKING_ALLOWANCE;
 
 export type WriterOutcome = {
   /** written：本章写完；cancelled：作者取消；stopped：中途停下（原因见 reason），已写入的段保留，可以续写。 */

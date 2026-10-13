@@ -191,10 +191,10 @@ export function parseConfig(text: string): Parsed<EvalConfig> {
   });
 }
 
-/** 一次评估大约要用的 Token（偏高的估计）：一个汉字按 1.5 Token，每次调用另算 2,000 Token 的思考。 */
+/** 一次评估大约要用的 Token（偏高的估计）：一个汉字按 1.5 Token，每次调用另算 6,000 Token 的思考（按思考较多的模型估）。 */
 export function estimateTokens(book: Pick<EvalBook, 'outline' | 'chapterCount' | 'wordsPerChapter' | 'plants'>): { input: number; output: number; calls: number } {
   const perChar = 1.5;
-  const thinking = 2_000;
+  const thinking = 6_000;
   const chapters = book.chapterCount;
   const chapterTokens = book.wordsPerChapter * perChar;
   const segments = Math.max(1, Math.ceil(book.wordsPerChapter / 1500));
