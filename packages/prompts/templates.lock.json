@@ -24,8 +24,8 @@
     "sha256": "83eef0aeb675a9249cf206aeb40a8664bda163edd36c743b79bbabafcf58e4fd"
   },
   "chapter_review": {
-    "version": "2",
-    "sha256": "27e562509b8840115e9cd48c672beb3d3a7d9bf240fcb4ba76a65927da2f344e"
+    "version": "3",
+    "sha256": "9732c12af07a23a1f2a05dacccc496a806fd49175c8068f874e8fc36a04be399"
   },
   "character_action": {
     "version": "8",
@@ -76,8 +76,8 @@
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
   },
   "writer_chapter": {
-    "version": "2",
-    "sha256": "e4dfb4bdded3896fa66cb8fab91d5fa43da09bbd3960e9be57cff114246a80ec"
+    "version": "3",
+    "sha256": "049265984dc3aa1b60ec4ebd3195e62bf2a63ae480afe3bcf112eef51095716e"
   },
   "writer_revise": {
     "version": "1",

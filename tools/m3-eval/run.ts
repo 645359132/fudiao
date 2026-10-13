@@ -20,11 +20,17 @@ export type EvalChapter = {
   /** 植入问题之前的审核结果。 */
   readonly issues: readonly EvalIssue[];
   readonly dropped: number;
+  /** 模型审核没有完成的原因（例如输出被截断）；完成时为 null。没有完成时 issues 里只有程序检查的问题。 */
+  readonly reviewIncomplete: string | null;
+  /** 模型审核没有完成后重试的次数。 */
+  readonly reviewRetries: number;
   readonly memory: { readonly summary: string; readonly castStates: number; readonly foreshadowProgress: number } | null;
 };
 
 export type PlantResult = {
   readonly plant: EvalPlant;
+  /** 植入后这一章的模型审核是否完成；没有完成的不计入检出率。 */
+  readonly reviewed: boolean;
   /** 审核在植入的那一段上提出了问题。 */
   readonly detected: boolean;
   /** 并且类型在预期之内。 */
@@ -55,17 +61,37 @@ const describe = (error: unknown): string => {
 
 const toEvalIssue = (i: ReviewIssue): EvalIssue => ({ kind: i.kind, severity: i.severity, source: i.source, description: i.description, suggestion: i.suggestion, quote: i.anchor.quote });
 
-/** 检出率：植入的问题中被指出的比例；strict 还要求类型在预期之内。 */
-export function detectionRates(plants: readonly PlantResult[]): { total: number; detected: number; kindMatched: number; byType: Record<string, { total: number; detected: number; kindMatched: number }> } {
+export type DetectionRates = {
+  /** 模型审核完成了的植入数，检出率以它为分母。 */
+  readonly total: number;
+  readonly detected: number;
+  readonly kindMatched: number;
+  /** 所在章节的模型审核没有完成、不计入检出率的植入数。 */
+  readonly unreviewed: number;
+  readonly byType: Record<string, { total: number; detected: number; kindMatched: number }>;
+};
+
+/** 检出率：模型审核完成了的植入中被指出的比例；kindMatched 还要求类型在预期之内。 */
+export function detectionRates(plants: readonly PlantResult[]): DetectionRates {
+  const reviewed = plants.filter((p) => p.reviewed);
   const byType: Record<string, { total: number; detected: number; kindMatched: number }> = {};
-  for (const p of plants) {
+  for (const p of reviewed) {
     const row = (byType[p.plant.type] ??= { total: 0, detected: 0, kindMatched: 0 });
     row.total++;
     if (p.detected) row.detected++;
     if (p.kindMatched) row.kindMatched++;
   }
-  return { total: plants.length, detected: plants.filter((p) => p.detected).length, kindMatched: plants.filter((p) => p.kindMatched).length, byType };
+  return {
+    total: reviewed.length,
+    detected: reviewed.filter((p) => p.detected).length,
+    kindMatched: reviewed.filter((p) => p.kindMatched).length,
+    unreviewed: plants.length - reviewed.length,
+    byType,
+  };
 }
+
+/** 模型审核没有完成（例如思考用完了输出上限）时重试的次数。 */
+export const REVIEW_RETRIES = 1;
 
 export async function runEvaluation(app: AppService, book: EvalBook, hooks: EvalHooks): Promise<EvalResult> {
   const { log, now } = hooks;
@@ -86,6 +112,16 @@ export async function runEvaluation(app: AppService, book: EvalBook, hooks: Eval
       stopped,
       bookText,
     };
+  };
+
+  /** 审核一章；模型审核没有完成时重试，仍没有完成则带着原因返回（程序检查的问题已保存）。 */
+  const review = async (id: string) => {
+    for (let retries = 0; ; retries++) {
+      const result = await app.reviewChapter(id);
+      if (!result.ok) return result;
+      if (result.value.modelReviewed || retries >= REVIEW_RETRIES) return { ok: true as const, value: { ...result.value, retries } };
+      log(`  模型审核没有完成（${result.value.reason ?? ''}），重试…`);
+    }
   };
 
   // 一、作品、设定与伏笔。
@@ -137,10 +173,10 @@ export async function runEvaluation(app: AppService, book: EvalBook, hooks: Eval
     if (!memory.ok) log(`  长篇记忆没有生成：${describe(memory.error)}`);
 
     at = now();
-    const review = await app.reviewChapter(id);
+    const reviewed = await review(id);
     const reviewMs = now() - at;
-    if (!review.ok) return finish(`“${title}”的审核失败：${describe(review.error)}`);
-    if (!review.value.modelReviewed) log(`  模型审核没有完成：${review.value.reason ?? ''}`);
+    if (!reviewed.ok) return finish(`“${title}”的审核失败：${describe(reviewed.error)}`);
+    if (!reviewed.value.modelReviewed) log(`  模型审核没有完成：${reviewed.value.reason ?? ''}`);
 
     const content = await app.openChapter(id);
     if (!content.ok) return finish(`读取“${title}”失败：${describe(content.error)}`);
@@ -155,11 +191,13 @@ export async function runEvaluation(app: AppService, book: EvalBook, hooks: Eval
       writeMs,
       memoryMs,
       reviewMs,
-      issues: review.value.issues.map(toEvalIssue),
-      dropped: review.value.dropped,
+      issues: reviewed.value.issues.map(toEvalIssue),
+      dropped: reviewed.value.dropped,
+      reviewIncomplete: reviewed.value.modelReviewed ? null : (reviewed.value.reason ?? '原因不明'),
+      reviewRetries: reviewed.value.retries,
       memory: memory.ok ? { summary: memory.value.summary, castStates: Object.keys(memory.value.castState).length, foreshadowProgress: Object.keys(memory.value.foreshadowProgress).length } : null,
     });
-    log(`  ${countWords(text)} 字，审核提出 ${review.value.issues.length} 条问题。`);
+    log(`  ${countWords(text)} 字，审核提出 ${reviewed.value.issues.length} 条问题${reviewed.value.modelReviewed ? '' : '（只有程序检查）'}。`);
   }
   bookText = texts.join('\n\n\n');
 
@@ -186,15 +224,16 @@ export async function runEvaluation(app: AppService, book: EvalBook, hooks: Eval
     const stored = await app.saveChapter(id, saved, current, { splits: [], merges: [] });
     if (!stored.ok) return finish(`植入“${item.chapter.title}”失败：${describe(stored.error)}`);
     log(`第 ${number} 章植入 ${list.length} 处问题，重新审核…`);
-    const review = await app.reviewChapter(id);
-    if (!review.ok) return finish(`“${item.chapter.title}”植入后的审核失败：${describe(review.error)}`);
-    if (!review.value.modelReviewed) log(`  模型审核没有完成：${review.value.reason ?? ''}`);
+    const reviewed = await review(id);
+    if (!reviewed.ok) return finish(`“${item.chapter.title}”植入后的审核失败：${describe(reviewed.error)}`);
+    const complete = reviewed.value.modelReviewed;
+    if (!complete) log(`  模型审核没有完成：${reviewed.value.reason ?? ''}`);
     for (const plant of list) {
       const paragraph = stored.value.find((p) => p.text === plant.text);
-      const hits = paragraph === undefined ? [] : review.value.issues.filter((i) => i.anchor.paragraphId === paragraph.id);
+      const hits = paragraph === undefined ? [] : reviewed.value.issues.filter((i) => i.anchor.paragraphId === paragraph.id);
       const kinds: readonly IssueKind[] = plant.expect;
-      plants.push({ plant, detected: hits.length > 0, kindMatched: hits.some((i) => kinds.includes(i.kind)), issues: hits.map(toEvalIssue) });
-      log(`  ${plant.id}（${plant.type}）：${hits.length > 0 ? `检出（${hits.map((h) => h.kind).join('、')}）` : '没有检出'}`);
+      plants.push({ plant, reviewed: complete, detected: hits.length > 0, kindMatched: hits.some((i) => kinds.includes(i.kind)), issues: hits.map(toEvalIssue) });
+      log(`  ${plant.id}（${plant.type}）：${hits.length > 0 ? `检出（${hits.map((h) => h.kind).join('、')}）` : complete ? '没有检出' : '审核没有完成，不计'}`);
     }
   }
   return finish(null);
@@ -231,25 +270,27 @@ export function renderReport(result: EvalResult, meta: { readonly model: string;
   out.push('', '## 各章', '', '| 章节 | 字数（计划） | 段数 | 写作 | 长篇记忆 | 审核 | 问题 | 丢弃 |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const c of result.chapters) {
     out.push(
-      `| ${cell(c.title)} | ${c.words}（${c.targetWords ?? '—'}） | ${c.paragraphs} | ${seconds(c.writeMs)} | ${c.memory === null ? '没有生成' : seconds(c.memoryMs)} | ${seconds(c.reviewMs)} | ${c.issues.length} | ${c.dropped} |`,
+      `| ${cell(c.title)} | ${c.words}（${c.targetWords ?? '—'}） | ${c.paragraphs} | ${seconds(c.writeMs)} | ${c.memory === null ? '没有生成' : seconds(c.memoryMs)} | ${seconds(c.reviewMs)}${c.reviewRetries > 0 ? `（重试 ${c.reviewRetries} 次）` : ''} | ${c.reviewIncomplete === null ? c.issues.length : `${c.issues.length}（模型审核没有完成）`} | ${c.dropped} |`,
     );
   }
   out.push('', '## 植入问题的检出', '');
   if (result.plants.length === 0) out.push('没有植入问题。');
   else {
+    if (rates.unreviewed > 0) out.push(`有 ${rates.unreviewed} 处植入所在章节的模型审核没有完成，不计入下面的检出率。`, '');
     out.push(`共植入 ${rates.total} 处：检出 ${rates.detected} 处（${percent(rates.detected, rates.total)}），其中类型也对的 ${rates.kindMatched} 处（${percent(rates.kindMatched, rates.total)}）。`, '');
     out.push('| 种类 | 植入 | 检出 | 类型也对 |', '| --- | --- | --- | --- |');
     for (const [type, row] of Object.entries(rates.byType)) out.push(`| ${PLANT_TYPE[type as EvalPlant['type']]} | ${row.total} | ${row.detected} | ${row.kindMatched} |`);
     out.push('', '| 编号 | 种类 | 章 | 植入的文字 | 结果 | 审核的说法 |', '| --- | --- | --- | --- | --- | --- |');
     for (const p of result.plants) {
-      const verdict = !p.detected ? '没有检出' : p.kindMatched ? '检出' : '检出（类型不在预期内）';
+      const verdict = !p.reviewed && !p.detected ? '审核没有完成' : !p.detected ? '没有检出' : p.kindMatched ? '检出' : '检出（类型不在预期内）';
       out.push(`| ${p.plant.id} | ${PLANT_TYPE[p.plant.type]} | ${p.plant.chapter} | ${cell(p.plant.text)} | ${verdict} | ${cell(p.issues.map((i) => `${KIND[i.kind]}：${i.description}`).join('；'))} |`);
     }
   }
   out.push('', '## 植入之前审核提出的问题', '', '这些问题出在写手自己写的正文上，需要作者对照正文判断是不是真问题（误报率由此估计）。', '');
   for (const c of result.chapters) {
     out.push(`### ${c.title}`, '');
-    if (c.issues.length === 0) out.push('没有问题。', '');
+    if (c.reviewIncomplete !== null) out.push(`模型审核没有完成：${c.reviewIncomplete}。下面只有程序检查的问题，这一章不能算“没有问题”。`, '');
+    else if (c.issues.length === 0) out.push('没有问题。', '');
     for (const i of c.issues) out.push(`- 【${KIND[i.kind]}·${i.severity}·${i.source === 'program' ? '程序' : '模型'}】${i.quote === '' ? '' : `“${i.quote}”：`}${i.description}${i.suggestion === '' ? '' : `（建议：${i.suggestion}）`}`);
     if (c.issues.length > 0) out.push('');
     if (c.memory !== null) out.push(`长篇记忆：${c.memory.summary}（人物状态 ${c.memory.castStates} 条，伏笔进展 ${c.memory.foreshadowProgress} 条）`, '');

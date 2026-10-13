@@ -63,7 +63,7 @@ export type AppliedDraft = { readonly view: PlanningView; readonly unmatchedCast
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 
 /** 计划草稿的输出上限：每章约 400 字的计划，留出思考的余量。 */
-const draftOutputTokens = (chapters: number) => Math.min(64_000, chapters * 1_200 + THINKING_ALLOWANCE);
+const draftOutputTokens = (chapters: number) => chapters * 1_200 + THINKING_ALLOWANCE;
 
 export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, runner: ReturnType<typeof modelRunner>) {
   const ctx = () => ({ now: deps.clock.now() });

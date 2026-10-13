@@ -5,7 +5,7 @@ import { createAppService } from '../../apps/desktop/src/app/service';
 import { fsDeps, type TestDeps } from '../../apps/desktop/src/testing/fs-deps';
 import { addTestedModel, reply } from '../../apps/desktop/src/testing/models';
 import { estimateCost, estimateTokens, parseBook, parseConfig, type EvalBook } from './book';
-import { detectionRates, renderReport, runEvaluation } from './run';
+import { detectionRates, renderReport, REVIEW_RETRIES, runEvaluation } from './run';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -93,15 +93,20 @@ describe('M3 评估流程', () => {
     expect(result.bookText).toContain('第一章 夜叩\n\n林舟叩响了门。\n钱四压低了价。\n林舟带着玉走了。');
     expect(result.bookText).not.toContain('左手稳稳');
 
-    expect(result.plants.map((p) => [p.plant.id, p.detected, p.kindMatched])).toEqual([
-      ['sc-1', true, true],
-      ['pov-1', true, false],
-      ['pov-2', false, false],
+    expect(result.plants.map((p) => [p.plant.id, p.detected, p.kindMatched, p.reviewed])).toEqual([
+      ['sc-1', true, true, true],
+      ['pov-1', true, false, true],
+      ['pov-2', false, false, true],
+    ]);
+    expect(result.chapters.map((c) => [c.reviewIncomplete, c.reviewRetries])).toEqual([
+      [null, 0],
+      [null, 0],
     ]);
     expect(detectionRates(result.plants)).toEqual({
       total: 3,
       detected: 2,
       kindMatched: 1,
+      unreviewed: 0,
       byType: { setting_conflict: { total: 1, detected: 1, kindMatched: 1 }, pov_leak: { total: 2, detected: 1, kindMatched: 0 } },
     });
     expect(result.usage).toMatchObject({ calls: 9 });
@@ -132,6 +137,61 @@ describe('M3 评估流程', () => {
     expect(result.chapters.map((c) => c.title)).toEqual(['第一章 夜叩']);
     expect(result.plants).toEqual([]);
     expect(renderReport(result, { model: 'S / m', startedAt: '' })).toContain('- 流程：中途停下（“第二章 揭晓”没有写完');
+  });
+});
+
+describe('模型审核没有完成时', () => {
+  const bad = () => reply('不是 JSON');
+  // 一次审核：模型的输出连续不符合格式（首次加两次修正）。
+  const failedReview = () => [bad(), bad(), bad()];
+
+  it('重试一次；仍没有完成时报告写明原因，不把这一章算作“没有问题”，植入的问题不计入检出率', async () => {
+    const { deps, app } = await setup();
+    expect(REVIEW_RETRIES).toBe(1);
+    deps.llmResponses.push(
+      reply(JSON.stringify(draft)),
+      // 第一章：审核第一次没有完成，重试后完成。
+      reply('林舟叩响了门。\n钱四压低了价。\n林舟带着玉走了。'),
+      memory('林舟当玉被压价。'),
+      ...failedReview(),
+      review([]),
+      // 第二章：审核与重试都没有完成。
+      reply('林舟又来了。\n钱四说出了实情。\n林舟把玉留下。\n雨停了。'),
+      memory('真相揭晓。'),
+      ...failedReview(),
+      ...failedReview(),
+      // 植入后：第一章完成并检出；第二章两次都没有完成。
+      review([{ paragraph: 'P3', quote: '用左手稳稳端起茶盏', kind: 'setting_conflict', severity: 'high', evidence: ['E1'], description: '林舟左手握不住东西', suggestion: '改用右手' }]),
+      ...failedReview(),
+      ...failedReview(),
+    );
+    const result = await runEvaluation(app, book, { log: () => undefined, now: () => 0 });
+    expect(result.stopped).toBeNull();
+    expect(deps.llmResponses).toHaveLength(0);
+    expect(result.chapters.map((c) => [c.reviewIncomplete === null, c.reviewRetries])).toEqual([
+      [true, 1],
+      [false, 1],
+    ]);
+    expect(result.plants.map((p) => [p.plant.id, p.reviewed, p.detected])).toEqual([
+      ['sc-1', true, true],
+      ['pov-1', false, false],
+      ['pov-2', false, false],
+    ]);
+    expect(detectionRates(result.plants)).toMatchObject({ total: 1, detected: 1, kindMatched: 1, unreviewed: 2 });
+
+    const report = renderReport(result, { model: 'S / m', startedAt: '' });
+    for (const part of [
+      '（重试 1 次） | 0 | 0 |',
+      '0（模型审核没有完成）',
+      '下面只有程序检查的问题，这一章不能算“没有问题”。',
+      '有 2 处植入所在章节的模型审核没有完成，不计入下面的检出率。',
+      '共植入 1 处：检出 1 处（100%）',
+      '| pov-1 | 视角越界 | 2 | 钱四心里早把价钱翻了三倍。 | 审核没有完成 |',
+    ]) {
+      expect(report).toContain(part);
+    }
+    // 第二章没有“没有问题。”这句话。
+    expect(report.split('### 第二章 揭晓')[1]).not.toContain('没有问题。');
   });
 });
 
