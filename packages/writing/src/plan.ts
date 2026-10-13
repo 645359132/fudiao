@@ -66,3 +66,20 @@ export function nextChapterToWrite(plans: readonly PlanItem[], order: ChapterOrd
   }
   return best?.id ?? null;
 }
+
+export type ForeshadowSuggestion = { readonly foreshadowId: string; readonly status: 'planted' | 'paid_off'; readonly chapterId: string };
+
+/**
+ * 账本状态的建议：埋设或回收的章节已经写完（已写或已审核），而账本中的状态还没有跟上。
+ * 只是建议：伏笔有没有真的埋下、回收，由作者看过正文后确认，再改账本。
+ */
+export function suggestForeshadowStatus(foreshadows: readonly ForeshadowItem[], plans: readonly PlanItem[]): ForeshadowSuggestion[] {
+  const written = new Set(plans.filter((p) => p.status === 'written' || p.status === 'reviewed').map((p) => p.chapterId));
+  const suggestions: ForeshadowSuggestion[] = [];
+  for (const f of foreshadows) {
+    if (CLOSED.has(f.status)) continue;
+    if (f.payoffChapterId !== null && written.has(f.payoffChapterId)) suggestions.push({ foreshadowId: f.id, status: 'paid_off', chapterId: f.payoffChapterId });
+    else if (f.status === 'planned' && f.plantChapterId !== null && written.has(f.plantChapterId)) suggestions.push({ foreshadowId: f.id, status: 'planted', chapterId: f.plantChapterId });
+  }
+  return suggestions;
+}

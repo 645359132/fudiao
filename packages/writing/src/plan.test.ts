@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkPlan, foreshadowsForChapter, nextChapterToWrite } from './plan';
+import { checkPlan, foreshadowsForChapter, nextChapterToWrite, suggestForeshadowStatus } from './plan';
 import type { ForeshadowItem, PlanItem } from './types';
 
 const order = new Map([
@@ -69,5 +69,28 @@ describe('下一章写哪章', () => {
 
   it('不在书中（回收站）的章节不算', () => {
     expect(nextChapterToWrite([plan('gone')], order)).toBeNull();
+  });
+});
+
+describe('账本状态的建议', () => {
+  const written = (chapterId: string) => plan(chapterId, { status: 'written' });
+
+  it('埋设的章节写完了、账本还是“计划”：建议标为已埋', () => {
+    expect(suggestForeshadowStatus([debt], [plan('c1'), written('c2')])).toEqual([{ foreshadowId: 'f2', status: 'planted', chapterId: 'c2' }]);
+  });
+
+  it('回收的章节写完了：建议标为已回收，优先于已埋；已审核的章节同样算写完', () => {
+    const planned: ForeshadowItem = { ...jade, status: 'planned' };
+    expect(suggestForeshadowStatus([planned, jade], [written('c1'), plan('c3', { status: 'reviewed' })])).toEqual([
+      { foreshadowId: 'f1', status: 'paid_off', chapterId: 'c3' },
+      { foreshadowId: 'f1', status: 'paid_off', chapterId: 'c3' },
+    ]);
+  });
+
+  it('章节没写完、没有定章节、已经是对应状态、已回收或废弃时没有建议', () => {
+    const dropped: ForeshadowItem = { ...debt, id: 'f4', status: 'dropped' };
+    const unplaced: ForeshadowItem = { ...debt, id: 'f5', plantChapterId: null };
+    // jade 已埋，回收的第三章还在写；debt 的第二章待写；done 已回收。
+    expect(suggestForeshadowStatus([jade, debt, done, dropped, unplaced], [written('c1'), plan('c2'), plan('c3', { status: 'writing' })])).toEqual([]);
   });
 });

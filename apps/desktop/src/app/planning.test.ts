@@ -88,6 +88,46 @@ describe('采用草稿', () => {
     expect(again.chapters).toHaveLength(3);
     expect(again.chapters[0]!.plan).toMatchObject({ goal: '林舟当玉被压价（改）', version: 2 });
   });
+
+  it('账本里已有、还没有定章节的伏笔：按草稿补上埋设与回收的章节；作者定过的章节不改', async () => {
+    const { app } = await setup();
+    const blank = { content: '', plantAnchor: null, payoffAnchor: null, status: 'planned' as const };
+    value(await app.addForeshadow({ ...blank, title: '玉佩的来历', reveal: '玉佩是遗物', plantChapterId: null, payoffChapterId: null }));
+    const view = value(await app.applyPlanDraft(draft)).view;
+    const [first, , third] = view.chapters;
+    expect(view.foreshadows).toHaveLength(1);
+    expect(view.foreshadows[0]).toMatchObject({ plantChapterId: first!.chapter.id, payoffChapterId: third!.chapter.id, reveal: '玉佩是遗物' });
+
+    // 作者把回收改到了第二章：再次采用草稿时不改回去。
+    const moved = value(await app.updateForeshadow(view.foreshadows[0]!, { ...view.foreshadows[0]!, payoffChapterId: view.chapters[1]!.chapter.id }));
+    const again = value(await app.applyPlanDraft(draft)).view;
+    expect(again.foreshadows[0]).toMatchObject({ plantChapterId: first!.chapter.id, payoffChapterId: moved.chapters[1]!.chapter.id });
+  });
+});
+
+describe('账本状态的建议', () => {
+  it('埋设的章节写完后建议标为已埋，带上长篇记忆里的进展；作者标过之后不再建议', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    const view = value(await app.applyPlanDraft(draft)).view;
+    const first = view.chapters[0]!;
+    const jade = view.foreshadows[0]!;
+    expect(view.foreshadowSuggestions).toEqual([]);
+
+    // 第一章计划三千字，分两段写。
+    deps.llmResponses.push(reply('林舟叩响了门。'), reply('钱四多看了玉佩一眼。'));
+    expect(value(await app.writeChapter(first.chapter.id))).toMatchObject({ status: 'written' });
+    // 还没有长篇记忆：只说章节写完了。
+    expect(value(await app.planningView()).foreshadowSuggestions).toEqual([{ foreshadowId: jade.id, status: 'planted', chapterId: first.chapter.id, progress: null }]);
+
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [{ title: '玉佩的来历', progress: '钱四多看了玉佩一眼' }] })));
+    value(await app.buildMemory(first.chapter.id));
+    const after = value(await app.planningView());
+    expect(after.foreshadowSuggestions).toEqual([{ foreshadowId: jade.id, status: 'planted', chapterId: first.chapter.id, progress: '钱四多看了玉佩一眼' }]);
+
+    const current = after.foreshadows[0]!;
+    expect(value(await app.updateForeshadow(current, { ...current, status: 'planted' })).foreshadowSuggestions).toEqual([]);
+  });
 });
 
 describe('计划与伏笔账本的编辑', () => {

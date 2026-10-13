@@ -230,6 +230,7 @@ pnpm --filter @fudiao/desktop tauri dev
 1. `pnpm m3:eval --config m3/eval/config.json --chapters 2` 试跑两章：显示预计费用，确认后走完，生成 `report.md` 与 `book.txt`。
 2. `pnpm m3:eval --config m3/eval/config.json` 跑完整的 6 章，把检出率、费用、耗时与读后的判断记入 `m3/RESULTS.md`。
 3. 在桌面应用里用同样的材料走一遍“计划 → 排定章节 → 审核 → 修订”，确认与脚本的结果一致、界面上每一步都能介入。
+4. 写完一章埋设伏笔的章节后看“伏笔账本”：这条伏笔下提示“这一章已经写完”与长篇记忆里的进展，点“标为已埋”后状态更新、提示消失。
 
 ## 记录
 

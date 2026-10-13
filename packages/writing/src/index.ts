@@ -1,6 +1,6 @@
 export type * from './types';
-export type { ChapterForeshadows, PlanProblem } from './plan';
-export { checkPlan, foreshadowsForChapter, nextChapterToWrite } from './plan';
+export type { ChapterForeshadows, ForeshadowSuggestion, PlanProblem } from './plan';
+export { checkPlan, foreshadowsForChapter, nextChapterToWrite, suggestForeshadowStatus } from './plan';
 export type { BuiltinSkillText, ComposedSkill, SkillSetting } from './skills';
 export { composeSkills } from './skills';
 export type { ProgramCheckInput } from './checks';

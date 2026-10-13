@@ -29,7 +29,7 @@ import {
   type RepoError,
   type SqlPort,
 } from '@fudiao/store';
-import { checkPlan, type PlanProblem } from '@fudiao/writing';
+import { checkPlan, suggestForeshadowStatus, type ForeshadowSuggestion, type PlanProblem } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -49,6 +49,11 @@ export type PlanningView = {
   readonly outline: string;
   readonly chapters: readonly PlanChapterView[];
   readonly foreshadows: readonly Foreshadow[];
+  /**
+   * 账本状态的建议（B63）：埋设或回收的章节已经写完，账本还没有跟上。progress 是那一章的长篇记忆里这条伏笔的进展，没有时为 null。
+   * 作者确认后才改账本。
+   */
+  readonly foreshadowSuggestions: readonly (ForeshadowSuggestion & { readonly progress: string | null })[];
   /** 可以选作出场人物的设定（人物类）。 */
   readonly characters: readonly Entity[];
 };
@@ -108,6 +113,10 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         };
       }),
       foreshadows: foreshadows.value,
+      foreshadowSuggestions: suggestForeshadowStatus(foreshadows.value, plans.value).map((s) => ({
+        ...s,
+        progress: memoryOf.get(s.chapterId)?.foreshadowProgress[s.foreshadowId] ?? null,
+      })),
       characters: entities.value.filter((e) => e.kind === 'character'),
     });
   }
@@ -189,6 +198,21 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         const created = await createForeshadow(port, { id: deps.ids.next(), ...fields }, ctx());
         if (!created.ok) return err(repo(created.error));
         byTitle.set(title, created.value.id);
+      }
+
+      // 账本里已有、还没有定章节的伏笔：草稿安排了埋设或回收的章节时补上；作者定过的不改。
+      for (const f of existing.value) {
+        const title = f.title.trim();
+        const plantChapterId = f.plantChapterId ?? chapterOf(title, 'plant');
+        const payoffChapterId = f.payoffChapterId ?? chapterOf(title, 'payoff');
+        if (plantChapterId === f.plantChapterId && payoffChapterId === f.payoffChapterId) continue;
+        const placed = await updateForeshadow(
+          port,
+          f,
+          { title: f.title, content: f.content, reveal: f.reveal, plantChapterId, plantAnchor: f.plantAnchor, payoffChapterId, payoffAnchor: f.payoffAnchor, status: f.status },
+          ctx(),
+        );
+        if (!placed.ok) return err(repo(placed.error));
       }
 
       const entities = await listEntities(port);

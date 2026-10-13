@@ -238,7 +238,10 @@ function ForeshadowEditor({ item, onDone }: { readonly item: Foreshadow | null; 
 
 function Ledger() {
   const planning = useApp((s) => s.planning);
+  const update = useApp((s) => s.updateForeshadow);
+  const busy = useApp((s) => s.busy);
   const [editing, setEditing] = useState<string | null>(null);
+  const suggestionOf = (id: string) => planning?.foreshadowSuggestions.find((s) => s.foreshadowId === id);
   const chapterTitle = (id: string | null) => planning?.chapters.find((c) => c.chapter.id === id)?.chapter.title ?? '未定';
   return (
     <section aria-label="伏笔账本">
@@ -255,6 +258,25 @@ function Ledger() {
                 {editing === f.id ? '收起' : '编辑'}
               </button>
             </div>
+            {suggestionOf(f.id) === undefined ? null : (
+              <FollowUp
+                text={`“${chapterTitle(suggestionOf(f.id)?.chapterId ?? null)}”已经写完${suggestionOf(f.id)?.progress ? `，长篇记忆里的进展：${suggestionOf(f.id)?.progress ?? ''}` : ''}`}
+                label={`标为${STATUS[suggestionOf(f.id)?.status ?? 'planted']}`}
+                disabled={busy}
+                onAccept={() =>
+                  void update(f.id, {
+                    title: f.title,
+                    content: f.content,
+                    reveal: f.reveal,
+                    plantChapterId: f.plantChapterId,
+                    plantAnchor: f.plantAnchor,
+                    payoffChapterId: f.payoffChapterId,
+                    payoffAnchor: f.payoffAnchor,
+                    status: suggestionOf(f.id)?.status ?? f.status,
+                  })
+                }
+              />
+            )}
             {editing === f.id ? <ForeshadowEditor item={f} onDone={() => setEditing(null)} /> : null}
           </li>
         ))}
@@ -267,6 +289,18 @@ function Ledger() {
         </button>
       )}
     </section>
+  );
+}
+
+/** 账本状态的建议：章节写完了，请作者确认伏笔是否已经埋下或回收。 */
+function FollowUp({ text, label, disabled, onAccept }: { readonly text: string; readonly label: string; readonly disabled: boolean; readonly onAccept: () => void }) {
+  return (
+    <div className="skill-actions" role="group" aria-label="账本状态的建议">
+      <span className="muted">{text}</span>
+      <button type="button" disabled={disabled} onClick={onAccept}>
+        {label}
+      </button>
+    </div>
   );
 }
 

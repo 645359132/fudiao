@@ -1190,3 +1190,31 @@ describe('成书流程看板（B65）', () => {
     expect(await screen.findByText(/只做了程序检查，模型审核没有完成：还没有设置默认模型/)).toBeTruthy();
   });
 });
+
+describe('伏笔账本的状态建议（B63）', () => {
+  it('埋设的章节写完后，账本提示“标为已埋”；确认后状态更新，提示消失', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    const added = await service.addForeshadow({ title: '玉佩的缺口', content: '钱四多看了一眼', reveal: '玉佩是钱四师父的遗作', plantChapterId: chapterId, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' });
+    if (!added.ok) throw new Error('伏笔');
+    const jade = added.value.foreshadows[0]?.id ?? '';
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [jade], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    const ledger = await screen.findByRole('region', { name: '伏笔账本' });
+    expect(within(ledger).queryByRole('group', { name: '账本状态的建议' })).toBeNull();
+
+    deps.llmResponses.push(reply('钱四多看了玉佩一眼。'), reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [{ title: '玉佩的缺口', progress: '钱四对着缺口多看了一眼' }] })));
+    await user.click(screen.getByRole('button', { name: '写下一章' }));
+    const hint = await within(ledger).findByRole('group', { name: '账本状态的建议' });
+    await waitFor(() => expect(hint.textContent).toContain('“第一章”已经写完，长篇记忆里的进展：钱四对着缺口多看了一眼'));
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+
+    await user.click(within(screen.getByRole('region', { name: '伏笔账本' })).getByRole('button', { name: '标为已埋' }));
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '伏笔账本' })).queryByRole('group', { name: '账本状态的建议' })).toBeNull());
+    expect(within(screen.getByRole('region', { name: '伏笔账本' })).getByRole('listitem', { name: '玉佩的缺口' }).textContent).toContain('已埋');
+  });
+});

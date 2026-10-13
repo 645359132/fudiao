@@ -63,6 +63,7 @@
 - M3-08 已完成：成书流程看板 `apps/desktop/src/ui/PipelineBoard.tsx`（“计划”页的“成书进度”：按章显示计划、写作、长篇记忆与审核，写下一章、依次写完、排定一段章节、写完后审核、单章审核与查看问题）；状态层的 `writeChapters(ids, { review })`、`reviewFromBoard`、`openChapterReview`。
 - M3-09 的工具已完成、真实评估待作者执行：评估脚本 `tools/m3-eval/`（`pnpm m3:eval`，走完全流程并统计植入问题的检出率，运行前显示预计费用并确认）；短篇材料与植入的问题 `m3/eval/book.json`，步骤见 `m3/README.md`，结果记入 `m3/RESULTS.md`；`chapter_review` 模板升到版本 2（先判断视角人物，带上详略说明）。M3 的任务代码已全部完成，待作者执行真实评估与手工清单。
 - M3-09 试跑后的调整（2026-10-13，两章，DeepSeek flash）：评估报告写明模型审核没有完成的章节并重试一次，不计入检出率；输出上限的思考余量 `THINKING_ALLOWANCE` 提到 32,000；`chapter_review` 版本 3（只标“不得说破”的伏笔不要求在本章出现）；`writer_chapter` 版本 3（设定是约束，不是要逐条写进正文的清单）；`proxy-fetch` 在读取方放弃响应体后丢弃迟到的事件。
+- M3-09 真实评估已执行一次（2026-10-13，DeepSeek flash，六章）：流程走通，6 处植入全部检出，$0.218，结果与发现见 `m3/RESULTS.md`，“读后的判断”待作者填写。由此补上：采用计划草稿时给账本里已有的伏笔补上章节；账本状态的建议 `suggestForeshadowStatus`（章节写完后提示标为已埋或已回收，作者确认）；`chapter_review` 版本 4。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

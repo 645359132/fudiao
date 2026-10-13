@@ -86,8 +86,10 @@ describe('M3 评估流程', () => {
     expect(result.unmatchedCast).toEqual(['阿青']);
     expect(result.chapters.map((c) => [c.title, c.paragraphs, c.segments, c.issues.length, c.memory?.castStates])).toEqual([
       ['第一章 夜叩', 3, 1, 1, 1],
-      ['第二章 揭晓', 4, 1, 0, 1],
+      // 第二章是“玉佩的缺口”计划回收的章节，账本还没有标为已回收：程序检查提出一条。
+      ['第二章 揭晓', 4, 1, 1, 1],
     ]);
+    expect(result.chapters[1]?.issues[0]).toMatchObject({ kind: 'foreshadow', source: 'program' });
     expect(result.chapters[0]?.issues[0]).toMatchObject({ kind: 'pacing', source: 'model', quote: '压低了价' });
     // 全书正文是植入之前的。
     expect(result.bookText).toContain('第一章 夜叩\n\n林舟叩响了门。\n钱四压低了价。\n林舟带着玉走了。');
@@ -182,7 +184,7 @@ describe('模型审核没有完成时', () => {
     const report = renderReport(result, { model: 'S / m', startedAt: '' });
     for (const part of [
       '（重试 1 次） | 0 | 0 |',
-      '0（模型审核没有完成）',
+      '1（模型审核没有完成）',
       '下面只有程序检查的问题，这一章不能算“没有问题”。',
       '有 2 处植入所在章节的模型审核没有完成，不计入下面的检出率。',
       '共植入 1 处：检出 1 处（100%）',
