@@ -28,6 +28,7 @@ import {
   BeliefUpdateOutput,
   DirectorProposalOutput,
   EvidenceJudgementOutput,
+  ChapterMemoryOutput,
   PlanDraftOutput,
   SceneDraftOutput,
   SemanticRulingOutput,
@@ -58,6 +59,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   EvidenceJudgementOutput,
   BeatSheetOutput,
   SceneDraftOutput,
+  ChapterMemoryOutput,
   PlanDraftOutput,
 };
 
@@ -520,12 +522,14 @@ export type WriterChapterInput = {
   /** 启用的写作技能（已按顺序组合）。 */
   readonly skills: readonly { readonly name: string; readonly text: string }[];
   readonly avoidPhrases: readonly string[];
-  readonly cast: readonly { readonly name: string; readonly description: string }[];
+  /** state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。 */
+  readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string }[];
   readonly facts: readonly string[];
   /** 前面章节的梗概，从远到近。 */
   readonly memories: readonly { readonly title: string; readonly summary: string }[];
   readonly toPlant: readonly { readonly title: string; readonly content: string }[];
-  readonly toPayoff: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  /** progress：长篇记忆中这条伏笔在前面各章的进展，从远到近。 */
+  readonly toPayoff: readonly { readonly title: string; readonly content: string; readonly reveal: string; readonly progress: readonly string[] }[];
   /** 本章不得说破的揭晓内容。 */
   readonly mustNotReveal: readonly string[];
   readonly beatsBefore: readonly string[];
@@ -553,7 +557,7 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasSkills: input.skills.length > 0,
     avoidPhrases: [...input.avoidPhrases],
     hasAvoid: input.avoidPhrases.length > 0,
-    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim() })),
+    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim() })),
     hasCast: input.cast.length > 0,
     facts: [...input.facts],
     hasFacts: input.facts.length > 0,
@@ -561,7 +565,7 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasMemories: input.memories.length > 0,
     toPlant: input.toPlant.map((f) => ({ title: f.title, content: f.content })),
     hasToPlant: input.toPlant.length > 0,
-    toPayoff: input.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+    toPayoff: input.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal, progress: [...f.progress], hasProgress: f.progress.length > 0 })),
     hasToPayoff: input.toPayoff.length > 0,
     mustNotReveal: [...input.mustNotReveal],
     hasMustNotReveal: input.mustNotReveal.length > 0,
@@ -574,6 +578,33 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     written: input.written,
     words: input.words,
     isLast: input.isLast,
+  });
+}
+
+/** 一章梗概的字数上限。 */
+export const MEMORY_SUMMARY_WORDS = 300;
+
+export type ChapterMemoryInput = {
+  readonly title: string;
+  readonly chapterTitle: string;
+  /** 人物设定的名字。 */
+  readonly characters: readonly string[];
+  /** 尚未废弃的伏笔。 */
+  readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  readonly text: string;
+};
+
+/** 长篇记忆（B66）：作者侧的整理，材料是本章正文、人物设定的名字与伏笔账本。 */
+export function renderChapterMemory(input: ChapterMemoryInput): Result<RenderedPrompt, string> {
+  return renderTemplate('chapter_memory', {
+    title: input.title,
+    chapterTitle: input.chapterTitle,
+    characters: input.characters.map((name) => ({ name })),
+    hasCharacters: input.characters.length > 0,
+    foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal.trim() })),
+    hasForeshadows: input.foreshadows.length > 0,
+    text: input.text,
+    summaryWords: MEMORY_SUMMARY_WORDS,
   });
 }
 

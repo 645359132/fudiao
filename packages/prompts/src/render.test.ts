@@ -35,6 +35,7 @@ import {
   renderCharacterAction,
   renderDirectorProposal,
   renderEvidenceJudgement,
+  renderChapterMemory,
   renderPlanDraft,
   renderRunSynopsis,
   renderSceneDraft,
@@ -347,13 +348,13 @@ describe('写手成章（B59）', () => {
     skills: [{ name: '章末钩子', text: '结尾停在未解的问题上。' }],
     avoidPhrases: ['不禁', '仿佛'],
     cast: [
-      { name: '林舟', description: '落魄书生' },
-      { name: '钱四', description: '' },
+      { name: '林舟', description: '落魄书生', state: '玉还在手里，欠着三天后到期的赌债' },
+      { name: '钱四', description: '', state: '' },
     ],
     facts: ['林舟欠下赌债'],
     memories: [{ title: '第一章 夜叩', summary: '林舟当玉被压价' }],
     toPlant: [{ title: '债主', content: '巷口有人盯梢' }],
-    toPayoff: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物' }],
+    toPayoff: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物', progress: ['第一章 夜叩：钱四盯着玉佩的缺口看了很久'] }],
     mustNotReveal: ['债主是钱四的表兄'],
     beatsBefore: ['雨中奔走'],
     beatsNow: ['再访当铺', '对峙'],
@@ -372,8 +373,9 @@ describe('写手成章（B59）', () => {
     for (const part of [
       '【章末钩子】结尾停在未解的问题上。',
       '不要使用这些说法：“不禁”“仿佛”',
-      '- 林舟：落魄书生',
+      '- 林舟：落魄书生（最近的状态：玉还在手里，欠着三天后到期的赌债）',
       '- 钱四\n',
+      '  前文中的进展：第一章 夜叩：钱四盯着玉佩的缺口看了很久；',
       '- 林舟欠下赌债',
       '- 第一章 夜叩：林舟当玉被压价',
       '- 债主：巷口有人盯梢',
@@ -398,5 +400,31 @@ describe('写手成章（B59）', () => {
       expect(text).not.toContain(absent);
     }
     expect(text).toContain('请接着写本章的正文，达成本章目标，约 1500 字。这是本章的最后一段，写到本章结束。');
+  });
+});
+
+describe('长篇记忆（B66）', () => {
+  it('写出正文、人物与伏笔，要求结构化输出；没有人物与伏笔时省略', () => {
+    const prompt = unwrap(
+      renderChapterMemory({
+        title: '当铺夜谈',
+        chapterTitle: '第一章 夜叩',
+        characters: ['林舟', '钱四'],
+        foreshadows: [
+          { title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是父亲的遗物' },
+          { title: '巷口的人', content: '有人盯梢', reveal: '' },
+        ],
+        text: '林舟叩响了当铺的门。',
+      }),
+    );
+    expect(prompt.task).toBe('memory');
+    expect(prompt.output?.name).toBe('ChapterMemoryOutput');
+    const text = fullText(prompt);
+    for (const part of ['300 字以内', '作品：《当铺夜谈》', '章节：第一章 夜叩', '人物：林舟；钱四；', '- 玉佩的来历：掌柜多看了一眼（揭晓的内容：玉佩是父亲的遗物）', '- 巷口的人：有人盯梢\n', '正文：\n林舟叩响了当铺的门。']) {
+      expect(text).toContain(part);
+    }
+    const bare = fullText(unwrap(renderChapterMemory({ title: 't', chapterTitle: 'c', characters: [], foreshadows: [], text: '正文。' })));
+    expect(bare).not.toContain('人物：');
+    expect(bare).not.toContain('伏笔：\n');
   });
 });

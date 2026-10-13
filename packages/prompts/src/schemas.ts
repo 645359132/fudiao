@@ -209,6 +209,14 @@ export const PlanDraftOutput = z.object({
 });
 export type PlanDraftOutput = z.infer<typeof PlanDraftOutput>;
 
+/** 长篇记忆（B66）：一章的梗概、出场人物在章末的状态、有进展的伏笔。人物与伏笔用名字指代。 */
+export const ChapterMemoryOutput = z.object({
+  summary: z.string(),
+  cast: z.array(z.object({ name: z.string(), state: z.string() })),
+  foreshadows: z.array(z.object({ title: z.string(), progress: z.string() })),
+});
+export type ChapterMemoryOutput = z.infer<typeof ChapterMemoryOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

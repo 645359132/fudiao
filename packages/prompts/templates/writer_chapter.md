@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 1
+version: 2
 task: writer
 ---
 @@system
@@ -30,7 +30,7 @@ task: writer
 {{#hasCast}}
 出场人物：
 {{#cast}}
-- {{name}}{{#description}}：{{description}}{{/description}}
+- {{name}}{{#description}}：{{description}}{{/description}}{{#state}}（最近的状态：{{state}}）{{/state}}
 {{/cast}}
 {{/hasCast}}
 {{#hasFacts}}
@@ -61,6 +61,9 @@ task: writer
 本章要回收的伏笔：
 {{#toPayoff}}
 - {{title}}：前文埋下的是“{{content}}”，本章揭晓：{{reveal}}
+{{#hasProgress}}
+  前文中的进展：{{#progress}}{{.}}；{{/progress}}
+{{/hasProgress}}
 {{/toPayoff}}
 {{/hasToPayoff}}
 {{#hasMustNotReveal}}

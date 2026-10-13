@@ -61,6 +61,17 @@ export function listChapterMemories(port: SqlPort): Promise<Result<ChapterMemory
   );
 }
 
+/** 有正文的章节（回收站以外）：只有它们可以生成记忆。 */
+export async function listChaptersWithText(port: SqlPort): Promise<Result<string[], RepoError>> {
+  const rows = await queryAll(
+    port,
+    z.object({ id: z.string() }),
+    `SELECT DISTINCT p.chapter_id AS id FROM paragraph p JOIN chapter c ON c.id = p.chapter_id
+     WHERE c.status = 'normal' AND trim(p.text) <> ''`,
+  );
+  return rows.ok ? ok(rows.value.map((r) => r.id)) : rows;
+}
+
 /** 写入（或重建）一章的记忆：整行替换，状态回到有效。 */
 export async function saveChapterMemory(port: SqlPort, input: MemoryInput, ctx: WriteContext): Promise<Result<ChapterMemory, RepoError>> {
   const result = await port.transaction([

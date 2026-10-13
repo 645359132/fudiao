@@ -19,6 +19,10 @@
     "version": "3",
     "sha256": "3f89bc243ddc830115dcdb720ddeee4c8ce8e42c81bef7a91c72e9402f73d3ff"
   },
+  "chapter_memory": {
+    "version": "1",
+    "sha256": "83eef0aeb675a9249cf206aeb40a8664bda163edd36c743b79bbabafcf58e4fd"
+  },
   "character_action": {
     "version": "8",
     "sha256": "ec0be1a728b9c0026c07ba46b5edc4ce9e52acef1444a6272436f113e99935f7"
@@ -68,8 +72,8 @@
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
   },
   "writer_chapter": {
-    "version": "1",
-    "sha256": "99b0c0d9f6424bb03c850245ab34672509484ee8b8dd7b1cd3928aea1430ac6e"
+    "version": "2",
+    "sha256": "e4dfb4bdded3896fa66cb8fab91d5fa43da09bbd3960e9be57cff114246a80ec"
   },
   "skill:cliffhanger": {
     "version": "1",

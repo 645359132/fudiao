@@ -201,6 +201,9 @@ export type AppState = {
   readonly writeChapters: (chapterIds: readonly string[]) => Promise<void>;
   readonly cancelWriting: () => void;
   readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
+  /** 生成或重建一章的长篇记忆（B66）；memoryBuilding 是正在生成的章节。 */
+  readonly memoryBuilding: string | null;
+  readonly buildMemory: (chapterId: string) => Promise<boolean>;
 
   readonly openSkills: () => Promise<void>;
   readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string }) => Promise<boolean>;
@@ -273,6 +276,26 @@ export function createAppStore(service: AppService): AppStore {
     let writerAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
+    /** 生成一章的长篇记忆，登记为任务；失败时显示原因。返回是否成功。 */
+    async function memoryTask(chapterId: string, abort: AbortController): Promise<boolean> {
+      const taskId = `task-${++taskSeq}`;
+      taskAborts.set(taskId, abort);
+      const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+      task({ type: 'started', task: { id: taskId, kind: 'memory', title: `长篇记忆 · ${title}`, chapterId, startedAt: new Date().toISOString() } });
+      set({ memoryBuilding: chapterId });
+      const result = await service.buildMemory(chapterId, {
+        signal: abort.signal,
+        onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+      });
+      taskAborts.delete(taskId);
+      const finishedAt = new Date().toISOString();
+      if (result.ok) task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+      else task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+      const planning = get().planning === null ? null : await service.planningView();
+      set({ memoryBuilding: null, ...(planning?.ok === true && { planning: planning.value }), ...(!result.ok && { message: describeError(result.error) }) });
+      return result.ok;
+    }
+
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
     async function run<T>(task: Promise<Result<T, AppError>>, apply: (value: T) => Partial<AppState>): Promise<boolean> {
       set({ busy: true });
@@ -344,6 +367,7 @@ export function createAppStore(service: AppService): AppStore {
       planUnmatched: [],
       planDrafting: false,
       writerJob: null,
+      memoryBuilding: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -391,7 +415,7 @@ export function createAppStore(service: AppService): AppStore {
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
         await service.closeWork();
-        set({ writerJob: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -716,7 +740,11 @@ export function createAppStore(service: AppService): AppStore {
           const { status, reason, segmentsDone, segmentsTotal } = result.value;
           if (status === 'written') {
             task({ type: 'finished', id: taskId, status: 'done', finishedAt });
-            continue;
+            // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
+            if (await memoryTask(chapterId, abort)) continue;
+            const rest = chapterIds.length - i - 1;
+            set({ message: `“${title}”已写完，但长篇记忆没有生成：${get().message ?? ''}${rest > 0 ? `；后面的 ${rest} 章没有接着写` : ''}` });
+            break;
           }
           const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
           set({ message: note });
@@ -727,6 +755,11 @@ export function createAppStore(service: AppService): AppStore {
         set({ writerJob: null });
       },
       cancelWriting: () => writerAbort?.abort(),
+      async buildMemory(chapterId) {
+        if (get().writerJob !== null || get().memoryBuilding !== null) return false;
+        if (!(await get().leaveChapter())) return false;
+        return memoryTask(chapterId, new AbortController());
+      },
       async rollbackWriter(chapterId) {
         if (get().writerJob !== null || !(await get().leaveChapter())) return false;
         const done = await run(service.rollbackWriter(chapterId), () => ({}));

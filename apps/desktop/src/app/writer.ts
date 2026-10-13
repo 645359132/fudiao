@@ -12,6 +12,7 @@ import {
   getProject,
   listChapterMemories,
   listChapters,
+  listChaptersWithText,
   listEntities,
   listFacts,
   listForeshadows,
@@ -65,7 +66,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
 
   /** 本章不随分段变化的材料：作品、技能、人物、事实、伏笔、前文梗概与上一章的结尾。 */
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
-    const [work, skills, entities, facts, foreshadows, memories] = await Promise.all([
+    const [work, skills, entities, facts, foreshadows, memories, withText] = await Promise.all([
       getProject(port),
       // 作品还没打开过“写作技能”页时，内置技能在这里登记（全部启用）。
       ensureBuiltinSkills(port, BUILTIN_SKILLS.map(({ key, name, version }) => ({ key, name, version })), () => deps.ids.next(), ctx()),
@@ -73,6 +74,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       listFacts(port),
       listForeshadows(port),
       listChapterMemories(port),
+      listChaptersWithText(port),
     ]);
     if (!work.ok) return err(repo(work.error));
     if (!skills.ok) return err(repo(skills.error));
@@ -80,6 +82,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     if (!facts.ok) return err(repo(facts.error));
     if (!foreshadows.ok) return err(repo(foreshadows.error));
     if (!memories.ok) return err(repo(memories.error));
+    if (!withText.ok) return err(repo(withText.error));
 
     const order = new Map(chapters.map((c, i) => [c.id, i]));
     const index = order.get(chapter.id) ?? 0;
@@ -87,16 +90,28 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     const castIds = new Set(cast.map((c) => c.id));
     const fs = foreshadowsForChapter(plan, foreshadows.value, order);
 
-    // 前文梗概：优先用长篇记忆，没有时用作者写的章节梗概；从近到远选入，超出预算时去掉最远的。
-    const memoryOf = new Map(memories.value.map((m) => [m.chapterId, m.summary]));
+    // 前文梗概：优先用长篇记忆（待复核的也用，它仍是最接近正文的梗概），没有时用作者写的章节梗概；从近到远选入，超出预算时去掉最远的。
+    // 正文已经清空（例如回退之后）的章节，留下的记忆不再对应任何正文，不用。
+    const hasText = new Set(withText.value);
+    const memoryOf = new Map(memories.value.filter((m) => hasText.has(m.chapterId)).map((m) => [m.chapterId, m]));
     const earlier: { title: string; summary: string }[] = [];
     let used = 0;
     for (const c of chapters.slice(0, index).reverse()) {
-      const summary = (memoryOf.get(c.id) ?? c.summary).trim();
+      const summary = (memoryOf.get(c.id)?.summary ?? c.summary).trim();
       if (summary === '') continue;
       if (used + summary.length > MEMORY_CHARS) break;
       used += summary.length;
       earlier.unshift({ title: c.title, summary });
+    }
+
+    // 人物最近的状态与伏笔在前文中的进展，取自前面各章的长篇记忆（从远到近，后面的覆盖前面的）。
+    const stateOf = new Map<string, string>();
+    const progressOf = new Map<string, string[]>();
+    for (const c of chapters.slice(0, index)) {
+      const memory = memoryOf.get(c.id);
+      if (memory === undefined) continue;
+      for (const [id, state] of Object.entries(memory.castState)) stateOf.set(id, state);
+      for (const [id, progress] of Object.entries(memory.foreshadowProgress)) progressOf.set(id, [...(progressOf.get(id) ?? []), `${c.title}：${progress}`]);
     }
 
     const previous = chapters[index - 1];
@@ -115,14 +130,14 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       treatment: plan.treatment,
       skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, text: s.text })),
       avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
-      cast: cast.map((c) => ({ name: c.name, description: c.description })),
+      cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
       facts: facts.value
         .filter((f) => f.status === 'confirmed' && (f.subjectIds.some((id) => castIds.has(id)) || (f.holderId !== null && castIds.has(f.holderId))))
         .slice(0, MAX_FACTS)
         .map((f) => f.content),
       memories: earlier,
       toPlant: fs.toPlant.map((f) => ({ title: f.title, content: f.content })),
-      toPayoff: fs.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+      toPayoff: fs.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal, progress: progressOf.get(f.id) ?? [] })),
       mustNotReveal: fs.mustNotReveal.map((f) => f.reveal.trim()),
       previousEnding,
     });

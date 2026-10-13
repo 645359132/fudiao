@@ -953,7 +953,8 @@ describe('写手成章界面（B59、B60）', () => {
     await user.click(screen.getByRole('button', { name: '计划' }));
     const actions = await screen.findByRole('group', { name: '第一章 夜叩的写作' });
     expect(actions.textContent).toContain('写作中（已写 1 / 2 段）');
-    deps.llmResponses.push(reply('林舟转身走进雨里。'));
+    // 写完后接着整理这一章的长篇记忆。
+    deps.llmResponses.push(reply('林舟转身走进雨里。'), reply(JSON.stringify({ summary: '林舟再访当铺，没有谈成，冒雨离开。', cast: [], foreshadows: [] })));
     await user.click(within(actions).getByRole('button', { name: '接着写' }));
     await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的写作' }).textContent).toContain('已写'));
     await waitFor(() => expect(store.getState().writerJob).toBeNull());
@@ -972,5 +973,66 @@ describe('写手成章界面（B59、B60）', () => {
     await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的写作' }).textContent).toContain('待写'));
     const back = await service.openChapter(chapterId);
     expect(back.ok && back.value.saved.map((p) => p.text)).toEqual(['作者写的开头。']);
+  });
+
+  it('长篇记忆（B66）：写完一章自动生成，可以查看；正文变了标为待复核，可以重建', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章 夜叩');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    const lin = await service.createEntity('character', '林舟');
+    if (!lin.ok) throw new Error('设定');
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [lin.value.created.id], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    // 还没有正文的章节不显示长篇记忆。
+    await screen.findByRole('group', { name: '第一章 夜叩的写作' });
+    expect(screen.queryByRole('group', { name: '第一章 夜叩的长篇记忆' })).toBeNull();
+
+    deps.llmResponses.push(reply('林舟叩响了门。'), reply(JSON.stringify({ summary: '林舟深夜叩响当铺的门。', cast: [{ name: '林舟', state: '站在当铺门外' }], foreshadows: [] })));
+    await user.click(screen.getByRole('button', { name: '写下一章' }));
+    const memory = await screen.findByRole('group', { name: '第一章 夜叩的长篇记忆' });
+    await waitFor(() => expect(memory.textContent).toContain('长篇记忆：有效'));
+    expect(memory.textContent).toContain('林舟深夜叩响当铺的门。');
+    expect(within(within(memory).getByRole('list', { name: '人物状态' })).getByText('林舟：站在当铺门外')).toBeTruthy();
+    expect(store.getState().tasks.map((t) => [t.kind, t.status])).toEqual(expect.arrayContaining([['writer', 'done'], ['memory', 'done']]));
+
+    // 回退后正文变了：记忆待复核；这一章没有正文，不能重建。
+    await user.click(screen.getByRole('button', { name: '回退到写手写入前' }));
+    await user.click(screen.getByRole('button', { name: '确定回退' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('待复核'));
+    expect(within(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' })).getByRole('button', { name: '重建记忆' }).matches(':disabled')).toBe(true);
+
+    // 重写后重建。
+    deps.llmResponses.push(reply('门没有开。'), reply(JSON.stringify({ summary: '林舟叩门，门没有开。', cast: [], foreshadows: [] })));
+    await user.click(screen.getByRole('button', { name: '写下一章' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('林舟叩门，门没有开。'));
+    expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('长篇记忆：有效');
+  });
+
+  it('长篇记忆没有生成时说明原因，不接着写后面的章节；之后可以单独生成', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await addChapter(user, '第二章');
+    const [c1, c2] = store.getState().work?.chapters.map((c) => c.id) ?? [];
+    if (c1 === undefined || c2 === undefined) throw new Error('章节');
+    for (const id of [c1, c2]) {
+      expect((await service.savePlan(id, { goal: '目标', castIds: [], beats: ['一'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    }
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    // 第一章写完，记忆的回复连续不符合格式。
+    deps.llmResponses.push(reply('第一章的正文。'), reply('不是 JSON'), reply('不是 JSON'), reply('不是 JSON'));
+    await user.click(await screen.findByRole('button', { name: '依次写完待写的 2 章' }));
+    expect(await screen.findByText(/“第一章”已写完，但长篇记忆没有生成.*后面的 1 章没有接着写/)).toBeTruthy();
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    expect(screen.getByRole('group', { name: '第二章的写作' }).textContent).toContain('待写');
+    expect(screen.getByRole('group', { name: '第一章的长篇记忆' }).textContent).toContain('长篇记忆：还没有');
+
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '第一章的梗概。', cast: [], foreshadows: [] })));
+    await user.click(within(screen.getByRole('group', { name: '第一章的长篇记忆' })).getByRole('button', { name: '生成记忆' }));
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章的长篇记忆' }).textContent).toContain('长篇记忆：有效'));
   });
 });

@@ -321,6 +321,63 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
   );
 }
 
+/** 一章的长篇记忆（B66）：状态、内容与生成、重建。没有正文的章节不显示。 */
+function MemoryBlock({ item }: { readonly item: PlanChapterView }) {
+  const planning = useApp((s) => s.planning);
+  const building = useApp((s) => s.memoryBuilding);
+  const writerJob = useApp((s) => s.writerJob);
+  const build = useApp((s) => s.buildMemory);
+  const busy = useApp((s) => s.busy);
+  const { memory } = item;
+  if (planning === null || (!item.hasText && memory === null)) return null;
+  const here = building === item.chapter.id;
+  const status = here
+    ? '正在生成…'
+    : memory === null
+      ? '还没有'
+      : !item.hasText
+        ? '待复核（这一章现在没有正文，写手不会用这份记忆）'
+        : memory.status === 'stale'
+          ? '待复核（正文在生成记忆之后改过）'
+          : '有效';
+  const cast = memory === null ? [] : planning.characters.flatMap((c) => (memory.castState[c.id] === undefined ? [] : [{ id: c.id, name: c.name, text: memory.castState[c.id] }]));
+  const progress = memory === null ? [] : planning.foreshadows.flatMap((f) => (memory.foreshadowProgress[f.id] === undefined ? [] : [{ id: f.id, name: f.title, text: memory.foreshadowProgress[f.id] }]));
+  return (
+    <div role="group" aria-label={`${item.chapter.title}的长篇记忆`}>
+      <div className="skill-actions">
+        <span className="muted">长篇记忆：{status}</span>
+        <button type="button" disabled={busy || writerJob !== null || building !== null || !item.hasText} onClick={() => void build(item.chapter.id)}>
+          {memory === null ? '生成记忆' : '重建记忆'}
+        </button>
+      </div>
+      {memory !== null ? (
+        <details>
+          <summary>查看记忆</summary>
+          <p>{memory.summary}</p>
+          {cast.length > 0 ? (
+            <ul aria-label="人物状态">
+              {cast.map((c) => (
+                <li key={c.id}>
+                  {c.name}：{c.text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {progress.length > 0 ? (
+            <ul aria-label="伏笔进展">
+              {progress.map((f) => (
+                <li key={f.id}>
+                  {f.name}：{f.text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 /** 成书计划：章节计划与伏笔账本（需求 B63、B65）。 */
 export function PlanningPanel() {
   const planning = useApp((s) => s.planning);
@@ -354,6 +411,7 @@ export function PlanningPanel() {
               <PlanEditor item={item} />
             </details>
             <WriterActions item={item} />
+            <MemoryBlock item={item} />
             {item.problems.map((p) => (
               <p key={`${p.code}:${p.foreshadowId}`} className="field-error">
                 {PROBLEM[p.code]}：{planning.foreshadows.find((f) => f.id === p.foreshadowId)?.title ?? p.foreshadowId}

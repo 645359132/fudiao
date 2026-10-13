@@ -9,13 +9,17 @@ import {
   deleteForeshadow,
   getChapterPlan,
   getProject,
+  listChapterMemories,
   listChapterPlans,
+  listChaptersWithText,
   listChapters,
   listEntities,
   listForeshadows,
+  reviewStaleMemories,
   saveChapterPlan,
   updateForeshadow,
   type Chapter,
+  type ChapterMemory,
   type ChapterPlan,
   type Entity,
   type Foreshadow,
@@ -29,7 +33,14 @@ import type { AppError } from './errors';
 import type { modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
-export type PlanChapterView = { readonly chapter: Chapter; readonly plan: ChapterPlan | null; readonly problems: readonly PlanProblem[] };
+export type PlanChapterView = {
+  readonly chapter: Chapter;
+  readonly plan: ChapterPlan | null;
+  readonly problems: readonly PlanProblem[];
+  /** 长篇记忆（B66）；正文在生成记忆后改过时状态为待复核。 */
+  readonly memory: ChapterMemory | null;
+  readonly hasText: boolean;
+};
 
 export type PlanningView = {
   readonly outline: string;
@@ -55,13 +66,20 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
   const ctx = () => ({ now: deps.clock.now() });
 
   async function view(port: SqlPort): Promise<Result<PlanningView, AppError>> {
-    const [work, chapters, plans, foreshadows, entities] = await Promise.all([
+    // 先标出需要复核的记忆，列出的状态因此总是最新的。
+    const reviewed = await reviewStaleMemories(port, ctx());
+    if (!reviewed.ok) return err(repo(reviewed.error));
+    const [work, chapters, plans, foreshadows, entities, memories, withText] = await Promise.all([
       getProject(port),
       listChapters(port, 'normal'),
       listChapterPlans(port),
       listForeshadows(port),
       listEntities(port),
+      listChapterMemories(port),
+      listChaptersWithText(port),
     ]);
+    if (!memories.ok) return err(repo(memories.error));
+    if (!withText.ok) return err(repo(withText.error));
     if (!work.ok) return err(repo(work.error));
     if (!chapters.ok) return err(repo(chapters.error));
     if (!plans.ok) return err(repo(plans.error));
@@ -69,11 +87,19 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
     if (!entities.ok) return err(repo(entities.error));
     const order = new Map(chapters.value.map((c, i) => [c.id, i]));
     const byChapter = new Map(plans.value.map((p) => [p.chapterId, p]));
+    const memoryOf = new Map(memories.value.map((m) => [m.chapterId, m]));
+    const hasText = new Set(withText.value);
     return ok({
       outline: work.value?.outline ?? '',
       chapters: chapters.value.map((chapter) => {
         const plan = byChapter.get(chapter.id) ?? null;
-        return { chapter, plan, problems: plan === null ? [] : checkPlan(plan, foreshadows.value, order) };
+        return {
+          chapter,
+          plan,
+          problems: plan === null ? [] : checkPlan(plan, foreshadows.value, order),
+          memory: memoryOf.get(chapter.id) ?? null,
+          hasText: hasText.has(chapter.id),
+        };
       }),
       foreshadows: foreshadows.value,
       characters: entities.value.filter((e) => e.kind === 'character'),

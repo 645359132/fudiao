@@ -34,7 +34,7 @@ export { getChapterPlan, listChapterPlans, PLAN_STATUSES, saveChapterPlan, setPl
 export type { BuiltinSkill, WritingSkill } from './writing-skill';
 export { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
 export type { ChapterMemory, MemoryInput } from './chapter-memory';
-export { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
+export { getChapterMemory, listChapterMemories, listChaptersWithText, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
 export type { IssueEvidence, IssueInput, IssueKind, IssueSeverity, IssueStatus, ReviewIssue } from './review-issue';
 export { addIssues, ISSUE_KINDS, ISSUE_STATUSES, listIssues, reviewStaleIssues, setIssueStatus } from './review-issue';
 export type { WriterProgress } from './chapter-plan';
