@@ -1,9 +1,10 @@
 // 角色推演的用例（需求 B22、B28、B30，施工文档 M4-01）：把 M0 的推演引擎接到桌面端。
 // 事件写入作品库的 sim_event（只追加），模型经桌面端的适配器（凭据代理）调用，调用记录写入 llm_call（步骤键查重）。
 // 引擎与领域内核的逻辑不在这里：这里只负责把场景、运行与模型配置交给引擎，并把引擎的状态写回运行记录（缓存）。
-import { parseScene, stateHash, type Scene } from '@fudiao/domain';
+import { parseScene, stateHash, type Scene, type SceneSpecInput } from '@fudiao/domain';
 import { createEngine, replayRun, RunConfig, type EngineError, type Phase, type RunStatus, type TaskModel } from '@fudiao/engine';
-import type { LlmPort, ModelProfile } from '@fudiao/llm';
+import type { CallOptions, LlmPort, ModelProfile } from '@fudiao/llm';
+import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput } from '@fudiao/prompts';
 import { err, ok, sha256, type Result } from '@fudiao/shared';
 import {
   createSimRun,
@@ -27,8 +28,9 @@ import {
 } from '@fudiao/store';
 import type { AppError } from './errors';
 import type { ProviderView } from './model-services';
-import { projectCallLog, THINKING_ALLOWANCE, type ModelChoice } from './model-runner';
+import { projectCallLog, THINKING_ALLOWANCE, type modelRunner, type ModelChoice } from './model-runner';
 import type { AppDeps } from './ports';
+import { checkSceneConfig, describeSceneProblems } from './scene-editing';
 
 /** 给作者看的运行状态：运行记录，加上由事件得出的阶段与等待作者处理的事项。 */
 export type SimRunView = {
@@ -49,6 +51,12 @@ export type SimRunOptions = {
   readonly seed?: number;
 };
 
+/** 场景配置草稿（B39）：由一段描述生成，不保存；problems 是草稿里还不对的地方，作者修改后才能保存。 */
+export type SceneDraft = { readonly config: SceneSpecInput; readonly problems: readonly string[] };
+
+/** 场景配置草稿的输出上限：区域、角色、认知与规则合计几千字，另留出思考的余量。 */
+export const SCENE_DRAFT_OUTPUT_TOKENS = 8_000 + THINKING_ALLOWANCE;
+
 export type SimVerification = { readonly snapshots: number; readonly mismatchedSeqs: readonly number[] };
 
 export type SimulationDeps = {
@@ -57,6 +65,7 @@ export type SimulationDeps = {
   readonly defaultModel: () => Promise<Result<ModelChoice | null, AppError>>;
   /** 按标识找模型服务（运行配置里记的是服务标识）。 */
   readonly provider: (id: string) => Promise<ProviderView | null>;
+  readonly runner: ReturnType<typeof modelRunner>;
 };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
@@ -87,7 +96,7 @@ function progressOf(status: RunStatus): SimRunProgress {
   return { status: phase === 'AwaitingAuthor' ? 'awaiting_author' : 'running', endReason: null, pauseReason: null, round: status.round };
 }
 
-export function simulationUseCases({ deps, project, defaultModel, provider }: SimulationDeps) {
+export function simulationUseCases({ deps, project, defaultModel, provider, runner }: SimulationDeps) {
   const ctx = () => ({ now: deps.clock.now() });
 
   /** 运行配置里的模型来自“模型服务”中的默认模型（硬性规则 13）；推演的各类任务都要结构化输出，须通过能力自检。 */
@@ -128,8 +137,8 @@ export function simulationUseCases({ deps, project, defaultModel, provider }: Si
   function sceneOf(config: unknown): Result<Scene, AppError> {
     const scene = parseScene(config);
     if (scene.ok) return scene;
-    const first = scene.error[0];
-    return err(settings(`场景配置不完整或有矛盾（共 ${scene.error.length} 处），第一处：${first === undefined ? '' : JSON.stringify(first)}`));
+    const problems = describeSceneProblems(scene.error);
+    return err(settings(`场景配置还有 ${problems.length} 处不对：${problems.slice(0, 5).join('；')}${problems.length > 5 ? '……' : ''}`));
   }
 
   /** 把引擎的状态写回运行记录；停在等待、暂停或结束时记下状态快照，供以后校验回放。 */
@@ -177,6 +186,17 @@ export function simulationUseCases({ deps, project, defaultModel, provider }: Si
       if (port === null) return err({ code: 'no_work' });
       const scenes = await listSimScenes(port);
       return scenes.ok ? scenes : err(repo(scenes.error));
+    },
+
+    /** 由一段局面描述生成场景配置草稿（B39）。草稿不保存：作者逐项修改、确认后再保存。 */
+    async draftSimScene(description: string, options: CallOptions = {}): Promise<Result<SceneDraft, AppError>> {
+      if (description.trim() === '') return err(settings('请先用一段话描述局面：在哪里、有谁、各自想要什么、谁知道什么'));
+      const prompt = renderSceneDraft(description.trim());
+      if (!prompt.ok) return err(settings(prompt.error));
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: SCENE_DRAFT_OUTPUT_TOKENS, effort: 'medium' }, SceneDraftOutput, options);
+      if (!result.ok) return result;
+      const config = sceneDraftToSpec(result.value.value);
+      return ok({ config, problems: checkSceneConfig(config) });
     },
 
     /** 新建（id 为 null）或修改推演场景。场景配置须通过领域内核的校验；第一个开口的角色须是场景里的角色。 */

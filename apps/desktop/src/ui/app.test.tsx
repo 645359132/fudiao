@@ -11,6 +11,7 @@ import { createAppService } from '../app/service';
 import { createAppStore } from '../state/store';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
+import { sceneDraftFixture } from '../testing/scenes';
 
 // jsdom 不做排版，ProseMirror 把选区滚入视野时要用到的几何接口给空实现。
 const noRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
@@ -1216,5 +1217,141 @@ describe('伏笔账本的状态建议（B63）', () => {
     await user.click(within(screen.getByRole('region', { name: '伏笔账本' })).getByRole('button', { name: '标为已埋' }));
     await waitFor(() => expect(within(screen.getByRole('region', { name: '伏笔账本' })).queryByRole('group', { name: '账本状态的建议' })).toBeNull());
     expect(within(screen.getByRole('region', { name: '伏笔账本' })).getByRole('listitem', { name: '玉佩的缺口' }).textContent).toContain('已埋');
+  });
+});
+
+describe('推演场景的编辑（B22、B23、B39）', () => {
+  async function open() {
+    const ctx = start();
+    await createWork(ctx.user, '当铺夜谈');
+    await ctx.user.click(screen.getByRole('button', { name: '推演' }));
+    await screen.findByRole('region', { name: '角色推演' });
+    return ctx;
+  }
+
+  it('从空白开始：填写角色卡、初始认知、秘密与物品；有不对的地方时列出来、不能保存；保存后再打开内容还在', async () => {
+    const { user, service } = await open();
+    expect(screen.getByText('还没有推演场景。')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '新建场景' }));
+    await user.click(screen.getByRole('button', { name: '从空白开始' }));
+    const form = await screen.findByRole('form', { name: '新场景' });
+    const title = within(form).getByRole('textbox', { name: '场景名' });
+    await user.clear(title);
+    await user.type(title, '当铺谈判');
+
+    // 角色卡。
+    const actor = within(form).getByRole('listitem', { name: '角色 角色一' });
+    await user.click(within(actor).getByText('角色一'));
+    const name = within(actor).getByRole('textbox', { name: '名字' });
+    await user.clear(name);
+    await user.type(name, '林舟');
+    const lin = within(form).getByRole('listitem', { name: '角色 林舟' });
+    await user.type(within(lin).getByRole('textbox', { name: '目标' }), '把玉当个好价钱');
+    await user.type(within(lin).getByRole('textbox', { name: '失控条件' }), '被当面质疑出身');
+    await user.type(within(lin).getByRole('textbox', { name: '性格倾向（每行一条）' }), '好面子{Enter}嘴硬');
+
+    // 初始认知：内容没填时是一处问题，不能保存。
+    await user.click(within(lin).getByRole('button', { name: '添加初始认知' }));
+    expect(within(form).getByRole('list', { name: '还不对的地方' }).textContent).toContain('角色 第 1 项 › 角色卡 › 初始认知 第 1 项 › 内容：没有填写');
+    expect(within(form).getByRole('button', { name: '保存场景' }).matches(':disabled')).toBe(true);
+    await user.type(within(lin).getByRole('textbox', { name: '内容' }), '玉是父亲留下的');
+    await user.selectOptions(within(lin).getByRole('combobox', { name: '来源方式' }), '听说');
+
+    // 物品与秘密。
+    await user.click(within(form).getByRole('button', { name: '添加物品' }));
+    const item = within(form).getByRole('listitem', { name: '物品 新物品' });
+    const itemKey = within(item).getByRole('textbox', { name: '键' });
+    await user.clear(itemKey);
+    await user.type(itemKey, 'jade');
+    await user.selectOptions(within(item).getByRole('combobox', { name: '位置' }), '在林舟身上');
+    await user.click(within(item).getByRole('checkbox', { name: /藏着/ }));
+
+    await user.click(within(form).getByRole('button', { name: '添加秘密' }));
+    const secret = within(form).getByRole('listitem', { name: '秘密 secret_1' });
+    await user.type(within(secret).getByRole('textbox', { name: /秘密的内容/ }), '玉佩是钱四师父的遗作');
+    expect(within(form).getByRole('list', { name: '还不对的地方' }).textContent).toContain('秘密 第 1 项 › 涉及的对象');
+    await user.type(within(secret).getByRole('textbox', { name: /涉及的对象/ }), 'jade');
+    await user.click(within(secret).getByRole('checkbox', { name: '林舟' }));
+    await waitFor(() => expect(within(form).queryByRole('list', { name: '还不对的地方' })).toBeNull());
+
+    await user.click(within(form).getByRole('button', { name: '保存场景' }));
+    const saved = await screen.findByRole('form', { name: '场景 当铺谈判' });
+    expect(within(screen.getByRole('navigation', { name: '推演场景' })).getByRole('button', { name: /当铺谈判/ }).textContent).toContain('同时行动 · 8 回合');
+    // 刚保存、没有改动时不用再保存。
+    expect(within(saved).getByRole('button', { name: '保存场景' }).matches(':disabled')).toBe(true);
+
+    const scenes = await service.listSimScenes();
+    if (!scenes.ok) throw new Error('场景');
+    expect(scenes.value[0]?.config).toMatchObject({
+      actors: [
+        {
+          id: 'actor_1',
+          name: '林舟',
+          zone: 'room',
+          card: { goal: '把玉当个好价钱', lossOfControl: '被当面质疑出身', traits: ['好面子', '嘴硬'], initialKnowledge: [{ text: '玉是父亲留下的', modality: 'heard' }] },
+        },
+      ],
+      items: [{ id: 'jade', location: { kind: 'actor', actor: 'actor_1' }, concealed: true }],
+      secrets: [{ id: 'secret_1', text: '玉佩是钱四师父的遗作', subjects: ['jade'], knownBy: ['actor_1'] }],
+    });
+
+    // 修改后保存：只改了协议，配置版本不变，记录版本加一。
+    await user.selectOptions(within(saved).getByRole('combobox', { name: '回合协议' }), '轮流对话');
+    await user.selectOptions(within(saved).getByRole('combobox', { name: '第一个开口的角色' }), '林舟');
+    await user.click(within(saved).getByRole('button', { name: '保存场景' }));
+    await waitFor(async () => {
+      const again = await service.listSimScenes();
+      expect(again.ok && again.value[0]).toMatchObject({ protocol: 'turn_based', firstSpeaker: 'actor_1', configVersion: 1, version: 2 });
+    });
+  });
+
+  it('用一段话生成场景配置草稿：草稿里不对的地方列出来，改好后保存；也可以放弃草稿', async () => {
+    const { user, service, deps, store } = await open();
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '新建场景' }));
+    const fresh = screen.getByRole('form', { name: '新建场景' });
+    expect(within(fresh).getByRole('button', { name: '生成场景配置草稿' }).matches(':disabled')).toBe(true);
+    await user.type(within(fresh).getByRole('textbox'), '雨夜，林舟到钱四的当铺当玉。');
+
+    // 草稿里钱四所在的区域不存在。
+    const draft = sceneDraftFixture();
+    deps.llmResponses.push(reply(JSON.stringify({ ...draft, actors: draft.actors.map((a) => (a.id === 'qian_si' ? { ...a, zone: 'cellar' } : a)) })));
+    await user.click(within(fresh).getByRole('button', { name: '生成场景配置草稿' }));
+    const form = await screen.findByRole('form', { name: '新场景' });
+    expect(within(form).getByRole('note').textContent).toContain('草稿里有 1 处需要你改一下才能保存');
+    expect(within(form).getByRole('list', { name: '还不对的地方' }).textContent).toContain('角色 第 2 项 › 所在区域：引用了场景里没有的“cellar”');
+    // 两个角色：默认轮流对话。
+    expect(within(form).getByRole('combobox', { name: '回合协议' })).toHaveProperty('value', 'turn_based');
+    expect(store.getState().tasks.map((t) => [t.kind, t.status])).toEqual(expect.arrayContaining([['scene_draft', 'done']]));
+
+    const qian = within(form).getByRole('listitem', { name: '角色 钱四' });
+    await user.click(within(qian).getByText('钱四'));
+    expect(within(qian).getByRole('combobox', { name: /二阶认知/ })).toHaveProperty('value', 'lin_zhou');
+    await user.selectOptions(within(qian).getByRole('combobox', { name: '所在区域' }), '后院');
+    await waitFor(() => expect(within(form).queryByRole('list', { name: '还不对的地方' })).toBeNull());
+
+    // 高级：整份配置可以直接看和改；不是合法的 JSON 时说明原因，表单不变。
+    await user.click(within(form).getByText('高级：直接编辑整份场景配置'));
+    const json = within(form).getByRole('textbox', { name: '场景配置（JSON）' });
+    const config = JSON.parse((json as HTMLTextAreaElement).value) as { exits: string[] };
+    expect(config.exits).toEqual(['yard']);
+    await user.clear(json);
+    await user.click(within(form).getByRole('button', { name: '应用到表单' }));
+    expect(within(form).getByText(/不是合法的 JSON/)).toBeTruthy();
+
+    const title = within(form).getByRole('textbox', { name: '场景名' });
+    await user.clear(title);
+    await user.type(title, '当铺');
+    await user.click(within(form).getByRole('button', { name: '保存场景' }));
+    await screen.findByRole('form', { name: '场景 当铺' });
+    const scenes = await service.listSimScenes();
+    expect(scenes.ok && scenes.value[0]?.config).toMatchObject({ actors: [{ id: 'lin_zhou' }, { id: 'qian_si', zone: 'yard' }], secrets: [{ id: 'origin' }], rules: { narrativeRules: ['当铺里不许动手'] } });
+
+    // 再新建一个，从空白开始后放弃：回到描述局面的输入框，场景列表不变。
+    await user.click(screen.getByRole('button', { name: '新建场景' }));
+    await user.click(screen.getByRole('button', { name: '从空白开始' }));
+    await user.click(screen.getByRole('button', { name: '放弃草稿' }));
+    expect(screen.getByRole('form', { name: '新建场景' })).toBeTruthy();
+    expect(within(screen.getByRole('navigation', { name: '推演场景' })).getAllByRole('listitem')).toHaveLength(1);
   });
 });

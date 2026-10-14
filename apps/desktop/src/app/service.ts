@@ -316,6 +316,7 @@ export function createAppService(deps: AppDeps) {
       const view = await services.loadModelServices();
       return view.ok ? (view.value.providers.find((p) => p.id === id) ?? null) : null;
     },
+    runner,
   });
 
   return {

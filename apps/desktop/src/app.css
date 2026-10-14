@@ -1340,3 +1340,28 @@ fieldset.plain {
   color: var(--muted);
   font-size: 13px;
 }
+
+.sim-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.sim-scenes {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.sim-scenes button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+}
+
+.sim-scenes button[aria-current='true'] {
+  border-color: var(--accent);
+}

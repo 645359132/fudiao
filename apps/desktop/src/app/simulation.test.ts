@@ -8,6 +8,7 @@ import { memoryEventStore } from '@fudiao/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
+import { sceneDraftFixture } from '../testing/scenes';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -312,5 +313,43 @@ describe('经桌面端的模型适配器', () => {
     expect(status.run.status).toBe('running');
     const usage = value(await ctx.app.usage());
     expect(usage.recent.map((c) => c.taskKind)).toEqual(['character_action', 'character_action']);
+  });
+});
+
+describe('场景配置草稿（B39）', () => {
+  const draft = sceneDraftFixture();
+
+  it('由一段描述生成场景配置草稿：不保存；保存后可以开始推演', async () => {
+    const { deps, app, useModel } = await ready();
+    useModel(null);
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify(draft)));
+    const result = value(await app.draftSimScene('雨夜，落魄书生林舟到钱四的当铺当玉。'));
+    expect(result.problems).toEqual([]);
+    expect(result.config.actors.map((a) => a.name)).toEqual(['林舟', '钱四']);
+    expect(result.config.actors[1]?.card?.initialKnowledge?.[0]).toMatchObject({ order: 2, concerning: 'lin_zhou' });
+    expect(JSON.stringify(deps.llmRequests[0]?.body)).toContain('雨夜，落魄书生林舟到钱四的当铺当玉。');
+    // 草稿没有保存：场景列表里只有 ready 建的那一个。
+    expect(value(await app.listSimScenes())).toHaveLength(1);
+
+    const saved = value(await app.saveSimScene(null, { chapterId: null, title: '当铺', config: result.config, protocol: 'turn_based', maxRounds: 4, firstSpeaker: 'lin_zhou' }));
+    useModel(fakeModel().port);
+    expect(value(await app.startSimRun(saved.id, { mode: 'auto', seed: 1 }))).toMatchObject({ run: { status: 'running' } });
+  });
+
+  it('草稿里不对的地方列给作者；没有描述时不调用模型', async () => {
+    const { deps, app, useModel } = await ready();
+    useModel(null);
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ ...draft, actors: draft.actors.map((a, i) => (i === 1 ? { ...a, zone: 'cellar' } : a)) })));
+    const result = value(await app.draftSimScene('当铺'));
+    expect(result.problems).toEqual(['角色 第 2 项 › 所在区域：引用了场景里没有的“cellar”']);
+    // 有问题的草稿不能保存，说明里写的是同样的话。
+    expect(await app.saveSimScene(null, { chapterId: null, title: '当铺', config: result.config, protocol: 'turn_based', maxRounds: 4, firstSpeaker: null })).toMatchObject({
+      ok: false,
+      error: { code: 'settings', detail: expect.stringContaining('角色 第 2 项 › 所在区域：引用了场景里没有的“cellar”') },
+    });
+    expect(await app.draftSimScene('  ')).toMatchObject({ ok: false, error: { code: 'settings' } });
+    expect(deps.llmRequests).toHaveLength(1);
   });
 });

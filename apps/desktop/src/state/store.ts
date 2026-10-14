@@ -4,7 +4,8 @@ import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, 
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
-import type { ForeshadowFields, PlanFields } from '@fudiao/store';
+import type { SceneSpecInput } from '@fudiao/domain';
+import type { ForeshadowFields, PlanFields, SimScene, SimSceneFields } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -48,6 +49,9 @@ export type WriterJob = {
   readonly queued: readonly string[];
 };
 
+/** 还没有保存的场景配置草稿：由描述生成，或从空白开始。serial 每次换草稿加一，编辑表单据此重建。 */
+export type SceneDraftState = { readonly serial: number; readonly title: string; readonly config: SceneSpecInput; readonly problems: readonly string[] };
+
 /** 审核抽屉的状态：note 是最近一次审核或修订的说明。 */
 export type ReviewState = {
   readonly chapterId: string;
@@ -71,7 +75,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -226,6 +230,18 @@ export type AppState = {
   readonly openChapterReview: (chapterId: string) => Promise<void>;
   readonly cancelWriting: () => void;
   readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
+  /** 角色推演（B22 起）：场景列表、选中的场景（'new' 为新建）与还没有保存的场景配置草稿（B39）。 */
+  readonly simScenes: readonly SimScene[] | null;
+  readonly simSceneId: string | null;
+  readonly sceneDraft: SceneDraftState | null;
+  readonly sceneDrafting: boolean;
+  readonly openSimulation: () => Promise<void>;
+  readonly selectSimScene: (id: string | null) => void;
+  readonly draftSimScene: (description: string) => Promise<void>;
+  readonly blankSimScene: (config: SceneSpecInput) => void;
+  readonly discardSceneDraft: () => void;
+  /** 保存场景；成功后选中它。返回是否成功。 */
+  readonly saveSimScene: (id: string | null, fields: SimSceneFields) => Promise<boolean>;
   /** 审核（B64）：正文旁的审核抽屉。running 为正在审核，revisingId 为正交给写手修订的问题。 */
   readonly reviewDrawerOpen: boolean;
   readonly review: ReviewState | null;
@@ -312,6 +328,7 @@ export function createAppStore(service: AppService): AppStore {
     const taskAborts = new Map<string, AbortController>();
     let taskSeq = 0;
     let writerAbort: AbortController | null = null;
+    let sceneSerial = 0;
     let reviewAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
@@ -428,6 +445,10 @@ export function createAppStore(service: AppService): AppStore {
       reviewDrawerOpen: false,
       review: null,
       reviewingChapterId: null,
+      simScenes: null,
+      simSceneId: null,
+      sceneDraft: null,
+      sceneDrafting: false,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -475,7 +496,7 @@ export function createAppStore(service: AppService): AppStore {
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -761,6 +782,45 @@ export function createAppStore(service: AppService): AppStore {
         return done;
       },
       discardPlanDraft: () => set({ planDraft: null }),
+      async openSimulation() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.listSimScenes(), (simScenes) => ({ simScenes, panel: 'simulation', chapterContent: null, drawerEntityId: null }));
+      },
+      selectSimScene: (id) => set({ simSceneId: id }),
+      async draftSimScene(description) {
+        if (get().sceneDrafting) return;
+        const taskId = `task-${++taskSeq}`;
+        const abort = new AbortController();
+        taskAborts.set(taskId, abort);
+        task({ type: 'started', task: { id: taskId, kind: 'scene_draft', title: '生成场景配置草稿', chapterId: null, startedAt: new Date().toISOString() } });
+        set({ sceneDrafting: true, message: null });
+        const result = await service.draftSimScene(description, {
+          signal: abort.signal,
+          onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+        });
+        taskAborts.delete(taskId);
+        const finishedAt = new Date().toISOString();
+        if (result.ok) {
+          const title = result.value.config.meta?.title?.trim() ?? '';
+          set({ sceneDrafting: false, sceneDraft: { serial: ++sceneSerial, title: title === '' ? '新场景' : title, config: result.value.config, problems: result.value.problems } });
+          task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+        } else {
+          set({ sceneDrafting: false, message: describeError(result.error) });
+          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+        }
+      },
+      blankSimScene: (config) => set({ sceneDraft: { serial: ++sceneSerial, title: '新场景', config, problems: [] } }),
+      discardSceneDraft: () => set({ sceneDraft: null }),
+      async saveSimScene(id, fields) {
+        const saved = await service.saveSimScene(id, fields);
+        if (!saved.ok) {
+          set({ message: describeError(saved.error) });
+          return false;
+        }
+        const scenes = await service.listSimScenes();
+        set({ simSceneId: saved.value.id, sceneDraft: id === null ? null : get().sceneDraft, message: null, ...(scenes.ok && { simScenes: scenes.value }) });
+        return true;
+      },
       async writeChapters(chapterIds, options = {}) {
         if (get().writerJob !== null || chapterIds.length === 0) return;
         // 先保存编辑器里的内容：写手不会覆盖未保存的修改。
