@@ -20,6 +20,7 @@ import {
   listChapters,
   listChapterEventLinks,
   listEntities,
+  listFacts,
   listParagraphs,
   listStoryEvents,
   planRangeReplace,
@@ -74,6 +75,8 @@ export type AdoptionEvent = {
   readonly participants: readonly { readonly key: string; readonly name: string }[];
   /** 视角角色察觉到了这件事（这份正文能讲到的事）。 */
   readonly seenByPov: boolean;
+  /** 以前已采纳为故事事件（例如另一个视角写过这一回合）：再次采纳时关联到它，不另建。 */
+  readonly adoptedEventId: string | null;
 };
 
 /** 视角角色的一条见闻，可以记为他的认知。 */
@@ -131,6 +134,7 @@ const factInput = (
   subjectIds: readonly string[],
   modality: 'observed' | 'heard' | 'inferred' | null,
   confidence: number | null,
+  chapterId: string,
 ): FactInput => ({
   kind,
   holderId,
@@ -138,7 +142,8 @@ const factInput = (
   content,
   modality,
   confidence,
-  validFromChapterId: null,
+  // 从写进的这一章起适用：写更早的章节时，上下文与写手不会拿到这件后来才发生的事。
+  validFromChapterId: chapterId,
   validToChapterId: null,
   validFrom: null,
   validTo: null,
@@ -253,6 +258,20 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
     const entityOf = (key: string): string | null => links.find((l) => l.key === key)?.entityId ?? null;
     const lockedNames = new Map(entities.value.filter((e) => e.locked).map((e) => [e.id, e.name]));
 
+    // 事件的出处：分支复制了分支点之前的事件，这些事件的出处是最初发生它们的那次运行（同一件事只采纳成一个故事事件）。
+    const lineage: { runId: string; upTo: number | null }[] = [];
+    for (let current: SimRun | null = loaded.value.run, upTo: number | null = null; current !== null; ) {
+      lineage.push({ runId: current.id, upTo });
+      if (current.parentRunId === null || current.branchFromSeq === null) break;
+      upTo = upTo === null ? current.branchFromSeq : Math.min(upTo, current.branchFromSeq);
+      const parent = await getSimRun(port, current.parentRunId);
+      if (!parent.ok) return err(repo(parent.error));
+      current = parent.value;
+    }
+    const originOf = (seq: number) => [...lineage].reverse().find((l) => l.upTo === null || seq <= l.upTo)!.runId;
+    const stories = await listStoryEvents(port);
+    if (!stories.ok) return err(repo(stories.error));
+
     // 范围内发生的事：提交时的事件序号与它在这一批里的位置，以及谁察觉到了。
     const inRange = events.filter((e) => e.seq <= upToSeq);
     const perceived = new Map<string, { actor: string; channel: string }[]>();
@@ -261,7 +280,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       if (p.type !== 'PerceptionDelivered' || p.round < fromRound || p.round > toRound) continue;
       for (const o of p.observations) perceived.set(o.occurrence, [...(perceived.get(o.occurrence) ?? []), { actor: p.actor, channel: o.channel }]);
     }
-    const occurrences = new Map<string, { seq: number; occurrence: Occurrence; perceivedBy: { actor: string; channel: string }[] }>();
+    const occurrences = new Map<string, { seq: number; originRunId: string; occurrence: Occurrence; perceivedBy: { actor: string; channel: string }[] }>();
     const draftEvents: AdoptionEvent[] = [];
     for (const e of inRange) {
       const p = e.payload as RunEvent;
@@ -269,11 +288,14 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       for (const [index, o] of p.occurrences.entries()) {
         const key = `${e.seq}:${index}`;
         const perceivedBy = perceived.get(o.id) ?? [];
-        occurrences.set(key, { seq: e.seq, occurrence: o, perceivedBy });
+        const originRunId = originOf(e.seq);
+        const summary = describeStoryOccurrence(o, name);
+        occurrences.set(key, { seq: e.seq, originRunId, occurrence: o, perceivedBy });
         draftEvents.push({
           key,
           round: p.round,
-          summary: describeStoryOccurrence(o, name),
+          summary,
+          adoptedEventId: stories.value.find((x) => x.originRunId === originRunId && x.originSeq === e.seq && x.summary === summary)?.id ?? null,
           participants: [...new Set([...(o.actor === undefined ? [] : [o.actor]), ...o.participants])].map((k) => ({ key: k, name: name(k) })),
           // 视角角色察觉到的事，才是这份正文能讲到的事。
           seenByPov: perceivedBy.some((x) => x.actor === povActor),
@@ -308,7 +330,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       reviews,
       entities: links,
     };
-    return ok({ draft, candidate: c, moment: { runId }, occurrences, entityOf, lockedNames });
+    return ok({ draft, candidate: c, occurrences, entityOf, lockedNames });
   }
 
   async function sheetView(port: SqlPort, sheet: BeatSheet): Promise<Result<BeatSheetView, AppError>> {
@@ -441,7 +463,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       const { port } = s;
       const loaded = await adoptionContext(port, request.candidateId);
       if (!loaded.ok) return loaded;
-      const { draft, candidate, moment, occurrences, entityOf, lockedNames } = loaded.value;
+      const { draft, candidate, occurrences, entityOf, lockedNames } = loaded.value;
 
       const unreviewed = draft.reviews.filter((r) => !request.reviewed.includes(r.requestId));
       if (unreviewed.length > 0) return err(settings(`还有 ${unreviewed.length} 条自动接受的裁决没有复核：自动模式的结果须逐条复核后才能采纳`));
@@ -450,9 +472,9 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       const draftFile = await deps.drafts.read(s.path, candidate.chapterId);
       if (draftFile.ok && draftFile.value !== null) return err(settings('这一章有未保存的修改：请先打开这一章保存或丢弃'));
 
-      // 事件与事实（人物与地点换成设定的标识；对不上设定的略去）。
-      const eventIds = new Map(chosen.map((e) => [e.key, deps.ids.next()]));
-      const events: AdoptedEvent[] = chosen.map((e) => {
+      // 事件与事实（人物与地点换成设定的标识；对不上设定的略去）。以前采纳过的事只关联，不另建。
+      const eventIds = new Map(chosen.map((e) => [e.key, e.adoptedEventId ?? deps.ids.next()]));
+      const events: AdoptedEvent[] = chosen.filter((e) => e.adoptedEventId === null).map((e) => {
         const o = occurrences.get(e.key)!;
         const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
         return {
@@ -464,14 +486,20 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
             const id = entityOf(p.actor);
             return id === null ? [] : [{ entityId: id, channel: p.channel }];
           }),
-          originRunId: moment.runId,
+          originRunId: o.originRunId,
           originSeq: o.seq,
         };
       });
+      const existing = await listFacts(port);
+      if (!existing.ok) return err(repo(existing.error));
       const facts: AdoptedFact[] = [];
       for (const e of chosen.filter((x) => request.worldFacts.includes(x.key))) {
-        const event = events.find((x) => x.id === eventIds.get(e.key))!;
-        facts.push({ id: deps.ids.next(), eventId: event.id, input: factInput('world', null, e.summary, event.participants, null, null) });
+        const eventId = eventIds.get(e.key)!;
+        // 同一件事以前已记为世界事实的，不重复记。
+        if (existing.value.some((f) => f.kind === 'world' && f.content === e.summary && f.eventIds.includes(eventId))) continue;
+        const o = occurrences.get(e.key)!;
+        const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
+        facts.push({ id: deps.ids.next(), eventIds: [eventId], input: factInput('world', null, e.summary, people.flatMap((k) => entityOf(k) ?? []), null, null, candidate.chapterId) });
       }
       const povEntity = entityOf(draft.povKey);
       const beliefs = draft.beliefs.filter((b) => request.beliefs.includes(b.ref));
@@ -479,8 +507,9 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       for (const b of beliefs) {
         facts.push({
           id: deps.ids.next(),
-          eventId: events[0]?.id ?? null,
-          input: factInput('belief', povEntity, b.text, b.about.flatMap((k) => entityOf(k) ?? []), b.modality, b.confidence),
+          // 见闻的来源：同一回合里视角角色察觉到、这次采纳的事。
+          eventIds: chosen.filter((e) => e.round === b.round && e.seenByPov).map((e) => eventIds.get(e.key)!),
+          input: factInput('belief', povEntity, b.text, b.about.flatMap((k) => entityOf(k) ?? []), b.modality, b.confidence, candidate.chapterId),
         });
       }
       const touched = new Set(facts.flatMap((f) => [...f.input.subjectIds, ...(f.input.holderId === null ? [] : [f.input.holderId])]));
@@ -515,12 +544,12 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       if (!snapshot.ok) return err(repo(snapshot.error));
       const done = await port.transaction([
         ...rangeReplaceStatements(candidate.chapterId, plan.value, ctx()),
-        ...adoptionStatements({ candidate, events, facts, paragraphIds: written }, ctx(), () => deps.ids.next()),
+        ...adoptionStatements({ candidate, events, linkedEventIds: [...eventIds.values()], facts, paragraphIds: written }, ctx(), () => deps.ids.next()),
       ]);
       if (!done.ok) return done.error.code === 'guard_failed' ? stale() : err(repo({ code: 'sql', error: done.error }));
       const after = await listParagraphs(port, candidate.chapterId);
       if (!after.ok) return err(repo(after.error));
-      return ok({ paragraphs: after.value, events: events.length, facts: facts.length });
+      return ok({ paragraphs: after.value, events: chosen.length, facts: facts.length });
     },
 
     /**

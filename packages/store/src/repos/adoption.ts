@@ -21,15 +21,18 @@ export type AdoptedEvent = {
 export type AdoptedFact = {
   readonly id: string;
   readonly input: FactInput;
-  /** 这条事实依据的故事事件（本次采纳的事件之一）；没有时为 null。 */
-  readonly eventId: string | null;
+  /** 这条事实依据的故事事件（这段正文讲述的事件）。 */
+  readonly eventIds: readonly string[];
 };
 
 export type AdoptionInput = {
   readonly candidate: { readonly id: string; readonly version: number };
+  /** 新建的故事事件。 */
   readonly events: readonly AdoptedEvent[];
+  /** 这段正文讲述的全部事件：新建的，加上以前采纳过、这次再次讲述的（同一件事只有一个故事事件，B55）。 */
+  readonly linkedEventIds: readonly string[];
   readonly facts: readonly AdoptedFact[];
-  /** 写入的正文段落：每一段都关联本次采纳的全部事件（正面叙述）。 */
+  /** 写入的正文段落：每一段都关联 linkedEventIds（正面叙述）。 */
   readonly paragraphIds: readonly string[];
 };
 
@@ -51,20 +54,22 @@ export function adoptionStatements(input: AdoptionInput, ctx: WriteContext, newI
         ctx.now,
       ],
     });
+  }
+  for (const eventId of input.linkedEventIds) {
     for (const paragraphId of input.paragraphIds) {
       statements.push({
         sql: "INSERT INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES (?, ?, 'direct', ?)",
-        params: [e.id, paragraphId, ctx.now],
+        params: [eventId, paragraphId, ctx.now],
       });
     }
   }
   for (const f of input.facts) {
     // 作者在采纳时逐条选定，即为接受（硬性规则 21）：状态记为已确认。
     statements.push(factInsertStatement(f.id, f.input, 'confirmed', ctx));
-    if (f.eventId !== null) {
+    for (const eventId of f.eventIds) {
       statements.push({
         sql: "INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, to_version, created_at) VALUES (?, 'fact', ?, 'story_event', ?, 1, ?)",
-        params: [newId(), f.id, f.eventId, ctx.now],
+        params: [newId(), f.id, eventId, ctx.now],
       });
     }
   }

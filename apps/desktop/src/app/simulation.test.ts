@@ -8,6 +8,7 @@ import { memoryEventStore } from '@fudiao/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
+import type { AdoptionDraft } from './narration';
 import { dramaPolicy as policy, sceneDraftFixture } from '../testing/scenes';
 import { createAppService, type AppService } from './service';
 
@@ -799,6 +800,42 @@ describe('采纳推演草案（B29、B55，验收“草案采纳”“自动模�
     // 锁定设定本身没有被改动。
     const after = value(await app.listEntities()).find((e) => e.id === lin.id)!;
     expect(after).toMatchObject({ name: '主角', locked: true, description: '', aliases: [] });
+  });
+
+  it('同一件事再次采纳（另一个视角、或从分支上写）时关联到原来的故事事件，不另建，世界事实不重复；事实从写进的那一章起适用', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await app.continueSimRun(runId));
+    // 从结束处的快照分支：第一回合的事都在分支点之前，分支上的是复制来的同一批事件。
+    const at = value(await app.simRunDetail(runId)).forkPoints.at(-1)!.seq;
+    const fork = value(await app.forkSimRun(runId, at)).run.id;
+    const one = value(await app.createChapter('第一章')).chapters[0]!;
+    const two = value(await app.createChapter('第二章', one.id)).chapters.find((c) => c.title === '第二章')!;
+    const narrate = async (run: string, pov: string, chapterId: string) => {
+      const sheet = value(await app.draftBeatSheet(run, { pov, fromRound: 1, toRound: 1, notes: '' }));
+      return value(await app.adoptionDraft(value(await app.narrateBeatSheet(sheet.sheet.id, chapterId)).id));
+    };
+    const adopt = (draft: AdoptionDraft, key: string) =>
+      app.adoptCandidate({ candidateId: draft.candidateId, events: [key], worldFacts: [key], beliefs: [], reviewed: draft.reviews.map((r) => r.requestId), confirmLocked: false });
+
+    const first = await narrate(runId, 'protagonist', one.id);
+    const shot = first.events.find((e) => e.summary.includes('弩箭'))!;
+    expect(shot.adoptedEventId).toBeNull();
+    value(await adopt(first, shot.key));
+    const [event] = value(await app.storyEvents());
+    expect(event).toMatchObject({ originRunId: runId });
+
+    // 分支复制了分支点之前的事件：从分支上、换一个视角写同一回合，仍是同一件事。
+    const second = await narrate(fork, 'antagonist', two.id);
+    const again = second.events.find((e) => e.summary === shot.summary)!;
+    expect(again.adoptedEventId).toBe(event!.id);
+    expect(value(await adopt(second, again.key))).toMatchObject({ events: 1, facts: 0 });
+    expect(value(await app.storyEvents())).toEqual([event]);
+    const linked = [...value(await app.chapterEventLinks(one.id)), ...value(await app.chapterEventLinks(two.id))];
+    expect(linked.map((l) => l.eventId)).toEqual([event!.id, event!.id]);
+
+    const facts = value(await app.listFacts());
+    expect(facts.map((f) => [f.kind, f.content, f.validFromChapterId, f.eventIds])).toEqual([['world', shot.summary, one.id, [event!.id]]]);
   });
 
   it('原文在写成之后被改过：候选稿过期，什么都不写', async () => {

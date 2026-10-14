@@ -53,6 +53,7 @@ export function AdoptionForm({ draft }: { readonly draft: AdoptionDraft }) {
               <input type="checkbox" checked={events.includes(e.key)} onChange={(x) => setEvents(toggle(events, e.key, x.currentTarget.checked))} />
               第 {e.round} 回合 · {e.summary}
               {!e.seenByPov && <span className="muted">（{draft.povName}没有察觉）</span>}
+              {e.adoptedEventId !== null && <span className="muted">（已采纳过：关联到同一个故事事件）</span>}
             </label>
             <label>
               <input
