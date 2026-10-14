@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { randomIdea } from '../app/idea-seeds';
 import type { BookSeed } from '../app/quick-book';
 import { PipelineBoard } from './PipelineBoard';
 import { useApp } from './store-context';
@@ -124,7 +125,12 @@ export function QuickBookPanel() {
           <p>已连接：{status.model.name}</p>
         ) : (
           <>
-            <p>{status.model.problem}。在“模型服务”里添加服务、填写 API Key、获取模型列表，运行能力自检后设为默认模型。</p>
+            <p>
+              {status.model.problem}。
+              {status.model.name === null
+                ? '在“模型服务”里添加服务、填写 API Key、获取模型列表，运行能力自检后设为默认模型。'
+                : '打开“模型服务”，对这个模型运行能力自检；通不过时换一个模型设为默认。'}
+            </p>
             <button type="button" onClick={() => void openModelServices()}>
               设置模型服务
             </button>
@@ -149,10 +155,23 @@ export function QuickBookPanel() {
           </>
         ) : (
           <div className="panel-form" role="form" aria-label="一句话的想法">
-            <label>
-              一句话的想法
-              <textarea rows={2} placeholder="例如：落魄书生深夜当玉，当铺掌柜认出了玉佩的来历" value={idea} onChange={(e) => setIdea(e.currentTarget.value)} />
-            </label>
+            <div className="book-idea-head">
+              <label htmlFor="book-idea">一句话的想法</label>
+              <button
+                type="button"
+                className="link"
+                title="从人物、处境与转折中随机拼一句，可以接着改；填了类型时按类型挑"
+                onClick={() => {
+                  // 随机只用来给作者一个起点，不进入推演，不需要可复现。
+                  const next = randomIdea(genre, Math.random);
+                  setIdea(next.idea);
+                  setGenre(next.genre);
+                }}
+              >
+                随机生成
+              </button>
+            </div>
+            <textarea id="book-idea" rows={2} placeholder="没有想法？随机生成一个" value={idea} onChange={(e) => setIdea(e.currentTarget.value)} />
             <div className="skill-actions">
               <label>
                 类型（可不填）

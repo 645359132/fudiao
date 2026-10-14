@@ -1446,3 +1446,9 @@ fieldset.plain {
 .book-character input:nth-child(2) {
   flex: 1;
 }
+
+.book-idea-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}

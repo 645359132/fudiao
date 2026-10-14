@@ -1758,8 +1758,17 @@ describe('快速成书的界面（B67）', () => {
         { name: '路人', description: '多余的人' },
       ],
     };
+    // 没有想法时随机生成一句（不调用模型），类型一并填上；之后可以改。
+    const ideaBox = within(step(2)).getByRole('textbox', { name: '一句话的想法' });
+    expect(ideaBox.getAttribute('placeholder')).toBe('没有想法？随机生成一个');
+    const calls = deps.llmRequests.length;
+    await user.click(within(step(2)).getByRole('button', { name: '随机生成' }));
+    expect((ideaBox as HTMLTextAreaElement).value).not.toBe('');
+    expect(within(step(2)).getByRole<HTMLInputElement>('textbox', { name: '类型（可不填）' }).value).not.toBe('');
+    expect(deps.llmRequests).toHaveLength(calls);
+    await user.clear(ideaBox);
     deps.llmResponses.push(reply(JSON.stringify(seed)));
-    await user.type(within(step(2)).getByRole('textbox', { name: '一句话的想法' }), '落魄书生当铺夜遇旧主');
+    await user.type(ideaBox, '落魄书生当铺夜遇旧主');
     const chapters = within(step(2)).getByRole('spinbutton', { name: '章数' });
     await user.clear(chapters);
     await user.type(chapters, '2');
