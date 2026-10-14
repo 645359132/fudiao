@@ -561,3 +561,53 @@ describe('作者介入与分支（B30）', () => {
     expect(value(await app.verifySimRun(fork.run.id)).mismatchedSeqs).toEqual([]);
   });
 });
+
+describe('回放与中断恢复（B30）', () => {
+  it('写完事件、还没写回运行记录时中断：列出运行时按事件校正状态与回合', async () => {
+    const { app, scene, fake, useModel } = await ready();
+    let count = 0;
+    // 第二回合里的一次调用中途崩溃：这一趟推进写下的事件都在，运行记录上的回合还停在开始时。
+    useModel({
+      complete(request, options) {
+        count++;
+        if (contextOf(request).round === 2 && count > 4) return Promise.reject(new Error('崩溃'));
+        return fake.port.complete(request, options);
+      },
+    });
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    expect(await app.continueSimRun(runId)).toMatchObject({ ok: false });
+    const events = value(await app.simRunEvents(runId));
+    expect(events.some((e) => (e.payload as { type: string; round?: number }).type === 'RoundStarted' && (e.payload as { round?: number }).round === 2)).toBe(true);
+
+    const listed = value(await app.listSimRuns(scene.id));
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ id: runId, status: 'running', round: 2, lastSeq: events.length });
+    // 结束了的运行不再重算。
+    useModel(fake.port);
+    value(await app.continueSimRun(runId));
+    const calls = fake.calls.length;
+    expect(value(await app.listSimRuns(scene.id))[0]).toMatchObject({ status: 'ended', endReason: 'max_rounds' });
+    expect(fake.calls.length).toBe(calls);
+  });
+
+  it('校验回放：快照处重算的状态与当时记下的一致；记录被改动时指出是哪个快照', async () => {
+    const { deps, app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await app.stepSimRun(runId));
+    value(await app.pauseSimRun(runId));
+    value(await app.continueSimRun(runId));
+    value(await app.resumeSimRun(runId));
+    value(await app.continueSimRun(runId));
+    expect(value(await app.verifySimRun(runId))).toEqual({ snapshots: 2, mismatchedSeqs: [] });
+
+    // 直接改库里的一个快照（应用本身没有这样的操作），校验要能发现。
+    const work = value(await app.reloadWork());
+    const reopened = value(await deps.opener.open(work.entry.path, deps.clock.now()));
+    const snapshots = await reopened.port.query('SELECT seq FROM sim_snapshot WHERE run_id = ? ORDER BY seq', [runId]);
+    if (!snapshots.ok) throw new Error('快照');
+    const seq = Number(snapshots.value[0]?.['seq']);
+    const tampered = await reopened.port.transaction([{ sql: "UPDATE sim_snapshot SET state_hash = 'tampered' WHERE run_id = ? AND seq = ?", params: [runId, seq] }]);
+    expect(tampered.ok).toBe(true);
+    expect(value(await app.verifySimRun(runId))).toEqual({ snapshots: 2, mismatchedSeqs: [seq] });
+  });
+});

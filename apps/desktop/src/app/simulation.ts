@@ -378,11 +378,26 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       return updated.ok ? updated : err(repo(updated.error));
     },
 
+    /**
+     * 一个场景的运行，新的在前。运行记录上的状态与回合只是缓存：应用在写完事件、还没来得及写回缓存时退出，
+     * 缓存就落后了。这里把还没有结束的运行按事件重算一遍（只读事件，不调用模型），列出的状态以事件为准。
+     */
     listSimRuns: async (sceneId: string): Promise<Result<SimRun[], AppError>> => {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       const runs = await listSimRuns(port, sceneId);
-      return runs.ok ? runs : err(repo(runs.error));
+      if (!runs.ok) return err(repo(runs.error));
+      const current: SimRun[] = [];
+      for (const run of runs.value) {
+        if (run.status === 'ended' || run.lastSeq === 0) {
+          current.push(run);
+          continue;
+        }
+        const view = await withRun(run.id, (engine, scene) => engine.status(run.id, scene));
+        // 读不出来的运行（记录损坏、场景配置已经无法解析）照原样列出，打开时再说明原因。
+        current.push(view.ok ? view.value.run : run);
+      }
+      return ok(current);
     },
 
     /** 开始一次推演：登记运行（带上此刻的场景配置），写入第一条事件。之后用 stepSimRun 或 continueSimRun 推进。 */

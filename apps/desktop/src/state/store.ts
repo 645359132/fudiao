@@ -6,7 +6,7 @@ import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
-import type { SimIntervention, SimRunDetail, SimRunOptions } from '../app/simulation';
+import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -259,6 +259,9 @@ export type AppState = {
   readonly decideSimDirector: (accept: boolean) => Promise<boolean>;
   readonly interveneSimRun: (input: SimIntervention) => Promise<boolean>;
   readonly forkSimRun: (seq: number) => Promise<boolean>;
+  /** 校验回放（B30）：只读事件重算各快照处的状态，与当时记下的哈希比较。结果属于选中的这次运行。 */
+  readonly simVerification: (SimVerification & { readonly runId: string }) | null;
+  readonly verifySimRun: () => Promise<void>;
   readonly draftSimScene: (description: string) => Promise<void>;
   readonly blankSimScene: (config: SceneSpecInput) => void;
   readonly discardSceneDraft: () => void;
@@ -513,6 +516,7 @@ export function createAppStore(service: AppService): AppStore {
       simRunId: null,
       simRun: null,
       simAdvancing: false,
+      simVerification: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -563,7 +567,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -931,6 +935,13 @@ export function createAppStore(service: AppService): AppStore {
         set({ message: null });
         await loadRuns(sceneId, fork.value.run.id);
         return true;
+      },
+      async verifySimRun() {
+        const id = get().simRunId;
+        if (id === null || get().simAdvancing) return;
+        const result = await service.verifySimRun(id);
+        if (!result.ok) set({ message: describeError(result.error) });
+        else if (get().simRunId === id) set({ simVerification: { ...result.value, runId: id }, message: null });
       },
       async stopSimRun() {
         const id = get().simRunId;

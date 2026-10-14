@@ -1498,6 +1498,10 @@ describe('推演工作区（B28）', () => {
 
     await user.click(within(workspace).getByText('等待时间'));
     expect(within(within(workspace).getByRole('table', { name: '等待时间' })).getAllByRole('row')).toHaveLength(4);
+
+    // 校验回放：只读记录重算，与结束时记下的快照一致。
+    await user.click(within(workspace).getByRole('button', { name: '校验回放' }));
+    expect((await within(workspace).findByRole('note')).textContent).toBe('回放一致：1 个快照处重算的状态都与当时记下的相同。');
   });
 
   it('单步、暂停、继续与停止；可以开始第二次推演并在两次之间切换', async () => {

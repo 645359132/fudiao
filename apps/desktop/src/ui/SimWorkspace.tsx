@@ -269,6 +269,8 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
   const proceed = useApp((s) => s.continueSimRun);
   const pause = useApp((s) => s.pauseSimRun);
   const stop = useApp((s) => s.stopSimRun);
+  const verify = useApp((s) => s.verifySimRun);
+  const verification = useApp((s) => (s.simVerification?.runId === detail.view.run.id ? s.simVerification : null));
   const [confirmStop, setConfirmStop] = useState(false);
   const { view, data, timing } = detail;
   const ended = view.phase === 'Ended';
@@ -320,6 +322,20 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
           <button type="button" disabled={ended} onClick={() => setConfirmStop(true)}>
             停止
           </button>
+        )}
+      </div>
+      <div className="skill-actions">
+        <button type="button" disabled={advancing} title="只读运行记录重新算一遍，与当时记下的状态比较；不调用模型" onClick={() => void verify()}>
+          校验回放
+        </button>
+        {verification === null ? null : (
+          <span role="note" className={verification.mismatchedSeqs.length > 0 ? 'field-error' : 'muted'}>
+            {verification.snapshots === 0
+              ? '这次推演还没有记下快照，没有可校验的。'
+              : verification.mismatchedSeqs.length === 0
+                ? `回放一致：${verification.snapshots} 个快照处重算的状态都与当时记下的相同。`
+                : `回放不一致：${verification.mismatchedSeqs.length} 个快照处（序号 ${verification.mismatchedSeqs.join('、')}）重算的状态与当时记下的不同，这次运行的记录不可信。`}
+          </span>
         )}
       </div>
       <PendingPanel detail={detail} locked={advancing} />
