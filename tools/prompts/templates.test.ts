@@ -33,14 +33,27 @@ describe('版本锁规则', () => {
     expect(build({ templates: { t: template('新', '2') }, partials }, previous).errors).toEqual([]);
   });
 
-  it('内置写作技能同样要求修改后提升版本号，文件头须有名称与顺序', () => {
-    const skill = (body: string, version = '1') => `---\nversion: ${version}\nname: 章末钩子\norder: 1\n---\n${body}`;
+  it('内置写作技能是 SKILL.md 格式：修改后须提升 metadata 里的版本号；name 与文件名相同，metadata 须有名称与顺序', () => {
+    const skill = (body: string, version = '1', name = 'hook') =>
+      `---
+name: ${name}
+description: "章末钩子：写每一章的结尾时使用"
+metadata:
+  title: "章末钩子"
+  version: "${version}"
+  order: "1"
+---
+
+${body}
+`;
     const first = build({ templates: {}, partials, skills: { hook: skill('旧') } }, {});
     expect(first.errors).toEqual([]);
     expect(Object.keys(first.lock)).toEqual(['skill:hook']);
     expect(build({ templates: {}, partials, skills: { hook: skill('新') } }, first.lock).errors).toEqual(['skill:hook：内容已修改，请提升版本号（当前 1）']);
     expect(build({ templates: {}, partials, skills: { hook: skill('新', '2') } }, first.lock).errors).toEqual([]);
-    expect(build({ templates: {}, partials, skills: { bad: '---\nversion: 1\n---\n文字' } }, {}).errors).toEqual(['skill:bad：文件头须有 name 与 order']);
+    expect(build({ templates: {}, partials, skills: { hook: skill('文字', '1', 'other') } }, {}).errors).toEqual(['skill:hook：name 须与文件名相同（现在是 other）']);
+    expect(build({ templates: {}, partials, skills: { bad: '---\nname: bad\ndescription: x\n---\n文字' } }, {}).errors).toEqual(['skill:bad：metadata 缺少 version']);
+    expect(build({ templates: {}, partials, skills: { bad: '---\nversion: 1\n---\n文字' } }, {}).errors).toEqual(['skill:bad：SKILL.md 的文件头缺少 name（技能的标识）']);
   });
 
   it('局部模板的改动计入引用它的模板', () => {

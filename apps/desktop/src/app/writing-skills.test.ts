@@ -61,6 +61,62 @@ describe('写作技能', () => {
 });
 
 describe('规避词表', () => {
+  it('技能带适用说明：内置的取自模板，自定义的由作者写', async () => {
+    const app = await setup();
+    const view = value(await app.listWritingSkills());
+    expect(view.skills.find((s) => s.skill.key === 'cliffhanger')?.description).toBe(BUILTIN_SKILLS.find((s) => s.key === 'cliffhanger')?.description);
+    const added = value(await app.addCustomSkill('对话节奏', '对话三句内要有动作。', '写对话时使用。'));
+    expect(added.skills.at(-1)).toMatchObject({ description: '写对话时使用。', skill: { description: '写对话时使用。' } });
+  });
+
+  it('导入 SKILL.md：成为自定义技能；同一标识再导入时更新；格式不对时说明原因', async () => {
+    const app = await setup();
+    const file = (body: string) => `---
+name: webnovel-pacing
+description: 网文节奏：写连载章节时使用。
+metadata:
+  title: "网文节奏"
+---
+
+${body}
+`;
+    const first = value(await app.importSkillMd(file('开篇三百字内进入冲突。')));
+    expect(first).toMatchObject({ name: '网文节奏', replaced: false });
+    expect(first.view.skills.at(-1)).toMatchObject({
+      description: '网文节奏：写连载章节时使用。',
+      builtinText: null,
+      skill: { key: 'webnovel-pacing', name: '网文节奏', instruction: '开篇三百字内进入冲突。', enabled: true, builtinVersion: null },
+    });
+    const again = value(await app.importSkillMd(file('每章至少一个爽点。')));
+    expect(again.replaced).toBe(true);
+    expect(again.view.skills.filter((s) => s.skill.key === 'webnovel-pacing').map((s) => s.skill.instruction)).toEqual(['每章至少一个爽点。']);
+    // 没有 metadata.title 时用 name 作名称。
+    expect(value(await app.importSkillMd('---\nname: plain\ndescription: d\n---\n正文')).name).toBe('plain');
+    expect(await app.importSkillMd('只是一段文字')).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('不是 SKILL.md') } });
+  });
+
+  it('导出为 SKILL.md 再导回：自定义技能原样回来；内置技能导回时成为对它的改写，名称与说明仍用内置的', async () => {
+    const app = await setup();
+    const added = value(await app.addCustomSkill('对话节奏', '对话三句内要有动作。', '写对话时使用。'));
+    const mine = added.skills.at(-1)!;
+    const exported = app.skillMdOf(mine);
+    expect(exported.fileName).toBe(`${mine.skill.key}.SKILL.md`);
+    expect(exported.content).toContain('description: "写对话时使用。"');
+    value(await app.deleteCustomSkill(mine.skill));
+    const back = value(await app.importSkillMd(exported.content));
+    expect(back.view.skills.at(-1)?.skill).toMatchObject({ key: mine.skill.key, name: '对话节奏', description: '写对话时使用。', instruction: '对话三句内要有动作。' });
+
+    const hook = back.view.skills.find((s) => s.skill.key === 'cliffhanger')!;
+    const hookFile = app.skillMdOf(hook);
+    expect(hookFile.content).toContain(hook.builtinText!);
+    // 原样导回：仍是模板文字（不算改写）。
+    expect(value(await app.importSkillMd(hookFile.content)).view.skills.find((s) => s.skill.key === 'cliffhanger')?.skill.instruction).toBe('');
+    const edited = value(await app.importSkillMd(hookFile.content.replace(hook.builtinText!, '停在悬念上。')));
+    expect(edited).toMatchObject({ name: '章末钩子', replaced: true });
+    expect(edited.view.skills.find((s) => s.skill.key === 'cliffhanger')?.skill).toMatchObject({ instruction: '停在悬念上。', builtinVersion: hook.skill.builtinVersion });
+    expect(edited.view.skills.filter((s) => s.skill.key === 'cliffhanger')).toHaveLength(1);
+  });
+
   it('默认用内置词表；作者的词表去掉空白项；清空表示不检查；可恢复默认', async () => {
     const app = await setup();
     expect(value(await app.listWritingSkills())).toMatchObject({ avoidPhrases: DEFAULT_AVOID_PHRASES, avoidPhrasesCustom: false });

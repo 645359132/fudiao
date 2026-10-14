@@ -80,7 +80,7 @@ const sample: Statement[] = [
   ),
   s("INSERT INTO chapter_plan (chapter_id, created_at, updated_at) VALUES ('01C2', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W1', 'foreshadow', '伏笔埋设与回收', '', 1, '1', ?, ?)", ...T),
-  s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
+  s("INSERT INTO writing_skill (id, key, name, description, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '写每一章的结尾时使用', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
   s(
     "INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at) VALUES ('01C1', '林舟深夜当玉，掌柜起疑', '{\"01E1\":\"急需用钱\"}', '{\"01H1\":\"planted\"}', '{\"01G1\":1,\"01G2\":3}', 'stale', '01L1', ?, ?)",
     ...T,
@@ -400,6 +400,15 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 8 导出的数据（写作技能没有 description 列）经转换后导入，说明为空', async () => {
+    const data = await exported(await seeded());
+    const tables = { ...data.tables, writing_skill: (data.tables['writing_skill'] ?? []).map(({ description: _dropped, ...row }) => row) };
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 8, tables })).toMatchObject({ ok: true });
+    const after = await exported(target);
+    expect(after.tables['writing_skill']).toEqual((data.tables['writing_skill'] ?? []).map((row) => ({ ...row, description: '' })));
   });
 
   it('每个迁移都登记了导出数据的转换', () => {

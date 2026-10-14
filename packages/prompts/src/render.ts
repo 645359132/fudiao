@@ -524,7 +524,8 @@ export type WriterChapterInput = {
   readonly goal: string;
   readonly treatment: string;
   /** 启用的写作技能（已按顺序组合）。 */
-  readonly skills: readonly { readonly name: string; readonly text: string }[];
+  /** 启用的写作技能：名称、适用说明（SKILL.md 的 description）与指令。 */
+  readonly skills: readonly { readonly name: string; readonly description: string; readonly text: string }[];
   readonly avoidPhrases: readonly string[];
   /** state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。 */
   readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string }[];
@@ -557,7 +558,8 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     chapterTitle: input.chapterTitle,
     goal: input.goal,
     treatment: input.treatment.trim(),
-    skills: input.skills.map((s) => ({ name: s.name, text: s.text })),
+    // 说明常以“名称：”开头（与【名称】重复），去掉这一截。
+    skills: input.skills.map((s) => ({ name: s.name, description: withoutName(s.name, s.description.trim()), text: s.text })),
     hasSkills: input.skills.length > 0,
     avoidPhrases: [...input.avoidPhrases],
     hasAvoid: input.avoidPhrases.length > 0,
@@ -710,6 +712,14 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,
   });
+}
+
+/** 技能的适用说明常以“名称：”开头，与【名称】重复，去掉这一截。 */
+function withoutName(name: string, description: string): string {
+  for (const sep of ['：', ':']) {
+    if (description.startsWith(name + sep)) return description.slice(name.length + sep.length).trim();
+  }
+  return description;
 }
 
 export type BookSeedInput = {

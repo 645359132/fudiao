@@ -359,7 +359,10 @@ describe('写手成章（B59）', () => {
     chapterTitle: '第二章 夜雨',
     goal: '林舟另寻门路',
     treatment: '奔走略写，对峙展开',
-    skills: [{ name: '章末钩子', text: '结尾停在未解的问题上。' }],
+    skills: [
+      { name: '章末钩子', description: '章末钩子：写每一章的结尾时使用。', text: '结尾停在未解的问题上。' },
+      { name: '对话', description: '', text: '每人一种腔调。' },
+    ],
     avoidPhrases: ['不禁', '仿佛'],
     cast: [
       { name: '林舟', description: '落魄书生', state: '玉还在手里，欠着三天后到期的赌债' },
@@ -385,7 +388,9 @@ describe('写手成章（B59）', () => {
     expect(prompt.output).toBeUndefined();
     const text = fullText(prompt);
     for (const part of [
-      '【章末钩子】结尾停在未解的问题上。',
+      // 适用说明开头的“名称：”去掉；没有说明的技能只写名称与指令。
+      '【章末钩子】适用：写每一章的结尾时使用。\n结尾停在未解的问题上。',
+      '【对话】\n每人一种腔调。',
       '不要使用这些说法：“不禁”“仿佛”',
       '- 林舟：落魄书生（最近的状态：玉还在手里，欠着三天后到期的赌债）',
       '- 钱四\n',

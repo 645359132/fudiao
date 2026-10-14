@@ -46,6 +46,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   7: (tables) => ({ ...tables, candidate: (tables['candidate'] ?? []).map((row) => ({ beat_sheet_id: null, ...row })) }),
   // 0008：新增推演评价表，旧版本导出的数据中没有，导入为空。
   8: (tables) => tables,
+  // 0009：写作技能增加适用说明 description（旧数据为空）。
+  9: (tables) => ({ ...tables, writing_skill: (tables['writing_skill'] ?? []).map((row) => ({ description: '', ...row })) }),
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

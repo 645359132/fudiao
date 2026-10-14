@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { composeSkills, type BuiltinSkillText, type SkillSetting } from './skills';
 
 const builtins: readonly BuiltinSkillText[] = [
-  { key: 'foreshadow', name: '伏笔埋设与回收', version: '1', text: '埋伏笔时只写现象，不写解释。' },
-  { key: 'pacing', name: '详略与节奏', version: '2', text: '改变局面的时刻展开，过场略写。' },
-  { key: 'cliffhanger', name: '章末钩子', version: '1', text: '结尾停在一个未解的问题上。' },
+  { key: 'foreshadow', name: '伏笔埋设与回收', description: '有伏笔时使用。', version: '1', text: '埋伏笔时只写现象，不写解释。' },
+  { key: 'pacing', name: '详略与节奏', description: '每一章都用。', version: '2', text: '改变局面的时刻展开，过场略写。' },
+  { key: 'cliffhanger', name: '章末钩子', description: '写结尾时使用。', version: '1', text: '结尾停在一个未解的问题上。' },
 ];
 
-const setting = (key: string, over: Partial<SkillSetting> = {}): SkillSetting => ({ key, name: key, enabled: true, instruction: '', builtinVersion: '1', ...over });
+const setting = (key: string, over: Partial<SkillSetting> = {}): SkillSetting => ({ key, name: key, description: '', enabled: true, instruction: '', builtinVersion: '1', ...over });
 
 describe('写作技能的组合', () => {
   it('按内置技能的顺序取启用的技能，作者改过的说明代替模板文字', () => {
@@ -18,6 +18,14 @@ describe('写作技能的组合', () => {
     expect(composed.map((s) => [s.key, s.text])).toEqual([
       ['foreshadow', '埋伏笔时只写现象，不写解释。'],
       ['cliffhanger', '停在悬念上，不要总结。'],
+    ]);
+  });
+
+  it('带上适用说明：内置技能用模板里的，自定义技能用作者写的', () => {
+    const composed = composeSkills([setting('foreshadow'), setting('mine', { builtinVersion: null, description: ' 写对话时使用。 ', instruction: '少用成语。' })], builtins);
+    expect(composed.map((s) => [s.key, s.description])).toEqual([
+      ['foreshadow', '有伏笔时使用。'],
+      ['mine', '写对话时使用。'],
     ]);
   });
 

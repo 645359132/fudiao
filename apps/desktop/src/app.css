@@ -1452,3 +1452,13 @@ fieldset.plain {
   align-items: baseline;
   gap: 12px;
 }
+
+/* 技能的标识（SKILL.md 的 name）与适用说明 */
+.skill-key {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.skill-description {
+  margin: 4px 0 6px;
+}

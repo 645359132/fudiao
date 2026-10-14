@@ -128,7 +128,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       chapterTitle: chapter.title,
       goal: plan.goal,
       treatment: plan.treatment,
-      skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, text: s.text })),
+      skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, description: s.description, text: s.text })),
       avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
       cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
       facts: facts.value

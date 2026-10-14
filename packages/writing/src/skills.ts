@@ -5,6 +5,8 @@
 export type SkillSetting = {
   readonly key: string;
   readonly name: string;
+  /** 适用说明（SKILL.md 的 description）；内置技能用模板里的。 */
+  readonly description: string;
   readonly enabled: boolean;
   /** 作者的说明；内置技能为空时沿用模板文字。 */
   readonly instruction: string;
@@ -12,11 +14,12 @@ export type SkillSetting = {
 };
 
 /** 内置技能的模板文字与版本。 */
-export type BuiltinSkillText = { readonly key: string; readonly name: string; readonly version: string; readonly text: string };
+export type BuiltinSkillText = { readonly key: string; readonly name: string; readonly description: string; readonly version: string; readonly text: string };
 
 export type ComposedSkill = {
   readonly key: string;
   readonly name: string;
+  readonly description: string;
   readonly text: string;
   /** 调用记录中核对用：builtin:版本、builtin:版本:modified（作者改过说明）或 custom。 */
   readonly origin: string;
@@ -29,11 +32,11 @@ export function composeSkills(settings: readonly SkillSetting[], builtins: reado
     const s = byKey.get(b.key);
     if (s === undefined || !s.enabled || s.builtinVersion === null) continue;
     const own = s.instruction.trim();
-    composed.push({ key: b.key, name: b.name, text: own === '' ? b.text : own, origin: own === '' ? `builtin:${b.version}` : `builtin:${b.version}:modified` });
+    composed.push({ key: b.key, name: b.name, description: b.description, text: own === '' ? b.text : own, origin: own === '' ? `builtin:${b.version}` : `builtin:${b.version}:modified` });
   }
   for (const s of settings) {
     if (s.builtinVersion !== null || !s.enabled || s.instruction.trim() === '') continue;
-    composed.push({ key: s.key, name: s.name, text: s.instruction.trim(), origin: 'custom' });
+    composed.push({ key: s.key, name: s.name, description: s.description.trim(), text: s.instruction.trim(), origin: 'custom' });
   }
   return composed;
 }

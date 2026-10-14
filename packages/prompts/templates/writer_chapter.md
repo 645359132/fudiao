@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 3
+version: 4
 task: writer
 ---
 @@system
@@ -17,9 +17,10 @@ task: writer
 {{/hasMustNotReveal}}
 {{#hasSkills}}
 
-写作技能：
+写作技能（每项先写明适用的情况；按情况运用，不适用的这次不用）：
 {{#skills}}
-【{{name}}】{{text}}
+【{{name}}】{{#description}}适用：{{description}}{{/description}}
+{{text}}
 {{/skills}}
 {{/hasSkills}}
 {{#hasAvoid}}

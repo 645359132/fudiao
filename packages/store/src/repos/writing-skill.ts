@@ -10,6 +10,7 @@ const SkillRow = z
     id: z.string(),
     key: z.string(),
     name: z.string(),
+    description: z.string(),
     instruction: z.string(),
     enabled: z.number().int(),
     builtin_version: z.string().nullable(),
@@ -21,6 +22,8 @@ const SkillRow = z
     id: r.id,
     key: r.key,
     name: r.name,
+    /** 适用说明（SKILL.md 的 description）：做什么、什么时候用。内置技能的在模板里，这里为空。 */
+    description: r.description,
     /** 作者改过的说明；内置技能为空时沿用模板文字。 */
     instruction: r.instruction,
     enabled: r.enabled === 1,
@@ -31,7 +34,7 @@ const SkillRow = z
   }));
 export type WritingSkill = z.output<typeof SkillRow>;
 
-const COLUMNS = 'id, key, name, instruction, enabled, builtin_version, version, created_at, updated_at';
+const COLUMNS = 'id, key, name, description, instruction, enabled, builtin_version, version, created_at, updated_at';
 
 export type BuiltinSkill = { readonly key: string; readonly name: string; readonly version: string };
 
@@ -74,13 +77,13 @@ export async function ensureBuiltinSkills(
 
 export function createCustomSkill(
   port: SqlPort,
-  input: { readonly id: string; readonly key: string; readonly name: string; readonly instruction: string },
+  input: { readonly id: string; readonly key: string; readonly name: string; readonly description: string; readonly instruction: string },
   ctx: WriteContext,
 ): Promise<Result<WritingSkill, RepoError>> {
   if (input.instruction.trim() === '') return Promise.resolve(err({ code: 'invalid', detail: '自定义技能须写明说明' }));
   return insertReturning(port, SkillRow, {
-    sql: `INSERT INTO writing_skill (id, key, name, instruction, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
-    params: [input.id, input.key, input.name, input.instruction, ctx.now, ctx.now],
+    sql: `INSERT INTO writing_skill (id, key, name, description, instruction, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
+    params: [input.id, input.key, input.name, input.description, input.instruction, ctx.now, ctx.now],
   });
 }
 
@@ -88,14 +91,14 @@ export function createCustomSkill(
 export function updateSkill(
   port: SqlPort,
   current: WritingSkill,
-  patch: { readonly enabled?: boolean; readonly name?: string; readonly instruction?: string },
+  patch: { readonly enabled?: boolean; readonly name?: string; readonly description?: string; readonly instruction?: string },
   ctx: WriteContext,
 ): Promise<Result<WritingSkill, RepoError>> {
   const instruction = patch.instruction ?? current.instruction;
   if (current.builtinVersion === null && instruction.trim() === '') return Promise.resolve(err({ code: 'invalid', detail: '自定义技能须写明说明' }));
   return guardedUpdate(port, SkillRow, 'writing_skill', current.id, {
-    sql: `UPDATE writing_skill SET enabled = ?, name = ?, instruction = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? RETURNING ${COLUMNS}`,
-    params: [(patch.enabled ?? current.enabled) ? 1 : 0, patch.name ?? current.name, instruction, ctx.now, current.id, current.version],
+    sql: `UPDATE writing_skill SET enabled = ?, name = ?, description = ?, instruction = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? RETURNING ${COLUMNS}`,
+    params: [(patch.enabled ?? current.enabled) ? 1 : 0, patch.name ?? current.name, patch.description ?? current.description, instruction, ctx.now, current.id, current.version],
   });
 }
 

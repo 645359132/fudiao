@@ -132,8 +132,8 @@ describe('写作技能', () => {
   it('自定义技能须写明说明，可以删除；内置技能只能停用', async () => {
     const db = await fresh();
     const [builtin] = value(await ensureBuiltinSkills(db, builtins, newId, ctx));
-    expect(await createCustomSkill(db, { id: 's1', key: 'mine', name: '我的', instruction: '  ' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid' } });
-    const mine = value(await createCustomSkill(db, { id: 's1', key: 'mine', name: '我的', instruction: '对话不超过三句就要有动作' }, ctx));
+    expect(await createCustomSkill(db, { id: 's1', key: 'mine', name: '我的', description: '', instruction: '  ' }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    const mine = value(await createCustomSkill(db, { id: 's1', key: 'mine', name: '我的', description: '', instruction: '对话不超过三句就要有动作' }, ctx));
     expect(await updateSkill(db, mine, { instruction: '' }, later)).toMatchObject({ ok: false, error: { code: 'invalid' } });
     expect(await deleteCustomSkill(db, builtin!)).toMatchObject({ ok: false, error: { code: 'invalid' } });
     value(await deleteCustomSkill(db, mine));

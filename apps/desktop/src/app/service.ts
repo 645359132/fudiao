@@ -666,7 +666,7 @@ export function createAppService(deps: AppDeps) {
     setFactStatus: (fact: Fact, status: FactStatus) => factChange((port) => setFactStatus(port, fact.id, fact.version, status, ctx())),
     deleteFact: (fact: Fact) => factChange((port) => deleteFact(port, fact.id, fact.version)),
 
-    exportPlainText: (suggestedName: string, content: string) => deps.exporter.exportText(suggestedName, content),
+    exportPlainText: (suggestedName: string, content: string, kind?: 'txt' | 'md') => deps.exporter.exportText(suggestedName, content, kind),
     pickText: () => deps.transfer.pickText(),
     redecode: (token: string, encoding: string) => deps.transfer.redecode(token, encoding),
     releaseImport: (token: string) => deps.transfer.release(token),

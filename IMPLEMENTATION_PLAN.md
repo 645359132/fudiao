@@ -143,7 +143,7 @@ fudiao/
 | `beat_sheet` | id、run_id、pov_actor（视角角色的键）、from_round 与 to_round、up_to_seq（视角角色的认知取到这个事件序号为止，即 to_round 结束时）、beats（JSON：指向认知条目的 ref、处理方式、说明、暂不揭示）、style、llm_call_id、version；迁移 0007 | B45 |
 | `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、progress（写手的进度 JSON：这次写作的标识、情节点的分段与每段字数、已写入的段数、写入前快照的标识；没让写手写过时为空）、version；迁移 0005 | B65、B59 |
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
-| `writing_skill` | id、key、name、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能的文字在 `packages/prompts/templates/skills/`，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
+| `writing_skill` | id、key（SKILL.md 的 name）、name（界面上的名称，SKILL.md 的 metadata.title）、description（适用说明，SKILL.md 的 description；只存自定义或导入的技能的，内置技能的在模板里；迁移 0009）、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能是 `packages/prompts/templates/skills/` 下的 SKILL.md 文件，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
 | `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
 | `evaluation` | id、run_id 或 batch_id（恰有其一，各自唯一）、answers（JSON：评分 characters、intel、twist、adopt 为 1 至 5，edits 为 0 至 3，不评为空，与 M0 评价表相同；可采用的转折与其他说明；保存时记下的运行、采纳进作品的故事事件、调用次数、费用、费用未知的次数与模型耗时）、version；迁移 0008 | B46 |
@@ -377,6 +377,8 @@ stateDiagram-v2
 章节计划草稿（B65，M3-04，`apps/desktop/src/app/planning.ts`）：`plan_draft` 模板读作品信息、大纲、人物设定的名字、已有章节的章名与已有的伏笔，输出每章的章名、目标、出场人物（名字）、情节点、要埋与要收的伏笔（名字）、详略说明与字数，以及新伏笔。草稿不写入作品；作者“采用”时，已有章节按顺序对应草稿的前几章（章名不改），多出的章节在末尾新建，新伏笔记入账本（计划状态，埋设与回收章节取草稿中列出它的章），账本里已有、还没有定章节的伏笔同样按草稿补上章节（作者定过的不改），人物按名字与别名对应到人物设定，对不上的名字列给作者、不新建设定。
 
 伏笔账本的状态（B63）：伏笔有没有埋下、回收，由作者确认。埋设或回收的章节写完（章节计划为已写或已审核）而账本的状态没有跟上时，账本里提示“这一章已经写完”，带上那一章长篇记忆里这条伏笔的进展，作者点一下标为已埋或已回收（`packages/writing` 的 `suggestForeshadowStatus`）；程序不自动改账本。没有确认的伏笔到了回收章节仍会被审核的程序检查列为“到期未回收”。
+
+写作技能的格式（B61，M3-11，`packages/prompts/src/skill-md.ts`）：技能采用与 Claude 等工具通用的 SKILL.md 格式——YAML 文件头的 name 是标识，description 说明这项技能做什么、什么时候用，文件头之后是给写手的指令（Markdown）；本应用自己的字段（界面上的名称 title、内置技能的 version 与 order）放在 metadata 里。只读取文件头里用得到的一小部分 YAML（单行值、带引号的值、`>` 与 `|` 多行值、一层 metadata，其他键忽略），不引入 YAML 库。写手模板（`writer_chapter` 版本 4）对每项启用的技能写出名称、适用说明与指令，要求按适用的情况运用。“写作技能”页可以导入 SKILL.md：name 作为标识，metadata.title 作为名称（没有时用 name）；同一标识的自定义技能再导入时更新；与内置技能同名时导入的指令成为作者对它的改写（与模板文字相同则不算改写）。任一技能都可以导出为 SKILL.md。只读取 SKILL.md 本身，技能文件夹里的其他文件（参考资料、脚本）不读。
 
 快速成书（B67，M3-10，`apps/desktop/src/app/quick-book.ts`、`apps/desktop/src/ui/QuickBookPanel.tsx`）：成书页把出书串成五步，每步由作品里已有的数据判断是否完成——默认模型已设置且通过能力自检；作品有大纲；有章节计划；计划的章节都已写完；导出。第 2 步没有想法时可点“随机生成”：从按类型准备的人物、处境与转折中各取一条拼成一句（`apps/desktop/src/app/idea-seeds.ts`，不调用模型，没连上模型也能用；填了类型时按类型挑，没填时一并给出类型）。第 2 步由 `book_seed` 模板（任务种类同 `plan_draft`，作者侧规划）把作者的一句话想法、可选的类型、章数与每章字数展开成作品名、类型、简介、大纲（开端、发展、高潮、结局，写明伏笔在哪里埋、在哪里揭开）与 3 到 8 个主要人物；作品名不是默认名时沿用，已有人物的名字一并给模型。骨架不写入作品，作者改过后“采用”：写入作品名（作品列表同步改名）、类型、简介与大纲；人物按名字与别名对应到人物设定，没有的新建并写上说明，已有的不改；重复采用不重复建人物。第 3 至 5 步沿用计划草稿（`draftPlans`、`applyPlanDraft`）、成书进度看板与整本导出，写入的是计划页的同一份数据，因此人物先进入设定，计划草稿里的出场人物都能对上。没有章节的作品打开时进入成书页，已有章节的作品打开第一章；顶栏只留“成书、计划、设定、任务”，推演、事实、查找收进“更多”，事实有待复核时顶栏另显示“事实（待复核 N）”。
 
@@ -685,6 +687,7 @@ pnpm m0 report --experiment m0/experiments/round1.yaml --out m0/packets/round1
 | M3-07 | 审核代理：程序检查加模型审核，问题定位与审核面板；忽略、修改、交给写手修订 | B64 |
 | M3-08 | 成书流程看板：按章显示计划、写作、审核状态，一键“写下一章”与批量排定 | B65 |
 | M3-09 | 评估：用一部 5 至 10 章的短篇走通全流程；在样章中植入设定冲突、视角越界、伏笔提前说破等问题，记录审核检出率；手工清单 | 验收“写手成章、写作技能、审核定位、伏笔账本” |
+| M3-11 | 写作技能采用通用的 SKILL.md 格式：内置技能改写为 SKILL.md（name、description、metadata 里的名称、版本与顺序）、适用说明进入写手请求、导入与导出 SKILL.md | B61 |
 | M3-10 | 快速成书：`book_seed` 模板（一句话想法 → 作品骨架）、采用骨架（作品信息与人物）、成书页五步与各步状态、顶栏精简 | B67，验收“快速成书” |
 
 完成条件：需求第八章“写手成章、写作技能、审核定位、伏笔账本、AI 候选稿、段落来源”通过；作者可以用写手与审核连续写成一部短篇，并随时直接修改或回退。

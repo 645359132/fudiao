@@ -1,6 +1,7 @@
 // 写作技能与规避词表的用例（需求 B61、B37，施工文档第五章“写手与审核”）：
 // 打开技能页时把内置技能登记进作品；作者可以启用、停用、改写说明、恢复内置文字，添加与删除自定义技能，编辑规避词表。
-import { BUILTIN_SKILLS } from '@fudiao/prompts';
+// 技能采用 SKILL.md 格式（M3-11）：可以导入别处的 SKILL.md，也可以把任一技能导出为 SKILL.md。
+import { BUILTIN_SKILLS, formatSkillMd, parseSkillMd } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createCustomSkill,
@@ -21,6 +22,8 @@ export type SkillView = {
   readonly skill: WritingSkill;
   /** 内置技能的模板文字；自定义技能为 null。 */
   readonly builtinText: string | null;
+  /** 适用说明：内置技能的取自模板，自定义技能的是作者写的。 */
+  readonly description: string;
 };
 
 export type SkillsView = {
@@ -32,11 +35,13 @@ export type SkillsView = {
 };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
+const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
 export function writingSkillUseCases(deps: AppDeps, project: () => SqlPort | null) {
   const ctx = () => ({ now: deps.clock.now() });
   const builtins = BUILTIN_SKILLS.map(({ key, name, version }) => ({ key, name, version }));
   const textOf = new Map(BUILTIN_SKILLS.map((s) => [s.key, s.text]));
+  const builtinOf = new Map(BUILTIN_SKILLS.map((s) => [s.key, s]));
 
   async function view(port: SqlPort): Promise<Result<SkillsView, AppError>> {
     const skills = await ensureBuiltinSkills(port, builtins, () => deps.ids.next(), ctx());
@@ -48,7 +53,11 @@ export function writingSkillUseCases(deps: AppDeps, project: () => SqlPort | nul
       // 已不再内置的技能（模板删掉了）不显示；作品中的记录保留，导出时不丢。
       skills: skills.value
         .filter((s) => s.builtinVersion === null || textOf.has(s.key))
-        .map((skill) => ({ skill, builtinText: skill.builtinVersion === null ? null : (textOf.get(skill.key) ?? null) })),
+        .map((skill) => ({
+          skill,
+          builtinText: skill.builtinVersion === null ? null : (textOf.get(skill.key) ?? null),
+          description: skill.builtinVersion === null ? skill.description : (builtinOf.get(skill.key)?.description ?? ''),
+        })),
       avoidPhrases: own ?? DEFAULT_AVOID_PHRASES,
       avoidPhrasesCustom: own !== null,
     });
@@ -68,14 +77,48 @@ export function writingSkillUseCases(deps: AppDeps, project: () => SqlPort | nul
     },
 
     /** 启用、停用或改写说明；内置技能的说明清空即恢复模板文字。 */
-    updateWritingSkill: (skill: WritingSkill, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string }) =>
+    updateWritingSkill: (skill: WritingSkill, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string; readonly description?: string }) =>
       change((port) => updateSkill(port, skill, patch, ctx())),
 
-    addCustomSkill(name: string, instruction: string): Promise<Result<SkillsView, AppError>> {
+    addCustomSkill(name: string, instruction: string, description = ''): Promise<Result<SkillsView, AppError>> {
       const id = deps.ids.next();
       const title = name.trim();
       if (title === '') return Promise.resolve(err({ code: 'repo', error: { code: 'invalid', detail: '技能名称不能为空' } }));
-      return change((port) => createCustomSkill(port, { id, key: `custom-${id.toLowerCase()}`, name: title, instruction: instruction.trim() }, ctx()));
+      return change((port) => createCustomSkill(port, { id, key: `custom-${id.toLowerCase()}`, name: title, description: description.trim(), instruction: instruction.trim() }, ctx()));
+    },
+
+    /**
+     * 导入一个 SKILL.md：name 作为技能的标识，metadata.title 作为名称（没有时用 name），description 与指令照录。
+     * 作品里已有同一标识的自定义技能时用导入的内容更新它（别处改了新版本可以再导入）。与内置技能同名时
+     * （例如导出内置技能、在别处改过再导回），导入的指令成为作者对这项内置技能的改写，名称与适用说明仍用内置的。
+     */
+    async importSkillMd(text: string): Promise<Result<{ readonly view: SkillsView; readonly name: string; readonly replaced: boolean }, AppError>> {
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const doc = parseSkillMd(text);
+      if (!doc.ok) return err(settings(doc.error));
+      const { name: key, description, metadata, body } = doc.value;
+      const title = (metadata['title'] ?? '').trim() || key;
+      const current = await ensureBuiltinSkills(port, builtins, () => deps.ids.next(), ctx());
+      if (!current.ok) return err(repo(current.error));
+      const existing = current.value.find((s) => s.key === key);
+      const done =
+        existing !== undefined && existing.builtinVersion !== null
+          ? await updateSkill(port, existing, { instruction: body === builtinOf.get(key)?.text ? '' : body }, ctx())
+          : existing === undefined
+          ? await createCustomSkill(port, { id: deps.ids.next(), key, name: title, description, instruction: body }, ctx())
+          : await updateSkill(port, existing, { name: title, description, instruction: body }, ctx());
+      if (!done.ok) return err(repo(done.error));
+      const next = await view(port);
+      return next.ok ? ok({ view: next.value, name: existing !== undefined && existing.builtinVersion !== null ? existing.name : title, replaced: existing !== undefined }) : next;
+    },
+
+    /** 把一项技能写成 SKILL.md（内置技能用作者改过的说明，没改时用模板文字），以及建议的文件名。 */
+    skillMdOf(item: SkillView): { readonly fileName: string; readonly content: string } {
+      const { skill } = item;
+      const body = skill.instruction.trim() === '' ? (item.builtinText ?? '') : skill.instruction;
+      const content = formatSkillMd({ name: skill.key, description: item.description, metadata: { title: skill.name }, body });
+      return { fileName: `${skill.key}.SKILL.md`, content };
     },
 
     deleteCustomSkill: (skill: WritingSkill) => change((port) => deleteCustomSkill(port, skill)),

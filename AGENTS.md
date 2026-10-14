@@ -76,6 +76,7 @@
 - 凭据代理的取消已修正（M2-01 补充，2026-10-14）：开始前已到的取消与可以发送同时就绪时，`tokio::select!` 随机选择会把请求连同凭据发出（全套 `net` 测试约 8% 复现）；`net.rs` 的三处 select 改为先看取消（`biased`），测试 `cancel_before_start_sends_nothing` 改为重复 50 次。
 - 全项目审查后的修正（2026-10-14）：采纳推演草案时同一件事（另一视角、分支上的同一事件）关联到原有的故事事件，不另建；采纳的事实从写进的那一章起适用，见闻的来源指向同一回合的事；写手只带适用于本章的事实（与上下文、审核一致）；自动保存在保存抛出异常时按失败重试，不再停下；事实涉及的设定、章节计划的出场人物、故事事件的参与者用到的设定不能删除。
 - M3-10 已完成（需求 v0.9 新增 B67，作者决定 2026-10-14）：快速成书——`book_seed` 模板（版本 1，输出 `BookSeedOutput`）；用例 `apps/desktop/src/app/quick-book.ts`（`quickBookStatus`、`draftBookSeed`、`applyBookSeed`）；成书页 `QuickBookPanel.tsx`（连接模型、想法生成大纲与人物、章节计划、写完并审核、导出），新作品从这一页开始；顶栏精简为成书、计划、设定、任务，推演、事实、查找收进“更多”。
+- M3-11 已完成：写作技能采用通用的 SKILL.md 格式——`packages/prompts/src/skill-md.ts`（`parseSkillMd`、`formatSkillMd`），八项内置技能改写为 SKILL.md（版本 2，metadata 里是名称、版本与顺序），迁移 `0009_skill_description.sql`（`writing_skill.description`），`writer_chapter` 版本 4（带上技能的适用说明），“写作技能”页可导入与导出 SKILL.md。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

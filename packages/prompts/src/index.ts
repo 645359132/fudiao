@@ -58,3 +58,5 @@ export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
 export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';
+export type { SkillDocument } from './skill-md';
+export { formatSkillMd, parseSkillMd } from './skill-md';

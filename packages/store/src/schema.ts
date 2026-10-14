@@ -136,7 +136,8 @@ export const TABLES: readonly TableSpec[] = [
   },
   {
     name: 'writing_skill',
-    columns: ['id', 'key', 'name', 'instruction', 'enabled', 'builtin_version', ...VERSIONED],
+    // description 由迁移 0009 追加在末尾。
+    columns: ['id', 'key', 'name', 'instruction', 'enabled', 'builtin_version', ...VERSIONED, 'description'],
     primaryKey: ['id'],
     json: [],
   },

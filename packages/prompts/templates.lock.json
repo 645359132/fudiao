@@ -80,43 +80,43 @@
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
   },
   "writer_chapter": {
-    "version": "3",
-    "sha256": "049265984dc3aa1b60ec4ebd3195e62bf2a63ae480afe3bcf112eef51095716e"
+    "version": "4",
+    "sha256": "4ee2cd61955b997ee564fec55b115f9df469f88a04d8b11f680d90493e843a31"
   },
   "writer_revise": {
     "version": "1",
     "sha256": "91c3472389769a4fd222680c8b48f70331896f9a041e37e6128b492a26c71d80"
   },
   "skill:cliffhanger": {
-    "version": "1",
-    "sha256": "82e962cd85b4fc743066ffcac354fc2feacd11097173cf76a94cfd6fde499c05"
+    "version": "2",
+    "sha256": "495368a6a66af261eac520f67b300ed0732e774c00838904331a2dd5903941a4"
   },
   "skill:dialogue": {
-    "version": "1",
-    "sha256": "23459b2751b8dbe4fe113c0367e62d0d7e7f25a7f01af7e65d1e8a8ba60e7c80"
+    "version": "2",
+    "sha256": "9fbab63b0572f434350ee23cd6b602b109403e2d0a9f158ac0a0271a2f5bec01"
   },
   "skill:foreshadow": {
-    "version": "1",
-    "sha256": "bc22a63772d6d7d5c89c4b3c11581aa16fe798634e4875e26b2db9e817b06e77"
+    "version": "2",
+    "sha256": "6fafc6e232eb1670190e1b5a6a5e7b9af15112f1c0038175c8673f67b68e01c4"
   },
   "skill:pacing": {
-    "version": "1",
-    "sha256": "e6ae52c1a1d4bdff86cd509187a424cc002045562bae71c442c8a159b8ec8f2d"
+    "version": "2",
+    "sha256": "3b8dd7b3fe4c7e9ec19a7536ceba827aeccd9e4565bb37e6a2857f11535533be"
   },
   "skill:polish": {
-    "version": "1",
-    "sha256": "0938019a49f15e51b1a6c3dd81c1f8b632bfba55e38b09cbadefe7cffe1687e5"
+    "version": "2",
+    "sha256": "a3d23a9185bb73ee46fdaa5c41a335c2a92eb05463ca36b3ff0ddf4b327944b1"
   },
   "skill:pov": {
-    "version": "1",
-    "sha256": "04a9e5df15d7de98ec8d09d465a0becc99128e28b039026f5343271b558b1051"
+    "version": "2",
+    "sha256": "2c194f014f2e80b9dca7e6e86f108e35e7206b59d1e9f8206bc09ef914cfc483"
   },
   "skill:scene": {
-    "version": "1",
-    "sha256": "a516311fd3080382d6f64bd1412f661da7fb6881a6d9148d9d59b08e28e6fea0"
+    "version": "2",
+    "sha256": "ff3169f21c3dc48a6541b37cf6da3e27b7b31ba4190ce9e5bce85360c6ea265e"
   },
   "skill:tension": {
-    "version": "1",
-    "sha256": "e424cdf1d0c9aad0ae6329f96081006de47661317a6c44340f0141fe862f0def"
+    "version": "2",
+    "sha256": "1a5dab433af51d6b81efcdf432af1dad395e24931fa2520aefdd0843c73ec1d6"
   }
 }
