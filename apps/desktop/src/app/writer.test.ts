@@ -77,6 +77,34 @@ describe('写手成章', () => {
     }
   });
 
+  it('只带适用于本章的事实：后面章节才成立的、本章之前已不再成立的事实不给写手', async () => {
+    const { deps, app, c1, c2 } = await setup();
+    const c3 = value(await app.createChapter('第三章 天明', c2)).chapters.find((c) => c.title === '第三章 天明')!.id;
+    const lin = value(await app.listEntities()).find((e) => e.name === '林舟')!;
+    const fact = (content: string, from: string | null, to: string | null) => ({
+      kind: 'world' as const,
+      holderId: null,
+      subjectIds: [lin.id],
+      content,
+      modality: null,
+      confidence: null,
+      validFromChapterId: from,
+      validToChapterId: to,
+      validFrom: null,
+      validTo: null,
+      basis: [],
+    });
+    value(await app.createFact(fact('林舟欠着房租', c1, null), 'confirmed'));
+    value(await app.createFact(fact('林舟中了举', c3, null), 'confirmed'));
+    value(await app.createFact(fact('林舟还住在破庙', null, c1), 'confirmed'));
+    deps.llmResponses.push(reply('一。'), reply('二。'));
+    value(await app.writeChapter(c2));
+    const request = bodyText(deps, 0);
+    expect(request).toContain('林舟欠着房租');
+    expect(request).not.toContain('林舟中了举');
+    expect(request).not.toContain('林舟还住在破庙');
+  });
+
   it('没有计划、已经写过或有未保存的修改时不写，并说明原因', async () => {
     const { deps, app, c1, c2 } = await setup();
     expect(await app.writeChapter(c1)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('还没有章节计划') } });

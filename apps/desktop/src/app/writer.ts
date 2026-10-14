@@ -132,7 +132,14 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
       cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
       facts: facts.value
-        .filter((f) => f.status === 'confirmed' && (f.subjectIds.some((id) => castIds.has(id)) || (f.holderId !== null && castIds.has(f.holderId))))
+        .filter((f) => {
+          if (f.status !== 'confirmed') return false;
+          // 只用适用于本章的事实（与上下文、审核相同）：后面章节才成立的事、已经不再成立的事都不给写手。
+          const from = f.validFromChapterId === null ? undefined : order.get(f.validFromChapterId);
+          const to = f.validToChapterId === null ? undefined : order.get(f.validToChapterId);
+          if ((from !== undefined && from > index) || (to !== undefined && to < index)) return false;
+          return f.subjectIds.some((id) => castIds.has(id)) || (f.holderId !== null && castIds.has(f.holderId));
+        })
         .slice(0, MAX_FACTS)
         .map((f) => f.content),
       memories: earlier,
