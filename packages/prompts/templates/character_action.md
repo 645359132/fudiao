@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 8
+version: 9
 task: character_action
 output: ActionProposal
 ---
@@ -52,6 +52,8 @@ output: ActionProposal
 
 {{> map}}
 @@system
+{{> knowledge_list}}
+
 {{> situation}}
 @@user
 {{#protocol.simultaneous}}所有人在这一回合同时行动，你不知道别人此刻会做什么。{{/protocol.simultaneous}}{{#protocol.turnBased}}这是轮流说话的场合。{{#pendingSpeech}}

@@ -55,6 +55,7 @@ export {
 } from './schemas';
 export type { RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
+export type { EvidenceSecret } from './render';
 export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';

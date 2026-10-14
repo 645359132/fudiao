@@ -384,6 +384,8 @@ export type AppState = {
   readonly addListedModel: (providerId: string, listed: ListedModel) => Promise<void>;
   readonly updateModel: (modelId: string, patch: ModelPatch) => Promise<boolean>;
   readonly runSelfTest: (modelId: string) => Promise<void>;
+  /** 采用内置表中这个模型的能力与价格。 */
+  readonly applyBuiltinModel: (modelId: string) => Promise<void>;
 };
 
 export type AppStore = StoreApi<AppState>;
@@ -1621,6 +1623,9 @@ export function createAppStore(service: AppService): AppStore {
       async updateModel(modelId, patch) {
         const model = get().modelServices?.models.find((m) => m.id === modelId);
         return model === undefined ? false : run(service.updateModel(model, patch), (modelServices) => ({ modelServices }));
+      },
+      async applyBuiltinModel(modelId) {
+        await run(service.applyBuiltinModel(modelId), (modelServices) => ({ modelServices }));
       },
       async runSelfTest(modelId) {
         set({ selfTesting: [...get().selfTesting, modelId] });

@@ -40,7 +40,7 @@ import {
   type StoredModel,
   type StoredPrices,
 } from '@fudiao/store';
-import { BUILTIN_MODELS, type BuiltinModel } from './builtin-models';
+import { BUILTIN_MODELS, builtinModel, type BuiltinModel } from './builtin-models';
 import type { AppError } from './errors';
 import type { AppDeps, CredentialStatus, KeyHeader } from './ports';
 
@@ -243,6 +243,29 @@ export function modelServices(deps: AppDeps) {
       const p = await port();
       if (!p.ok) return p;
       const updated = await updateModel(p.value, model, patch, ctx());
+      return updated.ok ? view() : err(repo(updated.error));
+    },
+
+    /**
+     * 采用内置表中这个模型的能力与价格（内置表随应用更新；早先添加的模型不会自动跟上）。自检结果保留，
+     * 结构化输出方式变了时须重新自检（与作者修改相同）。
+     */
+    async applyBuiltinModel(modelId: string): Promise<Result<ModelServicesView, AppError>> {
+      const p = await port();
+      if (!p.ok) return p;
+      const current = await view();
+      if (!current.ok) return current;
+      const model = current.value.models.find((m) => m.id === modelId);
+      const provider = current.value.providers.find((x) => x.id === model?.providerId);
+      if (model === undefined || provider === undefined) return err({ code: 'not_found' });
+      const builtin = builtinModel(provider.kind, model.modelId);
+      if (builtin === undefined) return err(library('内置表中没有这个模型'));
+      const updated = await updateModel(
+        p.value,
+        model,
+        { displayName: model.displayName, capabilities: { ...model.capabilities, ...builtin.capabilities }, prices: builtin.prices ?? model.prices },
+        ctx(),
+      );
       return updated.ok ? view() : err(repo(updated.error));
     },
 

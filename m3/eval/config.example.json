@@ -10,11 +10,15 @@
     "capabilities": {
       "structuredOutput": "json_object",
       "promptCaching": false,
-      "reasoningControl": "none",
+      "reasoningControl": "effort",
       "refusalFallback": "none",
       "contextWindow": 1000000,
       "maxOutputTokens": 384000
     },
-    "prices": { "input": 0.3, "output": 1.2 }
+    "prices": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.006
+    }
   }
 }

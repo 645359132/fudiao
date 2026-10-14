@@ -8,6 +8,9 @@
 # 下面按高峰价填写，费用估算与预算上限宁高勿低。
 # DeepSeek 默认开启思考，思考也计入输出（首轮实验中 8000 的上限截断了认知更新与证据判断）。
 # 作者决定不限制输出：各任务的输出上限都取模型允许的最大值。
+# 降本（2026-10-14）：首轮实验的费用约七成是思考计入的输出。抽取与判断类任务（认知更新、证据判断、僵局、导演）
+# 用 low；人物行动、语义裁决与正文保持默认的 high，它们决定推演与文字的质量。非高峰时段（周末，以及工作日
+# UTC 01:00–04:00、06:00–10:00 以外）价格减半，批量实验尽量放在非高峰时段。
 
 providers:
   deepseek:
@@ -22,7 +25,8 @@ models:
     capabilities:
       structuredOutput: json_object
       promptCaching: false
-      reasoningControl: none
+      # DeepSeek 支持 reasoning_effort（low、high、max；medium 按 high），2026-10-14 核实。
+      reasoningControl: effort
       refusalFallback: none
       contextWindow: 1000000
       maxOutputTokens: 384000
@@ -31,15 +35,15 @@ models:
 
 # 全部任务使用 flash（作者决定：官方文档中 pro 没有优势）；推演组与对照组用同一个模型，比较才公平。
 tasks:
-  character_action: { model: flash, maxOutputTokens: 384000 }
-  semantic_ruling: { model: flash, maxOutputTokens: 384000 }
-  belief_update: { model: flash, maxOutputTokens: 384000 }
-  judgement: { model: flash, maxOutputTokens: 384000 }
+  character_action: { model: flash, effort: high, maxOutputTokens: 384000 }
+  semantic_ruling: { model: flash, effort: high, maxOutputTokens: 384000 }
+  belief_update: { model: flash, effort: low, maxOutputTokens: 384000 }
+  judgement: { model: flash, effort: low, maxOutputTokens: 384000 }
   beat_sheet: { model: flash, maxOutputTokens: 384000 }
   candidate_text: { model: flash, maxOutputTokens: 384000 }
   baseline: { model: flash, maxOutputTokens: 384000 }
-  stalemate: { model: flash, maxOutputTokens: 384000 }
-  director: { model: flash, maxOutputTokens: 384000 }
+  stalemate: { model: flash, effort: low, maxOutputTokens: 384000 }
+  director: { model: flash, effort: low, maxOutputTokens: 384000 }
 
 run:
   mode: auto

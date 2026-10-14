@@ -21,11 +21,3 @@
 {{#visible.mechanisms}}
 你知道{{zone}}有{{name}}[{{id}}]。
 {{/visible.mechanisms}}
-
-你所知道、记得和推测的事（可能与真相不符）：
-{{#knowledge}}
-{{> knowledge}}
-{{/knowledge}}
-{{^knowledge}}
-- 暂无
-{{/knowledge}}

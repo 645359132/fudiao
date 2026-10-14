@@ -221,28 +221,29 @@ export function renderSemanticRuling(input: RulingInput): Result<RenderedPrompt,
   });
 }
 
-/** 证据链命中判断。secrets 为秘密标识到秘密文本的映射，只给判断模型使用。 */
-export function renderEvidenceJudgement(
-  view: CharacterView,
-  candidates: readonly SecretCandidate[],
-  secrets: Readonly<Record<string, string>>,
-): Result<RenderedPrompt, string> {
+/** 证据链要对照的一个秘密：标识、文本与涉及的对象。只给判断模型使用。 */
+export type EvidenceSecret = { readonly id: string; readonly text: string; readonly subjects: readonly string[] };
+
+/**
+ * 证据链命中判断。secrets 是这个人物不知道的全部秘密（不随回合变化）。线索只列一遍：他已有的、涉及这些秘密的
+ * 认知条目，按得知的先后（只追加），不含本回合新提出的推测（几条猜测不能互相支撑）。这样同一人物前后几回合的
+ * 请求开头相同，服务端的前缀缓存可以命中；推测各自引用秘密，不再为每对推测与秘密重复整份线索。
+ */
+export function renderEvidenceJudgement(view: CharacterView, candidates: readonly SecretCandidate[], secrets: readonly EvidenceSecret[]): Result<RenderedPrompt, string> {
   const names = namesOf([...view.names, { id: view.actorId, name: view.self.name }]);
   const byId = new Map(view.knowledge.map((k) => [k.id, k]));
-  const items = candidates.map((c) => {
-    const inference = byId.get(c.inference);
-    return {
-      inference: c.inference,
-      secretId: c.secret,
-      text: inference?.body.kind === 'text' ? inference.body.text : '',
-      secret: secrets[c.secret] ?? '',
-      evidence: c.evidence.flatMap((id) => {
-        const k = byId.get(id);
-        return k === undefined ? [] : [knowledgeModel(k, names, view.actorId, view.claims)];
-      }),
-    };
+  const round = Math.max(0, ...candidates.map((c) => byId.get(c.inference)?.round ?? 0));
+  const subjects = new Set(secrets.flatMap((s) => s.subjects));
+  const evidence = view.knowledge.filter((k) => (k.modality !== 'inferred' || k.round < round) && k.about.some((ref) => subjects.has(ref)));
+  return renderTemplate('evidence_judgement', {
+    name: view.self.name,
+    secrets: secrets.map((s) => ({ id: s.id, text: s.text })),
+    evidence: evidence.map((k) => knowledgeModel(k, names, view.actorId, view.claims)),
+    candidates: candidates.map((c) => {
+      const inference = byId.get(c.inference);
+      return { inference: c.inference, secretId: c.secret, text: inference?.body.kind === 'text' ? inference.body.text : '' };
+    }),
   });
-  return renderTemplate('evidence_judgement', { candidates: items });
 }
 
 export type BeatSheetInput = {

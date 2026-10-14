@@ -61,12 +61,28 @@ const fullText = (p: RenderedPrompt) => [...p.system.map((s) => s.text), ...p.me
 describe('角色行动提案', () => {
   const prompt = unwrap(renderCharacterAction(buildCharacterView(scene, start, P), { protocol: 'simultaneous' }));
 
+  it('认知条目（只追加）排在每回合都会变的局面之前：下一回合多了新条目时，请求的开头不变', () => {
+    const round2 = { ...start, round: 2 };
+    const planned = planBeliefUpdate(scene, round2, P, { add: [{ text: '对手在等援兵', confidence: 0.4, about: [A] }] });
+    if (!planned.ok) throw new Error('应当成功');
+    const next = applyEvent(scene, round2, planned.value);
+    if (!next.ok) throw new Error('应当成功');
+    const later = unwrap(renderCharacterAction(buildCharacterView(scene, next.value, P), { protocol: 'simultaneous' }));
+    const before = prompt.system[2]!.text;
+    const after = later.system[2]!.text;
+    expect(before.startsWith('你所知道、记得和推测的事')).toBe(true);
+    const known = before.slice(0, before.indexOf('现在是第'));
+    expect(after.startsWith(known.trimEnd())).toBe(true);
+    expect(after.slice(known.trimEnd().length, after.indexOf('现在是第'))).toContain('对手在等援兵');
+    expect(prompt.system.slice(0, 2).map((s) => s.text)).toEqual(later.system.slice(0, 2).map((s) => s.text));
+  });
+
   it('通用规则、角色卡与场地、本回合视图分段，在第二段末尾设置缓存断点', () => {
     expect(prompt.system.map((s) => s.cache === true)).toEqual([false, true, false]);
     expect(prompt.system[1]?.text).toContain('带着密信从南门脱身');
     expect(prompt.system[1]?.text).toContain('仓库中央[center]');
     expect(prompt.system[2]?.text).toContain('现在是第 1 回合');
-    expect(prompt.template).toEqual({ id: 'character_action', version: '8' });
+    expect(prompt.template).toEqual({ id: 'character_action', version: '9' });
     expect(prompt.output?.name).toBe('ActionProposal');
   });
 
@@ -168,18 +184,49 @@ describe('其他模板', () => {
     expect(text).toContain('具体动作：把弩横放在地上，说：“我不想动手。”（需要裁决）');
   });
 
-  it('证据链判断附上秘密与人物已有的线索', () => {
-    const planned = planBeliefUpdate(scene, start, P, { add: [{ text: '南门恐怕有埋伏', confidence: 0.5, about: ['south_gate'] }] });
-    if (!planned.ok) throw new Error('应当成功');
-    const next = applyEvent(scene, start, planned.value);
-    if (!next.ok) throw new Error('应当成功');
-    const candidates = screenSecretInferences(scene, next.value, P, planned.value.added);
-    const text = fullText(
-      unwrap(renderEvidenceJudgement(buildCharacterView(scene, next.value, P), candidates, { tripwire_secret: '对手在南门布置了绊索' })),
-    );
-    expect(text).toContain('推测 [protagonist:1:3] 对照秘密 [tripwire_secret]：南门恐怕有埋伏');
-    expect(text).toContain('相关的秘密：对手在南门布置了绊索');
-    expect(text).toContain('- 没有');
+  describe('证据链判断', () => {
+    const secrets = [{ id: 'tripwire_secret', text: '对手在南门布置了绊索', subjects: ['tripwire', 'south_gate'] }];
+    const infer = (state: SimState, texts: readonly string[]) => {
+      const planned = planBeliefUpdate(scene, state, P, { add: texts.map((text) => ({ text, confidence: 0.5, about: ['south_gate'] })) });
+      if (!planned.ok) throw new Error('应当成功');
+      const next = applyEvent(scene, state, planned.value);
+      if (!next.ok) throw new Error('应当成功');
+      return { state: next.value, candidates: screenSecretInferences(scene, next.value, P, planned.value.added) };
+    };
+    const userText = (state: SimState, candidates: ReturnType<typeof infer>['candidates']) =>
+      unwrap(renderEvidenceJudgement(buildCharacterView(scene, state, P), candidates, secrets)).messages[0]!.content;
+
+    it('先列他不知道的秘密，再列已有的线索，最后是本回合的推测；本回合的推测不作线索', () => {
+      const first = infer(start, ['南门恐怕有埋伏']);
+      const text = userText(first.state, first.candidates);
+      expect(text).toContain('- [tripwire_secret] 对手在南门布置了绊索');
+      expect(text).toContain('他已有的相关线索：\n- 没有');
+      expect(text).toContain('- 推测 [protagonist:1:3] 对照秘密 [tripwire_secret]：南门恐怕有埋伏');
+      expect(text.indexOf('他不知道的秘密')).toBeLessThan(text.indexOf('他已有的相关线索'));
+      expect(text.indexOf('他已有的相关线索')).toBeLessThan(text.indexOf('这一回合要判断的推测'));
+    });
+
+    it('线索只列一遍，不为每条推测重复；前几回合的推测算线索', () => {
+      const first = infer(start, ['南门恐怕有埋伏']);
+      const second = infer({ ...first.state, round: 2 }, ['南门地上可能拉了线', '对手守着南门是有准备的']);
+      expect(second.candidates).toHaveLength(2);
+      const text = userText(second.state, second.candidates);
+      expect(text.split('南门恐怕有埋伏').length - 1).toBe(1);
+      expect(text).toContain('- 推测 [protagonist:2:4]');
+      expect(text).toContain('- 推测 [protagonist:2:5]');
+    });
+
+    it('同一人物前后几回合的请求开头相同（秘密与已有线索只追加），服务端的前缀缓存才能命中', () => {
+      const first = infer(start, ['南门恐怕有埋伏']);
+      const second = infer({ ...first.state, round: 2 }, ['南门地上可能拉了线']);
+      const third = infer({ ...second.state, round: 3 }, ['对手守着南门是有准备的']);
+      const head = (text: string) => text.slice(0, text.indexOf('这一回合要判断的推测'));
+      const two = head(userText(second.state, second.candidates));
+      const three = head(userText(third.state, third.candidates));
+      // 第三回合的线索在第二回合的基础上只多了第二回合的那条推测，加在末尾。
+      expect(three.startsWith(two.trimEnd())).toBe(true);
+      expect(three.slice(two.trimEnd().length)).toContain('南门地上可能拉了线');
+    });
   });
 
   describe('正文视角', () => {

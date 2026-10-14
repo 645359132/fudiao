@@ -70,6 +70,22 @@ describe('模型服务', () => {
     expect(local.providers[0]?.credential).toEqual({ stored: true, origin: 'http://127.0.0.1:11434', hasSecret: false });
   });
 
+  it('内置表中的 DeepSeek：添加时带上可调思考深度与价格；早先添加、能力过时的模型可以一键采用内置的能力与价格', async () => {
+    const { app } = setup();
+    const deepseek = { kind: 'openai_compatible' as const, name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', authMethod: 'api_key' as const, apiKey: 'sk-ds' };
+    const [p] = value(await app.saveProvider(null, deepseek)).providers;
+    const added = value(await app.addModel(p?.id ?? '', 'deepseek-flash')).models[0]!;
+    expect(added).toMatchObject({ source: 'builtin', prices: { input: 0.3, output: 1.2, cacheRead: 0.006 }, capabilities: { reasoningControl: 'effort', structuredOutput: 'json_object' } });
+
+    // 模拟早先添加的模型：不能调思考深度、没有价格。
+    const old = value(await app.updateModel(added, { displayName: added.displayName, capabilities: { ...added.capabilities, reasoningControl: 'none' }, prices: null })).models[0]!;
+    const refreshed = value(await app.applyBuiltinModel(old.id)).models[0]!;
+    expect(refreshed).toMatchObject({ prices: { input: 0.3, output: 1.2, cacheRead: 0.006 }, capabilities: { reasoningControl: 'effort', structuredOutput: 'json_object' } });
+
+    const plain = value(await app.addModel(p?.id ?? '', 'some-other-model')).models.find((m) => m.modelId === 'some-other-model')!;
+    expect(await app.applyBuiltinModel(plain.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('内置表中没有') } });
+  });
+
   it('模型：第一个模型成为默认模型；可以改默认、删除模型', async () => {
     const { app } = setup();
     const [p] = value(await app.saveProvider(null, { ...anthropic, apiKey: SECRET })).providers;

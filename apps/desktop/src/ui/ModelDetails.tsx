@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ConnectionReport, ListedModel, LlmError } from '@fudiao/llm';
 import type { StoredCapabilities, StoredModel } from '@fudiao/store';
+import { builtinModel } from '../app/builtin-models';
 import { useApp } from './store-context';
 
 const ERROR_HINT: Partial<Record<LlmError['code'], string>> = {
@@ -157,8 +158,16 @@ export function ModelRow({ model, isDefault }: { readonly model: StoredModel; re
   const selfTesting = useApp((s) => s.selfTesting.includes(model.id));
   const setDefault = useApp((s) => s.setDefaultModel);
   const remove = useApp((s) => s.deleteModel);
+  const applyBuiltin = useApp((s) => s.applyBuiltinModel);
+  const kind = useApp((s) => s.modelServices?.providers.find((p) => p.id === model.providerId)?.kind);
   const busy = useApp((s) => s.busy);
   const [editing, setEditing] = useState(false);
+  // 内置表里有这个模型、而记下的能力或价格与它不同（例如早先添加时内置表还没有它）。
+  const builtin = kind === undefined ? undefined : builtinModel(kind, model.modelId);
+  const outdated =
+    builtin !== undefined &&
+    (Object.entries(builtin.capabilities).some(([k, v]) => model.capabilities[k as keyof typeof model.capabilities] !== v) ||
+      JSON.stringify(builtin.prices ?? null) !== JSON.stringify(model.prices));
   if (editing) return <ModelEditor model={model} onDone={() => setEditing(false)} />;
   return (
     <li className="model-row">
@@ -179,6 +188,11 @@ export function ModelRow({ model, isDefault }: { readonly model: StoredModel; re
       <button type="button" onClick={() => setEditing(true)}>
         能力与价格
       </button>
+      {outdated ? (
+        <button type="button" disabled={busy} title="按服务官方文档核实过的能力与价格，例如可以调节思考深度" onClick={() => void applyBuiltin(model.id)}>
+          采用内置的能力与价格
+        </button>
+      ) : null}
       <button type="button" disabled={busy} aria-label={`删除模型 ${model.displayName}`} onClick={() => void remove(model.id)}>
         删除
       </button>

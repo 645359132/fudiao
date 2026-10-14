@@ -1,6 +1,6 @@
 ---
 id: belief_update
-version: 6
+version: 7
 task: belief_update
 output: BeliefUpdateOutput
 ---
@@ -24,6 +24,8 @@ output: BeliefUpdateOutput
 
 {{> map}}
 @@system
+{{> knowledge_list}}
+
 {{> situation}}
 @@user
 这一回合新得到的信息：{{#fresh}}[{{.}}] {{/fresh}}{{^fresh}}没有{{/fresh}}

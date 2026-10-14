@@ -517,12 +517,13 @@ export function createEngine(deps: EngineDeps) {
 
     // 证据链：本回合新增的推测与秘密有关时，请求命中判断；只作提示，不作结论（B44）。
     // 各人的判断互不依赖，同时发出；结果按角色标识的顺序写入，与响应的到达顺序无关。
-    const secrets = Object.fromEntries(scene.secrets.map((s) => [s.id, s.text]));
     const results = await Promise.all(
       [...state.views].sort().map(async (actor) => {
         const inferred = (sim.knowledge[actor] ?? []).filter((k) => k.round === round && k.modality === 'inferred' && k.status === 'active');
         const candidates = screenSecretInferences(scene, sim, actor, inferred);
         if (candidates.length === 0) return { actor, candidates, outcome: null };
+        // 对照这个人物不知道的全部秘密（不随回合变化），请求的开头才能在前后几回合之间保持一致。
+        const secrets = scene.secrets.filter((s) => !s.knownBy.includes(actor)).map((s) => ({ id: s.id, text: s.text, subjects: [...s.subjects] }));
         const prompt = unwrapPrompt(renderEvidenceJudgement(buildCharacterView(scene, sim, actor), candidates, secrets));
         const outcome = await call(
           EvidenceJudgementOutput,
