@@ -5,7 +5,8 @@ import type { SqlPort } from '../sql';
 import { guardedUpdate, insertReturning, queryAll, queryOne, type RepoError, type WriteContext } from './common';
 import type { TextRange } from './paragraph-range';
 
-export const CANDIDATE_OPERATIONS = ['continue', 'rewrite', 'expand', 'shorten', 'polish'] as const;
+/** narrate：由推演的节拍表写成的正文（B29、B62），带着它依据的节拍表。 */
+export const CANDIDATE_OPERATIONS = ['continue', 'rewrite', 'expand', 'shorten', 'polish', 'narrate'] as const;
 export type CandidateOperation = (typeof CANDIDATE_OPERATIONS)[number];
 export type CandidateStatus = 'pending' | 'accepted' | 'discarded' | 'stale';
 
@@ -39,6 +40,7 @@ const CandidateRow = z
     version: z.number().int(),
     created_at: z.string(),
     updated_at: z.string(),
+    beat_sheet_id: z.string().nullable(),
   })
   .transform((r) => ({
     id: r.id,
@@ -55,10 +57,12 @@ const CandidateRow = z
     version: r.version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    /** 由节拍表写成的候选稿依据的节拍表；其余为 null。 */
+    beatSheetId: r.beat_sheet_id,
   }));
 export type Candidate = z.output<typeof CandidateRow>;
 
-const COLUMNS = 'id, chapter_id, operation, target, base_text, base_versions, generated, content, status, status_reason, llm_call_id, version, created_at, updated_at';
+const COLUMNS = 'id, chapter_id, operation, target, base_text, base_versions, generated, content, status, status_reason, llm_call_id, version, created_at, updated_at, beat_sheet_id';
 
 export type CandidateInput = {
   readonly id: string;
@@ -69,12 +73,13 @@ export type CandidateInput = {
   readonly baseVersions: Readonly<Record<string, number>>;
   readonly generated: string;
   readonly llmCallId: string | null;
+  readonly beatSheetId?: string;
 };
 
 export function createCandidate(port: SqlPort, input: CandidateInput, ctx: WriteContext): Promise<Result<Candidate, RepoError>> {
   return insertReturning(port, CandidateRow, {
-    sql: `INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, llm_call_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
+    sql: `INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, llm_call_id, beat_sheet_id, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
     params: [
       input.id,
       input.chapterId,
@@ -85,6 +90,7 @@ export function createCandidate(port: SqlPort, input: CandidateInput, ctx: Write
       input.generated,
       input.generated,
       input.llmCallId,
+      input.beatSheetId ?? null,
       ctx.now,
       ctx.now,
     ],

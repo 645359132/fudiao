@@ -1,10 +1,31 @@
 // 把推演里的结构化内容写成作者看得懂的话（施工文档 M4-05）：裁决的效果、发生的事、可以分支的时点。
 // 只做展示与格式转换，不改变任何状态。
-import type { Effect, RuledOccurrence, SemanticRuling } from '@fudiao/domain';
+import type { Effect, Observation, RuledOccurrence, SemanticRuling } from '@fudiao/domain';
 import type { RunEvent } from '@fudiao/engine';
 import type { SemanticRulingOutput } from '@fudiao/prompts';
 
 type Name = (id: string) => string;
+
+/** 行动与发生的事的种类。 */
+export const ACTION_LABELS: Readonly<Record<string, string>> = {
+  observe: '观察',
+  move: '移动',
+  probe: '试探',
+  attack: '攻击',
+  defend: '防御',
+  use_item: '使用物品',
+  take: '拾取',
+  drop: '放下',
+  speak: '说话',
+  withdraw: '撤离',
+  wait: '等待',
+  other: '其他',
+  failed_attempt: '失败的尝试',
+  trap_triggered: '触发机关',
+  discovered: '发现',
+  ruled: '裁决结果',
+  external: '外部事件',
+};
 
 const INJURY: Readonly<Record<string, string>> = { none: '没有受伤', light: '轻伤', severe: '重伤', incapacitated: '失去行动能力' };
 
@@ -81,4 +102,21 @@ export function forkLabel(last: RunEvent | undefined, next: RunEvent | undefined
     DirectorProposed: '等待决定导演提议时',
   };
   return (last === undefined ? undefined : labels[last.type]) ?? '停下时';
+}
+
+/** 一条观察写成文字：谁做了什么、在哪里、看见或听见了什么。 */
+export function describeObservation(o: Observation, name: Name): string {
+  if (o.channel === 'sound') {
+    return `从${name(o.zones[0] ?? '')}传来声响${o.sound === undefined ? '' : `（${o.sound}）`}${o.item === undefined ? '' : `，听得出是${name(o.item)}`}${o.speech?.clarity === 'full' ? `：“${o.speech.sentences.join('')}”` : ''}${o.description?.sound === undefined ? '' : `：${o.description.sound}`}`;
+  }
+  const parts = [o.actor === undefined ? '' : name(o.actor), o.kind === undefined ? '' : (ACTION_LABELS[o.kind] ?? o.kind)];
+  if (o.item !== undefined) parts.push(name(o.item));
+  if (o.target !== undefined) parts.push(`→ ${name(o.target)}`);
+  if (o.zones.length > 0) parts.push(`（${o.zones.map(name).join(' → ')}）`);
+  if (o.speech?.clarity === 'full') parts.push(`“${o.speech.sentences.join('')}”`);
+  if (o.speech?.clarity === 'muffled') parts.push('（听不清）');
+  if (o.failed === true) parts.push(`（没有成功${o.violation === undefined ? '' : `：${o.violation.code}`}）`);
+  if (o.description?.visual !== undefined) parts.push(`：${o.description.visual}`);
+  if (o.content !== undefined) parts.push(`，读到：“${o.content}”`);
+  return parts.filter((p) => p !== '').join(' ');
 }

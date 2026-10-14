@@ -1629,3 +1629,51 @@ describe('待核实裁决、作者介入与分支的界面（B26、B30）', () =
     await waitFor(() => expect(simStatus()).toContain('已结束：到达回合上限'), { timeout: 10_000 });
   });
 });
+
+describe('推演写成正文的界面（B29、B45）', () => {
+  it('生成节拍表、修改处理方式与文风、写成正文：结果是这一章的候选稿，在“AI 写作”里接受', async () => {
+    const { user, runs, store } = await simReady();
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    const workspace = await screen.findByRole('region', { name: '推演工作区' });
+    await user.click(within(workspace).getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(simStatus()).toContain('已结束'), { timeout: 10_000 });
+
+    // 先建一章：推演写成的正文要接在某一章末尾。
+    await addChapter(user, '第一章 夜雨');
+    await user.click(screen.getByRole('button', { name: '推演' }));
+    await user.click(await screen.findByRole('button', { name: /废仓库/ }));
+    await user.click(screen.getByRole('tab', { name: '推演' }));
+    const again = await screen.findByRole('region', { name: '推演工作区' });
+
+    await user.click(within(again).getByText('写成正文'));
+    const form = within(again).getByRole('form', { name: '生成节拍表' });
+    await user.selectOptions(within(form).getByRole('combobox', { name: '视角角色' }), '主角');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '从第几回合' }), '1');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '到第几回合' }), '2');
+    await user.click(within(form).getByRole('button', { name: '生成节拍表' }));
+    const sheet = await within(again).findByRole('form', { name: '主角视角的节拍表' });
+    const rows = within(within(sheet).getByRole('table', { name: '节拍' })).getAllByRole('row').slice(1);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(store.getState().tasks.map((t) => [t.kind, t.status])).toEqual(expect.arrayContaining([['beat_sheet', 'done']]));
+
+    // 改了没保存时不能写。
+    await user.selectOptions(within(rows[0]!).getByRole('combobox', { name: '处理' }), '展开');
+    await user.type(within(sheet).getByRole('textbox', { name: /文风/ }), '冷峻');
+    expect(within(sheet).getByRole('button', { name: '按节拍表写成正文' }).matches(':disabled')).toBe(true);
+    await user.click(within(sheet).getByRole('button', { name: '保存节拍表' }));
+    await waitFor(() => expect(store.getState().beatSheets[0]?.sheet).toMatchObject({ style: '冷峻', version: 2 }));
+    expect(store.getState().beatSheets[0]?.beats[0]?.treatment).toBe('expand');
+
+    const saved = within(screen.getByRole('region', { name: '推演工作区' })).getByRole('form', { name: '主角视角的节拍表' });
+    await user.click(within(saved).getByRole('button', { name: '按节拍表写成正文' }));
+    const note = await within(screen.getByRole('region', { name: '推演工作区' })).findByRole('note');
+    expect(note.textContent).toContain('已在“第一章 夜雨”末尾生成候选稿，接受后才写入正文。');
+
+    await user.click(within(note).getByRole('button', { name: '打开这一章看候选稿' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    const card = await within(drawer).findByRole('region', { name: '推演写成正文的候选稿' });
+    expect(card.textContent).toContain('雨下得更紧了。他没有回头。');
+    await user.click(within(card).getByRole('button', { name: '接受' }));
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]));
+  });
+});

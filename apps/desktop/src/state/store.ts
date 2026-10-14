@@ -1,5 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
+import type { CallOptions } from '@fudiao/llm';
 import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
@@ -7,6 +8,8 @@ import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
+import type { BeatSheetRequest, BeatSheetView } from '../app/narration';
+import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -262,6 +265,16 @@ export type AppState = {
   /** 校验回放（B30）：只读事件重算各快照处的状态，与当时记下的哈希比较。结果属于选中的这次运行。 */
   readonly simVerification: (SimVerification & { readonly runId: string }) | null;
   readonly verifySimRun: () => Promise<void>;
+  /** 推演写成正文（B29、B45）：选中运行的节拍表；narrationNote 是最近一次写成的候选稿所在的章节。 */
+  readonly beatSheets: readonly BeatSheetView[];
+  readonly narrationBusy: boolean;
+  readonly narrationNote: { readonly chapterId: string; readonly text: string } | null;
+  /** 生成节拍表，返回新节拍表的标识（失败时为 null）。 */
+  readonly draftBeatSheet: (request: BeatSheetRequest) => Promise<string | null>;
+  readonly saveBeatSheet: (id: string, fields: { readonly beats: readonly Beat[]; readonly style: string }) => Promise<boolean>;
+  readonly narrateBeatSheet: (id: string, chapterId: string) => Promise<void>;
+  /** 打开写成候选稿的那一章，并打开“AI 写作”看候选稿。 */
+  readonly openNarratedChapter: (chapterId: string) => Promise<void>;
   readonly draftSimScene: (description: string) => Promise<void>;
   readonly blankSimScene: (config: SceneSpecInput) => void;
   readonly discardSceneDraft: () => void;
@@ -379,6 +392,38 @@ export function createAppStore(service: AppService): AppStore {
       return done.ok;
     }
 
+    /** 一次模型任务登记在任务中心：开始、流式文字、用量与结束；失败时显示原因。 */
+    async function modelTask<T>(
+      kind: TaskRecord['kind'],
+      title: string,
+      chapterId: string | null,
+      call: (options: CallOptions) => Promise<Result<T, AppError>>,
+    ): Promise<Result<T, AppError>> {
+      const taskId = `task-${++taskSeq}`;
+      const abort = new AbortController();
+      taskAborts.set(taskId, abort);
+      task({ type: 'started', task: { id: taskId, kind, title, chapterId, startedAt: new Date().toISOString() } });
+      const result = await call({
+        signal: abort.signal,
+        onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+      });
+      taskAborts.delete(taskId);
+      const finishedAt = new Date().toISOString();
+      if (result.ok) task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+      else {
+        task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+        set({ message: describeError(result.error) });
+      }
+      return result;
+    }
+
+    async function loadBeatSheets(runId: string): Promise<void> {
+      const sheets = await service.listBeatSheets(runId);
+      if (get().simRunId !== runId) return;
+      if (!sheets.ok) set({ message: describeError(sheets.error) });
+      else set({ beatSheets: sheets.value });
+    }
+
     /** 读出一个场景的运行；select 给出时选中它，否则选中最近的一次。 */
     async function loadRuns(sceneId: string, select: string | null): Promise<void> {
       const runs = await service.listSimRuns(sceneId);
@@ -388,8 +433,11 @@ export function createAppStore(service: AppService): AppStore {
         return;
       }
       const runId = select ?? runs.value[0]?.id ?? null;
-      set({ simRuns: runs.value, simRunId: runId, simRun: null, ...(select !== null && { simTab: 'runs' as const }) });
-      if (runId !== null) await refreshRun(runId);
+      set({ simRuns: runs.value, simRunId: runId, simRun: null, beatSheets: [], narrationNote: null, ...(select !== null && { simTab: 'runs' as const }) });
+      if (runId !== null) {
+        await refreshRun(runId);
+        await loadBeatSheets(runId);
+      }
     }
     let reviewAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
@@ -517,6 +565,9 @@ export function createAppStore(service: AppService): AppStore {
       simRun: null,
       simAdvancing: false,
       simVerification: null,
+      beatSheets: [],
+      narrationBusy: false,
+      narrationNote: null,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -567,7 +618,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -876,8 +927,9 @@ export function createAppStore(service: AppService): AppStore {
       },
       async selectSimRun(id) {
         if (get().simAdvancing) return;
-        set({ simRunId: id, simRun: null });
+        set({ simRunId: id, simRun: null, beatSheets: [], narrationNote: null });
         await refreshRun(id);
+        await loadBeatSheets(id);
       },
       async stepSimRun() {
         const id = get().simRunId;
@@ -935,6 +987,40 @@ export function createAppStore(service: AppService): AppStore {
         set({ message: null });
         await loadRuns(sceneId, fork.value.run.id);
         return true;
+      },
+      async draftBeatSheet(request) {
+        const id = get().simRunId;
+        if (id === null || get().narrationBusy) return null;
+        set({ narrationBusy: true, message: null });
+        const result = await modelTask('beat_sheet', `节拍表 · 第 ${request.fromRound}–${request.toRound} 回合`, null, (options) => service.draftBeatSheet(id, request, options));
+        set({ narrationBusy: false });
+        if (!result.ok) return null;
+        await loadBeatSheets(id);
+        return result.value.sheet.id;
+      },
+      async saveBeatSheet(sheetId, fields) {
+        const id = get().simRunId;
+        if (id === null) return false;
+        const saved = await service.saveBeatSheet(sheetId, fields);
+        if (!saved.ok) {
+          set({ message: describeError(saved.error) });
+          return false;
+        }
+        await loadBeatSheets(id);
+        return true;
+      },
+      async narrateBeatSheet(sheetId, chapterId) {
+        if (get().narrationBusy) return;
+        // 写到正在编辑的这一章时先保存：未保存的修改会让写作被拒绝。
+        if (!(await get().leaveChapter())) return;
+        set({ narrationBusy: true, message: null, narrationNote: null });
+        const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+        const result = await modelTask('narrate', `推演写成正文 · ${title}`, chapterId, (options) => service.narrateBeatSheet(sheetId, chapterId, options));
+        set({ narrationBusy: false, ...(result.ok && { narrationNote: { chapterId, text: `已在“${title}”末尾生成候选稿，接受后才写入正文。` } }) });
+      },
+      async openNarratedChapter(chapterId) {
+        await get().selectChapter(chapterId);
+        if (get().selectedChapterId === chapterId) await get().openAiWrite();
       },
       async verifySimRun() {
         const id = get().simRunId;

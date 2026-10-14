@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { textDiff } from '@fudiao/shared';
 import type { Candidate } from '@fudiao/store';
-import { OPERATION_LABELS } from '../app/selection-ops';
+import { CANDIDATE_LABELS } from '../app/selection-ops';
 import { useApp } from './store-context';
 
 /** 与原文的差异：续写只有新增的文字；其余操作逐字标出删除与新增。 */
 function Diff({ candidate }: { readonly candidate: Candidate }) {
-  if (candidate.operation === 'continue') {
+  if (candidate.operation === 'continue' || candidate.operation === 'narrate') {
     return (
       <div className="ai-text diff" aria-label="候选稿内容">
         <ins>{candidate.content}</ins>
@@ -33,7 +33,7 @@ export function CandidateCard({ candidate }: { readonly candidate: Candidate }) 
   const busy = useApp((s) => s.busy);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(candidate.content);
-  const label = `${OPERATION_LABELS[candidate.operation]}的候选稿`;
+  const label = `${CANDIDATE_LABELS[candidate.operation]}的候选稿`;
 
   return (
     <section className="candidate" aria-label={label}>

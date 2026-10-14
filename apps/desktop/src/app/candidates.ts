@@ -52,7 +52,7 @@ export function insertFor(candidate: Candidate, paragraphs: readonly SavedParagr
   const content = candidate.content;
   const ai = candidate.content === candidate.generated ? (content === '' ? [] : [{ start: 0, end: content.length }]) : updateSpans(candidate.generated, [{ start: 0, end: candidate.generated.length }], content);
   const at = paragraphs.find((p) => p.id === candidate.target.from.paragraphId);
-  const newParagraph = candidate.operation === 'continue' && at !== undefined && at.text !== '' && candidate.target.from.offset === at.text.length;
+  const newParagraph = (candidate.operation === 'continue' || candidate.operation === 'narrate') && at !== undefined && at.text !== '' && candidate.target.from.offset === at.text.length;
   return newParagraph
     ? { text: `\n${content}`, ai: ai.map((s) => ({ start: s.start + 1, end: s.end + 1 })), unedited: content === candidate.generated }
     : { text: content, ai, unedited: content === candidate.generated };

@@ -67,6 +67,7 @@ import { candidateUseCases } from './candidates';
 import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
+import { narrationUseCases } from './narration';
 import { reviewUseCases } from './review';
 import { simulationUseCases } from './simulation';
 import { writerUseCases } from './writer';
@@ -307,6 +308,7 @@ export function createAppService(deps: AppDeps) {
   const planning = planningUseCases(deps, () => session?.port ?? null, runner);
   const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
+  const narration = narrationUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const simulation = simulationUseCases({
     deps,
@@ -326,6 +328,7 @@ export function createAppService(deps: AppDeps) {
     ...planning,
     ...writer,
     ...memory,
+    ...narration,
     ...review,
     ...simulation,
 

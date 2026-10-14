@@ -139,8 +139,8 @@ fudiao/
 | `sim_event` | run_id、seq、batch_first / batch_index / batch_size（同一次追加为一批，与 M0 的 JSONL 记录一一对应）、type 与 actor（取自事件内容，便于查询）、payload、created_at；主键 (run_id, seq)；只追加，表上的触发器拒绝修改与删除。回合与阶段由回放得到，不另存列；迁移 0006 | B28、B30 |
 | `sim_snapshot` | run_id、seq、state（JSON）、state_hash、created_at；在等待作者、暂停与结束处记下，用来校验回放；迁移 0006 | B30 |
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
-| `candidate` | id、chapter_id、operation、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
-| `beat_sheet` | id、run_id、pov_actor_id、beats（JSON） | B45 |
+| `candidate` | id、chapter_id、operation（续写、改写、扩写、缩写、润色；迁移 0007 增加“推演写成正文”）、beat_sheet_id（推演写成的正文依据的节拍表，迁移 0007）、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
+| `beat_sheet` | id、run_id、pov_actor（视角角色的键）、from_round 与 to_round、up_to_seq（视角角色的认知取到这个事件序号为止，即 to_round 结束时）、beats（JSON：指向认知条目的 ref、处理方式、说明、暂不揭示）、style、llm_call_id、version；迁移 0007 | B45 |
 | `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、progress（写手的进度 JSON：这次写作的标识、情节点的分段与每段字数、已写入的段数、写入前快照的标识；没让写手写过时为空）、version；迁移 0005 | B65、B59 |
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key、name、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能的文字在 `packages/prompts/templates/skills/`，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
@@ -351,6 +351,8 @@ stateDiagram-v2
 - 作者介入：改一个角色的认知（新增一条、撤回若干条）、在两个回合之间加入一件外部的事（区域、是否看得见、响度、看到与听到的内容）、替换一个角色这一回合的行动。必须写原因。能不能介入由引擎按当前阶段判断，桌面端不重复这套规则，只把引擎的拒绝写成说明。介入之前先记下状态快照（B30“保留介入前的场景快照”），介入本身是事件。
 - 分支：记有快照的时点（等待确认、暂停、结束、介入之前）都可以分出一条新的推演（`forkSimRun`）：新的运行登记来源的运行与序号，带着到那一刻为止的事件，原来的运行一条也不变。
 - 证据链提示（B44）与内心片段（B43）在时间线的全局局面里：缺少证据链的推测列在“提示”，内心片段随每个角色的行动显示，与提交给裁决的行动依据分开。
+
+推演写成正文（M4-07，B29、B45、B62，`apps/desktop/src/app/narration.ts`、`apps/desktop/src/ui/NarrationPanel.tsx`）：作者在一次推演里选视角角色与回合范围，由 `beat_sheet` 模板生成节拍表。视角角色的认知取到所选最后一回合结束时为止（回放到那一回合的 RoundEnded，再用 `buildCharacterView` 取他的视图），材料是这几个回合里他的见闻，加上他自己的内心片段；之后才发生的事他还不知道，不进入材料（硬性规则 3）。节拍只能指向这些见闻，模型给出的其他引用丢弃。作者可以改每个节拍的处理方式（展开、略写、省略、倒叙、留白）、说明与是否暂不向读者揭示，以及文风。写成正文由 `candidate_text` 模板完成，标为省略的节拍不进入请求；两个模板的参数都是角色视图，拿不到他人的认知、角色卡、秘密与全局局面。结果是所选章节末尾的候选稿（作者决定 2026-10-14：走候选稿，不直接写入），记下依据的节拍表，在章节的“AI 写作”里比较、修改与接受；接受时沿用候选稿的快照与段落来源。这一章还没有段落时先建一个空段落，候选稿写进它；有未保存的修改时不写。
 
 回放与中断恢复（M4-06，B30）：时间线本身就是回放——它只由事件得到，不调用模型。中断后的恢复不需要专门的步骤：事件按批写入作品库，模型调用按步骤键查重，重新打开作品后“继续”即从停下的那一步接着做，已完成的调用不重复、不重复计费。运行记录上的状态与回合是缓存，应用在写完事件、还没写回缓存时退出会让它落后，所以列出一个场景的运行时把还没有结束的运行按事件重算一遍。工作区的“校验回放”只读事件重算每个快照处的状态，与当时记下的哈希比较，不一致时指出是哪个快照。
 

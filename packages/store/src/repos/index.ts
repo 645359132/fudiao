@@ -24,6 +24,8 @@ export type { LlmCallRow, LlmCallStatus, LlmCallUsage, RunCall, UsageSummary, Us
 export { appendLlmCall, findCallByRequestHash, findCompletedCall, listLlmCalls, listRunCalls, usageSummary } from './llm-call';
 export type { RangeInsert, RangePlan, TextPosition, TextRange } from './paragraph-range';
 export { applyRangeReplace, planRangeReplace, textInRange } from './paragraph-range';
+export type { Beat, BeatSheet, BeatSheetInput, BeatTreatment } from './beat-sheet';
+export { BEAT_TREATMENTS, createBeatSheet, getBeatSheet, listBeatSheets, updateBeatSheet } from './beat-sheet';
 export type { Candidate, CandidateInput, CandidateOperation, CandidateStatus } from './candidate';
 export { CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
 export type { ParagraphAnchor } from './common';

@@ -13,6 +13,9 @@ export const OPERATION_LABELS: Readonly<Record<SelectionOperation, string>> = {
 
 export const OPERATIONS = Object.keys(OPERATION_LABELS) as SelectionOperation[];
 
+/** 候选稿的来历：选区操作，或由推演的节拍表写成的正文（B29）。 */
+export const CANDIDATE_LABELS: Readonly<Record<SelectionOperation | 'narrate', string>> = { ...OPERATION_LABELS, narrate: '推演写成正文' };
+
 /** 续写的默认字数。 */
 export const CONTINUE_LENGTH = 300;
 

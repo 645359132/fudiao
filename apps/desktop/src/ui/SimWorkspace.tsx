@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { Observation } from '@fudiao/domain';
 import type { ViewerData, ViewerKnowledge, ViewerRound } from '@fudiao/engine';
 import type { SimRun } from '@fudiao/store';
+import { describeObservation } from '../app/sim-describe';
 import type { SimRunDetail } from '../app/simulation';
+import { NarrationPanel } from './NarrationPanel';
 import { ForkPanel, IntervenePanel, PendingPanel } from './SimAuthorPanel';
 import { useApp } from './store-context';
 
@@ -57,24 +58,9 @@ const label = (map: Readonly<Record<string, string>>, key: string) => map[key] ?
 const usd = (v: number) => `$${v.toFixed(4)}`;
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`;
 
-function observationText(o: Observation, name: (id: string) => string): string {
-  if (o.channel === 'sound') {
-    return `从${name(o.zones[0] ?? '')}传来声响${o.sound === undefined ? '' : `（${o.sound}）`}${o.item === undefined ? '' : `，听得出是${name(o.item)}`}${o.speech?.clarity === 'full' ? `：“${o.speech.sentences.join('')}”` : ''}${o.description?.sound === undefined ? '' : `：${o.description.sound}`}`;
-  }
-  const parts = [o.actor === undefined ? '' : name(o.actor), o.kind === undefined ? '' : label(KIND, o.kind)];
-  if (o.item !== undefined) parts.push(name(o.item));
-  if (o.target !== undefined) parts.push(`→ ${name(o.target)}`);
-  if (o.zones.length > 0) parts.push(`（${o.zones.map(name).join(' → ')}）`);
-  if (o.speech?.clarity === 'full') parts.push(`“${o.speech.sentences.join('')}”`);
-  if (o.speech?.clarity === 'muffled') parts.push('（听不清）');
-  if (o.failed === true) parts.push(`（没有成功${o.violation === undefined ? '' : `：${o.violation.code}`}）`);
-  if (o.description?.visual !== undefined) parts.push(`：${o.description.visual}`);
-  if (o.content !== undefined) parts.push(`，读到：“${o.content}”`);
-  return parts.filter((p) => p !== '').join(' ');
-}
 
 function Knowledge({ item, name }: { readonly item: ViewerKnowledge; readonly name: (id: string) => string }) {
-  const body = item.text ?? (item.claim !== null ? `${name(item.claim.speaker)}说：“${item.claim.sentences.join('')}”` : item.observation !== null ? observationText(item.observation, name) : '');
+  const body = item.text ?? (item.claim !== null ? `${name(item.claim.speaker)}说：“${item.claim.sentences.join('')}”` : item.observation !== null ? describeObservation(item.observation, name) : '');
   return (
     <li>
       <span className="muted">【{label(MODALITY, item.modality)}】</span>
@@ -341,6 +327,7 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
       <PendingPanel detail={detail} locked={advancing} />
       {ended ? null : <IntervenePanel detail={detail} locked={advancing} />}
       <ForkPanel detail={detail} locked={advancing} />
+      <NarrationPanel detail={detail} />
       {data === null ? null : <Timeline data={data} />}
       {timing.length > 0 ? (
         <details>

@@ -70,6 +70,7 @@
 - M4-04 已完成：推演工作区 `SimWorkspace.tsx`（开始、单步、继续、暂停、停止，时间线的全局局面与角色所见，等待时间）；`buildViewerData` 从 M0 命令行移到 `packages/engine/src/run-view.ts` 两边共用；预算上限 `sim_run.budget_usd`（迁移 0006 尚未发布，直接修改）与 `listRunCalls`；用例 `simRunDetail`。待核实裁决的确认在 M4-05。
 - M4-05 已完成：待核实裁决的确认与修改、导演提议的决定、作者介入（改认知、外部事件、替换行动，介入前存快照）与从快照处分支（用例 `confirmSimRuling`、`decideSimDirector`、`interveneSimRun`、`forkSimRun`，界面 `SimAuthorPanel.tsx`，文字说明 `sim-describe.ts`）。
 - M4-06 已完成：列出运行时按事件校正状态与回合（缓存落后时以事件为准）；工作区的“校验回放”（`verifySimRun`，快照处重算的状态与记下的哈希比较）。中断后的恢复沿用事件存储与步骤键查重，测试见 `simulation.test.ts`。
+- M4-07 已完成：迁移 `0007_narration.sql`（`beat_sheet`；候选稿重建，增加 `narrate` 操作与 `beat_sheet_id`）；仓储 `beat-sheet.ts`；用例 `apps/desktop/src/app/narration.ts`（`draftBeatSheet` 取视角角色在所选回合结束时的认知、`saveBeatSheet`、`narrateBeatSheet` 写成这一章末尾的候选稿）；工作区的“写成正文”（`NarrationPanel.tsx`）；桌面端接法的金丝雀测试。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

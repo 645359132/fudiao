@@ -42,6 +42,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   5: (tables) => tables,
   // 0006：新增角色推演的四张表，旧版本导出的数据中没有，导入为空。
   6: (tables) => tables,
+  // 0007：新增节拍表；候选稿增加 beat_sheet_id 列（旧数据为空）与“推演写成正文”的操作。
+  7: (tables) => ({ ...tables, candidate: (tables['candidate'] ?? []).map((row) => ({ beat_sheet_id: null, ...row })) }),
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

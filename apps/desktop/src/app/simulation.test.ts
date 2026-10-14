@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import { dramaPolicy as policy, sceneDraftFixture } from '../testing/scenes';
-import { createAppService } from './service';
+import { createAppService, type AppService } from './service';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -609,5 +609,118 @@ describe('回放与中断恢复（B30）', () => {
     const tampered = await reopened.port.transaction([{ sql: "UPDATE sim_snapshot SET state_hash = 'tampered' WHERE run_id = ? AND seq = ?", params: [runId, seq] }]);
     expect(tampered.ok).toBe(true);
     expect(value(await app.verifySimRun(runId))).toEqual({ snapshots: 2, mismatchedSeqs: [seq] });
+  });
+});
+
+describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () => {
+  /** 自动模式推演到结束。 */
+  async function finished(use: Policy = policy) {
+    const ctx = await ready(use);
+    const runId = value(await ctx.app.startSimRun(ctx.scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await ctx.app.continueSimRun(runId));
+    return { ...ctx, runId };
+  }
+  const roundEndSeq = async (app: AppService, runId: string, round: number) =>
+    value(await app.simRunEvents(runId)).find((e) => (e.payload as { type: string; round?: number }).type === 'RoundEnded' && (e.payload as { round?: number }).round === round)?.seq;
+
+  it('生成节拍表：只取视角角色在所选回合结束时的认知里、这几个回合的见闻；记下依据的运行、视角与事件序号', async () => {
+    const { app, runId, fake } = await finished();
+    const before = fake.calls.length;
+    const sheet = value(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 2, notes: '对峙展开' }));
+    expect(fake.calls.length).toBe(before + 1);
+    expect(fake.calls.at(-1)?.request.task).toBe('beat_sheet');
+    expect(fake.calls.at(-1)?.text).toContain('对峙展开');
+    expect(sheet).toMatchObject({ povName: '主角', sheet: { runId, povActor: 'protagonist', fromRound: 1, toRound: 2, upToSeq: await roundEndSeq(app, runId, 2), style: '' } });
+    expect(sheet.sheet.llmCallId).not.toBeNull();
+    expect(sheet.beats.length).toBeGreaterThan(0);
+    expect(sheet.beats.every((b) => b.round >= 1 && b.round <= 2 && b.text !== '' && b.treatment === 'brief')).toBe(true);
+    expect(value(await app.listBeatSheets(runId))).toEqual([sheet]);
+  });
+
+  it('回合范围不对、回合还没有结束、没有这个角色时不生成', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    expect(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 1, notes: '' })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('还没有结束') } });
+    value(await app.continueSimRun(runId));
+    expect(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 2, toRound: 1, notes: '' })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('回合范围不对') } });
+    expect(await app.draftBeatSheet(runId, { pov: 'nobody', fromRound: 1, toRound: 1, notes: '' })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('nobody') } });
+    expect(value(await app.listBeatSheets(runId))).toEqual([]);
+  });
+
+  it('作者修改节拍与文风后写成正文：标为省略的节拍不进入请求；结果是这一章末尾的候选稿，接受后才写入', async () => {
+    const { app, runId, fake } = await finished();
+    const sheet = value(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 3, notes: '' }));
+    expect(sheet.beats.length).toBeGreaterThan(1);
+    const [omitted, ...rest] = sheet.beats;
+    const beats = [{ ...omitted!, treatment: 'omit' as const }, ...rest.map((b, i) => (i === 0 ? { ...b, treatment: 'expand' as const, note: '慢慢写', withhold: true } : b))].map(({ ref, treatment, note, withhold }) => ({ ref, treatment, note, withhold }));
+    const saved = value(await app.saveBeatSheet(sheet.sheet.id, { beats, style: '冷峻，短句' }));
+    expect(saved.sheet).toMatchObject({ style: '冷峻，短句', version: 2 });
+    expect(saved.beats[1]).toMatchObject({ treatment: 'expand', note: '慢慢写', withhold: true });
+    // 节拍只能指向原来的见闻。
+    expect(await app.saveBeatSheet(sheet.sheet.id, { beats: [...beats, { ref: 'antagonist:1:0', treatment: 'brief', note: '', withhold: false }], style: '' })).toMatchObject({ ok: false, error: { code: 'settings' } });
+
+    const chapter = value(await app.createChapter('第一章 夜雨')).chapters[0]!;
+    const candidate = value(await app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    expect(candidate).toMatchObject({ chapterId: chapter.id, operation: 'narrate', beatSheetId: sheet.sheet.id, generated: '雨下得更紧了。他没有回头。', status: 'pending' });
+    const request = fake.calls.at(-1)!;
+    expect(request.request.task).toBe('candidate_text');
+    expect(request.text).toContain('冷峻，短句');
+    expect(request.text).not.toContain(omitted!.ref);
+    expect(request.text).toContain(rest[0]!.ref);
+    // 候选稿不会自动写入正文。
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['']);
+
+    value(await app.acceptCandidate(candidate.id));
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
+  });
+
+  it('章末已有正文时另起一段；这一章有未保存的修改、节拍全部省略时不写', async () => {
+    const { app, runId, deps } = await finished();
+    const sheet = value(await app.draftBeatSheet(runId, { pov: 'antagonist', fromRound: 1, toRound: 1, notes: '' }));
+    const chapter = value(await app.createChapter('第二章')).chapters[0]!;
+    const opened = value(await app.openChapter(chapter.id));
+    value(await app.saveChapter(chapter.id, opened.saved, [{ id: 'p0', text: '天快亮了。', source: 'handwritten' }], { splits: [], merges: [] }));
+    const candidate = value(await app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    value(await app.acceptCandidate(candidate.id));
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['天快亮了。', '雨下得更紧了。他没有回头。']);
+
+    const path = value(await app.reloadWork()).entry.path;
+    value(await deps.drafts.write(path, chapter.id, '{"paragraphs":[]}'));
+    expect(await app.narrateBeatSheet(sheet.sheet.id, chapter.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('未保存的修改') } });
+    value(await deps.drafts.remove(path, chapter.id));
+    value(await app.saveBeatSheet(sheet.sheet.id, { beats: sheet.beats.map(({ ref, note, withhold }) => ({ ref, note, withhold, treatment: 'omit' as const })), style: '' }));
+    expect(await app.narrateBeatSheet(sheet.sheet.id, chapter.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('省略') } });
+  });
+});
+
+describe('金丝雀：节拍表与视角正文的请求（硬性规则 3、4）', () => {
+  it('只用视角角色当时的认知：不出现场景元信息、秘密与他人的角色卡；之后回合才发生的事不进入请求', async () => {
+    const ctx = await setup();
+    value(await ctx.app.createWork('推演'));
+    await addTestedModel(ctx.app, ctx.deps);
+    const spec = canarySpec();
+    const parsed = parseScene(spec);
+    if (!parsed.ok) throw new Error('场景');
+    const inspected: { task: string; text: string }[] = [];
+    ctx.useModel(
+      inspectRequests(fakeModel(policy).port, (request) => {
+        if (request.task !== 'beat_sheet' && request.task !== 'candidate_text') return;
+        const text = contextOf(request).text;
+        for (const marker of staticForbidden(parsed.value, 'protagonist' as never)) {
+          if (text.includes(marker)) throw new Error(`${request.task} 的请求含有 ${marker}`);
+        }
+        inspected.push({ task: request.task, text });
+      }),
+    );
+    const scene = value(await ctx.app.saveSimScene(null, { ...sceneFields(spec as Record<string, unknown>), maxRounds: 3 }));
+    const runId = value(await ctx.app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await ctx.app.continueSimRun(runId));
+
+    const sheet = value(await ctx.app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 1, notes: '' }));
+    const chapter = value(await ctx.app.createChapter('第一章')).chapters[0]!;
+    value(await ctx.app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    expect(inspected.map((r) => r.task)).toEqual(['beat_sheet', 'candidate_text']);
+    // 只写第一回合：第二、三回合的见闻（认知标识里的回合）不在请求里。
+    for (const { text } of inspected) expect(text).not.toMatch(/\[protagonist:[23]:\d+\]/);
   });
 });

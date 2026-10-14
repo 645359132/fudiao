@@ -107,6 +107,15 @@ const sample: Statement[] = [
   s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, type, actor, payload, created_at) VALUES ('01U1', 2, 2, 0, 2, 'ProposalSubmitted', 'lin_zhou', '{\"type\":\"ProposalSubmitted\",\"actor\":\"lin_zhou\"}', ?)", NOW),
   s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, payload, created_at) VALUES ('01U1', 3, 2, 1, 2, '[1,\"无类型的内容\"]', ?)", NOW),
   s("INSERT INTO sim_snapshot (run_id, seq, state, state_hash, created_at) VALUES ('01U1', 3, '{\"round\":8}', 'abc123', ?)", NOW),
+  s(
+    "INSERT INTO beat_sheet (id, run_id, pov_actor, from_round, to_round, up_to_seq, beats, style, llm_call_id, version, created_at, updated_at) VALUES ('01B1', '01U1', 'lin_zhou', 1, 8, 3, '[{\"ref\":\"k1\",\"treatment\":\"expand\",\"note\":\"对峙展开\",\"withhold\":false}]', '冷峻', '01L1', 2, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO beat_sheet (id, run_id, pov_actor, from_round, to_round, up_to_seq, beats, created_at, updated_at) VALUES ('01B2', '01U1', 'qian_si', 2, 2, 2, '[]', ?, ?)", ...T),
+  s(
+    "INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, beat_sheet_id, created_at, updated_at) VALUES ('01K2', '01C1', 'narrate', '{\"from\":{\"paragraphId\":\"01G2\",\"offset\":6},\"to\":{\"paragraphId\":\"01G2\",\"offset\":6}}', '', '{\"01G2\":3}', '林舟推开了门。', '林舟推开了门。', '01B1', ?, ?)",
+    ...T,
+  ),
 ];
 
 async function seeded(): Promise<ProjectDb> {
@@ -268,6 +277,30 @@ describe('角色推演的约束（迁移 0006）', () => {
   });
 });
 
+describe('节拍表与推演写成的候选稿（迁移 0007）', () => {
+  it('节拍表必须属于已有的运行，事件序号须是这次运行已有的事件，回合范围不能倒着', async () => {
+    const db = await seeded();
+    const sheet = "INSERT INTO beat_sheet (id, run_id, pov_actor, from_round, to_round, up_to_seq, beats, created_at, updated_at) VALUES";
+    await rejects(db, `${sheet} ('x', 'none', 'a', 1, 1, 1, '[]', ?, ?)`, ...T);
+    await rejects(db, `${sheet} ('x', '01U1', 'a', 1, 1, 9, '[]', ?, ?)`, ...T);
+    await rejects(db, `${sheet} ('x', '01U1', 'a', 3, 2, 1, '[]', ?, ?)`, ...T);
+    await rejects(db, `${sheet} ('x', '01U1', 'a', 0, 2, 1, '[]', ?, ?)`, ...T);
+    await rejects(db, `${sheet} ('x', '01U1', 'a', 1, 1, 1, '{}', ?, ?)`, ...T);
+  });
+
+  it('只有“推演写成正文”的候选稿可以带节拍表；原有的操作照旧', async () => {
+    const db = await seeded();
+    const candidate =
+      "INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, beat_sheet_id, created_at, updated_at) VALUES ('x', '01C1', ?, '{}', '', '{}', 'g', 'g', ?, ?, ?)";
+    await rejects(db, candidate, 'continue', '01B1', ...T);
+    await rejects(db, candidate, 'narrate', 'none', ...T);
+    await rejects(db, candidate, 'summarize', null, ...T);
+    expect((await db.transaction([s(candidate, 'narrate', null, ...T)])).ok).toBe(true);
+    const kept = await db.query("SELECT operation, beat_sheet_id FROM candidate WHERE id = '01K1'");
+    expect(kept.ok && kept.value[0]).toEqual({ operation: 'rewrite', beat_sheet_id: null });
+  });
+});
+
 describe('表结构清单', () => {
   it('与迁移后的实际结构一致，库中没有清单以外的表', async () => {
     const db = fresh();
@@ -326,6 +359,19 @@ describe('数据层导出导入（硬性规则 20）', () => {
     const target = fresh();
     expect((await importData(target, { ...data, schemaVersion: 1 })).ok).toBe(true);
     expect((await exported(target)).tables).toEqual(data.tables);
+  });
+
+  it('结构版本 6 导出的数据（没有节拍表，候选稿没有 beat_sheet_id 列）经转换后导入', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'beat_sheet'));
+    tables['candidate'] = (data.tables['candidate'] ?? [])
+      .filter((row) => row['operation'] !== 'narrate')
+      .map(({ beat_sheet_id: _dropped, ...row }) => row);
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 6, tables })).toMatchObject({ ok: true });
+    const after = await exported(target);
+    expect(after.tables['beat_sheet']).toEqual([]);
+    expect(after.tables['candidate']).toEqual((data.tables['candidate'] ?? []).filter((row) => row['operation'] !== 'narrate'));
   });
 
   it('每个迁移都登记了导出数据的转换', () => {
