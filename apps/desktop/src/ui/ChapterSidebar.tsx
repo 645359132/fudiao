@@ -183,7 +183,7 @@ export function ChapterSidebar() {
   const loose = chapters.filter((c) => c.volumeId === null);
 
   return (
-    <nav className="sidebar" aria-label="章节目录">
+    <nav className="toc" aria-label="章节目录">
       <div className="sidebar-head">
         <h2>章节</h2>
         <button type="button" disabled={busy} onClick={() => setAdding(true)}>

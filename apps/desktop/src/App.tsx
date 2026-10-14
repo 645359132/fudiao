@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { AppStore } from './state/store';
+import { AssistantPanel } from './ui/AssistantPanel';
 import { ImportPreview } from './ui/ImportPreview';
 import { LibraryScreen } from './ui/LibraryScreen';
 import { MessageBar } from './ui/MessageBar';
@@ -11,15 +12,18 @@ function Screens() {
   const init = useApp((s) => s.init);
   const hasWork = useApp((s) => s.work !== null);
   const modelServices = useApp((s) => s.modelServicesOpen);
+  const assistantOpen = useApp((s) => s.assistantOpen);
   useEffect(() => {
     void init();
   }, [init]);
   return (
-    <>
+    <div className="app-shell">
       <MessageBar />
-      {modelServices ? <ModelServicesScreen /> : hasWork ? <WorkScreen /> : <LibraryScreen />}
+      <div className="app-main">{modelServices ? <ModelServicesScreen /> : hasWork ? <WorkScreen /> : <LibraryScreen />}</div>
+      {/* AI 助手在右侧，作品列表与作品界面都可以用；模型服务页盖住整个窗口时收起。 */}
+      {assistantOpen && !modelServices ? <AssistantPanel /> : null}
       <ImportPreview />
-    </>
+    </div>
   );
 }
 

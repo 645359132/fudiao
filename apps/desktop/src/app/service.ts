@@ -74,6 +74,7 @@ import { candidateUseCases } from './candidates';
 import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
+import { assistantUseCases } from './assistant';
 import { narrationUseCases } from './narration';
 import { quickBookUseCases } from './quick-book';
 import { reviewUseCases } from './review';
@@ -710,9 +711,13 @@ export function createAppService(deps: AppDeps) {
     restoreChapter: (chapter: Chapter) => withPort((port) => restoreChapter(port, chapter.id, chapter.version, ctx())),
   };
 
+  // AI 助手（B69）：工具调用上面的用例，规则与守卫照常生效。
+  const assistant = assistantUseCases({ deps, host: app, project: () => session?.port ?? null, runner });
+
   // 快速成书（B67）：骨架与各步状态；计划、写作与审核沿用上面的用例。
   return {
     ...app,
+    ...assistant,
     ...quickBookUseCases({
       deps,
       project: () => session?.port ?? null,

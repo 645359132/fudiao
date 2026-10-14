@@ -19,6 +19,8 @@ export type TaskKind =
   | 'connection_test'
   /** 写手与审核（M3）。 */
   | 'plan_draft'
+  /** AI 助手（M5）。 */
+  | 'assistant'
   | 'writer'
   | 'review'
   | 'memory';

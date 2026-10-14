@@ -28,6 +28,7 @@ export {
   renderWriterRevise,
   renderPlanDraft,
   renderBookSeed,
+  renderAssistantTurn,
   renderWriterChapter,
   renderSceneDraft,
   renderSemanticRuling,
@@ -55,9 +56,11 @@ export {
 } from './schemas';
 export type { PlanDraftData, RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
-export type { EvidenceSecret } from './render';
+export type { AssistantHistoryItem, AssistantResult, AssistantState, EvidenceSecret } from './render';
 export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';
+export { ASSISTANT_PAGES, ASSISTANT_TOOLS, AssistantAction, AssistantTurnOutput, ENTITY_KINDS_FOR_ASSISTANT } from './assistant';
+export type { AssistantTool } from './assistant';
 export type { SkillDocument } from './skill-md';
 export { formatSkillMd, parseSkillMd } from './skill-md';

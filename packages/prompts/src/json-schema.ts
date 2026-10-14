@@ -27,7 +27,8 @@ function clean(node: JsonValue): JsonValue {
   const out: Record<string, JsonValue> = {};
   for (const [key, value] of Object.entries(node)) {
     if (UNSUPPORTED.has(key)) continue;
-    out[key] = clean(value);
+    // 可辨识联合（各分支以常量区分，互不重叠）生成 oneOf；OpenAI 严格模式只接受 anyOf，两者在这里含义相同。
+    out[key === 'oneOf' ? 'anyOf' : key] = clean(value);
   }
   if (out['type'] === 'object' && isObject(out['properties'] ?? null)) {
     out['additionalProperties'] = false;

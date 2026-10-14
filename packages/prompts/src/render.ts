@@ -18,6 +18,7 @@ import { err, ok, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
 import { parseTemplate, render, type RenderContext } from './engine';
 import { PARTIAL_SOURCES, TEMPLATE_SOURCES } from './generated/templates';
+import { AssistantTurnOutput } from './assistant';
 import { modelJsonSchema } from './json-schema';
 import { SelfTestOutput } from './self-test';
 import { flag, knowledgeModel, namesOf, observationModel, violationModel, viewModel } from './models';
@@ -45,7 +46,7 @@ export type RenderedPrompt = {
   readonly template: { readonly id: string; readonly version: string };
   readonly task: string;
   readonly system: readonly { readonly text: string; readonly cache?: boolean }[];
-  readonly messages: readonly { readonly role: 'user'; readonly content: string }[];
+  readonly messages: readonly { readonly role: 'user' | 'assistant'; readonly content: string }[];
   readonly output?: { readonly name: string; readonly schema: { readonly [key: string]: JsonValue } };
 };
 
@@ -65,6 +66,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   ChapterMemoryOutput,
   PlanDraftOutput,
   BookSeedOutput,
+  AssistantTurnOutput,
 };
 
 function renderTemplate(id: TemplateId, context: RenderContext): Result<RenderedPrompt, string> {
@@ -751,6 +753,74 @@ export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, str
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,
   });
+}
+
+/** 助手看到的作品现状（B69）：每一步都按最新的数据重新给出。 */
+export type AssistantState = {
+  readonly works: readonly string[];
+  readonly work: null | {
+    readonly title: string;
+    readonly genre: string;
+    readonly synopsis: string;
+    readonly outline: string;
+    readonly volumes: readonly { readonly id: string; readonly title: string; readonly summary: string }[];
+    readonly chapters: readonly { readonly id: string; readonly title: string; readonly volume: string; readonly words: number; readonly plan: string }[];
+    readonly chapterCount: number;
+    /** 章节太多时只列出前后部分。 */
+    readonly omitted: boolean;
+    readonly entities: readonly { readonly id: string; readonly kind: string; readonly name: string; readonly locked: boolean }[];
+    /** 作者正在看的页面或章节；没有时为空。 */
+    readonly current: string;
+  };
+};
+
+export type AssistantResult = { readonly tool: string; readonly ok: boolean; readonly detail: string };
+
+/** 对话记录：作者的话、助手每一步的输出、动作的结果。 */
+export type AssistantHistoryItem =
+  | { readonly role: 'user'; readonly text: string }
+  | { readonly role: 'assistant'; readonly output: AssistantTurnOutput }
+  | { readonly role: 'results'; readonly results: readonly AssistantResult[] };
+
+function renderPartial(name: string, context: RenderContext): Result<string, string> {
+  const source = PARTIAL_SOURCES[name];
+  if (source === undefined) return err(`局部模板 ${name} 不存在`);
+  return render(source, context, PARTIAL_SOURCES);
+}
+
+/**
+ * 助手的一步（B69）：系统提示（规则与动作说明）不变；之前的对话按原样排在前面（只追加，便于命中前缀缓存）；
+ * 最后一条消息给出作品现状与最新的请求或动作结果。连续的同一方消息合并成一条。
+ */
+export function renderAssistantTurn(input: { readonly history: readonly AssistantHistoryItem[]; readonly state: AssistantState }): Result<RenderedPrompt, string> {
+  const last = input.history.at(-1);
+  if (last === undefined || last.role === 'assistant') return err('助手的一步须以作者的话或动作结果结尾');
+  const rendered = renderTemplate('assistant_turn', {
+    works: [...input.state.works],
+    work: input.state.work === null ? null : { ...input.state.work, volumes: [...input.state.work.volumes], chapters: [...input.state.work.chapters], entities: [...input.state.work.entities], hasVolumes: input.state.work.volumes.length > 0 },
+    hasResults: last.role === 'results',
+    results: last.role === 'results' ? last.results.map((r) => ({ ...r })) : [],
+    request: last.role === 'user' ? last.text : '',
+  });
+  if (!rendered.ok) return rendered;
+  const earlier: { role: 'user' | 'assistant'; content: string }[] = [];
+  for (const item of input.history.slice(0, -1)) {
+    const text =
+      item.role === 'assistant'
+        ? ok(JSON.stringify(item.output))
+        : item.role === 'user'
+          ? renderPartial('assistant_request', { request: item.text })
+          : renderPartial('assistant_results', { results: item.results.map((r) => ({ ...r })) });
+    if (!text.ok) return text;
+    const role = item.role === 'assistant' ? 'assistant' : 'user';
+    const previous = earlier.at(-1);
+    if (previous !== undefined && previous.role === role) previous.content = `${previous.content}\n\n${text.value}`;
+    else earlier.push({ role, content: text.value });
+  }
+  const final = rendered.value.messages.at(-1);
+  if (final === undefined) return err('助手模板缺少给模型的消息');
+  const messages = earlier.at(-1)?.role === 'user' ? [...earlier.slice(0, -1), { role: 'user' as const, content: `${earlier.at(-1)?.content ?? ''}\n\n${final.content}` }] : [...earlier, final];
+  return ok({ ...rendered.value, messages });
 }
 
 export const TEMPLATE_IDS = Object.keys(TEMPLATE_SOURCES) as TemplateId[];

@@ -3,6 +3,10 @@
     "version": "1",
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
+  "assistant_turn": {
+    "version": "1",
+    "sha256": "6bd5195f71906eb06b4602261832673bf74d3417e6611b4af3dbdb6e90f57e21"
+  },
   "baseline_scene": {
     "version": "2",
     "sha256": "86a1b1b567a37fb155f5007a0f0e0c7bbeee40cbe8739cfc361712c24f179268"

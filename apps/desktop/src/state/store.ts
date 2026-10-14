@@ -9,6 +9,7 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
+import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome } from '../app/assistant';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat } from '@fudiao/store';
@@ -117,6 +118,12 @@ export type AppState = {
   readonly planDraft: PlanDraft | null;
   /** 快速成书（B67）：各步状态（打开成书页时读取）、正在编辑的作品骨架与是否正在生成。 */
   readonly quickBook: QuickBookStatus | null;
+  /** AI 助手（B69）：右侧对话框是否打开、当前作品（或作品列表页）的对话、是否正在处理。 */
+  readonly assistantOpen: boolean;
+  readonly assistantItems: readonly AssistantItem[];
+  readonly assistantRunning: boolean;
+  /** 对话属于哪部作品（作品标识；作品列表页为空字符串），切换作品时据此重新读取。 */
+  readonly assistantFor: string | null;
   readonly bookSeed: BookSeed | null;
   readonly seedDrafting: boolean;
   readonly planUnmatched: readonly string[];
@@ -240,6 +247,15 @@ export type AppState = {
   readonly openPlanning: () => Promise<void>;
   /** 保存正文后打开成书页，并读取各步状态与计划。 */
   readonly openQuickBook: () => Promise<void>;
+  readonly toggleAssistant: () => void;
+  /** 读取当前作品（或作品列表页）的对话。 */
+  readonly loadAssistant: () => Promise<void>;
+  /** 对助手说一句话；助手工作期间正文只读，结束后重新载入。 */
+  readonly sendAssistant: (text: string) => Promise<boolean>;
+  /** 确认或拒绝助手等待确认的动作。 */
+  readonly resolveAssistant: (approve: boolean) => Promise<void>;
+  readonly stopAssistant: () => void;
+  readonly clearAssistant: () => Promise<void>;
   readonly refreshQuickBook: () => Promise<void>;
   readonly draftBookSeed: (request: BookSeedRequest) => Promise<void>;
   readonly editBookSeed: (seed: BookSeed) => void;
@@ -556,6 +572,102 @@ export function createAppStore(service: AppService): AppStore {
 
     const reloadFacts = () => run(service.listFacts(), (facts) => ({ facts }));
 
+    // —— AI 助手（B69）——
+    let assistantAbort: AbortController | null = null;
+    const PAGE_LABEL: Readonly<Record<string, string>> = {
+      book: '成书页',
+      planning: '计划页',
+      settings: '设定页',
+      facts: '事实页',
+      simulation: '推演页',
+      search: '查找页',
+      skills: '写作技能页',
+      usage: '用量与费用页',
+      tasks: '任务页',
+      info: '作品信息',
+      trash: '回收站',
+      history: '版本快照',
+    };
+    /** 作者此刻在看什么，写进给助手的现状。 */
+    const currentView = (): string => {
+      const state = get();
+      if (state.work === null) return '作品列表';
+      if (state.panel === 'chapter') {
+        const chapter = state.work.chapters.find((c) => c.id === state.selectedChapterId);
+        return chapter === undefined ? '' : `《${chapter.title}》的正文 [${chapter.id}]`;
+      }
+      return PAGE_LABEL[state.panel] ?? '';
+    };
+    /** 作品内容变了：重新读取目录、设定、事实与计划。 */
+    async function refreshWork() {
+      const work = await service.reloadWork();
+      if (!work.ok) return;
+      set({ work: work.value });
+      await loadEntities();
+      await reloadFacts();
+      if (get().panel === 'planning' || get().panel === 'book') {
+        const planning = await service.planningView();
+        if (planning.ok) set({ planning: planning.value });
+      }
+    }
+    async function applyEffect(effect: AssistantEffect) {
+      switch (effect.kind) {
+        case 'open_chapter':
+          set({ selectedChapterId: effect.chapterId, panel: 'chapter', chapterContent: null, drawerEntityId: null });
+          return;
+        case 'open_page': {
+          const page = effect.page;
+          const actions = {
+            book: get().openQuickBook,
+            planning: get().openPlanning,
+            settings: get().openSettings,
+            facts: get().openFacts,
+            simulation: get().openSimulation,
+            search: get().openSearch,
+            skills: get().openSkills,
+            usage: get().openUsage,
+            tasks: get().openTasks,
+          } as const;
+          await actions[page]();
+          return;
+        }
+        case 'work_opened': {
+          const work = await service.reloadWork();
+          if (!work.ok) return;
+          set({ ...opened(work.value), entities: [], facts: [], planning: null, candidates: [], assistantFor: work.value.project.id });
+          await loadEntities();
+          await reloadFacts();
+          const library = await service.loadLibrary();
+          if (library.ok) set({ library: library.value });
+          return;
+        }
+        case 'changed':
+          await refreshWork();
+          return;
+      }
+    }
+    /** 助手的一轮：逐步显示进展，界面跟着助手打开章节与页面；结束后重新载入正文。 */
+    async function assistantTurn(start: (events: AssistantEvents) => Promise<Result<AssistantOutcome, AppError>>): Promise<boolean> {
+      const abort = new AbortController();
+      assistantAbort = abort;
+      set({ assistantRunning: true, message: null });
+      const pending: Promise<void>[] = [];
+      const result = await start({
+        signal: abort.signal,
+        current: currentView,
+        onUpdate: (items) => set({ assistantItems: items }),
+        onEffect: (effect) => {
+          pending.push(applyEffect(effect));
+        },
+      });
+      await Promise.all(pending);
+      if (assistantAbort === abort) assistantAbort = null;
+      set({ assistantRunning: false, ...(result.ok && { assistantItems: result.value.items }), ...(!result.ok && !abort.signal.aborted && { message: describeError(result.error) }) });
+      // 正文可能被写手、续写或章节操作改过：重新载入正在看的这一章。
+      if (get().panel === 'chapter' && get().selectedChapterId !== null) set({ chapterContent: null, contentRevision: get().contentRevision + 1 });
+      return result.ok;
+    }
+
     async function autoBackup() {
       const result = await service.autoBackupIfDue();
       if (!result.ok) set({ message: `自动备份失败：${describeError(result.error)}` });
@@ -593,6 +705,10 @@ export function createAppStore(service: AppService): AppStore {
       skills: null,
       planning: null,
       quickBook: null,
+      assistantOpen: true,
+      assistantItems: [],
+      assistantRunning: false,
+      assistantFor: null,
       bookSeed: null,
       seedDrafting: false,
       planDraft: null,
@@ -976,6 +1092,27 @@ export function createAppStore(service: AppService): AppStore {
       async openPlanning() {
         if (!(await get().leaveChapter())) return;
         await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawerEntityId: null }));
+      },
+      toggleAssistant: () => set({ assistantOpen: !get().assistantOpen }),
+      async loadAssistant() {
+        const owner = get().work?.project.id ?? '';
+        const items = await service.assistantItems();
+        if (items.ok) set({ assistantItems: items.value, assistantFor: owner });
+      },
+      async sendAssistant(text) {
+        if (get().assistantRunning || text.trim() === '') return false;
+        // 助手会改动作品：先保存正在编辑的正文，工作期间正文只读。
+        if (!(await get().leaveChapter())) return false;
+        return assistantTurn((events) => service.sendToAssistant(text, events));
+      },
+      async resolveAssistant(approve) {
+        if (get().assistantRunning) return;
+        await assistantTurn((events) => service.resolveAssistantPending(approve, events));
+      },
+      stopAssistant: () => assistantAbort?.abort(),
+      async clearAssistant() {
+        if (get().assistantRunning) return;
+        await run(service.clearAssistant(), () => ({ assistantItems: [] }));
       },
       async openQuickBook() {
         if (!(await get().leaveChapter())) return;

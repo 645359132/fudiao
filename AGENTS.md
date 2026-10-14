@@ -80,6 +80,7 @@
 - 降本（2026-10-14）：按 M0 首轮调用记录（证据链判断约占四成费用，平均输入约 1.6 万 Token、几乎不命中缓存；思考计入的输出约占七成）调整——提示词按“不变 → 只追加 → 每回合都变”排列以命中服务端前缀缓存（`knowledge_list` 局部模板；`character_action` 版本 9、`belief_update` 版本 7、`evidence_judgement` 版本 5，线索只列一遍）；内置能力表收录 DeepSeek（思考深度可调、价格含缓存命中），模型服务页可“采用内置的能力与价格”；DeepSeek 实验配置中抽取与判断类任务用 low。
 - M1-13 已完成（需求 B68，作者要求 2026-10-14）：分卷——迁移 `0010_volume.sql`（`volume` 表、`chapter.volume_id`、视图 `chapter_book_order` 给出书中顺序）；仓储 `repos/volume.ts`，章节的新建、移动与恢复按卷进行（`moveChapter` 的目的地为卷加前一章）；目录按卷分组（`ChapterSidebar.tsx`：新建卷、卷内新建章节、上下移动越过卷的边界、拖到卷标题、编辑卷名与简介、删除空卷）；整本导出带卷名，导入识别“第…卷”与 Markdown 二级标题；`writer_chapter` 版本 5 带上本卷与本卷梗概。
 - 计划草稿自动分卷（M1-13 补充）：`plan_draft` 版本 2（10 章及以上按故事的大段落分卷，输出 `volumes` 与每章的 `volume`，已有卷沿用卷名）；采用草稿时建卷、写梗概、把章节放进各自的卷（作者已归卷的章节不动）；计划页与成书页的草稿按卷列出（`PlanDraftChapters.tsx`）。
+- M5-01 已完成（需求 B69、B70，作者要求 2026-10-14）：AI 助手——`packages/prompts` 的 `AssistantTurnOutput`（动作的可辨识联合，27 个动作）、`assistant_turn` 模板与 `assistant_tools`、`assistant_state`、`assistant_results` 局部模板、`renderAssistantTurn`；迁移 `0011_assistant.sql`（`assistant_message`）；用例 `apps/desktop/src/app/assistant.ts`（工具执行、确认、最多 8 步、对话保存与随作品切换）；右侧对话框 `AssistantPanel.tsx`；三栏布局（左侧作品导航与目录、右侧助手）、新的视觉规范（`app.css` 的设计变量）、作品列表卡片、手写图标 `Icon.tsx`。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

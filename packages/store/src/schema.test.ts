@@ -32,6 +32,8 @@ const sample: Statement[] = [
   s("INSERT INTO chapter (id, order_key, title, summary, created_at, updated_at) VALUES ('01C1', 'a0', '第一章 雨夜', '两人在当铺重逢', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, status, trashed_at, created_at, updated_at) VALUES ('01C2', 'a1', '废稿', 'trashed', ?, ?, ?)", NOW, ...T),
   s("INSERT INTO volume (id, order_key, title, summary, version, created_at, updated_at) VALUES ('01O1', 'a0', '第一卷 雨夜', '两人重逢', 2, ?, ?)", ...T),
+  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q1', 1, 'user', '{\"text\":\"新建一卷\"}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q2', 2, 'assistant', '{\"output\":{\"message\":\"好\",\"actions\":[],\"done\":true}}', ?)", NOW),
   s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('01C3', 'a0', '第二章 当铺', '01O1', ?, ?)", ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),
   s(
@@ -428,6 +430,14 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 10 导出的数据（没有助手的对话）导入后对话为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'assistant_message'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 10, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, assistant_message: [] });
   });
 
   it('结构版本 9 导出的数据（没有卷，章节没有 volume_id 列）经转换后导入，章节都是未分卷', async () => {

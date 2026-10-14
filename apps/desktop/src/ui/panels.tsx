@@ -58,6 +58,8 @@ export function ChapterPanel() {
   const writingHere = writerJob !== null && writerJob.chapterId === chapterId;
   // 写手修订一段时同样只读，写入后重新载入。
   const revisingHere = review !== null && review.revisingId !== null && review.chapterId === chapterId;
+  // AI 助手工作时正文只读：助手可能新建、移动章节或让写手写这一章，结束后重新载入。
+  const assistantRunning = useApp((s) => s.assistantRunning);
 
   useEffect(() => {
     if (chapterId !== null && !loaded) void loadChapter(chapterId);
@@ -110,11 +112,16 @@ export function ChapterPanel() {
           </button>
         </div>
       ) : null}
+      {assistantRunning && !writingHere && !revisingHere ? (
+        <div className="writer-banner" role="status" aria-label="助手工作中">
+          <span>AI 助手正在操作作品，完成之前正文只读。</span>
+        </div>
+      ) : null}
       {/* 恢复快照后版次加一，编辑器换成恢复后的内容。 */}
       <div className="chapter-with-drawer">
         {!loaded ? (
           <p className="muted">正在载入……</p>
-        ) : writingHere || revisingHere ? (
+        ) : writingHere || revisingHere || assistantRunning ? (
           <div className="chapter-text" aria-label="正文（只读）">
             {content.saved.map((p) => (
               <p key={p.id}>{p.text}</p>

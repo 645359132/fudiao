@@ -12,6 +12,7 @@ import { SimulationPanel } from './SimulationPanel';
 import { SourcesPanel } from './SourcesPanel';
 import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
+import { Icon, type IconName } from './Icon';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -38,6 +39,8 @@ export function WorkScreen() {
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
+  const assistantOpen = useApp((s) => s.assistantOpen);
+  const toggleAssistant = useApp((s) => s.toggleAssistant);
 
   // Ctrl+F（或 Ctrl+Shift+F）打开全文查找；正文中选中的一行文字作为查询。
   useEffect(() => {
@@ -51,46 +54,38 @@ export function WorkScreen() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [openSearch]);
 
+  const navItem = (key: string, icon: IconName, label: string, active: boolean, onClick: () => void, extra?: string, title?: string) => (
+    <button key={key} type="button" className="nav-item" aria-pressed={active} title={title} onClick={onClick}>
+      <Icon name={icon} />
+      <span>
+        {label}
+        {extra === undefined ? null : <span className="nav-badge">{extra}</span>}
+      </span>
+    </button>
+  );
+
   return (
     <div className="work">
       <header className="work-bar">
-        <button type="button" onClick={() => void closeWork()}>
+        <button type="button" className="ghost" onClick={() => void closeWork()}>
+          <Icon name="back" />
           作品列表
         </button>
-        <button type="button" className="work-title" aria-pressed={panel === 'info'} onClick={() => void showPanel('info')}>
+        <span className="bar-divider" aria-hidden="true" />
+        <button type="button" className="work-title" title="作品信息" aria-pressed={panel === 'info'} onClick={() => void showPanel('info')}>
           {title}
         </button>
         <span className="spacer" />
-        {/* 常用的只留四个：成书一页走完全流程；推演、事实与查找等进阶功能在“更多”里。 */}
-        <button type="button" aria-pressed={panel === 'book'} title="快速成书：想法、大纲、章节计划、写完、导出" onClick={() => void openQuickBook()}>
-          成书
-        </button>
-        <button type="button" aria-pressed={panel === 'planning'} onClick={() => void openPlanning()}>
-          计划
-        </button>
-        <button type="button" aria-pressed={panel === 'settings'} onClick={() => void openSettings()}>
-          设定
-        </button>
-        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
+        <button type="button" className="ghost" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
+          <Icon name="tasks" />
           任务{running > 0 ? `（${running} 进行中）` : ''}
         </button>
-        {pendingReview > 0 ? (
-          <button type="button" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
-            事实（待复核 {pendingReview}）
-          </button>
-        ) : null}
         <details className="menu">
-          <summary>更多</summary>
+          <summary>
+            <Icon name="more" />
+            更多
+          </summary>
           <div className="menu-items" role="menu">
-            <button type="button" role="menuitem" aria-pressed={panel === 'simulation'} title="角色推演：设置场景，让角色各自依据所知行动" onClick={() => void openSimulation()}>
-              推演
-            </button>
-            <button type="button" role="menuitem" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
-              事实
-            </button>
-            <button type="button" role="menuitem" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
-              查找
-            </button>
             <button type="button" role="menuitem" disabled={busy} onClick={() => void startTextImport('current')}>
               导入章节（TXT/Markdown）
             </button>
@@ -120,10 +115,27 @@ export function WorkScreen() {
             </button>
           </div>
         </details>
+        {assistantOpen ? null : (
+          <button type="button" className="primary" onClick={toggleAssistant}>
+            <Icon name="sparkle" />
+            AI 助手
+          </button>
+        )}
       </header>
       <div className="work-body">
-        <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</main>
+        <aside className="sidebar">
+          {/* 一页走完成书流程放在最前；推演、事实与查找等进阶功能在下面。 */}
+          <nav className="nav" aria-label="作品导航">
+            {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '快速成书：想法、大纲、章节计划、写完、导出')}
+            {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
+            {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
+            {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
+            {navItem('simulation', 'stage', '推演', panel === 'simulation', () => void openSimulation(), undefined, '角色推演：设置场景，让角色各自依据所知行动')}
+            {navItem('search', 'search', '查找', panel === 'search', () => void openSearch(), undefined, '全文查找（Ctrl+F）')}
+          </nav>
+          <ChapterSidebar />
+        </aside>
+        <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</div></main>
       </div>
     </div>
   );

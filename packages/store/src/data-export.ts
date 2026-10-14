@@ -49,6 +49,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   // 0009：写作技能增加适用说明 description（旧数据为空）。
   9: (tables) => ({ ...tables, writing_skill: (tables['writing_skill'] ?? []).map((row) => ({ description: '', ...row })) }),
   // 0010：新增卷；章节增加 volume_id（旧数据都是未分卷）。
+  // 0011：新增 AI 助手的对话，旧版本导出的数据中没有，导入为空。
+  11: (tables) => tables,
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
 };
 
