@@ -7,6 +7,7 @@ import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SkillsPanel } from './SkillsPanel';
 import { PlanningPanel } from './PlanningPanel';
+import { QuickBookPanel } from './QuickBookPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { SourcesPanel } from './SourcesPanel';
 import { TasksPanel } from './TasksPanel';
@@ -33,6 +34,7 @@ export function WorkScreen() {
   const openSkills = useApp((s) => s.openSkills);
   const openPlanning = useApp((s) => s.openPlanning);
   const openSimulation = useApp((s) => s.openSimulation);
+  const openQuickBook = useApp((s) => s.openQuickBook);
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
@@ -59,27 +61,36 @@ export function WorkScreen() {
           {title}
         </button>
         <span className="spacer" />
-        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
-          任务{running > 0 ? `（${running} 进行中）` : ''}
+        {/* 常用的只留四个：成书一页走完全流程；推演、事实与查找等进阶功能在“更多”里。 */}
+        <button type="button" aria-pressed={panel === 'book'} title="快速成书：想法、大纲、章节计划、写完、导出" onClick={() => void openQuickBook()}>
+          成书
         </button>
         <button type="button" aria-pressed={panel === 'planning'} onClick={() => void openPlanning()}>
           计划
         </button>
-        <button type="button" aria-pressed={panel === 'simulation'} title="角色推演：设置场景，让角色各自依据所知行动" onClick={() => void openSimulation()}>
-          推演
-        </button>
-        <button type="button" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
-          查找
-        </button>
         <button type="button" aria-pressed={panel === 'settings'} onClick={() => void openSettings()}>
           设定
         </button>
-        <button type="button" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
-          事实{pendingReview > 0 ? `（待复核 ${pendingReview}）` : ''}
+        <button type="button" aria-pressed={panel === 'tasks'} onClick={() => void openTasks()}>
+          任务{running > 0 ? `（${running} 进行中）` : ''}
         </button>
+        {pendingReview > 0 ? (
+          <button type="button" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
+            事实（待复核 {pendingReview}）
+          </button>
+        ) : null}
         <details className="menu">
-          <summary>作品</summary>
+          <summary>更多</summary>
           <div className="menu-items" role="menu">
+            <button type="button" role="menuitem" aria-pressed={panel === 'simulation'} title="角色推演：设置场景，让角色各自依据所知行动" onClick={() => void openSimulation()}>
+              推演
+            </button>
+            <button type="button" role="menuitem" aria-pressed={panel === 'facts'} onClick={() => void openFacts()}>
+              事实
+            </button>
+            <button type="button" role="menuitem" aria-pressed={panel === 'search'} title="全文查找（Ctrl+F）" onClick={() => void openSearch()}>
+              查找
+            </button>
             <button type="button" role="menuitem" disabled={busy} onClick={() => void startTextImport('current')}>
               导入章节（TXT/Markdown）
             </button>
@@ -112,7 +123,7 @@ export function WorkScreen() {
       </header>
       <div className="work-body">
         <ChapterSidebar />
-        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : <ChapterPanel />}</main>
+        <main className="work-main">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</main>
       </div>
     </div>
   );

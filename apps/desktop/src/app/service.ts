@@ -68,6 +68,7 @@ import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
 import { narrationUseCases } from './narration';
+import { quickBookUseCases } from './quick-book';
 import { reviewUseCases } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
@@ -323,7 +324,7 @@ export function createAppService(deps: AppDeps) {
     runner,
   });
 
-  return {
+  const app = {
     ...services,
     ...candidates,
     ...writingSkills,
@@ -680,6 +681,19 @@ export function createAppService(deps: AppDeps) {
     moveChapter: (chapter: Chapter, after: string | null) => withPort((port) => moveChapter(port, chapter.id, chapter.version, after, ctx())),
     trashChapter: (chapter: Chapter) => withPort((port) => trashChapter(port, chapter.id, chapter.version, ctx())),
     restoreChapter: (chapter: Chapter) => withPort((port) => restoreChapter(port, chapter.id, chapter.version, ctx())),
+  };
+
+  // 快速成书（B67）：骨架与各步状态；计划、写作与审核沿用上面的用例。
+  return {
+    ...app,
+    ...quickBookUseCases({
+      deps,
+      project: () => session?.port ?? null,
+      runner,
+      planningView: () => app.planningView(),
+      defaultModel: () => services.defaultModel(),
+      updateWorkInfo: (patch) => app.updateWorkInfo(patch),
+    }),
   };
 }
 

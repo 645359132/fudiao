@@ -15,6 +15,10 @@
     "version": "6",
     "sha256": "5b4c64a4a2321bc715fb71c9e8794214cb677f7aef537de62e950a6fb748d1cd"
   },
+  "book_seed": {
+    "version": "1",
+    "sha256": "794e27d872060d2a4398b7eb843b2b225b5d95be40528edb722ad9d5ada3c56a"
+  },
   "candidate_text": {
     "version": "3",
     "sha256": "3f89bc243ddc830115dcdb720ddeee4c8ce8e42c81bef7a91c72e9402f73d3ff"

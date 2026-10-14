@@ -209,6 +209,16 @@ export const PlanDraftOutput = z.object({
 });
 export type PlanDraftOutput = z.infer<typeof PlanDraftOutput>;
 
+/** 作品骨架（B67 快速成书）：由一句话的想法展开的作品名、类型、简介、大纲与主要人物；作者修改确认后才写入作品。 */
+export const BookSeedOutput = z.object({
+  title: z.string(),
+  genre: z.string(),
+  synopsis: z.string(),
+  outline: z.string(),
+  characters: z.array(z.object({ name: z.string(), description: z.string() })),
+});
+export type BookSeedOutput = z.infer<typeof BookSeedOutput>;
+
 /** 长篇记忆（B66）：一章的梗概、出场人物在章末的状态、有进展的伏笔。人物与伏笔用名字指代。 */
 export const ChapterMemoryOutput = z.object({
   summary: z.string(),

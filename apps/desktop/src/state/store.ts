@@ -9,6 +9,7 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
+import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -83,7 +84,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -114,6 +115,10 @@ export type AppState = {
   /** 成书计划（B63、B65）：章节计划、伏笔账本，以及尚未采用的计划草稿与草稿中没对上的人物。 */
   readonly planning: PlanningView | null;
   readonly planDraft: PlanDraft | null;
+  /** 快速成书（B67）：各步状态（打开成书页时读取）、正在编辑的作品骨架与是否正在生成。 */
+  readonly quickBook: QuickBookStatus | null;
+  readonly bookSeed: BookSeed | null;
+  readonly seedDrafting: boolean;
   readonly planUnmatched: readonly string[];
   readonly planDrafting: boolean;
   /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
@@ -222,6 +227,14 @@ export type AppState = {
   readonly openEntityDrawer: (id: string | null) => void;
 
   readonly openPlanning: () => Promise<void>;
+  /** 保存正文后打开成书页，并读取各步状态与计划。 */
+  readonly openQuickBook: () => Promise<void>;
+  readonly refreshQuickBook: () => Promise<void>;
+  readonly draftBookSeed: (request: BookSeedRequest) => Promise<void>;
+  readonly editBookSeed: (seed: BookSeed) => void;
+  readonly discardBookSeed: () => void;
+  /** 采用骨架：写入作品信息与人物；成功后读取作品、设定与计划。 */
+  readonly applyBookSeed: () => Promise<boolean>;
   readonly draftPlans: (chapterCount: number, wordsPerChapter: number) => Promise<void>;
   readonly applyPlanDraft: () => Promise<boolean>;
   readonly discardPlanDraft: () => void;
@@ -532,7 +545,8 @@ export function createAppStore(service: AppService): AppStore {
     const opened = (work: WorkView): Partial<AppState> => ({
       work,
       selectedChapterId: work.chapters[0]?.id ?? null,
-      panel: 'chapter',
+      // 还没有章节的作品从成书页开始（B67）；已有章节的作品打开第一章。
+      panel: work.chapters.length === 0 ? 'book' : 'chapter',
       chapterContent: null,
     });
 
@@ -559,6 +573,9 @@ export function createAppStore(service: AppService): AppStore {
       sourceStats: null,
       skills: null,
       planning: null,
+      quickBook: null,
+      bookSeed: null,
+      seedDrafting: false,
       planDraft: null,
       planUnmatched: [],
       planDrafting: false,
@@ -632,7 +649,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -889,6 +906,46 @@ export function createAppStore(service: AppService): AppStore {
       async openPlanning() {
         if (!(await get().leaveChapter())) return;
         await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawerEntityId: null }));
+      },
+      async openQuickBook() {
+        if (!(await get().leaveChapter())) return;
+        set({ panel: 'book', chapterContent: null, drawerEntityId: null });
+        await get().refreshQuickBook();
+      },
+      async refreshQuickBook() {
+        const [status, planning] = await Promise.all([service.quickBookStatus(), service.planningView()]);
+        if (status.ok && planning.ok) set({ quickBook: status.value, planning: planning.value });
+        else set({ message: describeError(!status.ok ? status.error : !planning.ok ? planning.error : { code: 'no_work' }) });
+      },
+      async draftBookSeed(request) {
+        if (get().seedDrafting) return;
+        const taskId = `task-${++taskSeq}`;
+        const abort = new AbortController();
+        taskAborts.set(taskId, abort);
+        task({ type: 'started', task: { id: taskId, kind: 'plan_draft', title: '生成大纲与人物', chapterId: null, startedAt: new Date().toISOString() } });
+        set({ seedDrafting: true, message: null });
+        const result = await service.draftBookSeed(request, { signal: abort.signal, onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })) });
+        taskAborts.delete(taskId);
+        if (result.ok) {
+          set({ bookSeed: result.value, seedDrafting: false });
+          task({ type: 'finished', id: taskId, status: 'done', finishedAt: new Date().toISOString() });
+        } else {
+          set({ seedDrafting: false, message: describeError(result.error) });
+          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt: new Date().toISOString(), error: describeError(result.error) });
+        }
+      },
+      editBookSeed: (seed) => set({ bookSeed: seed }),
+      discardBookSeed: () => set({ bookSeed: null }),
+      async applyBookSeed() {
+        const seed = get().bookSeed;
+        if (seed === null) return false;
+        const done = await run(service.applyBookSeed(seed), () => ({ bookSeed: null }));
+        if (!done) return false;
+        const work = await service.reloadWork();
+        if (work.ok) set({ work: work.value });
+        await loadEntities();
+        await get().refreshQuickBook();
+        return true;
       },
       async draftPlans(chapterCount, wordsPerChapter) {
         const taskId = `task-${++taskSeq}`;

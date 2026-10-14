@@ -1392,3 +1392,57 @@ fieldset.plain {
 [aria-pressed='true'] {
   border-color: var(--accent);
 }
+
+/* 快速成书（B67）：一页五步，做完的步骤标上对勾、颜色变淡 */
+.quick-book {
+  max-width: 860px;
+}
+
+.book-step {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.book-step h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.book-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.book-step.done .book-step-n {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.book-step.done > p {
+  color: var(--muted);
+}
+
+.book-character {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.book-character input:first-child {
+  width: 8em;
+}
+
+.book-character input:nth-child(2) {
+  flex: 1;
+}

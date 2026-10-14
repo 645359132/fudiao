@@ -38,6 +38,7 @@ import {
   renderChapterMemory,
   renderChapterReview,
   renderPlanDraft,
+  renderBookSeed,
   renderRunSynopsis,
   renderSceneDraft,
   renderSemanticRuling,
@@ -337,6 +338,17 @@ describe('章节计划草稿（B65）', () => {
     expect(empty).toContain('还没有人物设定');
     expect(empty).not.toContain('已有的章节：');
     expect(empty).not.toContain('已有的伏笔：');
+  });
+});
+
+describe('作品骨架（B67 快速成书）', () => {
+  it('写出作者的想法、类型、作品名、已有人物、章数与字数，要求带结构化输出；可选部分没有时省略', () => {
+    const prompt = unwrap(renderBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '古风悬疑', title: '当铺夜谈', characters: ['林舟'], chapterCount: 12, wordsPerChapter: 3000 }));
+    expect(prompt).toMatchObject({ template: { id: 'book_seed' }, task: 'plan_draft', output: { name: 'BookSeedOutput' } });
+    const text = fullText(prompt);
+    for (const part of ['作者的想法：落魄书生当铺夜遇旧主', '类型：古风悬疑', '作品名：当铺夜谈', '已有的人物：林舟；', '约 12 章、每章约 3000 字', '计划写 12 章']) expect(text).toContain(part);
+    const bare = fullText(unwrap(renderBookSeed({ idea: '雨夜道歉', genre: '', title: '', characters: [], chapterCount: 5, wordsPerChapter: 2000 })));
+    for (const part of ['类型：', '作品名：', '已有的人物：']) expect(bare).not.toContain(part);
   });
 });
 

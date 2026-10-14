@@ -320,7 +320,7 @@ describe('导入、导出与备份', () => {
     await createWork(user, '雨夜');
     await addChapter(user, '楔子');
     deps.textPicks.push({ fileName: '续写.txt', text: novel }, { fileName: '不要.txt', text: novel });
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '导入章节（TXT/Markdown）' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '导入' }));
     await waitFor(() => expect(chapterTitles()).toEqual(['楔子', '第一章 雨夜', '第二章 当铺']));
@@ -335,7 +335,7 @@ describe('导入、导出与备份', () => {
     await user.click(await screen.findByRole('button', { name: '导入 TXT/Markdown' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '导入' }));
     await waitFor(() => expect(chapterTitles()).toHaveLength(2));
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '导出整本 TXT' }));
     await user.click(screen.getByRole('menuitem', { name: '导出作品包' }));
     await user.click(await screen.findByRole('button', { name: '导出 TXT' }));
@@ -347,14 +347,14 @@ describe('导入、导出与备份', () => {
     const { user } = start();
     await createWork(user, '雨夜');
     await addChapter(user, '第一章');
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
     await user.click(await screen.findByRole('button', { name: '立即备份' }));
     const list = await screen.findByRole('list', { name: '备份列表' });
     expect(within(list).getByText('手动备份')).toBeTruthy();
     await addChapter(user, '第二章');
     expect(chapterTitles()).toEqual(['第一章', '第二章']);
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
     await user.click(await screen.findByRole('button', { name: /恢复到 .* 的备份/ }));
     await user.click(screen.getByRole('button', { name: '确定恢复' }));
@@ -368,7 +368,7 @@ describe('导入、导出与备份', () => {
     await user.click(screen.getByRole('button', { name: '作品列表' }));
     await user.click(await screen.findByRole('button', { name: '雨夜' }));
     await screen.findByRole('navigation', { name: '章节目录' });
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
     const list = await screen.findByRole('list', { name: '备份列表' });
     expect(within(list).getAllByText('自动备份')).toHaveLength(1);
@@ -467,7 +467,9 @@ describe('事实', () => {
     await user.type(screen.getByRole('textbox', { name: '新设定的名字' }), '当铺{Enter}');
     await waitFor(() => expect(store.getState().entities).toHaveLength(2));
 
-    await user.click(screen.getByRole('button', { name: '事实' }));
+    await user.click(screen.getByText('更多'));
+
+    await user.click(screen.getByRole('menuitem', { name: '事实' }));
     await user.click(await screen.findByRole('button', { name: '记录新事实' }));
     const form = await screen.findByRole('form', { name: '事实内容' });
     await user.selectOptions(within(form).getByRole('combobox', { name: '种类' }), '人物认知');
@@ -494,13 +496,14 @@ describe('事实', () => {
     expect(await screen.findByText('设定“当铺”已修改')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '复核后确认' }));
     await waitFor(() => expect(store.getState().facts[0]?.status).toBe('confirmed'));
-    expect(screen.getByRole('button', { name: '事实' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /待复核/ })).toBeNull();
   });
 
   it('表单校验：故事时间的排序值须为数字；按种类与状态筛选', async () => {
     const { store, user } = start();
     await createWork(user, '雨夜');
-    await user.click(screen.getByRole('button', { name: '事实' }));
+    await user.click(screen.getByText('更多'));
+    await user.click(screen.getByRole('menuitem', { name: '事实' }));
     await user.click(await screen.findByRole('button', { name: '记录新事实' }));
     await user.type(screen.getByRole('textbox', { name: '内容' }), '城中宵禁');
     await user.type(screen.getByRole('textbox', { name: '故事时间起' }), '第三年春');
@@ -528,7 +531,7 @@ describe('段落来源', () => {
     await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['雨夜。']));
     const chapterId = store.getState().selectedChapterId ?? '';
 
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
     await screen.findByRole('table', { name: '来源统计' });
     // M2 接受候选稿之前，用保存用例写入一段 AI 生成的段落。
@@ -540,7 +543,7 @@ describe('段落来源', () => {
     });
     expect(saved.ok).toBe(true);
 
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
     const table = await screen.findByRole('table', { name: '来源统计' });
     await waitFor(() => expect(within(table).getByRole('row', { name: /第一章/ }).textContent).toContain('57.1%'));
@@ -550,7 +553,7 @@ describe('段落来源', () => {
     await waitFor(() => expect(document.querySelector('.chapter-text p.source-ai_generated')?.textContent).toBe('雨很大。'));
     expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(1);
 
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
     await user.click(await screen.findByRole('checkbox', { name: /显示来源色条/ }));
     await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false }));
@@ -583,7 +586,9 @@ describe('全文查找', () => {
     await waitFor(() => expect(document.getSelection()?.toString()).toBe('当铺'));
     expect(store.getState().reveal).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: '查找' }));
+    await user.click(screen.getByText('更多'));
+
+    await user.click(screen.getByRole('menuitem', { name: '查找' }));
     expect((await screen.findByRole('status')).textContent).toBe('共 2 处。');
     expect(screen.getByRole('searchbox', { name: '查找内容' })).toHaveProperty('value', '当铺');
 
@@ -667,7 +672,7 @@ describe('用量与费用', () => {
     if (!prompt.ok) throw new Error('模板');
     await service.runner.text({ prompt: prompt.value, maxOutputTokens: 64 });
 
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '用量与费用' }));
     const totals = await screen.findByRole('table', { name: '用量合计' });
     expect(within(totals).getByRole('row', { name: /本作品/ }).textContent).toBe('本作品11002未知');
@@ -849,7 +854,7 @@ describe('写作技能界面（B61、B37）', () => {
   it('停用技能、改写并恢复说明、添加与删除自己的技能、编辑规避词表', async () => {
     const { user, service } = start();
     await createWork(user, '雨夜');
-    await user.click(screen.getByText('作品'));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '写作技能' }));
     const hook = await screen.findByRole('listitem', { name: '章末钩子' });
 
@@ -1227,7 +1232,8 @@ describe('推演场景的编辑（B22、B23、B39）', () => {
   async function open() {
     const ctx = start();
     await createWork(ctx.user, '当铺夜谈');
-    await ctx.user.click(screen.getByRole('button', { name: '推演' }));
+    await ctx.user.click(screen.getByText('更多'));
+    await ctx.user.click(screen.getByRole('menuitem', { name: '推演' }));
     await screen.findByRole('region', { name: '角色推演' });
     return ctx;
   }
@@ -1363,7 +1369,8 @@ describe('区域图的编辑（B41）', () => {
   it('添加区域、设置区域之间的关系与出口；改区域的键时角色的位置跟着改；保存后配置正确', async () => {
     const { user, service } = start();
     await createWork(user, '当铺夜谈');
-    await user.click(screen.getByRole('button', { name: '推演' }));
+    await user.click(screen.getByText('更多'));
+    await user.click(screen.getByRole('menuitem', { name: '推演' }));
     await user.click(await screen.findByRole('button', { name: '新建场景' }));
     await user.click(screen.getByRole('button', { name: '从空白开始' }));
     const form = await screen.findByRole('form', { name: '新场景' });
@@ -1453,7 +1460,8 @@ async function simReady(maxRounds = 3) {
   model = fake.port;
   const saved = await service.saveSimScene(null, { chapterId: null, title: '废仓库', config: warehouseSpec(), protocol: 'simultaneous', maxRounds, firstSpeaker: null });
   if (!saved.ok) throw new Error('场景');
-  await user.click(screen.getByRole('button', { name: '推演' }));
+  await user.click(screen.getByText('更多'));
+  await user.click(screen.getByRole('menuitem', { name: '推演' }));
   await user.click(await screen.findByRole('button', { name: /废仓库/ }));
   await user.click(screen.getByRole('tab', { name: '推演' }));
   const runs = await screen.findByRole('region', { name: '推演运行' });
@@ -1640,7 +1648,8 @@ describe('推演写成正文的界面（B29、B45）', () => {
 
     // 先建一章：推演写成的正文要接在某一章末尾。
     await addChapter(user, '第一章 夜雨');
-    await user.click(screen.getByRole('button', { name: '推演' }));
+    await user.click(screen.getByText('更多'));
+    await user.click(screen.getByRole('menuitem', { name: '推演' }));
     await user.click(await screen.findByRole('button', { name: /废仓库/ }));
     await user.click(screen.getByRole('tab', { name: '推演' }));
     const again = await screen.findByRole('region', { name: '推演工作区' });
@@ -1722,5 +1731,74 @@ describe('推演评价的界面（B46）', () => {
     await user.selectOptions(within(saved).getByRole('combobox', { name: '意外但合理的转折' }), '5');
     await user.click(within(saved).getByRole('button', { name: '保存评价' }));
     await waitFor(() => expect(store.getState().simEvaluation?.evaluation).toMatchObject({ version: 2, answers: { scores: { characters: 4, twist: 5 } } }));
+  });
+});
+
+describe('快速成书的界面（B67）', () => {
+  it('新作品从成书页开始：先连模型，再由一句想法生成大纲与人物、改过后采用，拆出章节计划，写作看板出现', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '新作品');
+    const page = await screen.findByRole('region', { name: '快速成书' });
+    const step = (n: number) => within(page).getByRole('region', { name: new RegExp(`^第 ${n} 步`) });
+    await waitFor(() => expect(step(1).textContent).toContain('还没有设置默认模型'));
+    expect(within(step(2)).getByRole('button', { name: '生成大纲与人物' }).matches(':disabled')).toBe(true);
+
+    // 在“模型服务”里配好模型后回到成书页：第一步完成。
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '成书' }));
+    await waitFor(() => expect(step(1).textContent).toContain('已连接'));
+
+    const seed = {
+      title: '当铺夜谈',
+      genre: '古风悬疑',
+      synopsis: '落魄书生深夜当玉。',
+      outline: '开端：林舟当玉。结局：林舟得知身世。',
+      characters: [
+        { name: '林舟', description: '落魄书生' },
+        { name: '路人', description: '多余的人' },
+      ],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    await user.type(within(step(2)).getByRole('textbox', { name: '一句话的想法' }), '落魄书生当铺夜遇旧主');
+    const chapters = within(step(2)).getByRole('spinbutton', { name: '章数' });
+    await user.clear(chapters);
+    await user.type(chapters, '2');
+    await user.click(within(step(2)).getByRole('button', { name: '生成大纲与人物' }));
+    const skeleton = await within(step(2)).findByRole('form', { name: '作品骨架' });
+    expect(within(skeleton).getByRole('textbox', { name: '大纲' })).toHaveProperty('value', seed.outline);
+    await user.click(within(skeleton).getByRole('button', { name: '删去人物 路人' }));
+    await user.click(within(skeleton).getByRole('button', { name: '采用骨架' }));
+    await waitFor(() => expect(step(2).textContent).toContain('大纲已写好，人物 1 个'));
+    expect(store.getState().work?.project).toMatchObject({ title: '当铺夜谈', outline: seed.outline });
+    expect(store.getState().entities.map((e) => e.name)).toEqual(['林舟']);
+
+    const plan = {
+      chapters: [
+        { title: '第一章 夜叩', goal: '林舟当玉', cast: ['林舟'], beats: ['叩门', '压价'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
+        { title: '第二章 身世', goal: '真相揭开', cast: ['林舟'], beats: ['旧主现身'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
+      ],
+      foreshadows: [],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(plan)));
+    await user.click(within(step(3)).getByRole('button', { name: '生成章节计划' }));
+    await within(step(3)).findByText('第一章 夜叩');
+    await user.click(within(step(3)).getByRole('button', { name: '采用计划' }));
+    await waitFor(() => expect(step(3).textContent).toContain('2 章，2 章有计划'));
+    expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 身世']);
+    expect(within(step(4)).getByRole('region', { name: '成书进度' })).toBeTruthy();
+    expect(within(step(4)).getByRole('button', { name: '依次写完待写的 2 章' })).toBeTruthy();
+  });
+
+  it('已有章节的作品打开第一章；顶栏只留常用的几项，推演、事实与查找在“更多”里', async () => {
+    const { user } = start();
+    await createWork(user, '旧作');
+    await addChapter(user, '第一章');
+    expect(screen.queryByRole('button', { name: '推演' })).toBeNull();
+    await user.click(screen.getByText('更多'));
+    for (const name of ['推演', '事实', '查找']) expect(screen.getByRole('menuitem', { name })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '旧作' }));
+    await screen.findByRole('navigation', { name: '章节目录' });
+    await waitFor(() => expect(screen.queryByRole('region', { name: '快速成书' })).toBeNull());
   });
 });

@@ -26,6 +26,7 @@ import {
   BaselineOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
+  BookSeedOutput,
   DirectorProposalOutput,
   EvidenceJudgementOutput,
   ChapterReviewOutput,
@@ -63,6 +64,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   ChapterReviewOutput,
   ChapterMemoryOutput,
   PlanDraftOutput,
+  BookSeedOutput,
 };
 
 function renderTemplate(id: TemplateId, context: RenderContext): Result<RenderedPrompt, string> {
@@ -705,6 +707,29 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     hasChapters: input.chapters.length > 0,
     foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
     hasForeshadows: input.foreshadows.length > 0,
+    chapterCount: input.chapterCount,
+    wordsPerChapter: input.wordsPerChapter,
+  });
+}
+
+export type BookSeedInput = {
+  readonly idea: string;
+  readonly genre: string;
+  /** 作者已定的作品名；没有时为空，由模型拟。 */
+  readonly title: string;
+  readonly characters: readonly string[];
+  readonly chapterCount: number;
+  readonly wordsPerChapter: number;
+};
+
+/** 作品骨架（B67）：作者侧的规划，材料只有作者的想法与已有的人物名。 */
+export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, string> {
+  return renderTemplate('book_seed', {
+    idea: input.idea,
+    genre: input.genre,
+    title: input.title,
+    characters: input.characters.map((name) => ({ name })),
+    hasCharacters: input.characters.length > 0,
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,
   });
