@@ -9,6 +9,7 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
+import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
@@ -277,6 +278,10 @@ export type AppState = {
   readonly narrateBeatSheet: (id: string, chapterId: string) => Promise<void>;
   /** 打开写成候选稿的那一章，并打开“AI 写作”看候选稿。 */
   readonly openNarratedChapter: (chapterId: string) => Promise<void>;
+  /** 推演评价（B46）：选中运行（属于批量推演时是整组）的评价，打开评价时读取。 */
+  readonly simEvaluation: (SimEvaluationView & { readonly runId: string }) | null;
+  readonly loadSimEvaluation: () => Promise<void>;
+  readonly saveSimEvaluation: (input: SimEvaluationInput) => Promise<boolean>;
   readonly draftSimScene: (description: string) => Promise<void>;
   readonly blankSimScene: (config: SceneSpecInput) => void;
   readonly discardSceneDraft: () => void;
@@ -440,7 +445,7 @@ export function createAppStore(service: AppService): AppStore {
         return;
       }
       const runId = select ?? runs.value[0]?.id ?? null;
-      set({ simRuns: runs.value, simRunId: runId, simRun: null, beatSheets: [], narrationNote: null, ...(select !== null && { simTab: 'runs' as const }) });
+      set({ simRuns: runs.value, simRunId: runId, simRun: null, beatSheets: [], narrationNote: null, simEvaluation: null, ...(select !== null && { simTab: 'runs' as const }) });
       if (runId !== null) {
         await refreshRun(runId);
         await loadBeatSheets(runId);
@@ -573,6 +578,7 @@ export function createAppStore(service: AppService): AppStore {
       simAdvancing: false,
       simVerification: null,
       beatSheets: [],
+      simEvaluation: null,
       narrationBusy: false,
       narrationNote: null,
       usage: null,
@@ -626,7 +632,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -935,7 +941,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       async selectSimRun(id) {
         if (get().simAdvancing) return;
-        set({ simRunId: id, simRun: null, beatSheets: [], narrationNote: null });
+        set({ simRunId: id, simRun: null, beatSheets: [], narrationNote: null, simEvaluation: null });
         await refreshRun(id);
         await loadBeatSheets(id);
       },
@@ -1025,6 +1031,19 @@ export function createAppStore(service: AppService): AppStore {
         const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
         const result = await modelTask('narrate', `推演写成正文 · ${title}`, chapterId, (options) => service.narrateBeatSheet(sheetId, chapterId, options));
         set({ narrationBusy: false, ...(result.ok && { narrationNote: { chapterId, text: `已在“${title}”末尾生成候选稿，采纳后才写入正文。` } }) });
+      },
+      async loadSimEvaluation() {
+        const runId = get().simRunId;
+        if (runId === null) return;
+        await run(service.simEvaluation(runId), (view) => ({ simEvaluation: get().simRunId === runId ? { ...view, runId } : get().simEvaluation }));
+      },
+      async saveSimEvaluation(input) {
+        const current = get().simEvaluation;
+        if (current === null) return false;
+        const { runId } = current;
+        return run(service.saveSimEvaluation(runId, input, current.evaluation?.version ?? null), (view) => ({
+          simEvaluation: get().simRunId === runId ? { ...view, runId } : get().simEvaluation,
+        }));
       },
       async openNarratedChapter(chapterId) {
         await get().selectChapter(chapterId);

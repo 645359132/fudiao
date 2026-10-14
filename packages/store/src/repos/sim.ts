@@ -179,6 +179,11 @@ export function listSimRuns(port: SqlPort, sceneId: string): Promise<Result<SimR
   return queryAll(port, RunRow, `SELECT ${RUN_COLUMNS} FROM sim_run WHERE scene_id = ? ORDER BY created_at DESC, id DESC`, [sceneId]);
 }
 
+/** 批量推演（B48）的一组运行，按开始的先后。 */
+export function listBatchRuns(port: SqlPort, batchId: string): Promise<Result<SimRun[], RepoError>> {
+  return queryAll(port, RunRow, `SELECT ${RUN_COLUMNS} FROM sim_run WHERE batch_id = ? ORDER BY created_at, id`, [batchId]);
+}
+
 export type SimRunProgress = {
   readonly status: SimRunStatus;
   readonly endReason: string | null;

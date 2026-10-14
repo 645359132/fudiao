@@ -69,6 +69,7 @@ import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
 import { narrationUseCases } from './narration';
 import { reviewUseCases } from './review';
+import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
 import { writerUseCases } from './writer';
 import { modelRunner } from './model-runner';
@@ -310,6 +311,7 @@ export function createAppService(deps: AppDeps) {
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
   const narration = narrationUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
+  const simEvaluation = simEvaluationUseCases(deps, () => session?.port ?? null);
   const simulation = simulationUseCases({
     deps,
     project: () => session?.port ?? null,
@@ -331,6 +333,7 @@ export function createAppService(deps: AppDeps) {
     ...narration,
     ...review,
     ...simulation,
+    ...simEvaluation,
 
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {

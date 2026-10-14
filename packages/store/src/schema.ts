@@ -195,6 +195,12 @@ export const TABLES: readonly TableSpec[] = [
     json: ['state'],
   },
   {
+    name: 'evaluation',
+    columns: ['id', 'run_id', 'batch_id', 'answers', ...VERSIONED],
+    primaryKey: ['id'],
+    json: ['answers'],
+  },
+  {
     name: 'beat_sheet',
     columns: ['id', 'run_id', 'pov_actor', 'from_round', 'to_round', 'up_to_seq', 'beats', 'style', 'llm_call_id', ...VERSIONED],
     primaryKey: ['id'],

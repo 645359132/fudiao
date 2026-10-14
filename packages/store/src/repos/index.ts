@@ -29,6 +29,8 @@ export { adoptionStatements } from './adoption';
 export type { EventLink, StoryEvent } from './story-event';
 export { listChapterEventLinks, listStoryEvents } from './story-event';
 export type { Beat, BeatSheet, BeatSheetInput, BeatTreatment } from './beat-sheet';
+export type { Evaluation, EvaluationAnswers, EvaluationMeasured, EvaluationScores, EvaluationTarget } from './evaluation';
+export { getEvaluation, saveEvaluation } from './evaluation';
 export { BEAT_TREATMENTS, createBeatSheet, getBeatSheet, listBeatSheets, updateBeatSheet } from './beat-sheet';
 export type { Candidate, CandidateInput, CandidateOperation, CandidateStatus } from './candidate';
 export { CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
@@ -52,6 +54,7 @@ export {
   createSimScene,
   getSimRun,
   getSimScene,
+  listBatchRuns,
   listSimRuns,
   listSimScenes,
   listSimSnapshots,

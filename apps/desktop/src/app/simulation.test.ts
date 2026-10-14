@@ -812,6 +812,64 @@ describe('采纳推演草案（B29、B55，验收“草案采纳”“自动模�
   });
 });
 
+describe('推演评价（B46）', () => {
+  const scores = { characters: 4, intel: 3, twist: null, adopt: 4, edits: 1 };
+
+  it('推演结束后才能评价；保存时记下调用次数、费用与模型耗时；之后可以再改，打开后被别处改过时不覆盖', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    expect(value(await app.simEvaluation(runId))).toMatchObject({ scope: 'run', runIds: [runId], ready: false, evaluation: null });
+    expect(await app.saveSimEvaluation(runId, { scores, twistNote: '', note: '' }, null)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('还没有结束') } });
+
+    value(await app.continueSimRun(runId));
+    const before = value(await app.simEvaluation(runId));
+    expect(before).toMatchObject({ ready: true, adopted: [], evaluation: null });
+    expect(before.measured.calls).toBeGreaterThan(0);
+    const saved = value(await app.saveSimEvaluation(runId, { scores, twistNote: '弩箭那一下', note: '' }, null));
+    expect(saved.evaluation).toMatchObject({ runId, batchId: null, version: 1, answers: { scores, twistNote: '弩箭那一下', note: '', measured: before.measured } });
+    expect(value(await app.simEvaluation(runId)).evaluation).toEqual(saved.evaluation);
+
+    const changed = value(await app.saveSimEvaluation(runId, { scores: { ...scores, twist: 5 }, twistNote: '弩箭那一下', note: '可以用' }, 1));
+    expect(changed.evaluation).toMatchObject({ version: 2, answers: { scores: { twist: 5 }, note: '可以用' } });
+    expect(await app.saveSimEvaluation(runId, { scores, twistNote: '', note: '旧的' }, 1)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('别处修改') } });
+    expect(await app.saveSimEvaluation(runId, { scores: { ...scores, edits: 4 }, twistNote: '', note: '' }, 2)).toMatchObject({ ok: false, error: { code: 'repo' } });
+  });
+
+  it('评价列出这次推演采纳进作品的事件，保存时记下', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await app.continueSimRun(runId));
+    const sheet = value(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 1, notes: '' }));
+    const chapter = value(await app.createChapter('第一章')).chapters[0]!;
+    await adoptAll(app, value(await app.narrateBeatSheet(sheet.sheet.id, chapter.id)).id);
+
+    const view = value(await app.simEvaluation(runId));
+    const events = value(await app.storyEvents());
+    expect(view.adopted).toEqual(events.map((e) => ({ id: e.id, summary: e.summary })));
+    expect(view.adopted.length).toBeGreaterThan(0);
+    const saved = value(await app.saveSimEvaluation(runId, { scores, twistNote: '', note: '' }, null));
+    expect(saved.evaluation?.answers.measured.adoptedEventIds).toEqual(events.map((e) => e.id));
+  });
+
+  it('批量推演整组结束后评价一次：组里任何一次的评价都是同一份', async () => {
+    const { app, deps, scene } = await ready();
+    const first = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    const second = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 8 })).run.id;
+    value(await app.continueSimRun(first));
+    // 桌面端还没有批量推演（B48）：直接把两次运行编成一组。
+    const work = value(await app.reloadWork());
+    const reopened = value(await deps.opener.open(work.entry.path, deps.clock.now()));
+    expect((await reopened.port.transaction([{ sql: "UPDATE sim_run SET batch_id = 'batch-1' WHERE id IN (?, ?)", params: [first, second] }])).ok).toBe(true);
+
+    expect(value(await app.simEvaluation(first))).toMatchObject({ scope: 'batch', runIds: [first, second], ready: false });
+    expect(await app.saveSimEvaluation(first, { scores, twistNote: '', note: '' }, null)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('整组结束后') } });
+    value(await app.continueSimRun(second));
+    const saved = value(await app.saveSimEvaluation(first, { scores, twistNote: '', note: '整组' }, null));
+    expect(saved.evaluation).toMatchObject({ runId: null, batchId: 'batch-1', answers: { note: '整组', measured: { runIds: [first, second] } } });
+    expect(value(await app.simEvaluation(second)).evaluation).toEqual(saved.evaluation);
+  });
+});
+
 describe('金丝雀：节拍表与视角正文的请求（硬性规则 3、4）', () => {
   it('只用视角角色当时的认知：不出现场景元信息、秘密与他人的角色卡；之后回合才发生的事不进入请求', async () => {
     const ctx = await setup();

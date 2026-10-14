@@ -91,7 +91,7 @@ function SheetEditor({ view }: { readonly view: BeatSheetView }) {
 
 /**
  * 推演写成正文（B29、B45、B62）：选视角角色与回合范围生成节拍表，作者修改后写成正文。
- * 只用视角角色在所选回合结束时的认知；结果先成为这一章末尾的候选稿，在章节的“AI 写作”里比较、修改与接受。
+ * 只用视角角色在所选回合结束时的认知；结果先成为这一章末尾的候选稿，在章节的“AI 写作”里比较、修改与采纳。
  */
 export function NarrationPanel({ detail }: { readonly detail: SimRunDetail }) {
   const sheets = useApp((s) => s.beatSheets);

@@ -113,6 +113,11 @@ const sample: Statement[] = [
   ),
   s("INSERT INTO beat_sheet (id, run_id, pov_actor, from_round, to_round, up_to_seq, beats, created_at, updated_at) VALUES ('01B2', '01U1', 'qian_si', 2, 2, 2, '[]', ?, ?)", ...T),
   s(
+    "INSERT INTO evaluation (id, run_id, answers, version, created_at, updated_at) VALUES ('01V1', '01U1', '{\"scores\":{\"characters\":4,\"intel\":null,\"twist\":3,\"adopt\":4,\"edits\":1},\"twistNote\":\"弩箭\",\"note\":\"\",\"measured\":{\"runIds\":[\"01U1\"],\"adoptedEventIds\":[],\"calls\":3,\"costUsd\":0.02,\"unknownCostCalls\":0,\"modelMs\":1200}}', 2, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO evaluation (id, batch_id, answers, created_at, updated_at) VALUES ('01V2', '01B1', '{}', ?, ?)", ...T),
+  s(
     "INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, beat_sheet_id, created_at, updated_at) VALUES ('01K2', '01C1', 'narrate', '{\"from\":{\"paragraphId\":\"01G2\",\"offset\":6},\"to\":{\"paragraphId\":\"01G2\",\"offset\":6}}', '', '{\"01G2\":3}', '林舟推开了门。', '林舟推开了门。', '01B1', ?, ?)",
     ...T,
   ),
@@ -301,6 +306,20 @@ describe('节拍表与推演写成的候选稿（迁移 0007）', () => {
   });
 });
 
+describe('推演评价（迁移 0008）', () => {
+  it('评价一次运行或一个批次，恰有其一；同一次运行、同一批次只有一份；内容须是对象', async () => {
+    const db = await seeded();
+    const evaluation = 'INSERT INTO evaluation (id, run_id, batch_id, answers, created_at, updated_at) VALUES';
+    await rejects(db, `${evaluation} ('x', '01U2', '01B9', '{}', ?, ?)`, ...T);
+    await rejects(db, `${evaluation} ('x', NULL, NULL, '{}', ?, ?)`, ...T);
+    await rejects(db, `${evaluation} ('x', 'none', NULL, '{}', ?, ?)`, ...T);
+    await rejects(db, `${evaluation} ('x', '01U1', NULL, '{}', ?, ?)`, ...T);
+    await rejects(db, `${evaluation} ('x', NULL, '01B1', '{}', ?, ?)`, ...T);
+    await rejects(db, `${evaluation} ('x', '01U2', NULL, '[]', ?, ?)`, ...T);
+    expect((await db.transaction([s(`${evaluation} ('x', '01U2', NULL, '{}', ?, ?)`, ...T)])).ok).toBe(true);
+  });
+});
+
 describe('表结构清单', () => {
   it('与迁移后的实际结构一致，库中没有清单以外的表', async () => {
     const db = fresh();
@@ -372,6 +391,15 @@ describe('数据层导出导入（硬性规则 20）', () => {
     const after = await exported(target);
     expect(after.tables['beat_sheet']).toEqual([]);
     expect(after.tables['candidate']).toEqual((data.tables['candidate'] ?? []).filter((row) => row['operation'] !== 'narrate'));
+  });
+
+  it('结构版本 7 导出的数据（没有推演评价）导入后评价为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'evaluation'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
+    const after = await exported(target);
+    expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
   });
 
   it('每个迁移都登记了导出数据的转换', () => {

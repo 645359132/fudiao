@@ -72,6 +72,7 @@
 - M4-06 已完成：列出运行时按事件校正状态与回合（缓存落后时以事件为准）；工作区的“校验回放”（`verifySimRun`，快照处重算的状态与记下的哈希比较）。中断后的恢复沿用事件存储与步骤键查重，测试见 `simulation.test.ts`。
 - M4-07 已完成：迁移 `0007_narration.sql`（`beat_sheet`；候选稿重建，增加 `narrate` 操作与 `beat_sheet_id`）；仓储 `beat-sheet.ts`；用例 `apps/desktop/src/app/narration.ts`（`draftBeatSheet` 取视角角色在所选回合结束时的认知、`saveBeatSheet`、`narrateBeatSheet` 写成这一章末尾的候选稿）；工作区的“写成正文”（`NarrationPanel.tsx`）；桌面端接法的金丝雀测试。
 - M4-08 已完成：采纳推演草案（`narration.ts` 的 `adoptionDraft`、`adoptCandidate`，仓储 `repos/adoption.ts`、`repos/story-event.ts`）：选定事件、世界事实与视角角色的认知，复核自动接受的裁决，核对涉及锁定设定的事实，写入前快照，正文、故事事件、事件与段落关联、事实及其来源在一个事务中写入；推演写成的候选稿不能直接接受；“AI 写作”里候选稿的“采纳…”（`AdoptionForm.tsx`）。不涉及迁移。
+- M4-09 已完成：迁移 `0008_evaluation.sql`（`evaluation`：一次运行或一个批次一份）；仓储 `repos/evaluation.ts`；用例 `apps/desktop/src/app/sim-evaluation.ts`（评分项与 M0 评价表相同，保存时记下采纳的事件、费用与耗时，批量推演整组结束后评价一次）；工作区的“推演评价”（`EvaluationPanel.tsx`）。M4 的任务代码已全部完成，待作者执行手工清单。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

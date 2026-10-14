@@ -3,6 +3,7 @@ import type { ViewerData, ViewerKnowledge, ViewerRound } from '@fudiao/engine';
 import type { SimRun } from '@fudiao/store';
 import { describeObservation } from '../app/sim-describe';
 import type { SimRunDetail } from '../app/simulation';
+import { EvaluationPanel } from './EvaluationPanel';
 import { NarrationPanel } from './NarrationPanel';
 import { ForkPanel, IntervenePanel, PendingPanel } from './SimAuthorPanel';
 import { useApp } from './store-context';
@@ -328,6 +329,7 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
       {ended ? null : <IntervenePanel detail={detail} locked={advancing} />}
       <ForkPanel detail={detail} locked={advancing} />
       <NarrationPanel detail={detail} />
+      {ended ? <EvaluationPanel runId={detail.view.run.id} /> : null}
       {data === null ? null : <Timeline data={data} />}
       {timing.length > 0 ? (
         <details>

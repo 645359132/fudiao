@@ -1694,3 +1694,33 @@ describe('推演写成正文的界面（B29、B45）', () => {
     expect(store.getState().facts.map((f) => [f.kind, f.status, f.content, f.eventIds.length])).toEqual([['world', 'confirmed', '裁决结果（仓库中央）：弩箭擦过主角肩头', 1]]);
   });
 });
+
+describe('推演评价的界面（B46）', () => {
+  it('推演结束后出现评价：列出调用与费用，按 M0 的评分项打分，保存后再改', async () => {
+    const { user, runs, store } = await simReady();
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    const workspace = await screen.findByRole('region', { name: '推演工作区' });
+    expect(within(workspace).queryByText('推演评价')).toBeNull();
+    await user.click(within(workspace).getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(simStatus()).toContain('已结束'), { timeout: 10_000 });
+
+    const ended = screen.getByRole('region', { name: '推演工作区' });
+    await user.click(within(ended).getByText('推演评价'));
+    const form = await within(ended).findByRole('form', { name: '推演评价' });
+    expect(form.textContent).toMatch(/调用 \d+ 次，费用 \$/);
+    expect(form.textContent).toContain('还没有采纳进作品的事件。');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '人物可信且可区分' }), '4');
+    await user.selectOptions(within(form).getByRole('combobox', { name: /采纳前修改量/ }), '1');
+    await user.type(within(form).getByRole('textbox', { name: /可采用的转折/ }), '弩箭那一下');
+    await user.click(within(form).getByRole('button', { name: '保存评价' }));
+    await waitFor(() => expect(store.getState().simEvaluation?.evaluation?.version).toBe(1));
+    expect(store.getState().simEvaluation?.evaluation?.answers).toMatchObject({ scores: { characters: 4, intel: null, edits: 1 }, twistNote: '弩箭那一下' });
+
+    const saved = within(screen.getByRole('region', { name: '推演工作区' })).getByRole('form', { name: '推演评价' });
+    expect(saved.textContent).toContain('已保存（第 1 版）');
+    expect(within(saved).getByRole<HTMLSelectElement>('combobox', { name: '人物可信且可区分' }).value).toBe('4');
+    await user.selectOptions(within(saved).getByRole('combobox', { name: '意外但合理的转折' }), '5');
+    await user.click(within(saved).getByRole('button', { name: '保存评价' }));
+    await waitFor(() => expect(store.getState().simEvaluation?.evaluation).toMatchObject({ version: 2, answers: { scores: { characters: 4, twist: 5 } } }));
+  });
+});
