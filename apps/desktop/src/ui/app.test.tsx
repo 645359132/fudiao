@@ -3,6 +3,9 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { warehouseSpec } from '@fudiao/domain/testing';
+import { fakeModel } from '@fudiao/engine/testing';
+import type { LlmPort } from '@fudiao/llm';
 import { anthropicChunks, openaiChunks } from '@fudiao/llm/testing';
 import { renderConnectionTest, SELF_TEST_EXPECTED } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,7 +14,7 @@ import { createAppService } from '../app/service';
 import { createAppStore } from '../state/store';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
-import { sceneDraftFixture } from '../testing/scenes';
+import { dramaPolicy, sceneDraftFixture } from '../testing/scenes';
 
 // jsdom 不做排版，ProseMirror 把选区滚入视野时要用到的几何接口给空实现。
 const noRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
@@ -1431,5 +1434,120 @@ describe('区域图的编辑（B41）', () => {
       const again = await service.listSimScenes();
       expect(again.ok && again.value[0]).toMatchObject({ configVersion: 2, config: { zones: [{ id: 'shop' }], edges: [], exits: [] } });
     });
+  });
+});
+
+describe('推演工作区（B28）', () => {
+  /** 打开作品、配好默认模型（之后由测试模型应答）、存好废仓库场景，进入这个场景的“推演”。 */
+  async function ready(maxRounds = 3) {
+    const base = fsDeps();
+    let model: LlmPort | null = null;
+    const deps: TestDeps = { ...base, llm: { forProvider: (provider) => model ?? base.llm.forProvider(provider) } };
+    all.push(deps);
+    const service = createAppService(deps);
+    const store = createAppStore(service);
+    render(<App store={store} />);
+    const user = userEvent.setup();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    const fake = fakeModel(dramaPolicy);
+    model = fake.port;
+    const saved = await service.saveSimScene(null, { chapterId: null, title: '废仓库', config: warehouseSpec(), protocol: 'simultaneous', maxRounds, firstSpeaker: null });
+    if (!saved.ok) throw new Error('场景');
+    await user.click(screen.getByRole('button', { name: '推演' }));
+    await user.click(await screen.findByRole('button', { name: /废仓库/ }));
+    await user.click(screen.getByRole('tab', { name: '推演' }));
+    const runs = await screen.findByRole('region', { name: '推演运行' });
+    return { deps, service, store, user, fake, runs };
+  }
+  const status = () => screen.getByRole('region', { name: '推演工作区' }).querySelector('[role="status"]')?.textContent ?? '';
+
+  it('开始推演并继续到结束：时间线按回合显示全局局面与各角色所见；结束后不能再推进；列出等待时间', async () => {
+    const { user, runs } = await ready();
+    expect(within(runs).getByText('这个场景还没有推演过。')).toBeTruthy();
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    const workspace = await screen.findByRole('region', { name: '推演工作区' });
+    expect(status()).toContain('第 0 回合 · 可以继续 · 准备角色所见');
+    expect(within(workspace).getByText('还没有完成的回合。')).toBeTruthy();
+
+    await user.click(within(workspace).getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(status()).toContain('已结束：到达回合上限'), { timeout: 10_000 });
+    expect(status()).toContain('已用 $0.0000');
+    for (const name of ['单步', '继续', '暂停', '停止']) expect(within(workspace).getByRole('button', { name }).matches(':disabled')).toBe(true);
+    expect(within(runs).getByRole('button', { name: /第 1 次 · 已结束/ })).toBeTruthy();
+
+    // 默认跟着最新的一回合；点第一回合看当时的行动、内心片段与裁决。
+    const rounds = within(workspace).getByRole('group', { name: '回合' });
+    expect(within(rounds).getByRole('button', { name: '第 3 回合' }).getAttribute('aria-pressed')).toBe('true');
+    await user.click(within(rounds).getByRole('button', { name: '第 1 回合' }));
+    const global = within(workspace).getByLabelText('全局局面');
+    const attack = within(global).getByRole('listitem', { name: '对手的行动' });
+    expect(attack.textContent).toContain('攻击');
+    expect(attack.textContent).toContain('内心：');
+    expect(global.textContent).toContain('弩箭擦过');
+    expect(global.textContent).toContain('自动接受');
+    expect(within(global).getByRole('list', { name: '提示' }).textContent).toContain('缺少证据链');
+    expect(within(within(global).getByRole('table', { name: '回合结束时的局面' })).getByRole('row', { name: /主角/ }).textContent).toContain('重伤');
+
+    // 换成主角所见：只有他自己的处境与认知。
+    await user.click(within(workspace).getByRole('tab', { name: '主角所见' }));
+    const mine = within(workspace).getByLabelText('主角所见');
+    expect(mine.textContent).toContain('重伤');
+    expect(within(mine).getByRole('list', { name: '认知' }).querySelectorAll('li').length).toBeGreaterThan(0);
+    expect(within(workspace).queryByLabelText('全局局面')).toBeNull();
+
+    await user.click(within(workspace).getByText('等待时间'));
+    expect(within(within(workspace).getByRole('table', { name: '等待时间' })).getAllByRole('row')).toHaveLength(4);
+  });
+
+  it('单步、暂停、继续与停止；可以开始第二次推演并在两次之间切换', async () => {
+    const { user, runs, service, store } = await ready();
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    const workspace = await screen.findByRole('region', { name: '推演工作区' });
+    await user.click(within(workspace).getByRole('button', { name: '单步' }));
+    await waitFor(() => expect(store.getState().simRun?.view.run.lastSeq ?? 0).toBeGreaterThan(1));
+    expect(status()).toContain('可以继续');
+
+    await user.click(within(workspace).getByRole('button', { name: '暂停' }));
+    await waitFor(() => expect(status()).toContain('已暂停：作者暂停'));
+    expect(within(workspace).getByRole('button', { name: '暂停' }).matches(':disabled')).toBe(true);
+    // 暂停后“继续”先恢复再推进。
+    await user.click(within(workspace).getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(status()).toContain('已结束：到达回合上限'), { timeout: 10_000 });
+    const first = store.getState().simRunId ?? '';
+    const events = await service.simRunEvents(first);
+    expect(events.ok && events.value.map((e) => (e.payload as { type: string }).type).filter((t) => t === 'RunPaused' || t === 'RunResumed')).toEqual(['RunPaused', 'RunResumed']);
+
+    // 第二次：走一步后停止，需要确认。
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    await waitFor(() => expect(status()).toContain('第 0 回合'));
+    const again = screen.getByRole('region', { name: '推演工作区' });
+    await user.click(within(again).getByRole('button', { name: '停止' }));
+    expect(status()).toContain('可以继续');
+    await user.click(within(again).getByRole('button', { name: '确定停止' }));
+    await waitFor(() => expect(status()).toContain('已结束：作者停止'));
+    expect(within(runs).getByRole('button', { name: /第 2 次 · 已结束/ })).toBeTruthy();
+
+    // 切回第一次。
+    await user.click(within(runs).getByRole('button', { name: /第 1 次 · 已结束/ }));
+    await waitFor(() => expect(status()).toContain('已结束：到达回合上限'));
+    expect(store.getState().simRunId).toBe(first);
+  });
+
+  it('交互模式停在待核实的裁决上；没有价格时设预算会说明原因', async () => {
+    const { user, runs } = await ready();
+    await user.type(within(runs).getByRole('spinbutton', { name: /预算上限/ }), '1');
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    expect(await screen.findByText(/默认模型没有配置价格，预算上限无法生效/)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '推演工作区' })).toBeNull();
+
+    await user.clear(within(runs).getByRole('spinbutton', { name: /预算上限/ }));
+    await user.selectOptions(within(runs).getByRole('combobox', { name: '模式' }), 'interactive');
+    await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
+    const workspace = await screen.findByRole('region', { name: '推演工作区' });
+    await user.click(within(workspace).getByRole('button', { name: '继续' }));
+    expect(await within(workspace).findByText('有 1 条待核实的裁决等你确认。', undefined, { timeout: 10_000 })).toBeTruthy();
+    expect(status()).toContain('等待作者');
+    expect(within(workspace).getByRole('button', { name: '继续' }).matches(':disabled')).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
-// 测试用的场景配置草稿：模型按 scene_draft 模板给出的扁平形式（SceneDraftOutput）。
+// 推演相关测试共用的夹具：模型按 scene_draft 模板给出的场景配置草稿，以及测试模型在废仓库场景里的行为。
+import { waitProposal, type Policy } from '@fudiao/engine/testing';
 import type { SceneDraftOutput } from '@fudiao/prompts';
 
 /** 两个区域、两个角色、一件藏着的物品、一个秘密。 */
@@ -49,3 +50,26 @@ export const sceneDraftFixture = (): SceneDraftOutput => ({
   contest: 'ruling',
   narrativeRules: ['当铺里不许动手'],
 });
+
+// 覆盖各个阶段的行为：第一回合反派出手（需要裁决），主角喊话并提出推测（证据链判断），之后观察与防守。
+export const dramaPolicy: Policy = {
+  character_action: (ctx) => {
+    if (ctx.subject === 'antagonist') {
+      return ctx.round === 1 ? waitProposal({ kind: 'attack', target: 'protagonist', item: 'crossbow' }) : waitProposal({ kind: 'defend' });
+    }
+    return waitProposal({
+      kind: ctx.round === 2 ? 'observe' : 'speak',
+      ...(ctx.round !== 2 && { utterance: { sentences: ['你到底想要什么？'], volume: 'shout' as const } }),
+      inferences: [{ content: '南门恐怕有埋伏', about: ['south_gate'], confidence: 0.5, concerning: null }],
+    });
+  },
+  semantic_ruling: () => ({
+    rationale: '弩箭擦过',
+    effects: [{ type: 'setInjury', actor: 'protagonist', level: 'severe' }],
+    occurrences: [{ participants: ['antagonist', 'protagonist'], zones: ['center'], visible: true, loudness: 2, visual: '弩箭擦过主角肩头', sound: null }],
+    uncertainties: [],
+  }),
+  judgement: (ctx) => ({
+    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({ inference: m[1] ?? '', secret: m[2] ?? '', hit: true, supported: false, explanation: '没有线索' })),
+  }),
+};

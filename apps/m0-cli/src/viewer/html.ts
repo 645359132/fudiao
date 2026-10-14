@@ -1,4 +1,4 @@
-import type { ViewerData } from './data';
+import type { ViewerData } from '@fudiao/engine';
 
 // 单个 HTML 文件：数据以 JSON 内嵌，页面脚本负责展示。不加载任何外部资源，可离线打开。
 

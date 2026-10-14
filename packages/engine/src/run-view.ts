@@ -7,9 +7,10 @@ import {
   type Scene,
   type SimState,
 } from '@fudiao/domain';
-import type { RunEvent } from '@fudiao/engine';
+import type { RunEvent } from './events';
 
-// 静态查看页的数据：只由事件记录回放得到，不调用模型（硬性规则 9）。
+// 运行的查看数据（M0 的静态查看页与桌面端的推演工作区共用）：只由事件记录回放得到，不调用模型（硬性规则 9）。
+// 这是给作者看的全貌；角色代理的输入仍然只来自 buildCharacterView 的角色视图。
 // “角色所见”直接取自 buildCharacterView，与实际发给角色代理的信息一致。
 
 export type ViewerKnowledge = {

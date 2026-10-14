@@ -2,8 +2,8 @@
 // 事件写入作品库的 sim_event（只追加），模型经桌面端的适配器（凭据代理）调用，调用记录写入 llm_call（步骤键查重）。
 // 引擎与领域内核的逻辑不在这里：这里只负责把场景、运行与模型配置交给引擎，并把引擎的状态写回运行记录（缓存）。
 import { parseScene, stateHash, type Scene, type SceneSpecInput } from '@fudiao/domain';
-import { createEngine, replayRun, RunConfig, type EngineError, type Phase, type RunStatus, type TaskModel } from '@fudiao/engine';
-import type { CallOptions, LlmPort, ModelProfile } from '@fudiao/llm';
+import { buildViewerData, createEngine, replayRun, RunConfig, type EngineError, type Phase, type RunEvent, type RunStatus, type TaskModel, type ViewerData } from '@fudiao/engine';
+import { BudgetGuard, type CallOptions, type LlmPort, type ModelProfile } from '@fudiao/llm';
 import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput } from '@fudiao/prompts';
 import { err, ok, sha256, type Result } from '@fudiao/shared';
 import {
@@ -11,6 +11,7 @@ import {
   createSimScene,
   getSimRun,
   getSimScene,
+  listRunCalls,
   listSimRuns,
   listSimScenes,
   listSimSnapshots,
@@ -43,10 +44,21 @@ export type SimRunView = {
   readonly awaitingDirector: boolean;
   readonly pause: RunStatus['state']['pause'];
   readonly endReason: RunStatus['state']['endReason'];
+  /** 这次运行已用的费用（美元，来自调用记录）；unknownCostCalls 是费用未知的调用数。 */
+  readonly spentUsd: number;
+  readonly unknownCostCalls: number;
 };
+
+/** 一个回合的等待：从回合开始到回合结束经过的时间，与其中模型响应所占的时间（验收“推演等待”）。 */
+export type RoundTiming = { readonly round: number; readonly waitMs: number | null; readonly modelMs: number; readonly calls: number };
+
+/** 推演工作区的数据（B28）：运行状态、按回合整理的时间线（全局局面与各角色所见）与每回合的等待时间。 */
+export type SimRunDetail = { readonly view: SimRunView; readonly data: ViewerData | null; readonly timing: readonly RoundTiming[] };
 
 export type SimRunOptions = {
   readonly mode: 'interactive' | 'auto';
+  /** 费用上限（美元，B28）：预计将超出时不再发起新的调用，运行以“预算用完”结束。需要模型配置了价格。 */
+  readonly budgetUsd?: number;
   /** 随机数种子；不给时由运行标识得出。种子写在运行的第一条事件里，回放不依赖这里的算法。 */
   readonly seed?: number;
 };
@@ -132,7 +144,26 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     },
   };
 
-  const engineFor = (port: SqlPort) => createEngine({ llm, events: sqlEventStore(port), calls: projectCallLog(port, () => deps.ids.next()), now: () => deps.clock.now() });
+  /** 这次运行已用的费用：调用记录里它的全部调用之和。 */
+  async function spending(port: SqlPort, runId: string): Promise<Result<{ spentUsd: number; unknownCostCalls: number }, AppError>> {
+    const calls = await listRunCalls(port, runId);
+    if (!calls.ok) return err(repo(calls.error));
+    const done = calls.value.filter((c) => c.status !== 'error' && c.status !== 'cancelled');
+    return ok({ spentUsd: calls.value.reduce((n, c) => n + (c.cost ?? 0), 0), unknownCostCalls: done.filter((c) => c.cost === null).length });
+  }
+
+  /** 引擎每次操作新建：事件与调用记录都在作品库里；有预算的运行带上预算守卫，已用的费用从调用记录接着算。 */
+  const engineFor = (port: SqlPort, budget: { readonly limitUsd: number; readonly spentUsd: number } | null) => {
+    const guard = budget === null ? undefined : new BudgetGuard({ limitUsd: budget.limitUsd });
+    if (guard !== undefined && budget !== null) guard.spentUsd = budget.spentUsd;
+    return createEngine({
+      llm,
+      events: sqlEventStore(port),
+      calls: projectCallLog(port, () => deps.ids.next()),
+      now: () => deps.clock.now(),
+      ...(guard !== undefined && { budget: guard }),
+    });
+  };
 
   function sceneOf(config: unknown): Result<Scene, AppError> {
     const scene = parseScene(config);
@@ -149,6 +180,8 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       const snapshot = await saveSimSnapshot(port, { runId, seq: status.state.lastSeq, state: status.state.sim, stateHash: stateHash(status.state.sim) }, ctx());
       if (!snapshot.ok) return err(repo(snapshot.error));
     }
+    const spent = await spending(port, runId);
+    if (!spent.ok) return spent;
     return ok({
       run: saved.value,
       phase: status.phase,
@@ -157,6 +190,7 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       awaitingDirector: status.awaitingDirector !== null,
       pause: status.state.pause,
       endReason: status.state.endReason,
+      ...spent.value,
     });
   }
 
@@ -172,8 +206,11 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     if (run.value === null) return err({ code: 'not_found' });
     const scene = sceneOf(run.value.sceneConfig);
     if (!scene.ok) return scene;
+    const spent = run.value.budgetUsd === null ? null : await spending(port, runId);
+    if (spent !== null && !spent.ok) return spent;
     try {
-      const status = await action(engineFor(port), scene.value);
+      const engine = engineFor(port, run.value.budgetUsd === null || spent === null ? null : { limitUsd: run.value.budgetUsd, spentUsd: spent.value.spentUsd });
+      const status = await action(engine, scene.value);
       return status.ok ? await sync(port, runId, status.value) : err(engineError(status.error));
     } catch (error) {
       return err(settings(`推演没有推进：${error instanceof Error ? error.message : String(error)}`));
@@ -237,6 +274,12 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       if (!scene.ok) return scene;
       const models = await taskModels();
       if (!models.ok) return models;
+      if (options.budgetUsd !== undefined) {
+        if (!(options.budgetUsd > 0)) return err(settings('预算上限须大于 0'));
+        if (models.value.character_action.profile.prices === undefined) {
+          return err(settings('默认模型没有配置价格，预算上限无法生效：请在“模型服务”的“能力与价格”中填写价格，或不设预算'));
+        }
+      }
       const runId = deps.ids.next();
       const config = RunConfig.safeParse({
         protocol: stored.value.protocol,
@@ -249,7 +292,14 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       if (!config.success) return err(settings(`运行配置无效：${config.error.issues[0]?.message ?? ''}`));
       const run = await createSimRun(
         port,
-        { id: runId, sceneId, sceneConfig: stored.value.config, sceneConfigVersion: stored.value.configVersion, mode: options.mode },
+        {
+          id: runId,
+          sceneId,
+          sceneConfig: stored.value.config,
+          sceneConfigVersion: stored.value.configVersion,
+          mode: options.mode,
+          ...(options.budgetUsd !== undefined && { budgetUsd: options.budgetUsd }),
+        },
         ctx(),
       );
       if (!run.ok) return err(repo(run.error));
@@ -269,6 +319,48 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
 
     /** 当前状态：只读事件，不调用模型。 */
     simRunStatus: (runId: string) => withRun(runId, (engine, scene) => engine.status(runId, scene)),
+
+    /**
+     * 推演工作区的数据：只读事件与调用记录，不调用模型。时间线按回合整理，含全局局面与每个角色当时所见
+     * （角色所见取自 buildCharacterView，与实际发给角色代理的一致）。
+     */
+    async simRunDetail(runId: string): Promise<Result<SimRunDetail, AppError>> {
+      const view = await withRun(runId, (engine, scene) => engine.status(runId, scene));
+      if (!view.ok) return view;
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const scene = sceneOf(view.value.run.sceneConfig);
+      if (!scene.ok) return scene;
+      const calls = await listRunCalls(port, runId);
+      if (!calls.ok) return err(repo(calls.error));
+      let events: readonly StoredEvent[];
+      let data: ViewerData | null;
+      try {
+        events = await sqlEventStore(port).read(runId);
+        data = buildViewerData(scene.value, runId, events.map((e) => e.payload as RunEvent));
+      } catch (error) {
+        return err(settings(`运行记录读不出来：${error instanceof Error ? error.message : String(error)}`));
+      }
+      const started = new Map<number, string>();
+      const ended = new Map<number, string>();
+      for (const e of events) {
+        const payload = e.payload as RunEvent;
+        if (payload.type === 'RoundStarted') started.set(payload.round, e.at);
+        if (payload.type === 'RoundEnded') ended.set(payload.round, e.at);
+      }
+      const span = (from: string, to: string) => Math.max(0, Date.parse(to) - Date.parse(from));
+      const timing: RoundTiming[] = [...started.keys()].sort((a, b) => a - b).map((round) => {
+        const mine = calls.value.filter((c) => c.stepKey.split(':')[1] === String(round));
+        const end = ended.get(round);
+        return {
+          round,
+          waitMs: end === undefined ? null : span(started.get(round) ?? end, end),
+          modelMs: mine.reduce((n, c) => n + span(c.startedAt, c.finishedAt), 0),
+          calls: mine.length,
+        };
+      });
+      return ok({ view: view.value, data, timing });
+    },
 
     /** 这次运行的全部事件，按序号。 */
     async simRunEvents(runId: string): Promise<Result<readonly StoredEvent[], AppError>> {

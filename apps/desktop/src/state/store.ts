@@ -5,7 +5,8 @@ import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
-import type { ForeshadowFields, PlanFields, SimScene, SimSceneFields } from '@fudiao/store';
+import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
+import type { SimRunDetail, SimRunOptions } from '../app/simulation';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -51,6 +52,9 @@ export type WriterJob = {
 
 /** 还没有保存的场景配置草稿：由描述生成，或从空白开始。serial 每次换草稿加一，编辑表单据此重建。 */
 export type SceneDraftState = { readonly serial: number; readonly title: string; readonly config: SceneSpecInput; readonly problems: readonly string[] };
+
+/** 推演停下来等人的阶段：等待作者、已暂停、已结束。 */
+const SIM_STOPPED: ReadonlySet<string> = new Set(['AwaitingAuthor', 'Paused', 'Ended']);
 
 /** 审核抽屉的状态：note 是最近一次审核或修订的说明。 */
 export type ReviewState = {
@@ -236,7 +240,20 @@ export type AppState = {
   readonly sceneDraft: SceneDraftState | null;
   readonly sceneDrafting: boolean;
   readonly openSimulation: () => Promise<void>;
-  readonly selectSimScene: (id: string | null) => void;
+  readonly selectSimScene: (id: string | null) => Promise<void>;
+  /** 推演工作区（B28）：选中场景的“配置”或“推演”，这个场景的运行、选中的运行与它的时间线；simAdvancing 为正在推进。 */
+  readonly simTab: 'config' | 'runs';
+  readonly simRuns: readonly SimRun[];
+  readonly simRunId: string | null;
+  readonly simRun: SimRunDetail | null;
+  readonly simAdvancing: boolean;
+  readonly showSimTab: (tab: 'config' | 'runs') => void;
+  readonly startSimRun: (options: SimRunOptions) => Promise<void>;
+  readonly selectSimRun: (id: string) => Promise<void>;
+  readonly stepSimRun: () => Promise<void>;
+  readonly continueSimRun: () => Promise<void>;
+  readonly pauseSimRun: () => Promise<void>;
+  readonly stopSimRun: () => Promise<void>;
   readonly draftSimScene: (description: string) => Promise<void>;
   readonly blankSimScene: (config: SceneSpecInput) => void;
   readonly discardSceneDraft: () => void;
@@ -329,6 +346,33 @@ export function createAppStore(service: AppService): AppStore {
     let taskSeq = 0;
     let writerAbort: AbortController | null = null;
     let sceneSerial = 0;
+    let simAbort: AbortController | null = null;
+    /** 正在进行的连续推进；暂停、停止与关闭作品时先等它停下。 */
+    let simLoop: Promise<void> | null = null;
+
+    /** 读出一次运行的状态与时间线；选中的运行已经换了时不覆盖。 */
+    async function refreshRun(runId: string): Promise<void> {
+      const detail = await service.simRunDetail(runId);
+      if (get().simRunId !== runId) return;
+      if (!detail.ok) {
+        set({ message: describeError(detail.error) });
+        return;
+      }
+      set({ simRun: detail.value, simRuns: get().simRuns.map((r) => (r.id === runId ? detail.value.view.run : r)) });
+    }
+
+    /** 读出一个场景的运行；select 给出时选中它，否则选中最近的一次。 */
+    async function loadRuns(sceneId: string, select: string | null): Promise<void> {
+      const runs = await service.listSimRuns(sceneId);
+      if (get().simSceneId !== sceneId) return;
+      if (!runs.ok) {
+        set({ message: describeError(runs.error) });
+        return;
+      }
+      const runId = select ?? runs.value[0]?.id ?? null;
+      set({ simRuns: runs.value, simRunId: runId, simRun: null, ...(select !== null && { simTab: 'runs' as const }) });
+      if (runId !== null) await refreshRun(runId);
+    }
     let reviewAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
 
@@ -449,6 +493,11 @@ export function createAppStore(service: AppService): AppStore {
       simSceneId: null,
       sceneDraft: null,
       sceneDrafting: false,
+      simTab: 'config',
+      simRuns: [],
+      simRunId: null,
+      simRun: null,
+      simAdvancing: false,
       usage: null,
       contextDrawerOpen: false,
       writingContext: null,
@@ -495,8 +544,11 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
+        // 推演同样停在当前这一步之后；事件都在作品库里，下次打开可以继续。
+        simAbort?.abort();
+        await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -786,7 +838,78 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         await run(service.listSimScenes(), (simScenes) => ({ simScenes, panel: 'simulation', chapterContent: null, drawerEntityId: null }));
       },
-      selectSimScene: (id) => set({ simSceneId: id }),
+      async selectSimScene(id) {
+        if (get().simAdvancing) return;
+        set({ simSceneId: id, simTab: 'config', simRuns: [], simRunId: null, simRun: null });
+        if (id !== null && id !== 'new') await loadRuns(id, null);
+      },
+      showSimTab: (simTab) => set({ simTab }),
+      async startSimRun(options) {
+        const sceneId = get().simSceneId;
+        if (sceneId === null || sceneId === 'new' || get().simAdvancing) return;
+        const started = await service.startSimRun(sceneId, options);
+        if (!started.ok) {
+          set({ message: describeError(started.error) });
+          return;
+        }
+        set({ message: null });
+        await loadRuns(sceneId, started.value.run.id);
+      },
+      async selectSimRun(id) {
+        if (get().simAdvancing) return;
+        set({ simRunId: id, simRun: null });
+        await refreshRun(id);
+      },
+      async stepSimRun() {
+        const id = get().simRunId;
+        if (id === null || get().simAdvancing) return;
+        set({ simAdvancing: true, message: null });
+        const view = await service.stepSimRun(id);
+        if (!view.ok) set({ message: describeError(view.error) });
+        await refreshRun(id);
+        set({ simAdvancing: false });
+      },
+      async continueSimRun() {
+        const id = get().simRunId;
+        if (id === null || get().simAdvancing) return;
+        const abort = new AbortController();
+        simAbort = abort;
+        set({ simAdvancing: true, message: null });
+        // 一步一步推进，每一步之后刷新时间线；停在等待作者、暂停、结束，或作者叫停。
+        simLoop = (async () => {
+          let view = await service.simRunStatus(id);
+          if (view.ok && view.value.phase === 'Paused') view = await service.resumeSimRun(id);
+          while (view.ok && !SIM_STOPPED.has(view.value.phase) && !abort.signal.aborted) {
+            view = await service.stepSimRun(id, { signal: abort.signal });
+            await refreshRun(id);
+          }
+          if (!view.ok) set({ message: describeError(view.error) });
+          await refreshRun(id);
+        })();
+        await simLoop;
+        simLoop = null;
+        if (simAbort === abort) simAbort = null;
+        set({ simAdvancing: false });
+      },
+      async pauseSimRun() {
+        const id = get().simRunId;
+        if (id === null) return;
+        // 先让正在进行的推进停在当前这一步之后，再记下暂停：两边不会同时写这次运行。
+        simAbort?.abort();
+        await simLoop;
+        const view = await service.pauseSimRun(id);
+        if (!view.ok) set({ message: describeError(view.error) });
+        await refreshRun(id);
+      },
+      async stopSimRun() {
+        const id = get().simRunId;
+        if (id === null) return;
+        simAbort?.abort();
+        await simLoop;
+        const view = await service.stopSimRun(id);
+        if (!view.ok) set({ message: describeError(view.error) });
+        await refreshRun(id);
+      },
       async draftSimScene(description) {
         if (get().sceneDrafting) return;
         const taskId = `task-${++taskSeq}`;

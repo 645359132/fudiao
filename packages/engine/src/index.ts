@@ -6,3 +6,5 @@ export { createEngine, replayRun, sceneHash } from './engine';
 export type { EndReason, EngineEvent, PauseReason, RunEvent } from './events';
 export type { Phase, ProposalRecord, RunState } from './run-state';
 export { reduceRun } from './run-state';
+export type { ViewerData, ViewerKnowledge, ViewerRound, ViewerView } from './run-view';
+export { buildViewerData } from './run-view';

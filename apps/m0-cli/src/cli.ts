@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { buildCharacterView, initialState, type ActorId, type KnowledgeId, type Occurrence, type Scene } from '@fudiao/domain';
-import { createEngine, reduceRun, type RunEvent, type RunStatus } from '@fudiao/engine';
+import { buildViewerData, createEngine, reduceRun, type RunEvent, type RunStatus } from '@fudiao/engine';
 import { BudgetGuard, costOf, structured, type LlmPort, type LlmRequest, type LlmResult, type Prices } from '@fudiao/llm';
 import {
   ActionProposal,
@@ -24,7 +24,6 @@ import { buildPort, loadExperiment, runConfig, taskModel, type Experiment, type 
 import { loadSceneFile, type SceneFile } from './scene-file';
 import { groupOutcomes, renderOutcomes, runOutcome } from './report/outcomes';
 import { analyze, loadManifest, loadSamples, writePackets } from './report/report';
-import { buildViewerData } from './viewer/data';
 import { renderViewerHtml } from './viewer/html';
 
 export type Console = {

@@ -103,6 +103,7 @@ const RunRow = z
     batch_id: z.string().nullable(),
     parent_run_id: z.string().nullable(),
     branch_from_seq: z.number().int().nullable(),
+    budget_usd: z.number().nullable(),
     status: z.enum(SIM_RUN_STATUSES),
     end_reason: z.string().nullable(),
     pause_reason: z.string().nullable(),
@@ -121,6 +122,8 @@ const RunRow = z
     batchId: r.batch_id,
     parentRunId: r.parent_run_id,
     branchFromSeq: r.branch_from_seq,
+    /** 费用上限（美元）；没有设置时为 null。 */
+    budgetUsd: r.budget_usd,
     status: r.status,
     endReason: r.end_reason,
     pauseReason: r.pause_reason,
@@ -132,7 +135,7 @@ const RunRow = z
 export type SimRun = z.output<typeof RunRow>;
 
 const RUN_COLUMNS =
-  'id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, status, end_reason, pause_reason, round, last_seq, created_at, updated_at';
+  'id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, budget_usd, status, end_reason, pause_reason, round, last_seq, created_at, updated_at';
 
 export type SimRunInput = {
   readonly id: string;
@@ -143,13 +146,14 @@ export type SimRunInput = {
   readonly batchId?: string;
   /** 分支：来源的运行与序号。 */
   readonly parent?: { readonly runId: string; readonly seq: number };
+  readonly budgetUsd?: number;
 };
 
 /** 登记一次运行（还没有事件）。事件由引擎经 sqlEventStore 追加。 */
 export function createSimRun(port: SqlPort, input: SimRunInput, ctx: WriteContext): Promise<Result<SimRun, RepoError>> {
   return insertReturning(port, RunRow, {
-    sql: `INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${RUN_COLUMNS}`,
+    sql: `INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, budget_usd, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${RUN_COLUMNS}`,
     params: [
       input.id,
       input.sceneId,
@@ -159,6 +163,7 @@ export function createSimRun(port: SqlPort, input: SimRunInput, ctx: WriteContex
       input.batchId ?? null,
       input.parent?.runId ?? null,
       input.parent?.seq ?? null,
+      input.budgetUsd ?? null,
       ctx.now,
       ctx.now,
     ],

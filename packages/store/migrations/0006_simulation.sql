@@ -34,6 +34,8 @@ CREATE TABLE sim_run (
   -- 分支：从哪次运行的哪个序号分出来（B30）。
   parent_run_id TEXT REFERENCES sim_run (id),
   branch_from_seq INTEGER,
+  -- 这次运行的费用上限（美元，B28）；没有设置时为 NULL。
+  budget_usd REAL CHECK (budget_usd IS NULL OR budget_usd > 0),
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'running', 'awaiting_author', 'paused', 'ended')),
   end_reason TEXT,
   pause_reason TEXT,

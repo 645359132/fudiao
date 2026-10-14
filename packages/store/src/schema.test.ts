@@ -100,7 +100,7 @@ const sample: Statement[] = [
     ...T,
   ),
   s(
-    "INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, status, pause_reason, round, last_seq, created_at, updated_at) VALUES ('01U2', '01N1', '{\"zones\":[]}', 1, 'interactive', '01B1', '01U1', 2, 'paused', 'author', 1, 2, ?, ?)",
+    "INSERT INTO sim_run (id, scene_id, scene_config, scene_config_version, mode, batch_id, parent_run_id, branch_from_seq, budget_usd, status, pause_reason, round, last_seq, created_at, updated_at) VALUES ('01U2', '01N1', '{\"zones\":[]}', 1, 'interactive', '01B1', '01U1', 2, 1.5, 'paused', 'author', 1, 2, ?, ?)",
     ...T,
   ),
   s("INSERT INTO sim_event (run_id, seq, batch_first, batch_index, batch_size, type, payload, created_at) VALUES ('01U1', 1, 1, 0, 1, 'RunStarted', '{\"type\":\"RunStarted\",\"sceneHash\":\"h\"}', ?)", NOW),

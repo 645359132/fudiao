@@ -213,3 +213,22 @@ export async function usageSummary(port: SqlPort): Promise<Result<UsageSummary, 
     byModel: byModel.value.map((r) => ({ provider: r.provider, model: r.model, ...totals(r) })),
   });
 }
+
+const RunCallRow = z
+  .object({ step_key: z.string(), task_kind: z.string(), status: z.string(), cost: z.number().nullable(), started_at: z.string(), finished_at: z.string() })
+  .transform((r) => ({ stepKey: r.step_key, taskKind: r.task_kind, status: r.status, cost: r.cost, startedAt: r.started_at, finishedAt: r.finished_at }));
+export type RunCall = z.output<typeof RunCallRow>;
+
+/**
+ * 一次推演运行的模型调用，按开始时间。推演的步骤键都以“运行标识:”开头，按这个前缀取（用得上步骤键的索引）。
+ * 用来算这次运行已用的费用（预算，B28）与每回合的模型响应时间。
+ */
+export function listRunCalls(port: SqlPort, runId: string): Promise<Result<RunCall[], RepoError>> {
+  return queryAll(
+    port,
+    RunCallRow,
+    'SELECT step_key, task_kind, status, cost, started_at, finished_at FROM llm_call WHERE step_key >= ? AND step_key < ? ORDER BY started_at, id',
+    // “;”是“:”的下一个字符：区间正好是以“运行标识:”开头的全部步骤键。
+    [`${runId}:`, `${runId};`],
+  );
+}

@@ -189,6 +189,7 @@ export const TABLES: readonly TableSpec[] = [
       'batch_id',
       'parent_run_id',
       'branch_from_seq',
+      'budget_usd',
       'status',
       'end_reason',
       'pause_reason',

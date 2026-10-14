@@ -1365,3 +1365,13 @@ fieldset.plain {
 .sim-scenes button[aria-current='true'] {
   border-color: var(--accent);
 }
+
+.sim-thought {
+  color: var(--muted);
+  font-style: italic;
+}
+
+[role='tab'][aria-selected='true'],
+[aria-pressed='true'] {
+  border-color: var(--accent);
+}

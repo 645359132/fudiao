@@ -8,7 +8,7 @@ import { memoryEventStore } from '@fudiao/store';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
-import { sceneDraftFixture } from '../testing/scenes';
+import { dramaPolicy as policy, sceneDraftFixture } from '../testing/scenes';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -23,29 +23,6 @@ function value<T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
   if (!r.ok) throw new Error(JSON.stringify(r.error));
   return r.value;
 }
-
-// 覆盖各个阶段的行为：第一回合反派出手（需要裁决），主角喊话并提出推测（证据链判断），之后观察与防守。
-const policy: Policy = {
-  character_action: (ctx) => {
-    if (ctx.subject === 'antagonist') {
-      return ctx.round === 1 ? waitProposal({ kind: 'attack', target: 'protagonist', item: 'crossbow' }) : waitProposal({ kind: 'defend' });
-    }
-    return waitProposal({
-      kind: ctx.round === 2 ? 'observe' : 'speak',
-      ...(ctx.round !== 2 && { utterance: { sentences: ['你到底想要什么？'], volume: 'shout' as const } }),
-      inferences: [{ content: '南门恐怕有埋伏', about: ['south_gate'], confidence: 0.5, concerning: null }],
-    });
-  },
-  semantic_ruling: () => ({
-    rationale: '弩箭擦过',
-    effects: [{ type: 'setInjury', actor: 'protagonist', level: 'severe' }],
-    occurrences: [{ participants: ['antagonist', 'protagonist'], zones: ['center'], visible: true, loudness: 2, visual: '弩箭擦过主角肩头', sound: null }],
-    uncertainties: [],
-  }),
-  judgement: (ctx) => ({
-    judgements: [...ctx.text.matchAll(/推测 \[([^\]]+)\] 对照秘密 \[([^\]]+)\]/g)].map((m) => ({ inference: m[1] ?? '', secret: m[2] ?? '', hit: true, supported: false, explanation: '没有线索' })),
-  }),
-};
 
 const sceneFields = (config: Record<string, unknown> = warehouseSpec()) => ({
   chapterId: null,
@@ -351,5 +328,88 @@ describe('场景配置草稿（B39）', () => {
     });
     expect(await app.draftSimScene('  ')).toMatchObject({ ok: false, error: { code: 'settings' } });
     expect(deps.llmRequests).toHaveLength(1);
+  });
+});
+
+describe('推演工作区的数据（B28）', () => {
+  it('按回合整理时间线：行动与内心片段、裁决、发生的事与感知、回合结束时的局面、每个角色当时所见；只读事件，不调用模型', async () => {
+    const { app, scene, fake } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    // 刚开始、还没有完成的回合。
+    expect(value(await app.simRunDetail(runId))).toMatchObject({ view: { phase: 'BuildingViews' }, data: { rounds: [] }, timing: [] });
+    value(await app.continueSimRun(runId));
+    const before = fake.calls.length;
+    const detail = value(await app.simRunDetail(runId));
+    expect(fake.calls.length).toBe(before);
+
+    expect(detail.view).toMatchObject({ phase: 'Ended', endReason: 'max_rounds', spentUsd: 0 });
+    // 测试模型没有价格：每次调用的费用未知。
+    expect(detail.view.unknownCostCalls).toBe(before);
+    const data = detail.data!;
+    expect(data).toMatchObject({ protocol: 'simultaneous', mode: 'auto', endReason: 'max_rounds' });
+    expect(data.rounds.map((r) => r.round)).toEqual([1, 2, 3]);
+    const first = data.rounds[0]!;
+    expect(first.proposals.map((p) => [p.actor, p.kind])).toEqual([
+      ['对手', 'attack'],
+      ['主角', 'speak'],
+    ]);
+    expect(first.proposals.every((p) => p.innerThought !== null && p.innerThought !== '')).toBe(true);
+    expect(first.rulings).toHaveLength(1);
+    expect(first.rulings[0]).toMatchObject({ rationale: '弩箭擦过', by: 'auto' });
+    expect(first.occurrences.length).toBeGreaterThan(0);
+    expect(first.world.actors.find((a) => a.id === 'protagonist')).toMatchObject({ injury: 'severe' });
+    // 每个角色各有自己的所见。
+    expect(Object.keys(first.views).sort()).toEqual(['antagonist', 'protagonist']);
+    expect(first.notes.some((n) => n.includes('缺少证据链'))).toBe(true);
+
+    // 等待时间：每个回合一行，模型调用都归到所在的回合。
+    expect(detail.timing.map((t) => t.round)).toEqual([1, 2, 3]);
+    expect(detail.timing.every((t) => t.waitMs !== null && t.waitMs >= t.modelMs && t.calls > 0)).toBe(true);
+    expect(detail.timing.reduce((n, t) => n + t.calls, 0)).toBe(before);
+  });
+});
+
+describe('预算（B28）', () => {
+  /** 给默认模型配上价格：每百万 Token 输入与输出各 1 美元。 */
+  async function priced() {
+    const ctx = await ready();
+    const services = value(await ctx.app.loadModelServices());
+    const model = services.models[0]!;
+    value(await ctx.app.updateModel(model, { displayName: model.displayName, capabilities: model.capabilities, prices: { input: 1, output: 1 } }));
+    return ctx;
+  }
+
+  it('默认模型没有价格时不能设预算；预算须大于 0', async () => {
+    const { app, scene } = await ready();
+    expect(await app.startSimRun(scene.id, { mode: 'auto', budgetUsd: 1 })).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('没有配置价格') } });
+    const ctx = await priced();
+    expect(await ctx.app.startSimRun(ctx.scene.id, { mode: 'auto', budgetUsd: 0 })).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('大于 0') } });
+    expect(value(await ctx.app.listSimRuns(ctx.scene.id))).toEqual([]);
+  });
+
+  it('预算够用时跑到结束，已用的费用来自调用记录', async () => {
+    const { app, scene, fake } = await priced();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7, budgetUsd: 5 })).run.id;
+    const ended = value(await app.continueSimRun(runId));
+    expect(ended).toMatchObject({ phase: 'Ended', endReason: 'max_rounds', unknownCostCalls: 0, run: { budgetUsd: 5 } });
+    // 测试模型每次调用 1,000 输入、200 输出 Token。
+    expect(ended.spentUsd).toBeCloseTo((fake.calls.length * 1200) / 1_000_000, 9);
+  });
+
+  it('预计将超出预算时不再调用模型，运行以预算用完结束；单步推进时已用的费用接着算，不会因为换了引擎实例而清零', async () => {
+    const { app, scene, fake } = await priced();
+    // 一次调用按最坏情况估算约 0.005 美元（输入字数加 4,096 的输出上限）：0.02 美元只够几次调用。
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7, budgetUsd: 0.02 })).run.id;
+    let view = value(await app.stepSimRun(runId));
+    for (let i = 0; i < 200 && view.phase !== 'Ended'; i++) view = value(await app.stepSimRun(runId));
+    expect(view).toMatchObject({ phase: 'Ended', endReason: 'budget', run: { status: 'ended', endReason: 'budget' } });
+    expect(view.spentUsd).toBeLessThanOrEqual(0.02);
+    expect(fake.calls.length).toBeGreaterThan(0);
+
+    // 不设预算的同一场景要调用得多得多。
+    const free = await ready();
+    const freeId = value(await free.app.startSimRun(free.scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await free.app.continueSimRun(freeId));
+    expect(fake.calls.length).toBeLessThan(free.fake.calls.length);
   });
 });

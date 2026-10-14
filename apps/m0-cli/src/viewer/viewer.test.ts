@@ -1,10 +1,9 @@
-import { createEngine, type RunEvent } from '@fudiao/engine';
+import { buildViewerData, createEngine, type RunEvent } from '@fudiao/engine';
 import { fakeModel, testConfig, waitProposal } from '@fudiao/engine/testing';
 import { canaryScene, staticForbidden } from '@fudiao/domain/testing';
 import { memoryCallLog } from '@fudiao/llm';
 import { memoryEventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
-import { buildViewerData } from './data';
 import { embedJson, renderViewerHtml } from './html';
 
 async function recordedRun() {

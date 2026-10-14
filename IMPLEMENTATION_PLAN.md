@@ -135,7 +135,7 @@ fudiao/
 | `story_event` | id、故事时间（标签与排序键）、summary、participants、location_id、perceptions、origin_run_id、origin_seq | B55、I07 |
 | `event_paragraph_link` | event_id、paragraph_id、mode（正面叙述、回忆、转述、暗示） | B55 |
 | `sim_scene` | id、chapter_id、title、config（场景配置 JSON）、config_version（配置每改一次加一）、protocol、max_rounds、first_speaker、version；迁移 0006 | B22、B39 至 B41 |
-| `sim_run` | id、scene_id、scene_config 与 scene_config_version（开始时的场景配置：场景之后再改，这次运行仍按当时的配置继续与回放）、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq；status、end_reason、pause_reason、round、last_seq 是由事件得出的缓存，以事件为准；迁移 0006 | B28、B48 |
+| `sim_run` | id、scene_id、scene_config 与 scene_config_version（开始时的场景配置：场景之后再改，这次运行仍按当时的配置继续与回放）、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、budget_usd（费用上限，可空）；status、end_reason、pause_reason、round、last_seq 是由事件得出的缓存，以事件为准；迁移 0006 | B28、B48 |
 | `sim_event` | run_id、seq、batch_first / batch_index / batch_size（同一次追加为一批，与 M0 的 JSONL 记录一一对应）、type 与 actor（取自事件内容，便于查询）、payload、created_at；主键 (run_id, seq)；只追加，表上的触发器拒绝修改与删除。回合与阶段由回放得到，不另存列；迁移 0006 | B28、B30 |
 | `sim_snapshot` | run_id、seq、state（JSON）、state_hash、created_at；在等待作者、暂停与结束处记下，用来校验回放；迁移 0006 | B30 |
 | `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
@@ -342,6 +342,12 @@ stateDiagram-v2
 写作类任务（选区操作、候选稿）的上下文（M2-04，`packages/context/src/writing-context.ts`，纯函数）：候选条目为作品信息、本章梗概与备注、选区与前后的正文（前 2,000 字、后 600 字，必需）、前面章节的梗概（从近到远）、本章出现的设定（提及次数用编辑器的设定名匹配器计算，选区前后 300 字内出现的优先）与相关事实（与出现的设定有关，适用章节包含本章；只用已确认的，待复核与未确认的列出原因）。选入顺序为必需 → 作者加入（超出预算也纳入并标明）→ 按相关性在预算内；Token 按字符数估算。预算取默认模型上下文长度的 60%，最多 32,000，没有默认模型时 8,000。章节头部的“AI 上下文”显示清单，作者可以加入或移除条目，增减在本次打开作品期间按章节保留。
 
 桌面端的推演（M4-01，`apps/desktop/src/app/simulation.ts`）：引擎与领域内核原样使用，桌面端只做接线。事件经 `sqlEventStore` 写入作品库的 `sim_event`：一批事件一个事务，第一条插入带“最后序号仍是调用方读到的那个”的守卫，不满足时整批回滚并返回序号冲突；运行必须先登记在 `sim_run` 中。模型端口按请求里的服务标识找到桌面端的适配器（经凭据代理）；调用记录写入 `llm_call`，步骤键查重沿用 `projectCallLog`。运行配置里各类任务的模型取“模型服务”的默认模型（须通过能力自检），输出上限为任务所需加思考的余量、按模型的最大输出封顶。用例有保存场景（先经 `parseScene` 校验）、开始、单步、继续、暂停、恢复、停止、读取状态与事件、校验回放（按快照处的哈希）；每次引擎操作之后把阶段、回合与结束原因写回 `sim_run`。待核实裁决的确认、作者介入与分支在 M4-05，界面在 M4-02 至 M4-04。
+
+推演工作区（M4-04，B28，`apps/desktop/src/ui/SimWorkspace.tsx`）：场景的“推演”页签。开始推演时选择模式（自动或交互）与可选的预算上限；一个场景可以推演多次，随时在各次之间切换。工作区显示当前回合、阶段、已用费用与预算，提供单步、继续、暂停与停止（停止须确认）。“继续”由状态层一步一步调用单步，每一步之后刷新时间线，停在等待作者、暂停、结束或作者叫停处；暂停与停止先等正在进行的这一步停下，再写入对应的事件，两边不会同时写同一次运行。时间线按回合显示，可在“全局局面”与各角色“所见”之间切换：全局局面有各角色的行动与内心片段、语义裁决、发生的事与谁察觉到、回合结束时的局面与提示（缺少证据链的推测、僵局、作者介入等）；角色所见取自 `buildCharacterView`，与发给这个角色代理的信息一致。这些数据由 `packages/engine/src/run-view.ts` 的 `buildViewerData` 只读事件得到（原在 M0 命令行的查看页里，现在两边共用），不调用模型。
+
+预算（B28）：预算上限记在 `sim_run.budget_usd`，需要默认模型配置了价格。每次引擎操作时从调用记录算出这次运行已用的费用（`listRunCalls`，按步骤键的前缀取），交给预算守卫；预计将超出时不再发起新的调用，运行以“预算用完”结束。
+
+等待时间（验收“推演等待”）：工作区列出每回合等了多久（回合开始到回合结束的事件时间之差）与其中模型响应的合计（这一回合各次调用的起止时间之差），两者分开记录；同一回合的行动提案同时请求，所以后者可以大于前者。
 
 场景编辑（M4-02，B22、B23、B39）：顶栏“推演”页列出推演场景。新建时作者用一段话描述局面，`scene_draft` 模板生成场景配置草稿（`draftSimScene`，不保存），或从空白开始；草稿与已有场景用同一张表单编辑（`apps/desktop/src/ui/SceneEditor.tsx`）：场景名、所属章节、回合协议、回合上限、第一个开口的角色，角色与角色卡（目标、底线、性格倾向、风险偏好、情绪阈值、失控条件、说话风格），每个角色最多五条初始认知（来源方式、相信程度、涉及的对象、二阶认知指向的角色），秘密（内容、涉及的对象、知情的角色），物品（位置、是否藏着、写着的内容）与叙述规则。校验仍由领域内核的 `parseScene` 完成，`apps/desktop/src/app/scene-editing.ts` 把出错的位置与原因写成作者看得懂的话，随时列在表单下方，全部改好才能保存。机关、消耗规则、前提条件、伤势限制、标记、场景时钟与响度表首版没有表单，在“高级”里直接编辑整份配置（JSON）。
 

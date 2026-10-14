@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { blankSceneConfig } from '../app/scene-editing';
 import { SceneEditor } from './SceneEditor';
+import { SimWorkspace } from './SimWorkspace';
 import { useApp } from './store-context';
 
 const PROTOCOL = { simultaneous: '同时行动', turn_based: '轮流对话' } as const;
@@ -56,6 +57,8 @@ export function SimulationPanel() {
   const scenes = useApp((s) => s.simScenes);
   const selected = useApp((s) => s.simSceneId);
   const select = useApp((s) => s.selectSimScene);
+  const tab = useApp((s) => s.simTab);
+  const showTab = useApp((s) => s.showSimTab);
   if (scenes === null) return <p className="muted">正在读取推演场景…</p>;
   const scene = scenes.find((s) => s.id === selected);
   return (
@@ -66,7 +69,7 @@ export function SimulationPanel() {
           <ul className="sim-scenes">
             {scenes.map((s) => (
               <li key={s.id}>
-                <button type="button" aria-current={s.id === selected} onClick={() => select(s.id)}>
+                <button type="button" aria-current={s.id === selected} onClick={() => void select(s.id)}>
                   {s.title}
                   <span className="muted">
                     {PROTOCOL[s.protocol]} · {s.maxRounds} 回合
@@ -76,7 +79,7 @@ export function SimulationPanel() {
             ))}
           </ul>
           {scenes.length === 0 ? <p className="muted">还没有推演场景。</p> : null}
-          <button type="button" aria-current={selected === 'new'} onClick={() => select('new')}>
+          <button type="button" aria-current={selected === 'new'} onClick={() => void select('new')}>
             新建场景
           </button>
         </nav>
@@ -86,11 +89,25 @@ export function SimulationPanel() {
           ) : scene === undefined ? (
             <p className="muted">选一个场景，或新建一个。</p>
           ) : (
-            <SceneEditor
-              key={`${scene.id}:${scene.version}`}
-              id={scene.id}
-              initial={{ chapterId: scene.chapterId, title: scene.title, config: scene.config, protocol: scene.protocol, maxRounds: scene.maxRounds, firstSpeaker: scene.firstSpeaker }}
-            />
+            <>
+              <div className="skill-actions" role="tablist" aria-label="场景">
+                <button type="button" role="tab" aria-selected={tab === 'config'} onClick={() => showTab('config')}>
+                  场景配置
+                </button>
+                <button type="button" role="tab" aria-selected={tab === 'runs'} onClick={() => showTab('runs')}>
+                  推演
+                </button>
+              </div>
+              {tab === 'runs' ? (
+                <SimWorkspace />
+              ) : (
+                <SceneEditor
+                  key={`${scene.id}:${scene.version}`}
+                  id={scene.id}
+                  initial={{ chapterId: scene.chapterId, title: scene.title, config: scene.config, protocol: scene.protocol, maxRounds: scene.maxRounds, firstSpeaker: scene.firstSpeaker }}
+                />
+              )}
+            </>
           )}
         </div>
       </div>
