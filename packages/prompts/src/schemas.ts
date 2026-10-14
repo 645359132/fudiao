@@ -191,10 +191,15 @@ export const SceneDraftOutput = z.object({
 });
 export type SceneDraftOutput = z.infer<typeof SceneDraftOutput>;
 
-/** 章节计划草稿（B65）：由作品大纲拆出，作者修改确认后才写入章节计划与伏笔账本。人物与伏笔用名字指代。 */
+/**
+ * 章节计划草稿（B65）：由作品大纲拆出，作者修改确认后才写入章节计划与伏笔账本。人物与伏笔用名字指代。
+ * 分卷（B68）：每章的 volume 是所在卷的卷名（不分卷时为空），volumes 按顺序列出各卷的卷名与梗概。
+ */
 export const PlanDraftOutput = z.object({
+  volumes: z.array(z.object({ title: z.string(), summary: z.string() })).default([]),
   chapters: z.array(
     z.object({
+      volume: z.string().default(''),
       title: z.string(),
       goal: z.string(),
       cast: z.array(z.string()),
@@ -208,6 +213,8 @@ export const PlanDraftOutput = z.object({
   foreshadows: z.array(z.object({ title: z.string(), content: z.string(), reveal: z.string() })),
 });
 export type PlanDraftOutput = z.infer<typeof PlanDraftOutput>;
+/** 校验前的形状：分卷字段可以省略（不分卷的草稿、以前的录制样本）。 */
+export type PlanDraftData = z.input<typeof PlanDraftOutput>;
 
 /** 作品骨架（B67 快速成书）：由一句话的想法展开的作品名、类型、简介、大纲与主要人物；作者修改确认后才写入作品。 */
 export const BookSeedOutput = z.object({

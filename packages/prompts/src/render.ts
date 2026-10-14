@@ -696,6 +696,8 @@ export type PlanDraftInput = {
   readonly outline: string;
   readonly characters: readonly string[];
   readonly chapters: readonly string[];
+  /** 作品已有的卷名（B68），按顺序；没有分卷时为空。 */
+  readonly volumes?: readonly string[];
   readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
@@ -711,6 +713,8 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     characters: input.characters.map((name) => ({ name })),
     chapters: input.chapters.map((title) => ({ title })),
     hasChapters: input.chapters.length > 0,
+    volumes: (input.volumes ?? []).map((title) => ({ title })),
+    hasVolumes: (input.volumes ?? []).length > 0,
     foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
     hasForeshadows: input.foreshadows.length > 0,
     chapterCount: input.chapterCount,

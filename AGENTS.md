@@ -79,6 +79,7 @@
 - M3-11 已完成：写作技能采用通用的 SKILL.md 格式——`packages/prompts/src/skill-md.ts`（`parseSkillMd`、`formatSkillMd`），八项内置技能改写为 SKILL.md（版本 2，metadata 里是名称、版本与顺序），迁移 `0009_skill_description.sql`（`writing_skill.description`），`writer_chapter` 版本 4（带上技能的适用说明），“写作技能”页可导入与导出 SKILL.md。
 - 降本（2026-10-14）：按 M0 首轮调用记录（证据链判断约占四成费用，平均输入约 1.6 万 Token、几乎不命中缓存；思考计入的输出约占七成）调整——提示词按“不变 → 只追加 → 每回合都变”排列以命中服务端前缀缓存（`knowledge_list` 局部模板；`character_action` 版本 9、`belief_update` 版本 7、`evidence_judgement` 版本 5，线索只列一遍）；内置能力表收录 DeepSeek（思考深度可调、价格含缓存命中），模型服务页可“采用内置的能力与价格”；DeepSeek 实验配置中抽取与判断类任务用 low。
 - M1-13 已完成（需求 B68，作者要求 2026-10-14）：分卷——迁移 `0010_volume.sql`（`volume` 表、`chapter.volume_id`、视图 `chapter_book_order` 给出书中顺序）；仓储 `repos/volume.ts`，章节的新建、移动与恢复按卷进行（`moveChapter` 的目的地为卷加前一章）；目录按卷分组（`ChapterSidebar.tsx`：新建卷、卷内新建章节、上下移动越过卷的边界、拖到卷标题、编辑卷名与简介、删除空卷）；整本导出带卷名，导入识别“第…卷”与 Markdown 二级标题；`writer_chapter` 版本 5 带上本卷与本卷梗概。
+- 计划草稿自动分卷（M1-13 补充）：`plan_draft` 版本 2（10 章及以上按故事的大段落分卷，输出 `volumes` 与每章的 `volume`，已有卷沿用卷名）；采用草稿时建卷、写梗概、把章节放进各自的卷（作者已归卷的章节不动）；计划页与成书页的草稿按卷列出（`PlanDraftChapters.tsx`）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

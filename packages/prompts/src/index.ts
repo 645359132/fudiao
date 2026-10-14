@@ -53,7 +53,7 @@ export {
   StalemateJudgementOutput,
   SynopsisOutput,
 } from './schemas';
-export type { RulingEffect } from './schemas';
+export type { PlanDraftData, RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
 export type { EvidenceSecret } from './render';
 export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput } from './render';

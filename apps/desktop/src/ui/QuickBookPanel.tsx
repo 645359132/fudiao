@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import type { BookSeed } from '../app/quick-book';
 import { PipelineBoard } from './PipelineBoard';
+import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
 
 function Step({ n, title, done, children }: { readonly n: number; readonly title: string; readonly done: boolean; readonly children: ReactNode }) {
@@ -204,13 +205,7 @@ export function QuickBookPanel() {
       <Step n={3} title="章节计划" done={planned > 0 && planDraft === null}>
         {planDraft !== null ? (
           <div aria-label="章节计划草稿">
-            <ol>
-              {planDraft.chapters.map((c, i) => (
-                <li key={i}>
-                  <strong>{c.title}</strong>：{c.goal}
-                </li>
-              ))}
-            </ol>
+            <PlanDraftChapters draft={planDraft} withBeats={false} />
             {planDraft.foreshadows.length > 0 ? <p>伏笔：{planDraft.foreshadows.map((f) => f.title).join('、')}</p> : null}
             <p className="muted">采用后每章的情节点、出场人物与伏笔都可以在“计划”页细改；已有的计划会被草稿覆盖。</p>
             <div className="form-actions">
@@ -231,7 +226,7 @@ export function QuickBookPanel() {
           </p>
         ) : (
           <>
-            <p className="muted">由大纲拆成 {count} 章，每章约 {words} 字（章数与字数在第 2 步里改）。</p>
+            <p className="muted">由大纲拆成 {count} 章，每章约 {words} 字（章数与字数在第 2 步里改）；10 章及以上时自动分卷。</p>
             <button type="button" disabled={!idle || !modelReady || !outline || seed !== null} onClick={() => void draftPlans(count, words)}>
               {planDrafting ? '正在生成…' : '生成章节计划'}
             </button>

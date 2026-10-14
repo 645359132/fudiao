@@ -48,8 +48,8 @@
     "sha256": "e869374a4697f13251dca189d5104ddcc5a31c4858bd8067f234523256a908d7"
   },
   "plan_draft": {
-    "version": "1",
-    "sha256": "6ccbc960aa5c6f0e8e43b0cb9152467f7f4604eb54d66351de71bdb522a59c78"
+    "version": "2",
+    "sha256": "b718fca30fb84ec8495170ea73fea08d5e3b9ba5660b930628a7f74c146e7b95"
   },
   "run_synopsis": {
     "version": "3",

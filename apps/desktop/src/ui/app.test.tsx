@@ -1822,19 +1822,28 @@ describe('快速成书的界面（B67）', () => {
     expect(store.getState().work?.project).toMatchObject({ title: '当铺夜谈', outline: seed.outline });
     expect(store.getState().entities.map((e) => e.name)).toEqual(['林舟']);
 
+    // 草稿自动分卷（B68）：每卷第一章之前列出卷名与梗概，采用后目录按卷分组。
     const plan = {
+      volumes: [
+        { title: '第一卷 当玉', summary: '林舟当玉被压价' },
+        { title: '第二卷 身世', summary: '旧主现身' },
+      ],
       chapters: [
-        { title: '第一章 夜叩', goal: '林舟当玉', cast: ['林舟'], beats: ['叩门', '压价'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
-        { title: '第二章 身世', goal: '真相揭开', cast: ['林舟'], beats: ['旧主现身'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
+        { volume: '第一卷 当玉', title: '第一章 夜叩', goal: '林舟当玉', cast: ['林舟'], beats: ['叩门', '压价'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
+        { volume: '第二卷 身世', title: '第二章 身世', goal: '真相揭开', cast: ['林舟'], beats: ['旧主现身'], plant: [], payoff: [], treatment: '', targetWords: 3000 },
       ],
       foreshadows: [],
     };
     deps.llmResponses.push(reply(JSON.stringify(plan)));
     await user.click(within(step(3)).getByRole('button', { name: '生成章节计划' }));
     await within(step(3)).findByText('第一章 夜叩');
+    expect(step(3).textContent).toContain('共 2 章，分 2 卷。');
+    expect(step(3).textContent).toContain('第一卷 当玉：林舟当玉被压价');
     await user.click(within(step(3)).getByRole('button', { name: '采用计划' }));
     await waitFor(() => expect(step(3).textContent).toContain('2 章，2 章有计划'));
     expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 身世']);
+    const nav = screen.getByRole('navigation', { name: '章节目录' });
+    expect(within(within(nav).getByRole('region', { name: '第二卷 身世' })).getByText('第二章 身世')).toBeTruthy();
     expect(within(step(4)).getByRole('region', { name: '成书进度' })).toBeTruthy();
     expect(within(step(4)).getByRole('button', { name: '依次写完待写的 2 章' })).toBeTruthy();
   });

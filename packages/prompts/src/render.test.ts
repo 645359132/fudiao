@@ -385,6 +385,17 @@ describe('章节计划草稿（B65）', () => {
     expect(empty).toContain('还没有人物设定');
     expect(empty).not.toContain('已有的章节：');
     expect(empty).not.toContain('已有的伏笔：');
+    expect(empty).not.toContain('已有的卷：');
+  });
+
+  it('分卷（B68）：要求 10 章及以上时按故事的大段落分卷并列出各卷梗概；已有的卷沿用卷名', () => {
+    const text = fullText(
+      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], chapters: [], volumes: ['第一卷 雨夜'], foreshadows: [], chapterCount: 30, wordsPerChapter: 3000 })),
+    );
+    expect(text).toContain('30 章在 10 章及以上时');
+    expect(text).toContain('每章的 volume 写它所在的卷名');
+    expect(text).toContain('已有的卷：第一卷 雨夜；');
+    expect(text).toContain('作品已有卷时沿用已有的卷名');
   });
 });
 

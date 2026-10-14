@@ -1517,3 +1517,8 @@ fieldset.plain {
   display: block;
   margin-top: 6px;
 }
+
+/* 计划草稿中每卷第一章之前的卷名与梗概 */
+.draft-volume {
+  margin: 8px 0 4px;
+}

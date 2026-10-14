@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import type { PlanDraftOutput } from '@fudiao/prompts';
+import type { PlanDraftData } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
@@ -32,7 +32,7 @@ async function setup() {
   return { deps, app };
 }
 
-const draft: PlanDraftOutput = {
+const draft: PlanDraftData = {
   chapters: [
     { title: '夜叩', goal: '林舟当玉被压价', cast: ['林相公', '钱四'], beats: ['叩门', ' 压价 ', ''], plant: ['玉佩的来历'], payoff: [], treatment: '压价略写', targetWords: 3000 },
     { title: '第二章 夜雨', goal: '林舟另寻门路', cast: ['林舟', '阿青'], beats: ['雨中奔走'], plant: [], payoff: [], treatment: '', targetWords: null },
@@ -78,6 +78,47 @@ describe('采用草稿', () => {
     expect(second!.plan!.castIds.map((id) => names.get(id))).toEqual(['林舟']);
     expect(applied.unmatchedCast).toEqual(['阿青']);
     expect(view.chapters.every((c) => c.problems.length === 0)).toBe(true);
+  });
+
+  it('分卷的草稿（B68）：卷按卷名对应，已有的沿用并补上空的简介、没有的在最后新建并写上梗概；未分卷的已有章节移进草稿给它的卷，新章节放进各自的卷', async () => {
+    const { app } = await setup();
+    const existing = value(await app.createVolume('第一卷 雨夜')).volumes[0]!;
+    const volumed: PlanDraftData = {
+      ...draft,
+      volumes: [
+        { title: '第一卷 雨夜', summary: '林舟当玉' },
+        { title: '第二卷 天明', summary: '真相揭晓' },
+      ],
+      chapters: draft.chapters.map((c, i) => ({ ...c, volume: i < 2 ? '第一卷 雨夜' : '第二卷 天明' })),
+    };
+    value(await app.applyPlanDraft(volumed));
+    const work = value(await app.reloadWork());
+    expect(work.volumes.map((v) => [v.id === existing.id, v.title, v.summary])).toEqual([
+      [true, '第一卷 雨夜', '林舟当玉'],
+      [false, '第二卷 天明', '真相揭晓'],
+    ]);
+    const volumeTitle = (id: string | null) => work.volumes.find((v) => v.id === id)?.title ?? null;
+    expect(work.chapters.map((c) => [c.title, volumeTitle(c.volumeId)])).toEqual([
+      ['第一章 夜叩', '第一卷 雨夜'],
+      ['第二章 夜雨', '第一卷 雨夜'],
+      ['第三章 揭晓', '第二卷 天明'],
+    ]);
+  });
+
+  it('分卷的草稿：作者已经放进某一卷的章节不动，已有卷的简介不被覆盖；不分卷的草稿不建卷', async () => {
+    const { app } = await setup();
+    const mine = value(await app.createVolume('楔子卷')).volumes[0]!;
+    const described = value(await app.updateVolume(mine, { title: '楔子卷', summary: '作者写的' })).volumes[0]!;
+    const first = value(await app.reloadWork()).chapters[0]!;
+    value(await app.moveChapter(first, { volumeId: described.id, after: null }));
+    value(await app.applyPlanDraft({ ...draft, volumes: [{ title: '楔子卷', summary: '模型写的' }], chapters: draft.chapters.map((c) => ({ ...c, volume: '楔子卷' })) }));
+    const work = value(await app.reloadWork());
+    expect(work.volumes.map((v) => [v.title, v.summary])).toEqual([['楔子卷', '作者写的']]);
+    expect(work.chapters.every((c) => c.volumeId === described.id)).toBe(true);
+
+    const { app: plain } = await setup();
+    value(await plain.applyPlanDraft(draft));
+    expect(value(await plain.reloadWork()).volumes).toEqual([]);
   });
 
   it('再次采用时沿用已有的伏笔、更新已有的计划', async () => {

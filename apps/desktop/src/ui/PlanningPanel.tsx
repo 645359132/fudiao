@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Foreshadow, ForeshadowFields, ForeshadowStatus } from '@fudiao/store';
 import type { PlanChapterView } from '../app/planning';
 import { PipelineBoard } from './PipelineBoard';
+import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
 
 const STATUS: Record<ForeshadowStatus, string> = { planned: '计划', planted: '已埋', paid_off: '已回收', dropped: '废弃' };
@@ -45,18 +46,7 @@ function DraftSection() {
       {unmatched.length > 0 ? <p className="muted">草稿中这些人物还没有设定，没有加入出场人物：{unmatched.join('、')}。</p> : null}
       {draft === null ? null : (
         <div aria-label="草稿内容">
-          <ol>
-            {draft.chapters.map((c, i) => (
-              <li key={i}>
-                <strong>{c.title}</strong>：{c.goal}
-                <ul>
-                  {c.beats.map((b, j) => (
-                    <li key={j}>{b}</li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ol>
+          <PlanDraftChapters draft={draft} withBeats />
           {draft.foreshadows.length > 0 ? <p>新伏笔：{draft.foreshadows.map((f) => f.title).join('、')}</p> : null}
           <p className="muted">采用后，已有的章节按顺序对应草稿的前几章（章名不改），多出的章节在末尾新建；已有的计划会被草稿覆盖。</p>
           <div className="skill-actions">
