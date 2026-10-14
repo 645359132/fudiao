@@ -66,44 +66,91 @@ function SkillItem({ view }: { readonly view: SkillView }) {
   );
 }
 
+/**
+ * 添加自己的技能，按 SKILL.md 的标准：逐项填写（名称、标识、适用说明、指令），或者直接粘贴一份 SKILL.md。
+ * 适用说明是标准里的必填项（description）：写手按它判断什么时候用这项技能。
+ */
 function AddSkill() {
   const add = useApp((s) => s.addCustomSkill);
+  const importText = useApp((s) => s.importSkillText);
   const busy = useApp((s) => s.busy);
+  const [mode, setMode] = useState<'fields' | 'paste'>('fields');
   const [name, setName] = useState('');
+  const [key, setKey] = useState('');
   const [description, setDescription] = useState('');
   const [instruction, setInstruction] = useState('');
+  const [pasted, setPasted] = useState('');
   return (
-    <form
-      className="panel-form"
-      aria-label="添加技能"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void add(name, instruction, description).then((done) => {
-          if (done) {
-            setName('');
-            setDescription('');
-            setInstruction('');
-          }
-        });
-      }}
-    >
+    <section className="panel-form" aria-label="添加技能">
       <h3>添加自己的技能</h3>
-      <label>
-        名称
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label>
-        适用说明（做什么、什么时候用）
-        <input value={description} placeholder="例如：写人物对话时使用" onChange={(e) => setDescription(e.target.value)} />
-      </label>
-      <label>
-        指令（写给写手的要求）
-        <textarea rows={3} value={instruction} onChange={(e) => setInstruction(e.target.value)} />
-      </label>
-      <button type="submit" disabled={busy || name.trim() === '' || instruction.trim() === ''}>
-        添加
-      </button>
-    </form>
+      <div className="kind-tabs" role="tablist" aria-label="添加方式">
+        <button type="button" role="tab" aria-selected={mode === 'fields'} onClick={() => setMode('fields')}>
+          逐项填写
+        </button>
+        <button type="button" role="tab" aria-selected={mode === 'paste'} onClick={() => setMode('paste')}>
+          粘贴 SKILL.md
+        </button>
+      </div>
+      {mode === 'fields' ? (
+        <form
+          aria-label="逐项填写技能"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add(name, instruction, description, key).then((done) => {
+              if (done) {
+                setName('');
+                setKey('');
+                setDescription('');
+                setInstruction('');
+              }
+            });
+          }}
+        >
+          <label>
+            名称
+            <input value={name} placeholder="例如：对话与潜台词" onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label>
+            标识（SKILL.md 的 name，可不填）
+            <input value={key} placeholder="例如：dialogue-subtext；不填时自动生成" onChange={(e) => setKey(e.target.value)} />
+          </label>
+          <label>
+            适用说明（description：做什么、什么时候用）
+            <input value={description} placeholder="例如：写人物对话时使用，让话里带潜台词" onChange={(e) => setDescription(e.target.value)} />
+          </label>
+          <label>
+            指令（写给写手的要求，可以用 Markdown）
+            <textarea rows={4} value={instruction} onChange={(e) => setInstruction(e.target.value)} />
+          </label>
+          <button type="submit" disabled={busy || name.trim() === '' || description.trim() === '' || instruction.trim() === ''}>
+            添加
+          </button>
+        </form>
+      ) : (
+        <form
+          aria-label="粘贴技能"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void importText(pasted).then((done) => {
+              if (done) setPasted('');
+            });
+          }}
+        >
+          <label>
+            SKILL.md 的内容
+            <textarea
+              rows={10}
+              value={pasted}
+              placeholder={'---\nname: dialogue-subtext\ndescription: 写人物对话时使用，让话里带潜台词\n---\n\n人物很少直接说出心里话……'}
+              onChange={(e) => setPasted(e.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={busy || pasted.trim() === ''}>
+            导入
+          </button>
+        </form>
+      )}
+    </section>
   );
 }
 

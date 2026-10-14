@@ -80,11 +80,25 @@ export function writingSkillUseCases(deps: AppDeps, project: () => SqlPort | nul
     updateWritingSkill: (skill: WritingSkill, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string; readonly description?: string }) =>
       change((port) => updateSkill(port, skill, patch, ctx())),
 
-    addCustomSkill(name: string, instruction: string, description = ''): Promise<Result<SkillsView, AppError>> {
+    /**
+     * 添加自己的技能，字段与 SKILL.md 对应：名称（metadata.title）、标识（name，可不填，不填时自动生成）、
+     * 适用说明（description）与指令。标识与已有技能（含内置技能）重复时不添加。
+     */
+    async addCustomSkill(name: string, instruction: string, description = '', key = ''): Promise<Result<SkillsView, AppError>> {
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
       const id = deps.ids.next();
       const title = name.trim();
-      if (title === '') return Promise.resolve(err({ code: 'repo', error: { code: 'invalid', detail: '技能名称不能为空' } }));
-      return change((port) => createCustomSkill(port, { id, key: `custom-${id.toLowerCase()}`, name: title, description: description.trim(), instruction: instruction.trim() }, ctx()));
+      if (title === '') return err({ code: 'repo', error: { code: 'invalid', detail: '技能名称不能为空' } });
+      const wanted = key.trim();
+      if (/[\s:"'#]/.test(wanted)) return err(settings('标识里不能有空格、冒号、引号或 #：常见写法是小写字母、数字与连字符，例如 dialogue-voice'));
+      if (wanted !== '') {
+        const current = await ensureBuiltinSkills(port, builtins, () => deps.ids.next(), ctx());
+        if (!current.ok) return err(repo(current.error));
+        const taken = current.value.find((s) => s.key === wanted);
+        if (taken !== undefined) return err(settings(`标识“${wanted}”已被“${taken.name}”使用：换一个，或用“导入 SKILL.md”更新那项技能`));
+      }
+      return change((p) => createCustomSkill(p, { id, key: wanted === '' ? `custom-${id.toLowerCase()}` : wanted, name: title, description: description.trim(), instruction: instruction.trim() }, ctx()));
     },
 
     /**

@@ -869,10 +869,13 @@ describe('写作技能界面（B61、B37）', () => {
     await user.click(within(screen.getByRole('listitem', { name: '章末钩子' })).getByRole('button', { name: '恢复内置指令' }));
     expect(await within(screen.getByRole('listitem', { name: '章末钩子' })).findByText('内置')).toBeTruthy();
 
-    const add = screen.getByRole('form', { name: '添加技能' });
+    // 逐项填写：字段与 SKILL.md 对应，适用说明（description）必填。
+    const add = screen.getByRole('form', { name: '逐项填写技能' });
     await user.type(within(add).getByRole('textbox', { name: '名称' }), '对话节奏');
-    await user.type(within(add).getByRole('textbox', { name: '适用说明（做什么、什么时候用）' }), '写对话时使用。');
-    await user.type(within(add).getByRole('textbox', { name: '指令（写给写手的要求）' }), '对话三句内要有动作。');
+    await user.type(within(add).getByRole('textbox', { name: '标识（SKILL.md 的 name，可不填）' }), 'dialogue-rhythm');
+    await user.type(within(add).getByRole('textbox', { name: '指令（写给写手的要求，可以用 Markdown）' }), '对话三句内要有动作。');
+    expect(within(add).getByRole('button', { name: '添加' }).matches(':disabled')).toBe(true);
+    await user.type(within(add).getByRole('textbox', { name: '适用说明（description：做什么、什么时候用）' }), '写对话时使用。');
     await user.click(within(add).getByRole('button', { name: '添加' }));
     const mine = await screen.findByRole('listitem', { name: '对话节奏' });
     expect(within(mine).getByText('自定义')).toBeTruthy();
@@ -882,13 +885,38 @@ describe('写作技能界面（B61、B37）', () => {
 
     // 导出为 SKILL.md；导入别处的 SKILL.md。
     await user.click(within(mine).getByRole('button', { name: '导出 SKILL.md' }));
-    await waitFor(() => expect(deps.exported.at(-1)?.content).toMatch(/^---\nname: custom-.+\ndescription: "写对话时使用。"\nmetadata:\n {2}title: "对话节奏"\n---\n\n对话三句内要有动作。\n$/));
+    await waitFor(() => expect(deps.exported.at(-1)?.content).toMatch(/^---\nname: dialogue-rhythm\ndescription: "写对话时使用。"\nmetadata:\n {2}title: "对话节奏"\n---\n\n对话三句内要有动作。\n$/));
     deps.textPicks.push({ fileName: 'SKILL.md', text: '---\nname: webnovel-pacing\ndescription: 写连载章节时使用。\n---\n\n开篇三百字内进入冲突。\n' });
     await user.click(screen.getByRole('button', { name: '导入 SKILL.md' }));
     const imported = await screen.findByRole('listitem', { name: 'webnovel-pacing' });
     expect(within(imported).getByRole('textbox', { name: 'webnovel-pacing的指令' })).toHaveProperty('value', '开篇三百字内进入冲突。');
     expect(await screen.findByText('已导入技能“webnovel-pacing”')).toBeTruthy();
-    await user.click(within(mine).getByRole('button', { name: '删除' }));
+
+    // 粘贴一份 SKILL.md 导入；标识重复时用粘贴的内容更新那项技能。
+    await user.click(screen.getByRole('tab', { name: '粘贴 SKILL.md' }));
+    const paste = screen.getByRole('form', { name: '粘贴技能' });
+    await user.click(within(paste).getByRole('textbox', { name: 'SKILL.md 的内容' }));
+    await user.paste('---\nname: scene-senses\ndescription: 开场与换场时使用。\nmetadata:\n  title: "场景五感"\n---\n\n写听见、摸到、闻到的。\n');
+    await user.click(within(paste).getByRole('button', { name: '导入' }));
+    const pastedSkill = await screen.findByRole('listitem', { name: '场景五感' });
+    expect(within(pastedSkill).getByText('scene-senses')).toBeTruthy();
+    expect(within(screen.getByRole('form', { name: '粘贴技能' })).getByRole('textbox', { name: 'SKILL.md 的内容' })).toHaveProperty('value', '');
+    await user.click(within(screen.getByRole('form', { name: '粘贴技能' })).getByRole('textbox', { name: 'SKILL.md 的内容' }));
+    await user.paste('这不是 SKILL.md');
+    await user.click(within(screen.getByRole('form', { name: '粘贴技能' })).getByRole('button', { name: '导入' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('不是 SKILL.md：文件开头应是');
+
+    // 逐项填写时标识不能与已有技能重复。
+    await user.click(screen.getByRole('tab', { name: '逐项填写' }));
+    const again = screen.getByRole('form', { name: '逐项填写技能' });
+    await user.type(within(again).getByRole('textbox', { name: '名称' }), '另一个');
+    await user.type(within(again).getByRole('textbox', { name: '标识（SKILL.md 的 name，可不填）' }), 'scene-senses');
+    await user.type(within(again).getByRole('textbox', { name: '适用说明（description：做什么、什么时候用）' }), '说明');
+    await user.type(within(again).getByRole('textbox', { name: '指令（写给写手的要求，可以用 Markdown）' }), '指令');
+    await user.click(within(again).getByRole('button', { name: '添加' }));
+    expect(await screen.findByText(/标识“scene-senses”已被“场景五感”使用/)).toBeTruthy();
+
+    await user.click(within(screen.getByRole('listitem', { name: '对话节奏' })).getByRole('button', { name: '删除' }));
     await waitFor(() => expect(screen.queryByRole('listitem', { name: '对话节奏' })).toBeNull());
 
     const avoid = screen.getByRole('textbox', { name: '规避表达词表' });

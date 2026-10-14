@@ -319,9 +319,11 @@ export type AppState = {
 
   readonly openSkills: () => Promise<void>;
   readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string; readonly description?: string }) => Promise<boolean>;
-  readonly addCustomSkill: (name: string, instruction: string, description?: string) => Promise<boolean>;
+  readonly addCustomSkill: (name: string, instruction: string, description?: string, key?: string) => Promise<boolean>;
   /** 选一个 SKILL.md 文件导入为技能（同一标识的自定义技能更新，内置技能成为改写）。 */
   readonly importSkillMd: () => Promise<void>;
+  /** 导入粘贴进来的 SKILL.md 内容；返回是否导入成功。 */
+  readonly importSkillText: (text: string) => Promise<boolean>;
   /** 把一项技能另存为 SKILL.md。 */
   readonly exportSkillMd: (id: string) => Promise<void>;
   readonly deleteCustomSkill: (id: string) => Promise<boolean>;
@@ -1373,7 +1375,7 @@ export function createAppStore(service: AppService): AppStore {
         const skill = get().skills?.skills.find((s) => s.skill.id === id)?.skill;
         return skill === undefined ? false : run(service.updateWritingSkill(skill, patch), (skills) => ({ skills }));
       },
-      addCustomSkill: (name, instruction, description) => run(service.addCustomSkill(name, instruction, description), (skills) => ({ skills })),
+      addCustomSkill: (name, instruction, description, key) => run(service.addCustomSkill(name, instruction, description, key), (skills) => ({ skills })),
       async importSkillMd() {
         const picked = await service.pickText();
         if (!picked.ok) {
@@ -1382,12 +1384,16 @@ export function createAppStore(service: AppService): AppStore {
         }
         if (picked.value === null) return;
         await service.releaseImport(picked.value.token);
-        const imported = await service.importSkillMd(picked.value.text);
+        await get().importSkillText(picked.value.text);
+      },
+      async importSkillText(text) {
+        const imported = await service.importSkillMd(text);
         set(
           imported.ok
             ? { skills: imported.value.view, message: `${imported.value.replaced ? '已更新' : '已导入'}技能“${imported.value.name}”` }
             : { message: describeError(imported.error) },
         );
+        return imported.ok;
       },
       async exportSkillMd(id) {
         const view = get().skills?.skills.find((s) => s.skill.id === id);

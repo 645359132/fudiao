@@ -69,6 +69,17 @@ describe('规避词表', () => {
     expect(added.skills.at(-1)).toMatchObject({ description: '写对话时使用。', skill: { description: '写对话时使用。' } });
   });
 
+  it('逐项添加时可以自定标识（SKILL.md 的 name）：不填时自动生成；与已有技能重复、含空格或引号时不添加', async () => {
+    const app = await setup();
+    const added = value(await app.addCustomSkill('对话节奏', '对话三句内要有动作。', '写对话时使用。', ' dialogue-rhythm '));
+    expect(added.skills.at(-1)?.skill).toMatchObject({ key: 'dialogue-rhythm', name: '对话节奏', description: '写对话时使用。' });
+    expect(value(await app.addCustomSkill('无标识', '指令', '说明')).skills.at(-1)?.skill.key).toMatch(/^custom-/);
+    expect(await app.addCustomSkill('撞名', '指令', '说明', 'cliffhanger')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已被“章末钩子”使用') } });
+    expect(await app.addCustomSkill('撞名', '指令', '说明', 'dialogue-rhythm')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已被“对话节奏”使用') } });
+    expect(await app.addCustomSkill('坏标识', '指令', '说明', 'a b')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('不能有空格') } });
+    expect(value(await app.listWritingSkills()).skills.filter((s) => s.skill.builtinVersion === null)).toHaveLength(2);
+  });
+
   it('导入 SKILL.md：成为自定义技能；同一标识再导入时更新；格式不对时说明原因', async () => {
     const app = await setup();
     const file = (body: string) => `---
