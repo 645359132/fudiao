@@ -3,6 +3,7 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { SimSceneFields } from '@fudiao/store';
 import { checkSceneConfig } from '../app/scene-editing';
 import { useApp } from './store-context';
+import { ZoneGraphEditor } from './ZoneGraphEditor';
 
 type Config = SceneSpecInput;
 type Actor = Config['actors'][number];
@@ -235,7 +236,7 @@ const freshKey = (prefix: string, taken: readonly string[]) => {
 
 /**
  * 推演场景的编辑（需求 B22、B23）：基本信息、角色与角色卡、初始认知、秘密、物品与叙述规则。
- * 区域图在“区域”一节（M4-03）；机关、消耗规则等其余配置在“高级”里直接编辑。
+ * 区域图在“区域”一节（ZoneGraphEditor）；机关、消耗规则等其余配置在“高级”里直接编辑。
  * 校验由领域内核完成，表单下方随时列出还不对的地方，全部改好才能保存。
  */
 export function SceneEditor({ id, initial, notes }: { readonly id: string | null; readonly initial: SimSceneFields; readonly notes?: readonly string[] }) {
@@ -335,6 +336,8 @@ export function SceneEditor({ id, initial, notes }: { readonly id: string | null
         <Text label="题材（只给作者看，角色看不到）" value={meta.genre ?? ''} onChange={(genre) => change({ ...config, meta: { ...meta, genre } })} />
         <ListField label="想通过这次推演弄清的问题（每行一条，角色看不到）" lines={2} value={meta.questions ?? []} onChange={(questions) => change({ ...config, meta: { ...meta, questions } })} />
 
+        <ZoneGraphEditor config={config} onChange={change} />
+
         <section aria-label="角色">
           <h3>角色</h3>
           <ul className="skill-list">
@@ -410,7 +413,7 @@ export function SceneEditor({ id, initial, notes }: { readonly id: string | null
         }}
       >
         <summary>高级：直接编辑整份场景配置</summary>
-        <p className="muted">区域与关系、机关、消耗规则、前提条件、出口、场景时钟等都在这里。改完点“应用到表单”。</p>
+        <p className="muted">机关、消耗规则、前提条件、伤势限制、标记、场景时钟与响度表都在这里。改完点“应用到表单”。</p>
         <label>
           场景配置（JSON）
           <textarea rows={16} value={json ?? ''} onChange={(e) => setJson(e.target.value)} />

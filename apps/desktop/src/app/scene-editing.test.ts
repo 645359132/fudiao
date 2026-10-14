@@ -1,6 +1,6 @@
 import { warehouseSpec } from '@fudiao/domain/testing';
 import { describe, expect, it } from 'vitest';
-import { blankSceneConfig, checkSceneConfig } from './scene-editing';
+import { blankSceneConfig, checkSceneConfig, removeZone, renameZone, setZoneEdge, zonePairs } from './scene-editing';
 
 describe('场景配置的检查', () => {
   it('空白场景与测试场景没有问题', () => {
@@ -32,5 +32,52 @@ describe('场景配置的检查', () => {
   it('根本不是场景配置时也给出说明，而不是抛错', () => {
     expect(checkSceneConfig(null).length).toBeGreaterThan(0);
     expect(checkSceneConfig({ zones: [], actors: [] })).toEqual(expect.arrayContaining(['区域：没有填写，或格式不对', '角色：没有填写，或格式不对']));
+  });
+});
+
+describe('区域图的编辑（B41）', () => {
+  const base = () => {
+    const config = warehouseSpec();
+    return { ...config, zones: [{ id: 'a', name: '甲' }, { id: 'b', name: '乙' }, { id: 'c', name: '丙' }], edges: [{ between: ['b', 'a'] as [string, string], adjacent: true, visible: false, sound: 1 }], actors: [{ id: 'x', name: '某人', zone: 'a' }], items: [{ id: 'i', name: '物', location: { kind: 'zone' as const, zone: 'a' } }], mechanisms: [], secrets: [], exits: ['a', 'c'], rules: {} };
+  };
+
+  it('列出区域两两之间的关系：配置过的带上内容（不分先后），没有配置的为空', () => {
+    expect(zonePairs(base())).toEqual([
+      { a: 'a', b: 'b', edge: { between: ['b', 'a'], adjacent: true, visible: false, sound: 1 } },
+      { a: 'a', b: 'c', edge: null },
+      { a: 'b', b: 'c', edge: null },
+    ]);
+  });
+
+  it('修改关系：没有的新建，已有的原地改；什么都不通时去掉', () => {
+    const added = setZoneEdge(base(), 'a', 'c', { visible: true });
+    expect(added.edges).toEqual([
+      { between: ['b', 'a'], adjacent: true, visible: false, sound: 1 },
+      { between: ['a', 'c'], adjacent: false, visible: true, sound: null },
+    ]);
+    const changed = setZoneEdge(added, 'a', 'b', { sound: null, requiresFlag: ' door_open ' });
+    expect(changed.edges?.[0]).toEqual({ between: ['b', 'a'], adjacent: true, visible: false, sound: null, requiresFlag: 'door_open' });
+    // 清掉通行条件、取消相邻：这条关系什么都不通了。
+    const cleared = setZoneEdge(setZoneEdge(changed, 'b', 'a', { requiresFlag: '' }), 'a', 'b', { adjacent: false });
+    expect(cleared.edges).toEqual([{ between: ['a', 'c'], adjacent: false, visible: true, sound: null }]);
+    expect(checkSceneConfig(cleared)).toEqual([]);
+  });
+
+  it('改区域的键：关系、角色与物品的位置、出口一并改过来', () => {
+    const renamed = renameZone(base(), 'a', 'hall');
+    expect(renamed.zones.map((z) => z.id)).toEqual(['hall', 'b', 'c']);
+    expect(renamed.edges?.[0]?.between).toEqual(['b', 'hall']);
+    expect(renamed.actors[0]?.zone).toBe('hall');
+    expect(renamed.items?.[0]?.location).toEqual({ kind: 'zone', zone: 'hall' });
+    expect(renamed.exits).toEqual(['hall', 'c']);
+    expect(checkSceneConfig(renamed)).toEqual([]);
+  });
+
+  it('删除区域：它的关系与出口一并去掉；还在里面的角色由校验指出', () => {
+    const removed = removeZone(base(), 'a');
+    expect(removed.zones.map((z) => z.id)).toEqual(['b', 'c']);
+    expect(removed.edges).toEqual([]);
+    expect(removed.exits).toEqual(['c']);
+    expect(checkSceneConfig(removed)).toEqual(expect.arrayContaining(['角色 第 1 项 › 所在区域：引用了场景里没有的“a”']));
   });
 });

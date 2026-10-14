@@ -1355,3 +1355,81 @@ describe('推演场景的编辑（B22、B23、B39）', () => {
     expect(within(screen.getByRole('navigation', { name: '推演场景' })).getAllByRole('listitem')).toHaveLength(1);
   });
 });
+
+describe('区域图的编辑（B41）', () => {
+  it('添加区域、设置区域之间的关系与出口；改区域的键时角色的位置跟着改；保存后配置正确', async () => {
+    const { user, service } = start();
+    await createWork(user, '当铺夜谈');
+    await user.click(screen.getByRole('button', { name: '推演' }));
+    await user.click(await screen.findByRole('button', { name: '新建场景' }));
+    await user.click(screen.getByRole('button', { name: '从空白开始' }));
+    const form = await screen.findByRole('form', { name: '新场景' });
+    const zones = within(form).getByRole('region', { name: '区域' });
+    // 只有一个区域时没有关系表，也不能删。
+    expect(within(zones).queryByRole('table', { name: '区域之间的关系' })).toBeNull();
+    expect(within(zones).getByRole('button', { name: '删除区域 场地' }).matches(':disabled')).toBe(true);
+    expect(within(zones).getByText('没有指定出口：角色可以从任何区域撤离。')).toBeTruthy();
+
+    await user.click(within(zones).getByRole('button', { name: '添加区域' }));
+    const added = within(zones).getByRole('row', { name: '区域 新区域' });
+    const name = within(added).getByRole('textbox', { name: '区域的名字' });
+    await user.clear(name);
+    await user.type(name, '后院');
+    const key = within(within(zones).getByRole('row', { name: '区域 后院' })).getByRole('textbox', { name: '区域的键' });
+    await user.clear(key);
+    await user.type(key, 'yard');
+
+    const relation = within(within(zones).getByRole('table', { name: '区域之间的关系' })).getByRole('row', { name: '场地与后院' });
+    await user.click(within(relation).getByRole('checkbox', { name: '场地与后院相邻' }));
+    await user.selectOptions(within(relation).getByRole('combobox', { name: '场地与后院之间的声音' }), '减弱 1');
+    await user.type(within(relation).getByRole('textbox', { name: '场地与后院通行所需的标记' }), 'door_open');
+    await user.click(within(zones).getByRole('checkbox', { name: '可以从后院撤离' }));
+    expect(within(zones).getByText('只能从勾选的区域撤离。')).toBeTruthy();
+
+    // 改“场地”的键：角色所在的区域跟着改，没有出现引用不存在的区域的提示。
+    const roomKey = within(within(zones).getByRole('row', { name: '区域 场地' })).getByRole('textbox', { name: '区域的键' });
+    await user.clear(roomKey);
+    await user.type(roomKey, 'shop{Enter}');
+    // 改名之后角色的位置与关系的两端都跟着改了；剩下的一处是关系里用到的标记还没有定义。
+    const problems = within(form).getByRole('list', { name: '还不对的地方' });
+    expect(within(problems).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['区域之间的关系 第 1 项 › 通行所需的标记：引用了场景里没有的“door_open”']);
+
+    // 标记在“高级”里定义：应用后表单随之更新，问题消失。
+
+    await user.click(within(form).getByText('高级：直接编辑整份场景配置'));
+    const json = within(form).getByRole('textbox', { name: '场景配置（JSON）' });
+    const config = JSON.parse((json as HTMLTextAreaElement).value) as Record<string, unknown>;
+    await user.clear(json);
+    await user.click(json);
+    await user.paste(JSON.stringify({ ...config, flags: { door_open: false } }));
+    await user.click(within(form).getByRole('button', { name: '应用到表单' }));
+    await waitFor(() => expect(within(form).queryByRole('list', { name: '还不对的地方' })).toBeNull());
+
+    await user.click(within(form).getByRole('button', { name: '保存场景' }));
+    await screen.findByRole('form', { name: '场景 新场景' });
+    const scenes = await service.listSimScenes();
+    expect(scenes.ok && scenes.value[0]?.config).toMatchObject({
+      zones: [
+        { id: 'shop', name: '场地' },
+        { id: 'yard', name: '后院' },
+      ],
+      edges: [{ between: ['shop', 'yard'], adjacent: true, visible: false, sound: 1, requiresFlag: 'door_open' }],
+      exits: ['yard'],
+      flags: { door_open: false },
+      actors: [{ id: 'actor_1', zone: 'shop' }],
+    });
+
+    // 取消相邻、声音与通行条件后，这条关系不再保存；删除后院，出口随之去掉。
+    const saved = screen.getByRole('form', { name: '场景 新场景' });
+    const row = within(saved).getByRole('row', { name: '场地与后院' });
+    await user.click(within(row).getByRole('checkbox', { name: '场地与后院相邻' }));
+    await user.selectOptions(within(row).getByRole('combobox', { name: '场地与后院之间的声音' }), '传不过去');
+    await user.clear(within(row).getByRole('textbox', { name: '场地与后院通行所需的标记' }));
+    await user.click(within(saved).getByRole('button', { name: '删除区域 后院' }));
+    await user.click(within(saved).getByRole('button', { name: '保存场景' }));
+    await waitFor(async () => {
+      const again = await service.listSimScenes();
+      expect(again.ok && again.value[0]).toMatchObject({ configVersion: 2, config: { zones: [{ id: 'shop' }], edges: [], exits: [] } });
+    });
+  });
+});

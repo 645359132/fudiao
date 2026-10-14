@@ -103,3 +103,57 @@ export function checkSceneConfig(config: unknown): string[] {
   const parsed = parseScene(config);
   return parsed.ok ? [] : describeSceneProblems(parsed.error);
 }
+
+type Edge = NonNullable<SceneSpecInput['edges']>[number];
+
+/** 区域两两之间的关系（需求 B41）；没有配置的一对，edge 为 null：不相邻、互相看不见、声音传不过去。 */
+export type ZonePair = { readonly a: string; readonly b: string; readonly edge: Edge | null };
+
+const sameEdge = (e: Edge, a: string, b: string) => (e.between[0] === a && e.between[1] === b) || (e.between[0] === b && e.between[1] === a);
+
+export function zonePairs(config: SceneSpecInput): ZonePair[] {
+  const pairs: ZonePair[] = [];
+  for (const [i, a] of config.zones.entries()) {
+    for (const b of config.zones.slice(i + 1)) pairs.push({ a: a.id, b: b.id, edge: (config.edges ?? []).find((e) => sameEdge(e, a.id, b.id)) ?? null });
+  }
+  return pairs;
+}
+
+export type EdgePatch = { readonly adjacent?: boolean; readonly visible?: boolean; readonly sound?: number | null; readonly requiresFlag?: string };
+
+/** 修改两个区域之间的关系。什么都不通（不相邻、看不见、声音传不过去、没有通行条件）时去掉这条关系。 */
+export function setZoneEdge(config: SceneSpecInput, a: string, b: string, patch: EdgePatch): SceneSpecInput {
+  const edges = config.edges ?? [];
+  const current = edges.find((e) => sameEdge(e, a, b));
+  const { requiresFlag: _old, ...base } = current ?? { between: [a, b] as [string, string], adjacent: false, visible: false, sound: null };
+  const flag = (patch.requiresFlag ?? current?.requiresFlag ?? '').trim();
+  const next: Edge = { ...base, ...(patch.adjacent !== undefined && { adjacent: patch.adjacent }), ...(patch.visible !== undefined && { visible: patch.visible }), ...(patch.sound !== undefined && { sound: patch.sound }), ...(flag !== '' && { requiresFlag: flag }) };
+  const empty = !next.adjacent && !next.visible && next.sound === null && next.requiresFlag === undefined;
+  const others = edges.filter((e) => !sameEdge(e, a, b));
+  return { ...config, edges: empty ? others : current === undefined ? [...others, next] : edges.map((e) => (sameEdge(e, a, b) ? next : e)) };
+}
+
+/** 改区域的键，并把引用它的地方一并改过来：区域关系、角色与物品的位置、机关、出口。 */
+export function renameZone(config: SceneSpecInput, from: string, to: string): SceneSpecInput {
+  const zones = config.zones.map((z) => (z.id === from ? { ...z, id: to } : z));
+  const swap = (id: string) => (id === from ? to : id);
+  return {
+    ...config,
+    zones,
+    ...(config.edges !== undefined && { edges: config.edges.map((e) => ({ ...e, between: [swap(e.between[0]), swap(e.between[1])] as [string, string] })) }),
+    actors: config.actors.map((a) => ({ ...a, zone: swap(a.zone) })),
+    ...(config.items !== undefined && { items: config.items.map((i) => (i.location.kind === 'zone' ? { ...i, location: { kind: 'zone' as const, zone: swap(i.location.zone) } } : i)) }),
+    ...(config.mechanisms !== undefined && { mechanisms: config.mechanisms.map((m) => ({ ...m, zone: swap(m.zone) })) }),
+    ...(config.exits !== undefined && { exits: config.exits.map(swap) }),
+  };
+}
+
+/** 删除一个区域，连同它的关系与出口。还在这个区域里的角色、物品与机关不动，由校验提示作者改到别处。 */
+export function removeZone(config: SceneSpecInput, id: string): SceneSpecInput {
+  return {
+    ...config,
+    zones: config.zones.filter((z) => z.id !== id),
+    ...(config.edges !== undefined && { edges: config.edges.filter((e) => !e.between.includes(id)) }),
+    ...(config.exits !== undefined && { exits: config.exits.filter((x) => x !== id) }),
+  };
+}

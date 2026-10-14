@@ -66,6 +66,7 @@
 - M3-09 真实评估已执行一次（2026-10-13，DeepSeek flash，六章）：流程走通，6 处植入全部检出，$0.218，结果与发现见 `m3/RESULTS.md`，“读后的判断”待作者填写。由此补上：采用计划草稿时给账本里已有的伏笔补上章节；账本状态的建议 `suggestForeshadowStatus`（章节写完后提示标为已埋或已回收，作者确认）；`chapter_review` 版本 4。
 - M4-01 已完成：迁移 `0006_simulation.sql`（`sim_scene`、`sim_run`、`sim_event`、`sim_snapshot`；`sim_event` 的触发器拒绝修改与删除）；`sqlEventStore`（`packages/store/src/sql-event-store.ts`，与内存版、JSONL 版共用契约测试）；仓储 `repos/sim.ts`；用例 `apps/desktop/src/app/simulation.ts`（保存场景、开始、单步、继续、暂停、恢复、停止、状态与事件、校验回放），模型取默认模型、调用记录写入 `llm_call`；M0 的三个场景在 SQLite 上回放与 JSONL 记录逐事件一致（`apps/m0-cli/src/e2e.test.ts`）。没有界面，界面在 M4-02 起。
 - M4-02 已完成：顶栏“推演”页（`SimulationPanel.tsx`）与场景编辑表单（`SceneEditor.tsx`：基本信息、角色卡、初始认知、秘密、物品、叙述规则，“高级”里直接编辑整份配置）；用例 `draftSimScene`（`scene_draft` 模板，草稿不保存）；`apps/desktop/src/app/scene-editing.ts`（空白场景、校验结果的中文说明）。机关与各类规则首版只能在“高级”里编辑。
+- M4-03 已完成：区域图的表格编辑 `ZoneGraphEditor.tsx`（区域列表与出口，区域两两之间的相邻、可见、声音与通行标记）；`scene-editing.ts` 的 `zonePairs`、`setZoneEdge`、`renameZone`（引用一并改名）、`removeZone`。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式
