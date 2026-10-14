@@ -74,6 +74,7 @@
 - M4-08 已完成：采纳推演草案（`narration.ts` 的 `adoptionDraft`、`adoptCandidate`，仓储 `repos/adoption.ts`、`repos/story-event.ts`）：选定事件、世界事实与视角角色的认知，复核自动接受的裁决，核对涉及锁定设定的事实，写入前快照，正文、故事事件、事件与段落关联、事实及其来源在一个事务中写入；推演写成的候选稿不能直接接受；“AI 写作”里候选稿的“采纳…”（`AdoptionForm.tsx`）。不涉及迁移。
 - M4-09 已完成：迁移 `0008_evaluation.sql`（`evaluation`：一次运行或一个批次一份）；仓储 `repos/evaluation.ts`；用例 `apps/desktop/src/app/sim-evaluation.ts`（评分项与 M0 评价表相同，保存时记下采纳的事件、费用与耗时，批量推演整组结束后评价一次）；工作区的“推演评价”（`EvaluationPanel.tsx`）。M4 的任务代码已全部完成，待作者执行手工清单。
 - 凭据代理的取消已修正（M2-01 补充，2026-10-14）：开始前已到的取消与可以发送同时就绪时，`tokio::select!` 随机选择会把请求连同凭据发出（全套 `net` 测试约 8% 复现）；`net.rs` 的三处 select 改为先看取消（`biased`），测试 `cancel_before_start_sends_nothing` 改为重复 50 次。
+- 全项目审查后的修正（2026-10-14）：采纳推演草案时同一件事（另一视角、分支上的同一事件）关联到原有的故事事件，不另建；采纳的事实从写进的那一章起适用，见闻的来源指向同一回合的事；写手只带适用于本章的事实（与上下文、审核一致）；自动保存在保存抛出异常时按失败重试，不再停下；事实涉及的设定、章节计划的出场人物、故事事件的参与者用到的设定不能删除。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

@@ -134,6 +134,16 @@ export async function deleteEntity(port: SqlPort, id: string, expectedVersion: n
   const current = await getEntity(port, id);
   if (!current.ok) return current;
   if (current.value.locked) return err({ code: 'locked' });
+  // 外键只管得住人物认知的持有者；记在 JSON 里的引用（事实涉及的设定、章节计划的出场人物、故事事件的参与者）
+  // 要先查，否则删除后这些引用悄悄失效，事实再也进不了上下文。作为事实依据的设定可以删除，依赖它的事实标为待复核（M1-09）。
+  const used = await port.query(
+    `SELECT (SELECT count(*) FROM fact f, json_each(f.subject_ids) j WHERE j.value = ?)
+          + (SELECT count(*) FROM chapter_plan p, json_each(p.cast_ids) j WHERE j.value = ?)
+          + (SELECT count(*) FROM story_event e, json_each(e.participants) j WHERE j.value = ?) AS n`,
+    [id, id, id],
+  );
+  if (!used.ok) return err({ code: 'sql', error: used.error });
+  if (Number(used.value[0]?.['n'] ?? 0) > 0) return err({ code: 'in_use' });
   const done = await port.transaction([{ sql: 'DELETE FROM entity WHERE id = ? AND version = ? AND locked = 0', params: [id, expectedVersion], expectChanges: 1 }]);
   if (done.ok) return ok(undefined);
   if (done.error.code === 'constraint') return err({ code: 'in_use' });

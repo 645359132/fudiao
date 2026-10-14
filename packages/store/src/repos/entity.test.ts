@@ -79,4 +79,23 @@ describe('设定条目', () => {
     expect(await deleteEntity(db, 'e2', 1)).toEqual({ ok: true, value: undefined });
     expect(await getEntity(db, 'e2')).toEqual({ ok: false, error: { code: 'not_found' } });
   });
+
+  it('事实涉及的设定、章节计划的出场人物、故事事件的参与者用到它时同样不能删除；作为事实依据的可以删除（依赖它的事实待复核）', async () => {
+    const db = fresh();
+    const T = [ctx.now, ctx.now];
+    for (const id of ['s', 'b', 'c', 'p', 'free']) value(await createEntity(db, { id, kind: 'character', name: id }, ctx));
+    value(
+      await db.transaction([
+        { sql: "INSERT INTO fact (id, kind, subject_ids, content, created_at, updated_at) VALUES ('f1', 'world', '[\"s\"]', '宵禁', ?, ?)", params: T },
+        { sql: "INSERT INTO fact (id, kind, content, created_at, updated_at) VALUES ('f2', 'world', '城门早闭', ?, ?)", params: T },
+        { sql: "INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, created_at) VALUES ('r1', 'fact', 'f2', 'entity', 'b', ?)", params: [ctx.now] },
+        { sql: "INSERT INTO chapter (id, order_key, title, created_at, updated_at) VALUES ('c1', 'a0', '第一章', ?, ?)", params: T },
+        { sql: "INSERT INTO chapter_plan (chapter_id, cast_ids, created_at, updated_at) VALUES ('c1', '[\"c\"]', ?, ?)", params: T },
+        { sql: "INSERT INTO story_event (id, summary, participants, created_at, updated_at) VALUES ('v1', '对峙', '[\"p\"]', ?, ?)", params: T },
+      ]),
+    );
+    for (const id of ['s', 'c', 'p']) expect(await deleteEntity(db, id, 1)).toEqual({ ok: false, error: { code: 'in_use' } });
+    expect(await deleteEntity(db, 'b', 1)).toEqual({ ok: true, value: undefined });
+    expect(await deleteEntity(db, 'free', 1)).toEqual({ ok: true, value: undefined });
+  });
 });

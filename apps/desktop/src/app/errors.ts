@@ -51,7 +51,7 @@ export function describeError(error: AppError): string {
         case 'locked':
           return '这是锁定设定，先解锁才能修改或删除';
         case 'in_use':
-          return '还有人物认知或说法以它为持有者，不能删除';
+          return '还有事实、章节计划或故事事件用到它（持有者、涉及的设定、出场人物或参与者），不能删除：先在那里去掉它';
         case 'sql':
           return `保存失败：${error.error.error.code}`;
       }
