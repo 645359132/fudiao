@@ -93,3 +93,48 @@ describe('拆分正文', () => {
     ]);
   });
 });
+
+describe('分卷（B68）', () => {
+  const split = (text: string, rule: Parameters<typeof splitText>[1] = { kind: 'auto' }) => {
+    const r = splitText(text, rule, '雨夜');
+    if (!r.ok) throw new Error(r.error);
+    return r.value.map((c) => [c.volume ?? null, c.title, c.paragraphs.length]);
+  };
+
+  it('文本里有章一级的标题时，“第…卷”是分卷；卷首语成为以卷名为题的一章', () => {
+    const text = ['楔子', '旧事。', '第一卷 雨夜', '卷首语。', '第一章 当铺', '甲。', '第二章 赌坊', '乙。', '第二卷 天明', '第三章 渡口', '丙。'].join('\n');
+    expect(split(text)).toEqual([
+      [null, '楔子', 1],
+      ['第一卷 雨夜', '第一卷 雨夜', 1],
+      ['第一卷 雨夜', '第一章 当铺', 1],
+      ['第一卷 雨夜', '第二章 赌坊', 1],
+      ['第二卷 天明', '第三章 渡口', 1],
+    ]);
+  });
+
+  it('只有“第…卷”没有章一级标题时，卷仍当作章（与以前相同）', () => {
+    expect(split(['第一卷 雨夜', '甲。', '第二卷 天明', '乙。'].join('\n'))).toEqual([
+      [null, '第一卷 雨夜', 1],
+      [null, '第二卷 天明', 1],
+    ]);
+  });
+
+  it('Markdown 有三级标题时：一级是书名（略过），二级是卷，三级是章', () => {
+    const md = ['# 当铺夜谈', '', '## 第一卷', '', '### 第一章', '', '甲。', '', '## 第二卷', '', '### 第二章', '', '乙。'].join('\n');
+    expect(split(md, { kind: 'markdown' })).toEqual([
+      ['第一卷', '第一章', 1],
+      ['第二卷', '第二章', 1],
+    ]);
+    // 没有三级标题时与以前相同：各级标题都是章。
+    expect(split(['## 第一章', '甲。', '## 第二章', '乙。'].join('\n'), { kind: 'markdown' })).toEqual([
+      [null, '第一章', 1],
+      [null, '第二章', 1],
+    ]);
+  });
+
+  it('预览带上卷名', () => {
+    const r = splitText(['第一卷', '第一章', '甲。'].join('\n'), { kind: 'auto' }, '雨夜');
+    if (!r.ok) throw new Error(r.error);
+    expect(summarize(r.value)).toEqual([{ title: '第一章', paragraphs: 1, words: 2, volume: '第一卷' }]);
+  });
+});

@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 4
+version: 5
 task: writer
 ---
 @@system
@@ -48,6 +48,12 @@ task: writer
 {{/memories}}
 {{/hasMemories}}
 @@system
+{{#volumeTitle}}
+本卷：{{.}}
+{{/volumeTitle}}
+{{#volumeSummary}}
+本卷梗概：{{.}}
+{{/volumeSummary}}
 本章：{{chapterTitle}}
 本章目标：{{goal}}
 {{#treatment}}

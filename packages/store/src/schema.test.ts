@@ -31,6 +31,8 @@ const sample: Statement[] = [
   s("INSERT INTO project (id, title, genre, goals, avoid_phrases, created_at, updated_at) VALUES ('01P', '雨夜', '武侠', '{\"words\":300000}', '[\"不禁\",\"仿佛\"]', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, summary, created_at, updated_at) VALUES ('01C1', 'a0', '第一章 雨夜', '两人在当铺重逢', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, status, trashed_at, created_at, updated_at) VALUES ('01C2', 'a1', '废稿', 'trashed', ?, ?, ?)", NOW, ...T),
+  s("INSERT INTO volume (id, order_key, title, summary, version, created_at, updated_at) VALUES ('01O1', 'a0', '第一卷 雨夜', '两人重逢', 2, ?, ?)", ...T),
+  s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('01C3', 'a0', '第二章 当铺', '01O1', ?, ?)", ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),
   s(
     "INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, version, created_at, updated_at) VALUES ('01G2', '01C1', 'a1', '他没有回头。', 'ai_modified', '[{\"start\":0,\"end\":6}]', '他始终没有回头。', '01G1', 3, ?, ?)",
@@ -306,6 +308,32 @@ describe('节拍表与推演写成的候选稿（迁移 0007）', () => {
   });
 });
 
+describe('分卷（迁移 0010）', () => {
+  it('卷名不能为空；章节的卷须存在；删除卷后其中的章节变为未分卷', async () => {
+    const db = await seeded();
+    await rejects(db, "INSERT INTO volume (id, order_key, title, created_at, updated_at) VALUES ('x', 'a1', '  ', ?, ?)", ...T);
+    await rejects(db, "INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('x', 'a0', '章', 'none', ?, ?)", ...T);
+    expect((await db.transaction([s("DELETE FROM volume WHERE id = '01O1'")])).ok).toBe(true);
+    const chapter = await db.query("SELECT volume_id FROM chapter WHERE id = '01C3'");
+    expect(chapter.ok && chapter.value[0]).toEqual({ volume_id: null });
+  });
+
+  it('书中顺序：未分卷的在前，再按卷的顺序，卷内按章节的顺序（卷的键与章节的键各自独立）', async () => {
+    const db = fresh();
+    const done = await db.transaction([
+      s("INSERT INTO volume (id, order_key, title, created_at, updated_at) VALUES ('v2', 'a1', '第二卷', ?, ?)", ...T),
+      s("INSERT INTO volume (id, order_key, title, created_at, updated_at) VALUES ('v1', 'a0', '第一卷', ?, ?)", ...T),
+      s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('c4', 'a0', '二卷一章', 'v2', ?, ?)", ...T),
+      s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('c3', 'a1', '一卷二章', 'v1', ?, ?)", ...T),
+      s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('c2', 'a0', '一卷一章', 'v1', ?, ?)", ...T),
+      s("INSERT INTO chapter (id, order_key, title, created_at, updated_at) VALUES ('c1', 'a5', '楔子', ?, ?)", ...T),
+    ]);
+    expect(done.ok).toBe(true);
+    const order = await db.query('SELECT chapter_id FROM chapter_book_order ORDER BY position');
+    expect(order.ok && order.value.map((r) => r['chapter_id'])).toEqual(['c1', 'c2', 'c3', 'c4']);
+  });
+});
+
 describe('推演评价（迁移 0008）', () => {
   it('评价一次运行或一个批次，恰有其一；同一次运行、同一批次只有一份；内容须是对象', async () => {
     const db = await seeded();
@@ -400,6 +428,20 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 9 导出的数据（没有卷，章节没有 volume_id 列）经转换后导入，章节都是未分卷', async () => {
+    const data = await exported(await seeded());
+    const chapters = (data.tables['chapter'] ?? []).filter((row) => row['volume_id'] === null);
+    const tables = Object.fromEntries(
+      Object.entries({ ...data.tables, chapter: chapters.map(({ volume_id: _dropped, ...row }) => row) }).filter(([name]) => name !== 'volume'),
+    );
+    // 样本中归属卷的章节没有正文与其他引用，去掉后其余各表照旧。
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 9, tables })).toMatchObject({ ok: true });
+    const after = await exported(target);
+    expect(after.tables['volume']).toEqual([]);
+    expect(after.tables['chapter']).toEqual(chapters);
   });
 
   it('结构版本 8 导出的数据（写作技能没有 description 列）经转换后导入，说明为空', async () => {

@@ -524,7 +524,8 @@ export type WriterChapterInput = {
   readonly chapterTitle: string;
   readonly goal: string;
   readonly treatment: string;
-  /** 启用的写作技能（已按顺序组合）。 */
+  /** 本章所在的卷（B68）：卷名与本卷简介；未分卷时省略。 */
+  readonly volume?: { readonly title: string; readonly summary: string };
   /** 启用的写作技能：名称、适用说明（SKILL.md 的 description）与指令。 */
   readonly skills: readonly { readonly name: string; readonly description: string; readonly text: string }[];
   readonly avoidPhrases: readonly string[];
@@ -557,6 +558,8 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     title: input.title,
     genre: input.genre,
     chapterTitle: input.chapterTitle,
+    volumeTitle: input.volume?.title ?? '',
+    volumeSummary: input.volume?.summary.trim() ?? '',
     goal: input.goal,
     treatment: input.treatment.trim(),
     // 说明常以“名称：”开头（与【名称】重复），去掉这一截。

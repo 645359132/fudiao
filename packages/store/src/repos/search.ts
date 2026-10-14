@@ -34,7 +34,8 @@ const CONTEXT = 20;
 
 const Row = z.object({ id: z.string(), chapter_id: z.string(), title: z.string(), text: z.string() });
 
-const ORDER = 'ORDER BY c.order_key, c.id, p.order_key';
+// 按书中的顺序（分卷之后以卷为先，见视图 chapter_book_order），章内按段落顺序。
+const ORDER = 'ORDER BY o.position, p.order_key';
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -56,6 +57,7 @@ export async function searchParagraphs(port: SqlPort, rawQuery: string, limit = 
              JOIN paragraph_search_key k ON k.id = f.rowid
              JOIN paragraph p ON p.id = k.paragraph_id
              JOIN chapter c ON c.id = p.chapter_id
+             JOIN chapter_book_order o ON o.chapter_id = c.id
             WHERE paragraph_fts MATCH ? AND c.status = 'normal'
             ${ORDER} LIMIT ?`,
           [phrase(query), limit + 1],
@@ -65,6 +67,7 @@ export async function searchParagraphs(port: SqlPort, rawQuery: string, limit = 
           Row,
           `SELECT p.id, p.chapter_id, c.title, p.text
              FROM paragraph p JOIN chapter c ON c.id = p.chapter_id
+             JOIN chapter_book_order o ON o.chapter_id = c.id
             WHERE c.status = 'normal' AND instr(lower(p.text), lower(?)) > 0
             ${ORDER} LIMIT ?`,
           [query, limit + 1],

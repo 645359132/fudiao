@@ -95,20 +95,20 @@ describe('章节目录', () => {
     const db = fresh();
     const before = await three(db);
     const v = (id: string) => before.find((c) => c.id === id)?.version ?? 0;
-    value(await moveChapter(db, 'c3', v('c3'), null, later));
+    value(await moveChapter(db, 'c3', v('c3'), { volumeId: null, after: null }, later));
     expect(await titles(db)).toEqual(['第三章', '第一章', '第二章']);
-    value(await moveChapter(db, 'c1', v('c1'), 'c2', later));
+    value(await moveChapter(db, 'c1', v('c1'), { volumeId: null, after: 'c2' }, later));
     expect(await titles(db)).toEqual(['第三章', '第二章', '第一章']);
     const after = value(await listChapters(db, 'normal'));
     // 只改了被移动的章节。
     expect(after.find((c) => c.id === 'c2')?.version).toBe(1);
-    expect(await moveChapter(db, 'c2', 1, 'c2', later)).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    expect(await moveChapter(db, 'c2', 1, { volumeId: null, after: 'c2' }, later)).toMatchObject({ ok: false, error: { code: 'invalid' } });
   });
 
   it('移到原来的位置时顺序不变', async () => {
     const db = fresh();
     const before = await three(db);
-    value(await moveChapter(db, 'c2', before[1]?.version ?? 0, 'c1', later));
+    value(await moveChapter(db, 'c2', before[1]?.version ?? 0, { volumeId: null, after: 'c1' }, later));
     expect(await titles(db)).toEqual(['第一章', '第二章', '第三章']);
   });
 

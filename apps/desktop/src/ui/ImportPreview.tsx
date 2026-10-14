@@ -28,6 +28,7 @@ export function ImportPreview() {
   const split = splitText(decoded.text, rule, baseName(decoded.fileName));
   const preview = split.ok ? summarize(split.value) : [];
   const total = preview.reduce((n, c) => n + c.words, 0);
+  const volumes = new Set(preview.flatMap((c) => (c.volume === undefined ? [] : [c.volume]))).size;
   const encodings = ENCODINGS.some((e) => e.toLowerCase() === decoded.encoding.toLowerCase()) ? ENCODINGS : [decoded.encoding, ...ENCODINGS];
 
   return (
@@ -74,11 +75,15 @@ export function ImportPreview() {
           <>
             <p>
               共 {preview.length} 章，{total.toLocaleString('zh-CN')} 字
+              {volumes > 0 ? `，分 ${volumes} 卷` : ''}
             </p>
             <ol className="import-chapters" aria-label="拆分结果">
               {preview.slice(0, 500).map((c, i) => (
                 <li key={i}>
-                  <span>{c.title}</span>
+                  <span>
+                    {c.volume !== undefined && c.volume !== preview[i - 1]?.volume ? <strong className="import-volume">{c.volume}</strong> : null}
+                    {c.title}
+                  </span>
                   <span className="muted">
                     {c.paragraphs} 段 · {c.words.toLocaleString('zh-CN')} 字
                   </span>

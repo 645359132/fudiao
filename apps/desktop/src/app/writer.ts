@@ -13,6 +13,7 @@ import {
   listChapterMemories,
   listChapters,
   listChaptersWithText,
+  listVolumes,
   listEntities,
   listFacts,
   listForeshadows,
@@ -66,7 +67,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
 
   /** 本章不随分段变化的材料：作品、技能、人物、事实、伏笔、前文梗概与上一章的结尾。 */
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
-    const [work, skills, entities, facts, foreshadows, memories, withText] = await Promise.all([
+    const [work, skills, entities, facts, foreshadows, memories, withText, volumes] = await Promise.all([
       getProject(port),
       // 作品还没打开过“写作技能”页时，内置技能在这里登记（全部启用）。
       ensureBuiltinSkills(port, BUILTIN_SKILLS.map(({ key, name, version }) => ({ key, name, version })), () => deps.ids.next(), ctx()),
@@ -75,6 +76,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       listForeshadows(port),
       listChapterMemories(port),
       listChaptersWithText(port),
+      listVolumes(port),
     ]);
     if (!work.ok) return err(repo(work.error));
     if (!skills.ok) return err(repo(skills.error));
@@ -83,6 +85,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     if (!foreshadows.ok) return err(repo(foreshadows.error));
     if (!memories.ok) return err(repo(memories.error));
     if (!withText.ok) return err(repo(withText.error));
+    if (!volumes.ok) return err(repo(volumes.error));
+    const volume = volumes.value.find((v) => v.id === chapter.volumeId);
 
     const order = new Map(chapters.map((c, i) => [c.id, i]));
     const index = order.get(chapter.id) ?? 0;
@@ -126,6 +130,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       title: work.value?.title ?? '',
       genre: work.value?.genre ?? '',
       chapterTitle: chapter.title,
+      ...(volume !== undefined && { volume: { title: volume.title, summary: volume.summary } }),
       goal: plan.goal,
       treatment: plan.treatment,
       skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, description: s.description, text: s.text })),

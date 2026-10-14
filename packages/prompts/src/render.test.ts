@@ -462,10 +462,18 @@ describe('写手成章（B59）', () => {
         renderWriterChapter({ ...base, skills: [], avoidPhrases: [], cast: [], facts: [], memories: [], toPlant: [], toPayoff: [], mustNotReveal: [], beatsBefore: [], beatsNow: [], beatsAfter: [], previousEnding: '', written: '', isLast: true }),
       ),
     );
-    for (const absent of ['写作技能：', '不要使用这些说法', '出场人物：', '已确认的事实：', '前文梗概：', '要埋的伏笔', '要回收的伏笔', '不得说破', '本章的情节点：', '上一章的结尾', '本章已经写到这里']) {
+    for (const absent of ['写作技能：', '不要使用这些说法', '出场人物：', '已确认的事实：', '前文梗概：', '要埋的伏笔', '要回收的伏笔', '不得说破', '本章的情节点：', '上一章的结尾', '本章已经写到这里', '本卷']) {
       expect(text).not.toContain(absent);
     }
     expect(text).toContain('请接着写本章的正文，达成本章目标，约 1500 字。这是本章的最后一段，写到本章结束。');
+  });
+
+  it('本章在某一卷里时写出卷名与本卷梗概（B68）；卷没有梗概时只写卷名', () => {
+    const text = fullText(unwrap(renderWriterChapter({ ...base, volume: { title: '第一卷 雨夜', summary: ' 林舟当玉，引出旧主。 ' } })));
+    expect(text).toContain('本卷：第一卷 雨夜\n本卷梗概：林舟当玉，引出旧主。\n本章：');
+    const bare = fullText(unwrap(renderWriterChapter({ ...base, volume: { title: '第一卷 雨夜', summary: '' } })));
+    expect(bare).toContain('本卷：第一卷 雨夜\n本章：');
+    expect(bare).not.toContain('本卷梗概');
   });
 });
 

@@ -57,7 +57,7 @@ export function listChapterMemories(port: SqlPort): Promise<Result<ChapterMemory
     port,
     MemoryRow,
     `SELECT ${COLUMNS.split(', ').map((c) => `m.${c}`).join(', ')} FROM chapter_memory m JOIN chapter c ON c.id = m.chapter_id
-     WHERE c.status = 'normal' ORDER BY c.order_key`,
+     JOIN chapter_book_order o ON o.chapter_id = c.id WHERE c.status = 'normal' ORDER BY o.position`,
   );
 }
 

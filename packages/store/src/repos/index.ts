@@ -1,6 +1,9 @@
 export type { RepoError, WriteContext } from './common';
 export type { Chapter, ChapterStatus } from './chapter';
+export type { ChapterTarget } from './chapter';
 export { createChapter, listChapters, moveChapter, renameChapter, restoreChapter, trashChapter, updateChapterNotes } from './chapter';
+export type { Volume } from './volume';
+export { createVolume, deleteVolume, listVolumes, moveVolume, updateVolume } from './volume';
 export type { Project, ProjectPatch } from './project';
 export { createProject, DEFAULT_GOALS, getProject, updateProject, WorkGoals } from './project';
 export type { CurrentParagraph, ParagraphSavePlan, SavedParagraph, SourceKind, StructuralEdits } from './paragraph-plan';

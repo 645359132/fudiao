@@ -157,7 +157,7 @@ describe('作品信息与章节', () => {
     const [c1, c2, c3] = view.chapters;
     if (!c1 || !c2 || !c3) throw new Error();
     view = value(await app.createChapter('楔子', undefined));
-    view = value(await app.moveChapter(view.chapters[3] ?? c1, null));
+    view = value(await app.moveChapter(view.chapters[3] ?? c1, { volumeId: null, after: null }));
     expect(titles(view)).toEqual(['楔子', '第一章', '第二章', '第三章']);
     view = value(await app.renameChapter(c2, '第二章 当铺'));
     view = value(await app.trashChapter(view.chapters.find((c) => c.id === c3.id) ?? c3));
@@ -165,6 +165,38 @@ describe('作品信息与章节', () => {
     expect(view.trashed.map((c) => c.title)).toEqual(['第三章']);
     view = value(await app.restoreChapter(view.trashed[0] ?? c3));
     expect(titles(view)).toEqual(['楔子', '第一章', '第二章 当铺', '第三章']);
+  });
+
+  it('分卷（B68）：新建卷与卷里的章节、调整卷的顺序、卷里还有章节时不能删除；整本导出带卷名，导回时分卷照旧', async () => {
+    const { app, deps } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    value(await app.createChapter('楔子'));
+    let view = value(await app.createVolume('第一卷 雨夜'));
+    view = value(await app.createVolume('第二卷 天明'));
+    const [v1, v2] = view.volumes;
+    if (!v1 || !v2) throw new Error();
+    view = value(await app.createChapter('第一章', undefined, v1.id));
+    // 不指定位置的新章节接在全书末尾，也就是最后一卷的末尾。
+    view = value(await app.createChapter('第二章'));
+    expect(view.chapters.map((c) => [c.title, view.volumes.find((v) => v.id === c.volumeId)?.title ?? null])).toEqual([
+      ['楔子', null],
+      ['第一章', '第一卷 雨夜'],
+      ['第二章', '第二卷 天明'],
+    ]);
+    expect(await app.deleteVolume(v2)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('里还有章节') } });
+    view = value(await app.updateVolume(v2, { title: '第二卷 天明', summary: '旧主现身' }));
+    view = value(await app.moveVolume(view.volumes[1]!, null));
+    expect(titles(view)).toEqual(['楔子', '第二章', '第一章']);
+
+    value(await app.exportText('txt'));
+    const txt = deps.exported.at(-1)?.content ?? '';
+    expect(txt.indexOf('第二卷 天明')).toBeLessThan(txt.indexOf('第二章'));
+    expect(txt.indexOf('第一卷 雨夜')).toBeLessThan(txt.indexOf('第一章'));
+
+    view = value(await app.importChaptersIntoWork([{ title: '第三章', paragraphs: ['甲。'], volume: '第一卷 雨夜' }, { title: '第四章', paragraphs: ['乙。'], volume: '第三卷 归途' }]));
+    expect(view.volumes.map((v) => v.title)).toEqual(['第二卷 天明', '第一卷 雨夜', '第三卷 归途']);
+    expect(titles(view)).toEqual(['楔子', '第二章', '第一章', '第三章', '第四章']);
   });
 
   it('用过期的版本修改时返回冲突', async () => {

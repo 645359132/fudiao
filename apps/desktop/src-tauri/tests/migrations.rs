@@ -251,6 +251,7 @@ fn embedded_migrations_apply_on_a_fresh_database() {
     // 与 packages/store/src/schema.ts 的表清单一致（Node 端的测试逐列校验）。
     let mut expected = vec![
         "project",
+        "volume",
         "chapter",
         "paragraph",
         "chapter_snapshot",

@@ -119,13 +119,14 @@ async function prepare(port: SqlPort, input: FactInput, selfId: string | null): 
   }
   if (input.validFrom !== null && input.validTo !== null && (compareStoryTime(input.validFrom, input.validTo) ?? 0) > 0) return invalid('故事时间的开始晚于结束');
   if (input.validFromChapterId !== null && input.validToChapterId !== null) {
-    const keys = await queryAll(port, z.object({ id: z.string(), order_key: z.string() }), 'SELECT id, order_key FROM chapter WHERE id IN (?, ?)', [
+    // 比较书中的位置（分卷之后，卷的顺序在先）。
+    const keys = await queryAll(port, z.object({ chapter_id: z.string(), position: z.number() }), 'SELECT chapter_id, position FROM chapter_book_order WHERE chapter_id IN (?, ?)', [
       input.validFromChapterId,
       input.validToChapterId,
     ]);
     if (!keys.ok) return keys;
-    const from = keys.value.find((k) => k.id === input.validFromChapterId)?.order_key;
-    const to = keys.value.find((k) => k.id === input.validToChapterId)?.order_key;
+    const from = keys.value.find((k) => k.chapter_id === input.validFromChapterId)?.position;
+    const to = keys.value.find((k) => k.chapter_id === input.validToChapterId)?.position;
     if (from !== undefined && to !== undefined && from > to) return invalid('适用章节的开始在结束之后');
   }
   const basis: FactBasis[] = [];

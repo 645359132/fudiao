@@ -20,8 +20,16 @@ export const TABLES: readonly TableSpec[] = [
     json: ['goals', 'avoid_phrases'],
   },
   {
+    // 章节引用卷（迁移 0010），导入时须排在章节之前。
+    name: 'volume',
+    columns: ['id', 'order_key', 'title', 'summary', ...VERSIONED],
+    primaryKey: ['id'],
+    json: [],
+  },
+  {
     name: 'chapter',
-    columns: ['id', 'order_key', 'title', 'summary', 'notes', 'status', 'trashed_at', ...VERSIONED],
+    // volume_id 由迁移 0010 追加在末尾。
+    columns: ['id', 'order_key', 'title', 'summary', 'notes', 'status', 'trashed_at', ...VERSIONED, 'volume_id'],
     primaryKey: ['id'],
     json: [],
   },

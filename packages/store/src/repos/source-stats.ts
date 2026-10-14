@@ -38,9 +38,9 @@ export async function sourceStats(port: SqlPort): Promise<Result<SourceStats, Re
     port,
     Row,
     `SELECT c.id AS chapter_id, c.title, p.text, p.source_kind, p.source_spans
-       FROM chapter c LEFT JOIN paragraph p ON p.chapter_id = c.id
+       FROM chapter c JOIN chapter_book_order o ON o.chapter_id = c.id LEFT JOIN paragraph p ON p.chapter_id = c.id
       WHERE c.status = 'normal'
-      ORDER BY c.order_key, c.id, p.order_key`,
+      ORDER BY o.position, p.order_key`,
   );
   if (!rows.ok) return rows;
   const chapters: (ChapterSourceStats & ReturnType<typeof empty>)[] = [];

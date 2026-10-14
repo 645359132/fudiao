@@ -34,7 +34,7 @@ describe('按选区分开正文', () => {
 });
 
 const chapter = (id: string, title: string, summary = ''): Chapter =>
-  ({ id, title, summary, notes: '', orderKey: id, status: 'normal', trashedAt: null, version: 1, createdAt: '', updatedAt: '' });
+  ({ id, title, summary, notes: '', orderKey: id, status: 'normal', trashedAt: null, volumeId: null, version: 1, createdAt: '', updatedAt: '' });
 const entity = (id: string, name: string, aliases: string[] = []): Entity =>
   ({ id, kind: 'character', name, aliases, description: `${name}的说明`, attributes: [], locked: false, version: 1, createdAt: '', updatedAt: '' });
 const fact = (id: string, patch: Partial<Fact>): Fact =>

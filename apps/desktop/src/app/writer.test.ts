@@ -105,6 +105,18 @@ describe('写手成章', () => {
     expect(request).not.toContain('林舟还住在破庙');
   });
 
+  it('本章在某一卷里时，请求带上卷名与本卷梗概（B68）', async () => {
+    const { deps, app, c2 } = await setup();
+    const created = value(await app.createVolume('第一卷 夜雨'));
+    const volume = value(await app.updateVolume(created.volumes[0]!, { title: '第一卷 夜雨', summary: '林舟两访当铺' })).volumes[0]!;
+    const chapter = value(await app.reloadWork()).chapters.find((c) => c.id === c2)!;
+    value(await app.moveChapter(chapter, { volumeId: volume.id, after: null }));
+    deps.llmResponses.push(reply('一。'), reply('二。'));
+    value(await app.writeChapter(c2));
+    expect(bodyText(deps, 0)).toContain('本卷：第一卷 夜雨');
+    expect(bodyText(deps, 0)).toContain('本卷梗概：林舟两访当铺');
+  });
+
   it('没有计划、已经写过或有未保存的修改时不写，并说明原因', async () => {
     const { deps, app, c1, c2 } = await setup();
     expect(await app.writeChapter(c1)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('还没有章节计划') } });

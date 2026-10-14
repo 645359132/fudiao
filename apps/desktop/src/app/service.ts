@@ -3,6 +3,11 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
+  createVolume,
+  deleteVolume,
+  listVolumes,
+  moveVolume,
+  updateVolume,
   createEntity,
   createFact,
   deleteFact,
@@ -37,6 +42,7 @@ import {
   updateChapterNotes,
   updateProject,
   type Chapter,
+  type ChapterTarget,
   type Entity,
   type Fact,
   type FactInput,
@@ -46,6 +52,7 @@ import {
   type Project,
   type ProjectPatch,
   type RepoError,
+  type Volume,
   type CurrentParagraph,
   type SavedParagraph,
   type SqlPort,
@@ -103,6 +110,8 @@ export type WorkView = {
   readonly project: Project;
   readonly chapters: readonly Chapter[];
   readonly trashed: readonly Chapter[];
+  /** 分卷（B68），按书中的顺序；没有分卷时为空。 */
+  readonly volumes: readonly Volume[];
 };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
@@ -152,7 +161,9 @@ export function createAppService(deps: AppDeps) {
     if (!chapters.ok) return err(repo(chapters.error));
     const trashed = await listChapters(session.port, 'trashed');
     if (!trashed.ok) return err(repo(trashed.error));
-    return ok({ entry: session.entry, project: project.value, chapters: chapters.value, trashed: trashed.value });
+    const volumes = await listVolumes(session.port);
+    if (!volumes.ok) return err(repo(volumes.error));
+    return ok({ entry: session.entry, project: project.value, chapters: chapters.value, trashed: trashed.value, volumes: volumes.value });
   }
 
   /** 打开作品库并读取作品信息；成功后成为当前作品。 */
@@ -574,7 +585,8 @@ export function createAppService(deps: AppDeps) {
       for (const c of chosen) {
         const paragraphs = await listParagraphs(session.port, c.id);
         if (!paragraphs.ok) return err(repo(paragraphs.error));
-        chapters.push({ title: c.title, paragraphs: paragraphs.value.map((p) => p.text) });
+        const volume = work.value.volumes.find((v) => v.id === c.volumeId)?.title;
+        chapters.push({ title: c.title, paragraphs: paragraphs.value.map((p) => p.text), ...(volume !== undefined && chapterId === undefined && { volume }) });
       }
       const title = chapterId === undefined ? work.value.project.title : (chosen[0]?.title ?? '章节');
       const content = kind === 'txt' ? toTxt(chapters) : toMarkdown(chapters, chapterId === undefined ? title : undefined);
@@ -672,13 +684,28 @@ export function createAppService(deps: AppDeps) {
     releaseImport: (token: string) => deps.transfer.release(token),
     copyText: (content: string) => deps.exporter.copyText(content),
 
-    createChapter: (title: string, after?: string) =>
-      withPort((port) => createChapter(port, { id: deps.ids.next(), title, ...(after !== undefined && { after }) }, ctx())),
+    /** 新建章节：after 为前一章（跟在它后面，同一卷）；省略时放在 volumeId 这一卷末尾，再省略时放在全书末尾。 */
+    createChapter: (title: string, after?: string, volumeId?: string | null) =>
+      withPort((port) => createChapter(port, { id: deps.ids.next(), title, ...(after !== undefined && { after }), ...(volumeId !== undefined && { volumeId }) }, ctx())),
     renameChapter: (chapter: Chapter, title: string) => withPort((port) => renameChapter(port, chapter.id, chapter.version, title, ctx())),
     updateChapterNotes: (chapter: Chapter, notes: { summary: string; notes: string }) =>
       withPort((port) => updateChapterNotes(port, chapter.id, chapter.version, notes, ctx())),
     /** 把章节移到 after 之后；after 为 null 时移到最前。 */
-    moveChapter: (chapter: Chapter, after: string | null) => withPort((port) => moveChapter(port, chapter.id, chapter.version, after, ctx())),
+    /** 把章节移到某一卷（null 为未分卷）里某章之后（null 为卷首）。 */
+    moveChapter: (chapter: Chapter, target: ChapterTarget) => withPort((port) => moveChapter(port, chapter.id, chapter.version, target, ctx())),
+
+    /** 分卷（B68）：新建一卷（after 为前一卷，省略时放在最后）。 */
+    createVolume: (title: string, after?: string) => withPort((port) => createVolume(port, { id: deps.ids.next(), title, ...(after !== undefined && { after }) }, ctx())),
+    updateVolume: (volume: Volume, fields: { readonly title: string; readonly summary: string }) => withPort((port) => updateVolume(port, volume.id, volume.version, fields, ctx())),
+    /** 调整卷的顺序（after 为 null 时移到最前），卷里的章节跟着移动。 */
+    moveVolume: (volume: Volume, after: string | null) => withPort((port) => moveVolume(port, volume.id, volume.version, after, ctx())),
+    /** 删除一卷；卷里还有章节时不删，说明先把它们移走。 */
+    async deleteVolume(volume: Volume): Promise<Result<WorkView, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const done = await deleteVolume(session.port, volume.id, volume.version);
+      if (!done.ok && done.error.code === 'in_use') return err({ code: 'settings', detail: `“${volume.title}”里还有章节：先把它们移到别的卷，或移入回收站` });
+      return afterChange(done);
+    },
     trashChapter: (chapter: Chapter) => withPort((port) => trashChapter(port, chapter.id, chapter.version, ctx())),
     restoreChapter: (chapter: Chapter) => withPort((port) => restoreChapter(port, chapter.id, chapter.version, ctx())),
   };

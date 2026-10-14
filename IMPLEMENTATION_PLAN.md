@@ -126,7 +126,9 @@ fudiao/
 | 表 | 关键字段 | 相关需求 |
 | --- | --- | --- |
 | `project` | id、title、genre、synopsis、outline、goals、avoid_phrases（规避词表，为空时用默认词表；迁移 0005）；每个作品库只有一行，结构版本记录在 `schema_migrations` | B01、B37 |
-| `chapter` | id、order_key、title、summary、notes、status（正常、回收站）、trashed_at | B02 |
+| `volume` | id、order_key（卷的顺序）、title、summary（本卷简介，写手写本卷的章节时参考）、version；迁移 0010 | B68 |
+| `chapter` | id、order_key（卷内顺序）、title、summary、notes、status（正常、回收站）、trashed_at、volume_id（所在的卷，为空即未分卷；卷删除时置空；迁移 0010） | B02、B68 |
+| `chapter_book_order`（视图） | chapter_id、position：章节在书中的位置——未分卷在前，再按卷的顺序，卷内按章节的顺序；目录、导出、查找、来源统计、章节计划、长篇记忆与事实的适用范围都按它排序；迁移 0010 | B68 |
 | `paragraph` | id、chapter_id、order_key（章内唯一）、text、version、source_kind（手写、AI 生成、AI 生成后修改、混合）、source_spans、ai_origin_text、split_from | B04、B33 |
 | `chapter_snapshot` | id、chapter_id、reason（手动、恢复前、接受候选稿、导入、写手写入）、title、created_at、paragraphs（JSON） | B06、B17 |
 | `entity` | id、kind（人物、地点、组织、物品、规则）、name、aliases、data、locked、version | B09 |
@@ -656,6 +658,7 @@ pnpm m0 report --experiment m0/experiments/round1.yaml --out m0/packets/round1
 | M1-10 | 段落来源字段与统计界面（AI 部分在 M2 生效） | B33 |
 | M1-11 | 全文查找：FTS5 trigram 与短查询的退化路径 | B04 |
 | M1-12 | 连载规模测试集生成器与性能基准 | 大作品操作验收 |
+| M1-13 | 分卷：卷的增删改与排序、章节在卷内与卷间移动、目录按卷分组、导出导入带卷名、写手参考本卷简介 | B68，验收“分卷” |
 
 完成条件：需求第八章的“中文编辑、保存反馈、意外退出、大作品操作、数据迁移、事件关联、锁定设定”通过；输入法手工测试清单全部通过。
 

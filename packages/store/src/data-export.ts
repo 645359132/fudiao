@@ -48,6 +48,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   8: (tables) => tables,
   // 0009：写作技能增加适用说明 description（旧数据为空）。
   9: (tables) => ({ ...tables, writing_skill: (tables['writing_skill'] ?? []).map((row) => ({ description: '', ...row })) }),
+  // 0010：新增卷；章节增加 volume_id（旧数据都是未分卷）。
+  10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

@@ -1,7 +1,7 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result } from '@fudiao/shared';
 import type { CallOptions } from '@fudiao/llm';
-import type { Chapter, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
+import type { Chapter, ChapterTarget, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
@@ -165,10 +165,21 @@ export type AppState = {
   readonly chooseLibraryDir: () => Promise<void>;
   readonly updateWorkInfo: (patch: ProjectPatch) => Promise<boolean>;
   readonly createChapter: (title: string) => Promise<boolean>;
+  /** 在某一卷（null 为未分卷）末尾新建章节。 */
+  readonly createChapterIn: (volumeId: string | null, title: string) => Promise<boolean>;
+  /** 分卷（B68）：新建、改名与简介、调整顺序、删除（卷里还有章节时不删）。 */
+  readonly createVolume: (title: string) => Promise<boolean>;
+  readonly updateVolume: (id: string, fields: { readonly title: string; readonly summary: string }) => Promise<boolean>;
+  readonly moveVolumeUp: (id: string) => Promise<void>;
+  readonly moveVolumeDown: (id: string) => Promise<void>;
+  readonly deleteVolume: (id: string) => Promise<void>;
+  /** 把章节拖到某一卷的标题上：移到这一卷的卷首。 */
+  readonly dropChapterOnVolume: (id: string, volumeId: string | null) => Promise<void>;
   readonly renameChapter: (id: string, title: string) => Promise<boolean>;
   readonly updateChapterNotes: (id: string, notes: { summary: string; notes: string }) => Promise<boolean>;
   /** 把章节移到 after 之后；after 为 null 时移到最前。 */
-  readonly moveChapter: (id: string, after: string | null) => Promise<void>;
+  /** 把章节移到某一卷（null 为未分卷）里某章之后（null 为卷首）。 */
+  readonly moveChapter: (id: string, target: ChapterTarget) => Promise<void>;
   readonly moveUp: (id: string) => Promise<void>;
   readonly moveDown: (id: string) => Promise<void>;
   /** 拖到某一章上：放到该章所在的位置。 */
@@ -685,29 +696,80 @@ export function createAppStore(service: AppService): AppStore {
       },
       renameChapter: (id, title) => withChapter(id, (c) => service.renameChapter(c, title)),
       updateChapterNotes: (id, notes) => withChapter(id, (c) => service.updateChapterNotes(c, notes)),
-      async moveChapter(id, after) {
-        await withChapter(id, (c) => service.moveChapter(c, after));
+      async moveChapter(id, target) {
+        await withChapter(id, (c) => service.moveChapter(c, target));
       },
+      // 目录按书中的顺序排列（未分卷、各卷依次）；上移、下移越过卷的边界时移到相邻的卷里。
       async moveUp(id) {
         const list = get().work?.chapters ?? [];
         const i = list.findIndex((c) => c.id === id);
-        if (i > 0) await get().moveChapter(id, list[i - 2]?.id ?? null);
+        const self = list[i];
+        const prev = list[i - 1];
+        if (self === undefined || prev === undefined) return;
+        if (prev.volumeId !== self.volumeId) {
+          await get().moveChapter(id, { volumeId: prev.volumeId, after: prev.id });
+          return;
+        }
+        const before = list[i - 2];
+        await get().moveChapter(id, { volumeId: self.volumeId, after: before !== undefined && before.volumeId === self.volumeId ? before.id : null });
       },
       async moveDown(id) {
         const list = get().work?.chapters ?? [];
         const i = list.findIndex((c) => c.id === id);
+        const self = list[i];
         const next = list[i + 1];
-        if (i >= 0 && next !== undefined) await get().moveChapter(id, next.id);
+        if (self === undefined || next === undefined) return;
+        await get().moveChapter(id, next.volumeId === self.volumeId ? { volumeId: self.volumeId, after: next.id } : { volumeId: next.volumeId, after: null });
       },
       async dropChapter(id, targetId) {
         if (id === targetId) return;
         const list = get().work?.chapters ?? [];
         const from = list.findIndex((c) => c.id === id);
         const to = list.findIndex((c) => c.id === targetId);
-        if (from < 0 || to < 0) return;
-        // 向下拖放到目标之后，向上拖放到目标之前。
-        const after = from < to ? targetId : (list[to - 1]?.id ?? null);
-        await get().moveChapter(id, after);
+        const target = list[to];
+        if (from < 0 || target === undefined) return;
+        // 向下拖放到目标之后，向上拖放到目标之前；落在目标所在的卷里。
+        if (from < to) {
+          await get().moveChapter(id, { volumeId: target.volumeId, after: target.id });
+          return;
+        }
+        const before = list[to - 1];
+        await get().moveChapter(id, { volumeId: target.volumeId, after: before !== undefined && before.volumeId === target.volumeId ? before.id : null });
+      },
+      async dropChapterOnVolume(id, volumeId) {
+        await get().moveChapter(id, { volumeId, after: null });
+      },
+      async createChapterIn(volumeId, title) {
+        if (!(await get().leaveChapter())) return false;
+        const before = new Set((get().work?.chapters ?? []).map((c) => c.id));
+        const ok = await run(service.createChapter(title, undefined, volumeId), (work) => ({ work }));
+        if (ok) {
+          const created = get().work?.chapters.find((c) => !before.has(c.id));
+          if (created !== undefined) set({ selectedChapterId: created.id, panel: 'chapter' });
+        }
+        return ok;
+      },
+      createVolume: (title) => run(service.createVolume(title), (work) => ({ work })),
+      async updateVolume(id, fields) {
+        const volume = get().work?.volumes.find((v) => v.id === id);
+        return volume === undefined ? false : run(service.updateVolume(volume, fields), (work) => ({ work }));
+      },
+      async moveVolumeUp(id) {
+        const list = get().work?.volumes ?? [];
+        const i = list.findIndex((v) => v.id === id);
+        const volume = list[i];
+        if (volume !== undefined && i > 0) await run(service.moveVolume(volume, list[i - 2]?.id ?? null), (work) => ({ work }));
+      },
+      async moveVolumeDown(id) {
+        const list = get().work?.volumes ?? [];
+        const i = list.findIndex((v) => v.id === id);
+        const volume = list[i];
+        const next = list[i + 1];
+        if (volume !== undefined && next !== undefined) await run(service.moveVolume(volume, next.id), (work) => ({ work }));
+      },
+      async deleteVolume(id) {
+        const volume = get().work?.volumes.find((v) => v.id === id);
+        if (volume !== undefined) await run(service.deleteVolume(volume), (work) => ({ work }));
       },
       async trashChapter(id) {
         const selected = get().selectedChapterId === id;

@@ -80,7 +80,7 @@ export function listChapterPlans(port: SqlPort): Promise<Result<ChapterPlan[], R
     port,
     PlanRow,
     `SELECT ${COLUMNS.split(', ').map((c) => `p.${c}`).join(', ')} FROM chapter_plan p JOIN chapter c ON c.id = p.chapter_id
-     WHERE c.status = 'normal' ORDER BY c.order_key`,
+     JOIN chapter_book_order o ON o.chapter_id = c.id WHERE c.status = 'normal' ORDER BY o.position`,
   );
 }
 

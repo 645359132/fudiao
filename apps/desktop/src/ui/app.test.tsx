@@ -1852,3 +1852,49 @@ describe('快速成书的界面（B67）', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: '快速成书' })).toBeNull());
   });
 });
+
+describe('分卷的界面（B68）', () => {
+  it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
+    const { user, store } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '楔子');
+    const nav = () => screen.getByRole('navigation', { name: '章节目录' });
+    // 没有分卷时与以前相同：一个章节列表。
+    expect(within(nav()).queryByLabelText('卷：未分卷')).toBeNull();
+
+    for (const name of ['第一卷', '第二卷']) {
+      await user.click(within(nav()).getByRole('button', { name: '新建卷' }));
+      await user.type(within(nav()).getByRole('textbox', { name: '新卷名' }), `${name}{Enter}`);
+      await within(nav()).findByRole('region', { name });
+    }
+    expect(within(nav()).getByRole('region', { name: '未分卷' })).toBeTruthy();
+    expect(within(within(nav()).getByRole('region', { name: '第一卷' })).getByText('这一卷还没有章节')).toBeTruthy();
+
+    // 在第二卷里新建章节。
+    await user.click(within(nav()).getByRole('button', { name: '在 第二卷 末尾新建章节' }));
+    await user.type(within(nav()).getByRole('textbox', { name: '新章节名' }), '第一章{Enter}');
+    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '第二卷' })).getByText('第一章')).toBeTruthy());
+
+    // 上移：第一章是第二卷的第一章，上一章是未分卷的楔子，于是移到未分卷末尾（第一卷是空的，跳过）。
+    await user.click(within(nav()).getByRole('button', { name: '上移 第一章' }));
+    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '未分卷' })).getByText('第一章')).toBeTruthy());
+    // 拖到第一卷的标题上：移入第一卷。
+    const chapterId = store.getState().work?.chapters.find((c) => c.title === '第一章')?.id ?? '';
+    const volumeId = store.getState().work?.volumes.find((v) => v.title === '第一卷')?.id ?? null;
+    await store.getState().dropChapterOnVolume(chapterId, volumeId);
+    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '第一卷' })).getByText('第一章')).toBeTruthy());
+
+    await user.click(within(nav()).getByRole('button', { name: '编辑 第一卷' }));
+    const editor = within(nav()).getByRole('form', { name: '编辑 第一卷' });
+    await user.clear(within(editor).getByRole('textbox', { name: '卷名' }));
+    await user.type(within(editor).getByRole('textbox', { name: '卷名' }), '第一卷 雨夜');
+    await user.type(within(editor).getByRole('textbox', { name: '本卷简介' }), '林舟当玉');
+    await user.click(within(editor).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(store.getState().work?.volumes[0]).toMatchObject({ title: '第一卷 雨夜', summary: '林舟当玉' }));
+
+    await user.click(within(nav()).getByRole('button', { name: '删除 第一卷 雨夜' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('“第一卷 雨夜”里还有章节');
+    await user.click(within(nav()).getByRole('button', { name: '删除 第二卷' }));
+    await waitFor(() => expect(store.getState().work?.volumes.map((v) => v.title)).toEqual(['第一卷 雨夜']));
+  });
+});

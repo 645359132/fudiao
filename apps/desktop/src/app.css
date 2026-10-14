@@ -1462,3 +1462,58 @@ fieldset.plain {
 .skill-description {
   margin: 4px 0 6px;
 }
+
+/* 分卷（B68）：卷的标题行，章节列表缩进在卷下 */
+.volume {
+  margin-bottom: 8px;
+}
+
+.volume-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.volume-head.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.volume-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volume-head:hover .chapter-actions,
+.volume-head:focus-within .chapter-actions {
+  display: flex;
+}
+
+.volume .chapter-list {
+  padding-left: 10px;
+}
+
+.volume-empty {
+  margin: 2px 0 0 16px;
+  font-size: 13px;
+}
+
+.volume-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  font-weight: normal;
+}
+
+/* 导入预览中每卷第一章前的卷名 */
+.import-volume {
+  display: block;
+  margin-top: 6px;
+}
