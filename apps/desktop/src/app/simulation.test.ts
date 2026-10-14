@@ -413,3 +413,151 @@ describe('预算（B28）', () => {
     expect(fake.calls.length).toBeLessThan(free.fake.calls.length);
   });
 });
+
+describe('待核实裁决的确认（B26）', () => {
+  /** 交互模式推进到第一条待核实的裁决。 */
+  async function waiting() {
+    const ctx = await ready();
+    const runId = value(await ctx.app.startSimRun(ctx.scene.id, { mode: 'interactive', seed: 7 })).run.id;
+    expect(value(await ctx.app.continueSimRun(runId))).toMatchObject({ phase: 'AwaitingAuthor', awaitingRulings: 1 });
+    const detail = value(await ctx.app.simRunDetail(runId));
+    return { ...ctx, runId, pending: detail.pendingRulings[0]!, detail };
+  }
+
+  it('列出待确认的裁决：理由、效果与发生的事写成文字，并给出可修改的内容；按原样接受后继续推进', async () => {
+    const { app, runId, pending, detail } = await waiting();
+    expect(detail.pendingRulings).toHaveLength(1);
+    expect(pending).toMatchObject({ rationale: '弩箭擦过', effects: ['主角的伤势变为“重伤”'] });
+    expect(pending.occurrences[0]).toContain('弩箭擦过主角肩头');
+    expect(JSON.parse(pending.editable)).toMatchObject({ rationale: '弩箭擦过', effects: [{ type: 'setInjury', actor: 'protagonist', level: 'severe' }] });
+    // 等待确认时记了快照，可以从这里分支。
+    expect(detail.forkPoints.map((f) => f.label)).toEqual(['等待确认裁决时']);
+
+    expect(value(await app.confirmSimRuling(runId, pending.requestId))).toMatchObject({ awaitingRulings: 0 });
+    const after = value(await app.simRunDetail(runId));
+    expect(after.pendingRulings).toEqual([]);
+    const confirmed = value(await app.simRunEvents(runId)).map((e) => e.payload as { type: string; by?: string; needsReview?: boolean }).filter((p) => p.type === 'AdjudicationConfirmed');
+    expect(confirmed).toMatchObject([{ by: 'author', needsReview: false }]);
+    // 已确认的裁决不能再确认一次。
+    expect(await app.confirmSimRuling(runId, pending.requestId)).toMatchObject({ ok: false, error: { code: 'settings' } });
+  });
+
+  it('作者改过的裁决经同样的转换与校验：改轻伤势生效；不是合法的 JSON、格式不对、超出裁决范围时拒绝，仍在等待', async () => {
+    const { app, runId, pending } = await waiting();
+    const edit = (change: (ruling: { effects: unknown[] }) => void) => {
+      const ruling = JSON.parse(pending.editable) as { effects: unknown[] };
+      change(ruling);
+      return JSON.stringify(ruling);
+    };
+    expect(await app.confirmSimRuling(runId, pending.requestId, '{')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('不是合法的 JSON') } });
+    expect(await app.confirmSimRuling(runId, pending.requestId, '{"effects":[]}')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('格式不对') } });
+    // 裁决里出现了场景中没有的标记：不合规则。
+    const outOfScope = edit((r) => r.effects.push({ type: 'setFlag', flag: 'no_such_flag', value: true }));
+    expect(await app.confirmSimRuling(runId, pending.requestId, outOfScope)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('裁决不符合规则') } });
+    expect(value(await app.simRunStatus(runId))).toMatchObject({ phase: 'AwaitingAuthor', awaitingRulings: 1 });
+
+    const lighter = edit((r) => {
+      r.effects = [{ type: 'setInjury', actor: 'protagonist', level: 'light' }];
+    });
+    value(await app.confirmSimRuling(runId, pending.requestId, lighter));
+    value(await app.continueSimRun(runId));
+    const first = value(await app.simRunDetail(runId)).data!.rounds[0]!;
+    expect(first.world.actors.find((a) => a.id === 'protagonist')).toMatchObject({ injury: 'light' });
+    expect(first.rulings[0]).toMatchObject({ by: 'author' });
+  });
+
+  it('没有等待决定的导演提议时，决定导演提议会说明现在不能做', async () => {
+    const { app, runId } = await waiting();
+    expect(await app.decideSimDirector(runId, true)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('现在这个阶段不能做这个操作') } });
+  });
+});
+
+describe('作者介入与分支（B30）', () => {
+  const types = (events: readonly { payload: unknown }[]) => events.map((e) => (e.payload as { type: string }).type);
+
+  it('修改角色的认知：先记下介入前的快照，介入写成事件，角色此刻的认知随之变化；必须写原因', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    const before = value(await app.simRunDetail(runId));
+    const add = [{ text: '有人在南门埋了绊线', modality: 'heard' as const, confidence: 0.6, about: ['south_gate'] }];
+    expect(await app.interveneSimRun(runId, { kind: 'edit_knowledge', actor: 'protagonist', add, retract: [], reason: ' ' })).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('原因') } });
+    expect(await app.interveneSimRun(runId, { kind: 'edit_knowledge', actor: '不是 键', add, retract: [], reason: '试试' })).toMatchObject({ ok: false, error: { code: 'settings' } });
+
+    value(await app.interveneSimRun(runId, { kind: 'edit_knowledge', actor: 'protagonist', add, retract: [], reason: '让他提前听到风声' }));
+    const after = value(await app.simRunDetail(runId));
+    expect(after.knowledge['protagonist']?.map((k) => k.text)).toContain('有人在南门埋了绊线');
+    expect(after.knowledge['protagonist']?.length).toBe((before.knowledge['protagonist']?.length ?? 0) + 1);
+    expect(after.knowledge['antagonist']).toEqual(before.knowledge['antagonist']);
+    expect(types(value(await app.simRunEvents(runId)))).toEqual(['RunStarted', 'AuthorIntervened', 'KnowledgeEdited']);
+    expect(after.forkPoints).toEqual([{ seq: 1, round: 0, label: '作者介入之前' }]);
+
+    // 撤回刚加的那一条。
+    const added = after.knowledge['protagonist']!.find((k) => k.text === '有人在南门埋了绊线')!;
+    value(await app.interveneSimRun(runId, { kind: 'edit_knowledge', actor: 'protagonist', add: [], retract: [added.id], reason: '改主意了' }));
+    expect(value(await app.simRunDetail(runId)).knowledge['protagonist']?.map((k) => k.text)).not.toContain('有人在南门埋了绊线');
+    // 介入之后照常推进到结束，回放与快照一致。
+    expect(value(await app.continueSimRun(runId))).toMatchObject({ phase: 'Ended' });
+    expect(value(await app.verifySimRun(runId)).mismatchedSeqs).toEqual([]);
+  });
+
+  it('两个回合之间加入外部事件：按感知规则分发，记在时间线里；回合进行中不能加', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    const event = { kind: 'external_event' as const, zone: 'center', visible: true, loudness: 3, visual: '一盏灯笼从梁上掉下来', sound: '哗啦一声', reason: '逼他们动起来' };
+    value(await app.interveneSimRun(runId, event));
+    expect(types(value(await app.simRunEvents(runId)))).toEqual(expect.arrayContaining(['AuthorIntervened', 'Committed', 'StateChanged']));
+
+    // 推进到回合中途：外部事件加不进去。
+    let view = value(await app.stepSimRun(runId));
+    for (let i = 0; i < 10 && view.phase !== 'AwaitingProposals'; i++) view = value(await app.stepSimRun(runId));
+    expect(view.phase).toBe('AwaitingProposals');
+    expect(await app.interveneSimRun(runId, event)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('外部事件只能加在两个回合之间') } });
+
+    value(await app.continueSimRun(runId));
+    const first = value(await app.simRunDetail(runId)).data!.rounds[0]!;
+    expect(first.occurrences.some((o) => o.visual === '一盏灯笼从梁上掉下来')).toBe(true);
+    expect(first.notes).toContain('作者介入（external_event）：逼他们动起来');
+  });
+
+  it('替换一个角色的行动：这一回合不再向模型请求他的行动，其余照常', async () => {
+    const { app, scene, fake } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    let view = value(await app.stepSimRun(runId));
+    for (let i = 0; i < 10 && view.phase !== 'AwaitingProposals'; i++) view = value(await app.stepSimRun(runId));
+    const calls = fake.calls.length;
+    value(await app.interveneSimRun(runId, { kind: 'replace_action', actor: 'antagonist', action: { kind: 'wait', sentences: ['我不动手。'], volume: 'normal' }, reason: '看看他不出手会怎样' }));
+    // 不合规则的行动被拒绝。
+    expect(await app.interveneSimRun(runId, { kind: 'replace_action', actor: 'antagonist', action: { kind: 'wait', sentences: [], volume: 'normal' }, reason: '再来一次' })).toMatchObject({ ok: false });
+
+    value(await app.continueSimRun(runId));
+    const first = value(await app.simRunDetail(runId)).data!.rounds[0]!;
+    expect(first.proposals.find((p) => p.actor === '对手')).toMatchObject({ kind: 'wait', source: '作者替换', sentences: ['我不动手。'] });
+    // 第一回合没有向模型问过对手的行动，也就没有那次出手与裁决。
+    expect(fake.calls.slice(calls).some((c) => c.round === 1 && c.step === 'propose' && c.subject === 'antagonist')).toBe(false);
+    expect(first.rulings).toEqual([]);
+  });
+
+  it('从介入前的快照分出新的推演：原来的运行不动，新的运行带着到那一刻为止的事件，可以走另一条路', async () => {
+    const { app, scene } = await ready();
+    const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await app.stepSimRun(runId));
+    const at = value(await app.simRunStatus(runId)).run.lastSeq;
+    value(await app.interveneSimRun(runId, { kind: 'edit_knowledge', actor: 'protagonist', add: [{ text: '对手带着弩', modality: 'inferred', confidence: 0.5, about: ['antagonist'] }], retract: [], reason: '给他一点提示' }));
+    value(await app.continueSimRun(runId));
+    const original = value(await app.simRunEvents(runId));
+
+    expect(await app.forkSimRun(runId, at + 1)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('快照') } });
+    const fork = value(await app.forkSimRun(runId, at));
+    expect(fork.run).toMatchObject({ parentRunId: runId, branchFromSeq: at, lastSeq: at, status: 'running', sceneConfigVersion: 1 });
+    const copied = value(await app.simRunEvents(fork.run.id));
+    expect(copied.map((e) => e.payload).slice(1)).toEqual(original.slice(1, at).map((e) => e.payload));
+    expect(copied[0]?.payload).toMatchObject({ type: 'RunStarted', parent: { runId, seq: at } });
+
+    // 分支上没有那次介入，照常推进到结束；原来的运行一条事件也没有变。
+    expect(value(await app.continueSimRun(fork.run.id))).toMatchObject({ phase: 'Ended' });
+    expect(types(value(await app.simRunEvents(fork.run.id)))).not.toContain('AuthorIntervened');
+    expect(value(await app.simRunEvents(runId))).toEqual(original);
+    expect(value(await app.listSimRuns(scene.id)).map((r) => r.id)).toEqual([fork.run.id, runId]);
+    expect(value(await app.verifySimRun(fork.run.id)).mismatchedSeqs).toEqual([]);
+  });
+});

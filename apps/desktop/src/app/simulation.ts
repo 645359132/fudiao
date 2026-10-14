@@ -1,10 +1,23 @@
 // 角色推演的用例（需求 B22、B28、B30，施工文档 M4-01）：把 M0 的推演引擎接到桌面端。
 // 事件写入作品库的 sim_event（只追加），模型经桌面端的适配器（凭据代理）调用，调用记录写入 llm_call（步骤键查重）。
 // 引擎与领域内核的逻辑不在这里：这里只负责把场景、运行与模型配置交给引擎，并把引擎的状态写回运行记录（缓存）。
-import { parseScene, stateHash, type Scene, type SceneSpecInput } from '@fudiao/domain';
-import { buildViewerData, createEngine, replayRun, RunConfig, type EngineError, type Phase, type RunEvent, type RunStatus, type TaskModel, type ViewerData } from '@fudiao/engine';
+import { ActorId, buildCharacterView, ItemId, KnowledgeId, parseScene, stateHash, ZoneId, type ActionKind, type Scene, type SceneSpecInput } from '@fudiao/domain';
+import {
+  buildViewerData,
+  createEngine,
+  replayRun,
+  rulingFromOutput,
+  RunConfig,
+  type EngineError,
+  type Intervention,
+  type Phase,
+  type RunEvent,
+  type RunStatus,
+  type TaskModel,
+  type ViewerData,
+} from '@fudiao/engine';
 import { BudgetGuard, type CallOptions, type LlmPort, type ModelProfile } from '@fudiao/llm';
-import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput } from '@fudiao/prompts';
+import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput, SemanticRulingOutput } from '@fudiao/prompts';
 import { err, ok, sha256, type Result } from '@fudiao/shared';
 import {
   createSimRun,
@@ -32,6 +45,7 @@ import type { ProviderView } from './model-services';
 import { projectCallLog, THINKING_ALLOWANCE, type modelRunner, type ModelChoice } from './model-runner';
 import type { AppDeps } from './ports';
 import { checkSceneConfig, describeSceneProblems } from './scene-editing';
+import { describeEffect, describeOccurrence, forkLabel, rulingToOutput, type ForkPoint } from './sim-describe';
 
 /** 给作者看的运行状态：运行记录，加上由事件得出的阶段与等待作者处理的事项。 */
 export type SimRunView = {
@@ -52,8 +66,109 @@ export type SimRunView = {
 /** 一个回合的等待：从回合开始到回合结束经过的时间，与其中模型响应所占的时间（验收“推演等待”）。 */
 export type RoundTiming = { readonly round: number; readonly waitMs: number | null; readonly modelMs: number; readonly calls: number };
 
-/** 推演工作区的数据（B28）：运行状态、按回合整理的时间线（全局局面与各角色所见）与每回合的等待时间。 */
-export type SimRunDetail = { readonly view: SimRunView; readonly data: ViewerData | null; readonly timing: readonly RoundTiming[] };
+/** 等待作者确认的裁决（B26）：效果与发生的事已写成文字；editable 是与裁决模型输出同一形式的 JSON，供作者修改。 */
+export type PendingRuling = {
+  readonly requestId: string;
+  readonly rationale: string;
+  readonly uncertainties: readonly string[];
+  readonly effects: readonly string[];
+  readonly occurrences: readonly string[];
+  readonly editable: string;
+};
+
+/** 等待作者决定的导演提议。 */
+export type PendingDirector = { readonly rationale: string; readonly effects: readonly string[]; readonly occurrences: readonly string[] };
+
+/** 作者介入（B30）。键都是场景里的键；reason 记在运行记录里。 */
+export type SimIntervention =
+  | { readonly kind: 'external_event'; readonly zone: string; readonly visible: boolean; readonly loudness: number; readonly visual: string; readonly sound: string; readonly reason: string }
+  | {
+      readonly kind: 'edit_knowledge';
+      readonly actor: string;
+      readonly add: readonly { readonly text: string; readonly modality: 'observed' | 'heard' | 'inferred'; readonly confidence: number; readonly about: readonly string[] }[];
+      readonly retract: readonly string[];
+      readonly reason: string;
+    }
+  | {
+      readonly kind: 'replace_action';
+      readonly actor: string;
+      readonly action: {
+        readonly kind: ActionKind;
+        readonly target?: string;
+        readonly item?: string;
+        readonly toZone?: string;
+        readonly sentences: readonly string[];
+        readonly volume: 'whisper' | 'normal' | 'shout';
+        readonly description?: string;
+      };
+      readonly reason: string;
+    };
+
+/** 推演工作区的数据（B28）：运行状态、按回合整理的时间线（全局局面与各角色所见）、每回合的等待时间，以及等作者处理的事。 */
+export type SimRunDetail = {
+  readonly view: SimRunView;
+  readonly data: ViewerData | null;
+  readonly timing: readonly RoundTiming[];
+  readonly pendingRulings: readonly PendingRuling[];
+  readonly pendingDirector: PendingDirector | null;
+  /** 可以分出新推演的时点（记有快照的序号）。 */
+  readonly forkPoints: readonly ForkPoint[];
+  /** 每个角色此刻的认知条目（介入时选择要撤回的）。 */
+  readonly knowledge: Readonly<Record<string, readonly { readonly id: string; readonly text: string }[]>>;
+  /** 这次运行的场景里的角色、区域与物品（介入的表单用它们的键）。 */
+  readonly cast: {
+    readonly actors: readonly { readonly id: string; readonly name: string }[];
+    readonly zones: readonly { readonly id: string; readonly name: string }[];
+    readonly items: readonly { readonly id: string; readonly name: string }[];
+  };
+};
+
+/** 界面给出的介入换成引擎的介入；键不合规则时抛出（调用方转成说明）。 */
+function toIntervention(input: SimIntervention): Intervention {
+  switch (input.kind) {
+    case 'external_event':
+      return {
+        kind: 'external_event',
+        reason: input.reason.trim(),
+        event: {
+          effects: [],
+          occurrences: [
+            {
+              participants: [],
+              zones: [ZoneId.parse(input.zone)],
+              visible: input.visible,
+              loudness: input.loudness,
+              description: { ...(input.visual.trim() !== '' && { visual: input.visual.trim() }), ...(input.sound.trim() !== '' && { sound: input.sound.trim() }) },
+            },
+          ],
+        },
+      };
+    case 'edit_knowledge':
+      return {
+        kind: 'edit_knowledge',
+        reason: input.reason.trim(),
+        actor: ActorId.parse(input.actor),
+        add: input.add.map((k) => ({ text: k.text.trim(), modality: k.modality, confidence: k.confidence, about: [...k.about] })),
+        retract: input.retract.map((id) => KnowledgeId.parse(id)),
+      };
+    case 'replace_action': {
+      const a = input.action;
+      return {
+        kind: 'replace_action',
+        reason: input.reason.trim(),
+        action: {
+          actor: ActorId.parse(input.actor),
+          kind: a.kind,
+          ...(a.target !== undefined && a.target !== '' && { target: a.target }),
+          ...(a.item !== undefined && a.item !== '' && { item: ItemId.parse(a.item) }),
+          ...(a.toZone !== undefined && a.toZone !== '' && { toZone: ZoneId.parse(a.toZone) }),
+          ...(a.sentences.length > 0 && { utterance: { sentences: [...a.sentences], volume: a.volume } }),
+          ...(a.description !== undefined && a.description.trim() !== '' && { description: a.description.trim() }),
+        },
+      };
+    }
+  }
+}
 
 export type SimRunOptions = {
   readonly mode: 'interactive' | 'auto';
@@ -89,7 +204,7 @@ const ENGINE_ERRORS: Readonly<Record<EngineError['code'], string>> = {
   scene_mismatch: '运行记录与场景配置对不上，不能继续',
   corrupt_log: '运行记录损坏，无法回放',
   conflict: '这次推演正在别处推进，请稍后再试',
-  invalid_phase: '现在这个阶段不能做这个操作',
+  invalid_phase: '现在这个阶段不能做这个操作（外部事件只能加在两个回合之间；替换行动只能在等这个角色行动的时候）',
   invalid_ruling: '裁决不符合规则',
   invalid_intervention: '介入的内容不符合规则',
 };
@@ -194,11 +309,16 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     });
   }
 
+  type Operated = { readonly view: SimRunView; readonly status: RunStatus; readonly scene: Scene; readonly port: SqlPort };
+  type EngineAction = (engine: ReturnType<typeof createEngine>, scene: Scene) => Promise<Result<RunStatus, EngineError>>;
+
+  const withRun = async (runId: string, action: EngineAction): Promise<Result<SimRunView, AppError>> => {
+    const done = await operate(runId, action);
+    return done.ok ? ok(done.value.view) : done;
+  };
+
   /** 读出运行与它开始时的场景，执行一次引擎操作，再把结果写回运行记录。事件存储的异常在这里变成给作者看的说明。 */
-  async function withRun(
-    runId: string,
-    action: (engine: ReturnType<typeof createEngine>, scene: Scene) => Promise<Result<RunStatus, EngineError>>,
-  ): Promise<Result<SimRunView, AppError>> {
+  async function operate(runId: string, action: EngineAction): Promise<Result<Operated, AppError>> {
     const port = project();
     if (port === null) return err({ code: 'no_work' });
     const run = await getSimRun(port, runId);
@@ -211,7 +331,9 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     try {
       const engine = engineFor(port, run.value.budgetUsd === null || spent === null ? null : { limitUsd: run.value.budgetUsd, spentUsd: spent.value.spentUsd });
       const status = await action(engine, scene.value);
-      return status.ok ? await sync(port, runId, status.value) : err(engineError(status.error));
+      if (!status.ok) return err(engineError(status.error));
+      const view = await sync(port, runId, status.value);
+      return view.ok ? ok({ view: view.value, status: status.value, scene: scene.value, port }) : view;
     } catch (error) {
       return err(settings(`推演没有推进：${error instanceof Error ? error.message : String(error)}`));
     }
@@ -325,12 +447,10 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
      * （角色所见取自 buildCharacterView，与实际发给角色代理的一致）。
      */
     async simRunDetail(runId: string): Promise<Result<SimRunDetail, AppError>> {
-      const view = await withRun(runId, (engine, scene) => engine.status(runId, scene));
-      if (!view.ok) return view;
-      const port = project();
-      if (port === null) return err({ code: 'no_work' });
-      const scene = sceneOf(view.value.run.sceneConfig);
-      if (!scene.ok) return scene;
+      const current = await operate(runId, (engine, s) => engine.status(runId, s));
+      if (!current.ok) return current;
+      const { view, status, port } = current.value;
+      const scene = ok(current.value.scene);
       const calls = await listRunCalls(port, runId);
       if (!calls.ok) return err(repo(calls.error));
       let events: readonly StoredEvent[];
@@ -359,7 +479,134 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
           calls: mine.length,
         };
       });
-      return ok({ view: view.value, data, timing });
+      const names = new Map([...scene.value.zones, ...scene.value.actors, ...scene.value.items, ...scene.value.mechanisms].map((x) => [x.id as string, x.name]));
+      const name = (id: string) => names.get(id) ?? id;
+      const pendingRulings: PendingRuling[] = status.awaiting.map((p) => ({
+        requestId: p.requestId,
+        rationale: p.rationale,
+        uncertainties: p.uncertainties,
+        effects: p.ruling.effects.map((e) => describeEffect(e, name)),
+        occurrences: p.ruling.occurrences.map((o) => describeOccurrence(o, name)),
+        editable: JSON.stringify(rulingToOutput(p.ruling, p.rationale, p.uncertainties), null, 2),
+      }));
+      const proposed = status.awaitingDirector;
+      const pendingDirector: PendingDirector | null =
+        proposed === null || proposed.event === null
+          ? null
+          : { rationale: proposed.rationale, effects: proposed.event.effects.map((e) => describeEffect(e, name)), occurrences: proposed.event.occurrences.map((o) => describeOccurrence(o, name)) };
+
+      const snapshots = await listSimSnapshots(port, runId);
+      if (!snapshots.ok) return err(repo(snapshots.error));
+      const bySeq = new Map(events.map((e) => [e.seq, e.payload as RunEvent]));
+      let round = 0;
+      const roundAt = new Map<number, number>();
+      for (const e of events) {
+        const payload = e.payload as RunEvent;
+        if (payload.type === 'RoundStarted') round = payload.round;
+        roundAt.set(e.seq, round);
+      }
+      const forkPoints: ForkPoint[] = snapshots.value.map((s) => ({ seq: s.seq, round: roundAt.get(s.seq) ?? 0, label: forkLabel(bySeq.get(s.seq), bySeq.get(s.seq + 1)) }));
+
+      // 每个角色此刻的认知：与发给他的角色视图里的条目相同，供作者介入时选择要撤回的。
+      const knowledge = Object.fromEntries(
+        scene.value.actors.map((a) => {
+          const v = buildCharacterView(scene.value, status.state.sim, a.id);
+          return [
+            a.id,
+            v.knowledge.map((k) => {
+              const body = k.body;
+              const claim = body.kind === 'claim' ? v.claims.find((c) => c.id === body.claim) : undefined;
+              const text = body.kind === 'text' ? body.text : claim !== undefined ? `${name(claim.speaker)}说：“${claim.sentences.join('')}”` : `第 ${k.round} 回合的见闻`;
+              return { id: k.id, text };
+            }),
+          ] as const;
+        }),
+      );
+      const keys = (list: readonly { readonly id: string; readonly name: string }[]) => list.map((x) => ({ id: x.id, name: x.name }));
+      const cast = { actors: keys(scene.value.actors), zones: keys(scene.value.zones), items: keys(scene.value.items) };
+      return ok({ view, data, timing, pendingRulings, pendingDirector, forkPoints, knowledge, cast });
+    },
+
+    /**
+     * 作者确认一条待核实的裁决（B26）。edited 是作者改过的裁决（与裁决模型的输出同一形式的 JSON）；不给时按原样接受。
+     * 改过的裁决与模型的输出走同一条转换，再由引擎按裁决的范围与不变式校验。
+     */
+    async confirmSimRuling(runId: string, requestId: string, edited?: string): Promise<Result<SimRunView, AppError>> {
+      if (edited === undefined) return withRun(runId, (engine, scene) => engine.confirmRuling(runId, scene, requestId));
+      let raw: unknown;
+      try {
+        raw = JSON.parse(edited);
+      } catch (error) {
+        return err(settings(`改过的裁决不是合法的 JSON：${error instanceof Error ? error.message : String(error)}`));
+      }
+      const output = SemanticRulingOutput.safeParse(raw);
+      if (!output.success) return err(settings(`改过的裁决格式不对：${output.error.issues[0]?.path.join('.') ?? ''} ${output.error.issues[0]?.message ?? ''}`));
+      const ruling = rulingFromOutput(requestId, output.data);
+      if (!ruling.ok) return err(settings(`改过的裁决第 ${ruling.error.index + 1} 条效果不对：${ruling.error.issue}`));
+      return withRun(runId, (engine, scene) => engine.confirmRuling(runId, scene, requestId, ruling.value));
+    },
+
+    /** 作者决定是否采用导演提议（B47 的简化形式）。 */
+    decideSimDirector: (runId: string, accept: boolean) => withRun(runId, (engine, scene) => engine.decideDirector(runId, scene, accept)),
+
+    /**
+     * 作者介入（B30）：先记下介入前的状态快照（之后可以从这里分出另一条推演），再把介入写成事件。
+     * 能不能介入由引擎按当前阶段判断：外部事件只能加在两个回合之间，替换行动只能在等这个角色行动的时候。
+     */
+    async interveneSimRun(runId: string, input: SimIntervention): Promise<Result<SimRunView, AppError>> {
+      if (input.reason.trim() === '') return err(settings('请写一句介入的原因：它会记在运行记录里'));
+      const before = await operate(runId, (engine, scene) => engine.status(runId, scene));
+      if (!before.ok) return before;
+      const { status, port } = before.value;
+      let intervention: Intervention;
+      try {
+        intervention = toIntervention(input);
+      } catch {
+        return err(settings('介入里的角色、区域或物品的键不对'));
+      }
+      if (status.state.lastSeq > 0) {
+        const snapshot = await saveSimSnapshot(port, { runId, seq: status.state.lastSeq, state: status.state.sim, stateHash: stateHash(status.state.sim) }, ctx());
+        if (!snapshot.ok) return err(repo(snapshot.error));
+      }
+      return withRun(runId, (engine, scene) => engine.intervene(runId, scene, intervention));
+    },
+
+    /**
+     * 从一个快照处分出新的推演（B30）：原来的运行不动，新的运行带着到那一刻为止的事件，可以走另一条路。
+     * seq 须是这次运行的一个快照所在的序号。
+     */
+    async forkSimRun(runId: string, seq: number): Promise<Result<SimRunView, AppError>> {
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const run = await getSimRun(port, runId);
+      if (!run.ok) return err(repo(run.error));
+      if (run.value === null) return err({ code: 'not_found' });
+      const snapshots = await listSimSnapshots(port, runId);
+      if (!snapshots.ok) return err(repo(snapshots.error));
+      if (!snapshots.value.some((s) => s.seq === seq)) return err(settings('只能从记有快照的时点分支'));
+      const scene = sceneOf(run.value.sceneConfig);
+      if (!scene.ok) return scene;
+      const newId = deps.ids.next();
+      const created = await createSimRun(
+        port,
+        {
+          id: newId,
+          sceneId: run.value.sceneId,
+          sceneConfig: run.value.sceneConfig,
+          sceneConfigVersion: run.value.sceneConfigVersion,
+          mode: run.value.mode,
+          parent: { runId, seq },
+          ...(run.value.budgetUsd !== null && { budgetUsd: run.value.budgetUsd }),
+        },
+        ctx(),
+      );
+      if (!created.ok) return err(repo(created.error));
+      try {
+        const status = await engineFor(port, null).fork(runId, scene.value, seq, newId);
+        return status.ok ? await sync(port, newId, status.value) : err(engineError(status.error));
+      } catch (error) {
+        return err(settings(`分支没有建成：${error instanceof Error ? error.message : String(error)}`));
+      }
     },
 
     /** 这次运行的全部事件，按序号。 */

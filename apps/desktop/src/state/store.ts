@@ -6,7 +6,7 @@ import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
-import type { SimRunDetail, SimRunOptions } from '../app/simulation';
+import type { SimIntervention, SimRunDetail, SimRunOptions } from '../app/simulation';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { describeError } from '../app/errors';
@@ -254,6 +254,11 @@ export type AppState = {
   readonly continueSimRun: () => Promise<void>;
   readonly pauseSimRun: () => Promise<void>;
   readonly stopSimRun: () => Promise<void>;
+  /** 确认待核实的裁决（edited 为作者改过的内容）、决定导演提议、作者介入、从快照处分支（B26、B30）。返回是否成功。 */
+  readonly confirmSimRuling: (requestId: string, edited?: string) => Promise<boolean>;
+  readonly decideSimDirector: (accept: boolean) => Promise<boolean>;
+  readonly interveneSimRun: (input: SimIntervention) => Promise<boolean>;
+  readonly forkSimRun: (seq: number) => Promise<boolean>;
   readonly draftSimScene: (description: string) => Promise<void>;
   readonly blankSimScene: (config: SceneSpecInput) => void;
   readonly discardSceneDraft: () => void;
@@ -359,6 +364,16 @@ export function createAppStore(service: AppService): AppStore {
         return;
       }
       set({ simRun: detail.value, simRuns: get().simRuns.map((r) => (r.id === runId ? detail.value.view.run : r)) });
+    }
+
+    /** 作者对选中的运行做一次操作（确认裁决、决定导演提议、介入）：正在推进时不做；之后刷新时间线。 */
+    async function authorAction(action: (runId: string) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: AppError }>): Promise<boolean> {
+      const id = get().simRunId;
+      if (id === null || get().simAdvancing) return false;
+      const done = await action(id);
+      set({ message: done.ok ? null : describeError(done.error) });
+      await refreshRun(id);
+      return done.ok;
     }
 
     /** 读出一个场景的运行；select 给出时选中它，否则选中最近的一次。 */
@@ -900,6 +915,22 @@ export function createAppStore(service: AppService): AppStore {
         const view = await service.pauseSimRun(id);
         if (!view.ok) set({ message: describeError(view.error) });
         await refreshRun(id);
+      },
+      confirmSimRuling: (requestId, edited) => authorAction((id) => service.confirmSimRuling(id, requestId, edited)),
+      decideSimDirector: (accept) => authorAction((id) => service.decideSimDirector(id, accept)),
+      interveneSimRun: (input) => authorAction((id) => service.interveneSimRun(id, input)),
+      async forkSimRun(seq) {
+        const id = get().simRunId;
+        const sceneId = get().simSceneId;
+        if (id === null || sceneId === null || get().simAdvancing) return false;
+        const fork = await service.forkSimRun(id, seq);
+        if (!fork.ok) {
+          set({ message: describeError(fork.error) });
+          return false;
+        }
+        set({ message: null });
+        await loadRuns(sceneId, fork.value.run.id);
+        return true;
       },
       async stopSimRun() {
         const id = get().simRunId;

@@ -68,6 +68,7 @@
 - M4-02 已完成：顶栏“推演”页（`SimulationPanel.tsx`）与场景编辑表单（`SceneEditor.tsx`：基本信息、角色卡、初始认知、秘密、物品、叙述规则，“高级”里直接编辑整份配置）；用例 `draftSimScene`（`scene_draft` 模板，草稿不保存）；`apps/desktop/src/app/scene-editing.ts`（空白场景、校验结果的中文说明）。机关与各类规则首版只能在“高级”里编辑。
 - M4-03 已完成：区域图的表格编辑 `ZoneGraphEditor.tsx`（区域列表与出口，区域两两之间的相邻、可见、声音与通行标记）；`scene-editing.ts` 的 `zonePairs`、`setZoneEdge`、`renameZone`（引用一并改名）、`removeZone`。
 - M4-04 已完成：推演工作区 `SimWorkspace.tsx`（开始、单步、继续、暂停、停止，时间线的全局局面与角色所见，等待时间）；`buildViewerData` 从 M0 命令行移到 `packages/engine/src/run-view.ts` 两边共用；预算上限 `sim_run.budget_usd`（迁移 0006 尚未发布，直接修改）与 `listRunCalls`；用例 `simRunDetail`。待核实裁决的确认在 M4-05。
+- M4-05 已完成：待核实裁决的确认与修改、导演提议的决定、作者介入（改认知、外部事件、替换行动，介入前存快照）与从快照处分支（用例 `confirmSimRuling`、`decideSimDirector`、`interveneSimRun`、`forkSimRun`，界面 `SimAuthorPanel.tsx`，文字说明 `sim-describe.ts`）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

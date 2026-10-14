@@ -3,6 +3,7 @@ import type { Observation } from '@fudiao/domain';
 import type { ViewerData, ViewerKnowledge, ViewerRound } from '@fudiao/engine';
 import type { SimRun } from '@fudiao/store';
 import type { SimRunDetail } from '../app/simulation';
+import { ForkPanel, IntervenePanel, PendingPanel } from './SimAuthorPanel';
 import { useApp } from './store-context';
 
 const KIND: Readonly<Record<string, string>> = {
@@ -289,7 +290,12 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
           {view.unknownCostCalls > 0 ? `（另有 ${view.unknownCostCalls} 次调用费用未知）` : ''}
         </span>
       </p>
-      {waiting ? <p className="field-error">有 {view.awaitingRulings} 条待核实的裁决等你确认。</p> : null}
+      {waiting ? (
+        <p className="field-error">
+          {view.awaitingRulings > 0 ? `有 ${view.awaitingRulings} 条待核实的裁决等你确认。` : ''}
+          {view.awaitingDirector ? '有一条导演提议等你决定。' : ''}
+        </p>
+      ) : null}
       <div className="skill-actions">
         <button type="button" disabled={advancing || ended || waiting} onClick={() => void step()}>
           单步
@@ -316,6 +322,9 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
           </button>
         )}
       </div>
+      <PendingPanel detail={detail} locked={advancing} />
+      {ended ? null : <IntervenePanel detail={detail} locked={advancing} />}
+      <ForkPanel detail={detail} locked={advancing} />
       {data === null ? null : <Timeline data={data} />}
       {timing.length > 0 ? (
         <details>
@@ -382,6 +391,7 @@ export function SimWorkspace() {
             <button key={r.id} type="button" aria-current={r.id === selected} disabled={advancing && r.id !== selected} onClick={() => void select(r.id)}>
               第 {runs.length - i} 次 · {RUN_STATUS[r.status]}
               {r.status === 'ended' ? '' : ` · 第 ${r.round} 回合`}
+              {r.parentRunId === null ? '' : ' · 分支'}
             </button>
           ))}
         </nav>
