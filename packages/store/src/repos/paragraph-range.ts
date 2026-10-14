@@ -99,6 +99,13 @@ export function planRangeReplace(paragraphs: readonly SavedParagraph[], range: T
  * 先复制事件关联，再删除并入的段落，最后插入新段落（新排序键落在被删段落的位置上，须在删除之后）。
  */
 export async function applyRangeReplace(port: SqlPort, chapterId: string, plan: RangePlan, ctx: WriteContext): Promise<Result<void, RepoError>> {
+  const done = await port.transaction(rangeReplaceStatements(chapterId, plan, ctx));
+  if (done.ok) return ok(undefined);
+  return err(done.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: done.error });
+}
+
+/** 替换的全部语句（带版本守卫）；采纳推演草案时与事件、事实一起放进同一个事务。 */
+export function rangeReplaceStatements(chapterId: string, plan: RangePlan, ctx: WriteContext): Statement[] {
   const statements: Statement[] = [];
   const guarded = (sql: string, params: SqlValue[]): Statement => ({ sql, params, expectChanges: 1 });
   const u = plan.update;
@@ -133,7 +140,5 @@ export async function applyRangeReplace(port: SqlPort, chapterId: string, plan: 
     });
   }
   statements.push({ sql: 'UPDATE chapter SET updated_at = ? WHERE id = ?', params: [ctx.now, chapterId] });
-  const done = await port.transaction(statements);
-  if (done.ok) return ok(undefined);
-  return err(done.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: done.error });
+  return statements;
 }

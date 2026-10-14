@@ -612,6 +612,21 @@ describe('回放与中断恢复（B30）', () => {
   });
 });
 
+/** 采纳一份推演写成的候选稿：复核全部待复核的裁决，采纳视角角色察觉到的全部事件，不写事实。 */
+async function adoptAll(app: AppService, candidateId: string) {
+  const draft = value(await app.adoptionDraft(candidateId));
+  return value(
+    await app.adoptCandidate({
+      candidateId,
+      events: draft.events.filter((e) => e.seenByPov).map((e) => e.key),
+      worldFacts: [],
+      beliefs: [],
+      reviewed: draft.reviews.map((r) => r.requestId),
+      confirmLocked: false,
+    }),
+  );
+}
+
 describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () => {
   /** 自动模式推演到结束。 */
   async function finished(use: Policy = policy) {
@@ -670,7 +685,9 @@ describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () =
     // 候选稿不会自动写入正文。
     expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['']);
 
-    value(await app.acceptCandidate(candidate.id));
+    // 推演写成的正文不能直接接受，要经采纳（关联它讲述的事件）。
+    expect(await app.acceptCandidate(candidate.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('采纳') } });
+    await adoptAll(app, candidate.id);
     expect(value(await app.openChapter(chapter.id)).saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
   });
 
@@ -681,7 +698,7 @@ describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () =
     const opened = value(await app.openChapter(chapter.id));
     value(await app.saveChapter(chapter.id, opened.saved, [{ id: 'p0', text: '天快亮了。', source: 'handwritten' }], { splits: [], merges: [] }));
     const candidate = value(await app.narrateBeatSheet(sheet.sheet.id, chapter.id));
-    value(await app.acceptCandidate(candidate.id));
+    await adoptAll(app, candidate.id);
     expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['天快亮了。', '雨下得更紧了。他没有回头。']);
 
     const path = value(await app.reloadWork()).entry.path;
@@ -690,6 +707,108 @@ describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () =
     value(await deps.drafts.remove(path, chapter.id));
     value(await app.saveBeatSheet(sheet.sheet.id, { beats: sheet.beats.map(({ ref, note, withhold }) => ({ ref, note, withhold, treatment: 'omit' as const })), style: '' }));
     expect(await app.narrateBeatSheet(sheet.sheet.id, chapter.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('省略') } });
+  });
+});
+
+describe('采纳推演草案（B29、B55，验收“草案采纳”“自动模式”“锁定设定”“事件关联”“事实来源”）', () => {
+  /** 自动模式推演到结束，主角视角写第一回合，写成第一章的候选稿。 */
+  async function narrated() {
+    const ctx = await ready();
+    const runId = value(await ctx.app.startSimRun(ctx.scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await ctx.app.continueSimRun(runId));
+    const sheet = value(await ctx.app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 1, notes: '' }));
+    const chapter = value(await ctx.app.createChapter('第一章')).chapters[0]!;
+    const candidate = value(await ctx.app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    const draft = value(await ctx.app.adoptionDraft(candidate.id));
+    return { ...ctx, runId, sheet, chapter, candidate, draft };
+  }
+  const base = (draft: { candidateId: string; events: readonly { key: string; seenByPov: boolean }[]; reviews: readonly { requestId: string }[] }) => ({
+    candidateId: draft.candidateId,
+    events: draft.events.filter((e) => e.seenByPov).map((e) => e.key),
+    worldFacts: [] as string[],
+    beliefs: [] as string[],
+    reviewed: draft.reviews.map((r) => r.requestId),
+    confirmLocked: false,
+  });
+
+  it('采纳的准备：范围内发生的事、视角角色察觉到哪些、他的见闻、待复核的裁决与设定的对应', async () => {
+    const { draft, chapter } = await narrated();
+    expect(draft).toMatchObject({ chapterId: chapter.id, povKey: 'protagonist', povName: '主角' });
+    expect(draft.events.length).toBeGreaterThan(0);
+    expect(draft.events.every((e) => e.round === 1 && e.summary !== '')).toBe(true);
+    expect(draft.events.some((e) => e.seenByPov)).toBe(true);
+    expect(draft.events.find((e) => e.summary.includes('弩箭'))).toMatchObject({ summary: '裁决结果（仓库中央）：弩箭擦过主角肩头', participants: expect.arrayContaining([{ key: 'antagonist', name: '对手' }]) });
+    expect(draft.beliefs.length).toBeGreaterThan(0);
+    // 自动模式第一回合自动接受了那次出手的裁决：须复核。
+    expect(draft.reviews).toMatchObject([{ round: 1, rationale: '弩箭擦过' }]);
+    // 作品里还没有设定：都对不上。
+    expect(draft.entities.find((e) => e.key === 'protagonist')).toMatchObject({ name: '主角', kind: 'character', entityId: null, locked: false });
+  });
+
+  it('自动接受的裁决没有逐条复核、没有选事件时不能采纳，正文不变', async () => {
+    const { app, draft, chapter } = await narrated();
+    expect(await app.adoptCandidate({ ...base(draft), reviewed: [] })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('没有复核') } });
+    expect(await app.adoptCandidate({ ...base(draft), events: [] })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('至少选一件事') } });
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['']);
+    expect(value(await app.listSnapshots(chapter.id))).toEqual([]);
+  });
+
+  it('一次写入：正文带来源标记，选中的事件成为故事事件并关联到写入的段落，选中的见闻与事成为事实并记下来源事件；写入前有快照', async () => {
+    const { app, draft, chapter, runId } = await narrated();
+    const lin = value(await app.createEntity('character', '主角')).created;
+    const villain = value(await app.createEntity('character', '对手')).created;
+    const fresh = value(await app.adoptionDraft(draft.candidateId));
+    expect(fresh.entities.find((e) => e.key === 'protagonist')).toMatchObject({ entityId: lin.id, entityName: '主角' });
+
+    const attack = fresh.events.find((e) => e.summary.includes('弩箭'))!;
+    const belief = fresh.beliefs[0]!;
+    const result = value(await app.adoptCandidate({ ...base(fresh), events: [attack.key], worldFacts: [attack.key], beliefs: [belief.ref] }));
+    expect(result).toMatchObject({ events: 1, facts: 2 });
+    expect(result.paragraphs.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
+    expect(value(await app.listSnapshots(chapter.id)).map((s) => s.reason)).toEqual(['accept_candidate']);
+
+    const events = value(await app.storyEvents());
+    expect(events).toHaveLength(1);
+    const runEvents = value(await app.simRunEvents(runId));
+    expect(events[0]).toMatchObject({ summary: attack.summary, originRunId: runId, participants: expect.arrayContaining([villain.id]) });
+    expect((runEvents.find((e) => e.seq === events[0]!.originSeq)?.payload as { type: string }).type).toBe('StateChanged');
+    expect(value(await app.chapterEventLinks(chapter.id))).toEqual([{ eventId: events[0]!.id, paragraphId: result.paragraphs[0]!.id, mode: 'direct' }]);
+
+    const facts = value(await app.listFacts());
+    expect(facts.map((f) => [f.kind, f.status, f.holderId, f.content, f.eventIds])).toEqual(
+      expect.arrayContaining([
+        ['world', 'confirmed', null, attack.summary, [events[0]!.id]],
+        ['belief', 'confirmed', lin.id, belief.text, [events[0]!.id]],
+      ]),
+    );
+    // 以事件为来源的事实不会因此被标为待复核。
+    expect(value(await app.listFacts()).every((f) => f.status === 'confirmed')).toBe(true);
+    // 同一份候选稿不能再采纳一次。
+    expect(await app.adoptCandidate({ ...base(fresh), events: [attack.key] })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('处理过') } });
+  });
+
+  it('视角角色没有对应的人物设定时不能记他的认知；涉及锁定设定的事实要作者核对后才写入', async () => {
+    const { app, draft } = await narrated();
+    const belief = draft.beliefs[0]!;
+    expect(await app.adoptCandidate({ ...base(draft), beliefs: [belief.ref] })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('没有对应的人物设定') } });
+
+    const lin = value(await app.createEntity('character', '主角')).created;
+    value(await app.setEntityLocked(lin, true));
+    expect(await app.adoptCandidate({ ...base(draft), beliefs: [belief.ref] })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('涉及锁定设定：主角') } });
+    value(await app.adoptCandidate({ ...base(draft), beliefs: [belief.ref], confirmLocked: true }));
+    // 锁定设定本身没有被改动。
+    const after = value(await app.listEntities()).find((e) => e.id === lin.id)!;
+    expect(after).toMatchObject({ name: '主角', locked: true, description: '', aliases: [] });
+  });
+
+  it('原文在写成之后被改过：候选稿过期，什么都不写', async () => {
+    const { app, draft, chapter } = await narrated();
+    const opened = value(await app.openChapter(chapter.id));
+    value(await app.saveChapter(chapter.id, opened.saved, [{ id: opened.saved[0]!.id, text: '作者先写了一句。', source: 'handwritten' }], { splits: [], merges: [] }));
+    expect(await app.adoptCandidate(base(draft))).toMatchObject({ ok: false, error: { detail: expect.stringContaining('过期') } });
+    expect(value(await app.storyEvents())).toEqual([]);
+    expect(value(await app.listFacts())).toEqual([]);
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['作者先写了一句。']);
   });
 });
 

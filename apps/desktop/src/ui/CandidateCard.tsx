@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { textDiff } from '@fudiao/shared';
 import type { Candidate } from '@fudiao/store';
 import { CANDIDATE_LABELS } from '../app/selection-ops';
+import { AdoptionForm } from './AdoptionForm';
 import { useApp } from './store-context';
 
 /** 与原文的差异：续写只有新增的文字；其余操作逐字标出删除与新增。 */
@@ -24,13 +25,15 @@ function Diff({ candidate }: { readonly candidate: Candidate }) {
 
 /**
  * 一份候选稿（需求 B17）：比较、修改、接受或放弃。接受时先保存现稿快照，再写入正文；
- * 原文在生成之后被修改过时不写入，候选稿标为过期。
+ * 原文在生成之后被修改过时不写入，候选稿标为过期。推演写成的候选稿不直接接受，经“采纳”与它讲述的事件一起写入（B29、B55）。
  */
 export function CandidateCard({ candidate }: { readonly candidate: Candidate }) {
   const accept = useApp((s) => s.acceptCandidate);
   const discard = useApp((s) => s.discardCandidate);
   const edit = useApp((s) => s.editCandidate);
   const busy = useApp((s) => s.busy);
+  const openAdoption = useApp((s) => s.openAdoption);
+  const adoption = useApp((s) => (s.adoption?.candidateId === candidate.id ? s.adoption : null));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(candidate.content);
   const label = `${CANDIDATE_LABELS[candidate.operation]}的候选稿`;
@@ -69,17 +72,27 @@ export function CandidateCard({ candidate }: { readonly candidate: Candidate }) 
       ) : (
         <>
           <Diff candidate={candidate} />
-          <div className="form-actions">
-            <button type="button" disabled={busy} onClick={() => void accept(candidate.id)}>
-              接受
-            </button>
-            <button type="button" disabled={busy} onClick={() => setEditing(true)}>
-              修改
-            </button>
-            <button type="button" disabled={busy} onClick={() => void discard(candidate.id)}>
-              放弃
-            </button>
-          </div>
+          {adoption !== null ? (
+            <AdoptionForm draft={adoption} />
+          ) : (
+            <div className="form-actions">
+              {candidate.operation === 'narrate' ? (
+                <button type="button" disabled={busy} onClick={() => void openAdoption(candidate.id)}>
+                  采纳…
+                </button>
+              ) : (
+                <button type="button" disabled={busy} onClick={() => void accept(candidate.id)}>
+                  接受
+                </button>
+              )}
+              <button type="button" disabled={busy} onClick={() => setEditing(true)}>
+                修改
+              </button>
+              <button type="button" disabled={busy} onClick={() => void discard(candidate.id)}>
+                放弃
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>

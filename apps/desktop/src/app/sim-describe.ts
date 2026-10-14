@@ -1,6 +1,6 @@
 // 把推演里的结构化内容写成作者看得懂的话（施工文档 M4-05）：裁决的效果、发生的事、可以分支的时点。
 // 只做展示与格式转换，不改变任何状态。
-import type { Effect, Observation, RuledOccurrence, SemanticRuling } from '@fudiao/domain';
+import type { Effect, Observation, Occurrence, RuledOccurrence, SemanticRuling } from '@fudiao/domain';
 import type { RunEvent } from '@fudiao/engine';
 import type { SemanticRulingOutput } from '@fudiao/prompts';
 
@@ -119,4 +119,15 @@ export function describeObservation(o: Observation, name: Name): string {
   if (o.description?.visual !== undefined) parts.push(`：${o.description.visual}`);
   if (o.content !== undefined) parts.push(`，读到：“${o.content}”`);
   return parts.filter((p) => p !== '').join(' ');
+}
+
+/** 推演中发生的一件事写成故事事件的摘要：谁做了什么、在哪里、说了什么、看上去怎样。 */
+export function describeStoryOccurrence(o: Occurrence, name: Name): string {
+  const parts = [o.actor === undefined ? '' : name(o.actor), ACTION_LABELS[o.kind] ?? o.kind];
+  if (o.item !== undefined) parts.push(name(o.item));
+  if (o.target !== undefined) parts.push(`→ ${name(o.target)}`);
+  const where = o.zones.length === 0 ? '' : `（${o.zones.map(name).join(' → ')}）`;
+  const speech = o.speech === undefined ? '' : `：“${o.speech.sentences.join('')}”`;
+  const look = o.description?.visual === undefined ? '' : `：${o.description.visual}`;
+  return `${parts.filter((p) => p !== '').join(' ')}${where}${speech}${look}`;
 }

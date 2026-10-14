@@ -56,6 +56,7 @@ const fact = (id: string, patch: Partial<Fact>): Fact =>
     createdAt: '',
     updatedAt: '',
     basis: [],
+    eventIds: [],
     ...patch,
   });
 

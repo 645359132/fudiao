@@ -134,6 +134,7 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
       if (!found.ok) return err(repo(found.error));
       const candidate = found.value;
       if (candidate.status !== 'pending') return err(settings('这份候选稿已经处理过了'));
+      if (candidate.operation === 'narrate') return err(settings('推演写成的正文须经“采纳”写入：选定它讲述的事件后一起写入作品'));
       const paragraphs = await listParagraphs(p.value, candidate.chapterId);
       if (!paragraphs.ok) return err(repo(paragraphs.error));
       const stale = async () => {

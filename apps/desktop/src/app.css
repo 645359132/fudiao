@@ -1238,6 +1238,23 @@ fieldset.plain {
   margin: 0 0 6px;
 }
 
+/* 采纳推演草案：每个选项一行，事件下的“记为世界事实”缩进 */
+.adoption fieldset {
+  margin: 8px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.adoption label {
+  display: block;
+  margin: 2px 0;
+}
+
+.adoption-event label + label {
+  padding-left: 22px;
+}
+
 .candidate textarea {
   width: 100%;
   padding: 6px;

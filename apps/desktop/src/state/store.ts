@@ -8,7 +8,7 @@ import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
-import type { BeatSheetRequest, BeatSheetView } from '../app/narration';
+import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
@@ -131,6 +131,8 @@ export type AppState = {
   readonly tasks: readonly TaskRecord[];
   /** 当前章节待处理的候选稿（B17），新的在前。 */
   readonly candidates: readonly Candidate[];
+  /** 正在采纳的推演候选稿（B29、B55）：可以带进作品的事件、见闻与须复核的裁决。 */
+  readonly adoption: AdoptionDraft | null;
   /** 用量与费用（打开“用量与费用”时读取）。 */
   readonly usage: { readonly summary: UsageSummary; readonly recent: readonly LlmCallRow[] } | null;
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
@@ -331,6 +333,11 @@ export type AppState = {
   readonly discardCandidate: (id: string) => Promise<void>;
   /** 保存正文后接受候选稿，写入后重新载入本章。 */
   readonly acceptCandidate: (id: string) => Promise<void>;
+  /** 推演写成的候选稿：读取采纳要选的事件、见闻与须复核的裁决。 */
+  readonly openAdoption: (candidateId: string) => Promise<void>;
+  readonly closeAdoption: () => void;
+  /** 保存正文后采纳，写入后重新载入本章与事实。 */
+  readonly adoptCandidate: (request: AdoptionRequest) => Promise<void>;
   /** 保存正文后打开用量与费用。 */
   readonly openUsage: () => Promise<void>;
   /** 保存正文后打开查找页；给出查询时（例如正文中选中的文字）立即查找。 */
@@ -578,6 +585,7 @@ export function createAppStore(service: AppService): AppStore {
       writeSelectedText: '',
       aiWrite: null,
       candidates: [],
+      adoption: null,
       tasks: [],
       searchQuery: '',
       searchResult: null,
@@ -618,7 +626,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [] });
+        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1016,7 +1024,7 @@ export function createAppStore(service: AppService): AppStore {
         set({ narrationBusy: true, message: null, narrationNote: null });
         const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
         const result = await modelTask('narrate', `推演写成正文 · ${title}`, chapterId, (options) => service.narrateBeatSheet(sheetId, chapterId, options));
-        set({ narrationBusy: false, ...(result.ok && { narrationNote: { chapterId, text: `已在“${title}”末尾生成候选稿，接受后才写入正文。` } }) });
+        set({ narrationBusy: false, ...(result.ok && { narrationNote: { chapterId, text: `已在“${title}”末尾生成候选稿，采纳后才写入正文。` } }) });
       },
       async openNarratedChapter(chapterId) {
         await get().selectChapter(chapterId);
@@ -1425,6 +1433,28 @@ export function createAppStore(service: AppService): AppStore {
           const list = await service.listCandidates(chapterId);
           if (list.ok) set({ candidates: list.value });
         }
+      },
+      async openAdoption(candidateId) {
+        await run(service.adoptionDraft(candidateId), (adoption) => ({ adoption }));
+      },
+      closeAdoption: () => set({ adoption: null }),
+      async adoptCandidate(request) {
+        const chapterId = get().selectedChapterId;
+        if (chapterId === null || !(await get().leaveChapter())) return;
+        const adopted = await run(service.adoptCandidate(request), ({ paragraphs }) => ({
+          chapterContent: { chapterId, saved: paragraphs, draft: null },
+          contentRevision: get().contentRevision + 1,
+          saveStatus: { kind: 'saved' },
+          candidates: get().candidates.filter((c) => c.id !== request.candidateId),
+          adoption: null,
+        }));
+        if (adopted) {
+          await reloadFacts();
+          return;
+        }
+        // 过期的候选稿不再列出（与接受相同）；直接读取列表，不清掉刚显示的原因。
+        const list = await service.listCandidates(chapterId);
+        if (list.ok) set({ candidates: list.value, ...(!list.value.some((c) => c.id === request.candidateId) && { adoption: null }) });
       },
       async openUsage() {
         if (!(await get().leaveChapter())) return;

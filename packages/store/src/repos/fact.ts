@@ -49,6 +49,7 @@ const FactRow = z
     created_at: z.string(),
     updated_at: z.string(),
     basis: z.string(),
+    events: z.string(),
   })
   .transform((r) => ({
     id: r.id,
@@ -71,6 +72,8 @@ const FactRow = z
       .array(z.object({ type: z.enum(['entity', 'fact']), id: z.string(), version: z.number().int().nullable() }))
       .parse(JSON.parse(r.basis))
       .map((b): FactBasis => ({ type: b.type, id: b.id, version: b.version ?? 0 })),
+    /** 采纳推演草案时记下的来源：故事事件的标识（事实来源验收：采纳的推演事实定位事件记录）。 */
+    eventIds: z.array(z.string()).parse(JSON.parse(r.events)),
   }));
 export type Fact = z.output<typeof FactRow>;
 
@@ -78,7 +81,9 @@ const SELECT = `SELECT f.id, f.kind, f.holder_id, f.subject_ids, f.content, f.mo
   f.valid_from_chapter_id, f.valid_to_chapter_id, f.valid_from_label, f.valid_from_order, f.valid_to_label, f.valid_to_order,
   f.status, f.review_reason, f.version, f.created_at, f.updated_at,
   (SELECT json_group_array(json_object('type', r.to_type, 'id', r.to_id, 'version', r.to_version))
-     FROM (SELECT to_type, to_id, to_version FROM source_ref WHERE from_type = 'fact' AND from_id = f.id ORDER BY to_type, to_id) AS r) AS basis
+     FROM (SELECT to_type, to_id, to_version FROM source_ref WHERE from_type = 'fact' AND from_id = f.id AND to_type IN ('entity', 'fact') ORDER BY to_type, to_id) AS r) AS basis,
+  (SELECT json_group_array(e.to_id)
+     FROM (SELECT to_id FROM source_ref WHERE from_type = 'fact' AND from_id = f.id AND to_type = 'story_event' ORDER BY to_id) AS e) AS events
   FROM fact f`;
 
 export function listFacts(port: SqlPort): Promise<Result<Fact[], RepoError>> {
@@ -135,6 +140,14 @@ async function prepare(port: SqlPort, input: FactInput, selfId: string | null): 
   return ok(basis);
 }
 
+/** 插入一条事实（不含依据）的语句；采纳推演草案时与正文、事件放进同一个事务。调用方负责校验（持有者须是人物等）。 */
+export const factInsertStatement = (id: string, input: FactInput, status: FactStatus, ctx: WriteContext): Statement => ({
+  sql: `INSERT INTO fact (id, kind, holder_id, subject_ids, content, modality, confidence, valid_from_chapter_id, valid_to_chapter_id,
+          valid_from_label, valid_from_order, valid_to_label, valid_to_order, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  params: [id, ...columns(input), status, ctx.now, ctx.now],
+});
+
 const columns = (input: FactInput): SqlValue[] => [
   input.kind,
   input.holderId,
@@ -151,7 +164,8 @@ const columns = (input: FactInput): SqlValue[] => [
 ];
 
 const basisStatements = (factId: string, basis: readonly FactBasis[], ctx: WriteContext, newId: () => string): Statement[] => [
-  { sql: "DELETE FROM source_ref WHERE from_type = 'fact' AND from_id = ?", params: [factId] },
+  // 只换设定与事实两类依据；采纳时记下的故事事件来源（to_type = 'story_event'）保留。
+  { sql: "DELETE FROM source_ref WHERE from_type = 'fact' AND from_id = ? AND to_type IN ('entity', 'fact')", params: [factId] },
   ...basis.map((b) => ({
     sql: "INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, to_version, created_at) VALUES (?, 'fact', ?, ?, ?, ?, ?)",
     params: [newId(), factId, b.type, b.id, b.version, ctx.now],
@@ -275,7 +289,7 @@ export async function reviewStaleFacts(port: SqlPort, ctx: WriteContext): Promis
        JOIN source_ref r ON r.from_type = 'fact' AND r.from_id = f.id
        LEFT JOIN entity e ON r.to_type = 'entity' AND e.id = r.to_id
        LEFT JOIN fact t ON r.to_type = 'fact' AND t.id = r.to_id
-       WHERE f.status = 'confirmed'
+       WHERE f.status = 'confirmed' AND r.to_type IN ('entity', 'fact')
          AND (CASE r.to_type WHEN 'entity' THEN e.id ELSE t.id END IS NULL
               OR coalesce(CASE r.to_type WHEN 'entity' THEN e.version ELSE t.version END, 0) > coalesce(r.to_version, 0)
               OR (r.to_type = 'fact' AND t.status = 'needs_review'))

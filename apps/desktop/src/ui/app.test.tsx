@@ -1631,7 +1631,7 @@ describe('待核实裁决、作者介入与分支的界面（B26、B30）', () =
 });
 
 describe('推演写成正文的界面（B29、B45）', () => {
-  it('生成节拍表、修改处理方式与文风、写成正文：结果是这一章的候选稿，在“AI 写作”里接受', async () => {
+  it('生成节拍表、修改处理方式与文风、写成正文：结果是这一章的候选稿，在“AI 写作”里复核裁决、选定事件后采纳', async () => {
     const { user, runs, store } = await simReady();
     await user.click(within(runs).getByRole('button', { name: '开始新的推演' }));
     const workspace = await screen.findByRole('region', { name: '推演工作区' });
@@ -1667,13 +1667,30 @@ describe('推演写成正文的界面（B29、B45）', () => {
     const saved = within(screen.getByRole('region', { name: '推演工作区' })).getByRole('form', { name: '主角视角的节拍表' });
     await user.click(within(saved).getByRole('button', { name: '按节拍表写成正文' }));
     const note = await within(screen.getByRole('region', { name: '推演工作区' })).findByRole('note');
-    expect(note.textContent).toContain('已在“第一章 夜雨”末尾生成候选稿，接受后才写入正文。');
+    expect(note.textContent).toContain('已在“第一章 夜雨”末尾生成候选稿，采纳后才写入正文。');
 
     await user.click(within(note).getByRole('button', { name: '打开这一章看候选稿' }));
     const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
     const card = await within(drawer).findByRole('region', { name: '推演写成正文的候选稿' });
     expect(card.textContent).toContain('雨下得更紧了。他没有回头。');
-    await user.click(within(card).getByRole('button', { name: '接受' }));
+    // 推演写成的正文没有“接受”，要经采纳。
+    expect(within(card).queryByRole('button', { name: '接受' })).toBeNull();
+    await user.click(within(card).getByRole('button', { name: '采纳…' }));
+    const adoption = await within(card).findByRole('form', { name: '采纳推演草案' });
+    // 自动模式自动接受的裁决逐条复核之前不能采纳。
+    const adopt = within(adoption).getByRole('button', { name: '采纳' });
+    expect(adopt.matches(':disabled')).toBe(true);
+    const reviews = within(adoption).getAllByRole('checkbox', { name: /^已复核/ });
+    expect(reviews.length).toBeGreaterThan(0);
+    for (const box of reviews) await user.click(box);
+    // 视角角色察觉到的事默认选中；作品里还没有“主角”这个人物，不能记他的认知。
+    const shot = within(adoption).getByRole('checkbox', { name: /^第 1 回合 · 裁决结果/ });
+    expect((shot as HTMLInputElement).checked).toBe(true);
+    expect(adoption.textContent).toContain('没有对应的人物设定');
+    await user.click(within(adoption).getByRole('checkbox', { name: '记为世界事实：裁决结果（仓库中央）：弩箭擦过主角肩头' }));
+    await user.click(adopt);
     await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]));
+    expect(store.getState().candidates).toEqual([]);
+    expect(store.getState().facts.map((f) => [f.kind, f.status, f.content, f.eventIds.length])).toEqual([['world', 'confirmed', '裁决结果（仓库中央）：弩箭擦过主角肩头', 1]]);
   });
 });
