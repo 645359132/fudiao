@@ -39,7 +39,7 @@ function fakeTimers() {
 const p = (id: string, text: string): CurrentParagraph => ({ id, text, source: 'handwritten' });
 const asSaved = (ps: readonly CurrentParagraph[], version = 1): SavedParagraph[] => ps.map((x, i) => ({ ...x, orderKey: `a${i}`, version, aiOriginText: null, spans: [] }));
 
-function setup(options: { failTimes?: number; slow?: boolean } = {}) {
+function setup(options: { failTimes?: number; throwTimes?: number; slow?: boolean } = {}) {
   const clock = fakeTimers();
   let doc: CurrentParagraph[] | null = [p('a', '雨')];
   let composing = false;
@@ -47,6 +47,7 @@ function setup(options: { failTimes?: number; slow?: boolean } = {}) {
   const drafts: CurrentParagraph[][] = [];
   const statuses: SaveStatus['kind'][] = [];
   let failures = options.failTimes ?? 0;
+  let throws = options.throwTimes ?? 0;
   let release: (() => void) | null = null;
   const controller = new AutosaveController(
     {
@@ -55,6 +56,10 @@ function setup(options: { failTimes?: number; slow?: boolean } = {}) {
       save: async (_saved, current): Promise<Result<SavedParagraph[], string>> => {
         saves.push([...current]);
         if (options.slow) await new Promise<void>((r) => (release = r));
+        if (throws > 0) {
+          throws--;
+          throw new Error('连接中断');
+        }
         if (failures > 0) {
           failures--;
           return err('磁盘已满');
@@ -147,6 +152,20 @@ describe('自动保存', () => {
     await s.clock.advance(5_000);
     expect(s.saves).toHaveLength(3);
     expect(s.controller.current.kind).toBe('saved');
+  });
+
+  it('保存抛出异常时按失败处理并重试，自动保存不会就此停下', async () => {
+    const s = setup({ throwTimes: 1 });
+    s.edit([p('a', '雨夜')]);
+    await s.clock.advance(800);
+    expect(s.controller.current).toEqual({ kind: 'failed', message: '连接中断' });
+    await s.clock.advance(2_000);
+    expect(s.saves).toHaveLength(2);
+    expect(s.statuses.at(-1)).toBe('saved');
+    s.edit([p('a', '雨夜，灯灭了')]);
+    await s.clock.advance(800);
+    expect(s.saves).toHaveLength(3);
+    expect(s.controller.current).toEqual({ kind: 'saved' });
   });
 
   it('立即保存（切换章节前）：取消计时，等进行中的保存结束', async () => {

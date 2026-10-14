@@ -147,7 +147,12 @@ export class AutosaveController {
     }
     this.setStatus({ kind: 'saving' });
     this.editedDuringSave = false;
-    this.inFlight = this.deps.save(this.saved, paragraphs, edits).then((result) => {
+    // 保存抛出异常时按失败处理：否则 inFlight 一直不清，之后的保存都在等它，自动保存就此停下。
+    const attempt = this.deps.save(this.saved, paragraphs, edits).catch((error: unknown): Result<SavedParagraph[], string> => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    this.inFlight = attempt.then((result) => {
       this.inFlight = null;
       if (this.disposed) return result.ok;
       if (!result.ok) {
