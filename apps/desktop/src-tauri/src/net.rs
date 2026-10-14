@@ -323,7 +323,9 @@ impl Proxy {
             cancel,
         } = prepared;
         let semaphore = self.semaphore(&origin, concurrency);
+        // 三处 select 都先看取消（biased）：开始前已到的取消与可以发送同时就绪时，随机选择会把请求连同凭据发出去。
         let event = tokio::select! {
+            biased;
             _ = cancel.notified() => Some(NetEvent::End { cancelled: true }),
             permit = semaphore.acquire_owned() => {
                 let _permit = permit.expect("信号量不会关闭");
@@ -344,6 +346,7 @@ impl Proxy {
         emit: &mut (impl FnMut(NetEvent) + Send),
     ) -> Option<NetEvent> {
         let response = tokio::select! {
+            biased;
             _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
             r = self.client.execute(request) => r,
         };
@@ -373,6 +376,7 @@ impl Proxy {
         let mut body = response.bytes_stream();
         loop {
             tokio::select! {
+                biased;
                 _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
                 chunk = body.next() => match chunk {
                     Some(Ok(bytes)) => emit(NetEvent::Chunk { data: bytes.to_vec() }),

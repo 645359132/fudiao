@@ -338,17 +338,22 @@ async fn cancel_before_start_sends_nothing() {
     let server = Arc::new(Server::default());
     let base = serve(server.clone()).await;
     let proxy = proxy_for(&base, api_key(KeyHeader::XApiKey), 4);
-    let prepared = proxy.prepare(request("r1", format!("{base}/x"))).unwrap();
-    assert!(proxy.cancel("r1"));
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let sink = events.clone();
-    proxy
-        .run(prepared, move |e| sink.lock().unwrap().push(e))
-        .await;
-    assert_eq!(
-        *events.lock().unwrap(),
-        vec![NetEvent::End { cancelled: true }]
-    );
+    // 取消与开始同时就绪时不能靠运气：重复多次，任何一次把请求发出去都算失败。
+    for i in 0..50 {
+        let id = format!("r{i}");
+        let prepared = proxy.prepare(request(&id, format!("{base}/x"))).unwrap();
+        assert!(proxy.cancel(&id));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        proxy
+            .run(prepared, move |e| sink.lock().unwrap().push(e))
+            .await;
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![NetEvent::End { cancelled: true }]
+        );
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(server.requests.lock().unwrap().is_empty());
 }
 

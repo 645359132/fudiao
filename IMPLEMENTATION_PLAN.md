@@ -466,7 +466,7 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 | 命令 | 说明 |
 | --- | --- |
 | `net_fetch(request, channel)` | 转发 HTTP 请求：校验目标主机属于已配置的模型服务，注入凭据，经 Channel 流式回传响应头与响应体字节，返回请求标识 |
-| `net_cancel(requestId)` | 中断转发；已收到的内容照常交给适配器，用于保留部分结果与已知用量 |
+| `net_cancel(requestId)` | 中断转发；已收到的内容照常交给适配器，用于保留部分结果与已知用量。取消在请求开始前到达时不发出请求：等待并发名额、发送与读取响应时都先检查取消 |
 | `credential_set` / `credential_status` / `credential_delete` | 凭据只写入、只查询是否存在，从不把明文返回给 WebView |
 
 ### 代理与适配器行为
