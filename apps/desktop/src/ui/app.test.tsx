@@ -553,7 +553,7 @@ describe('段落来源', () => {
     await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
     await user.click(await screen.findByRole('checkbox', { name: /显示来源色条/ }));
-    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false }));
+    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'system' }));
     await user.click(screen.getByRole('button', { name: '第一章' }));
     await screen.findByRole('textbox', { name: '正文' });
     expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(0);
@@ -1951,5 +1951,67 @@ describe('AI 助手的界面（B69）', () => {
     expect(screen.queryByRole('complementary', { name: 'AI 助手' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'AI 助手' }));
     expect(within(panel()).getByText('已删除。')).toBeTruthy();
+  });
+
+  it('选中正文后对话框上方显示选中的字数与快捷说法：点“润色”后改好的文字成为候选稿，在章节旁打开；可以不带上这次的选区', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('沈砚推开当铺的门。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['沈砚推开当铺的门。']));
+    await addTestedModel(service, deps);
+    const panel = () => screen.getByRole('complementary', { name: 'AI 助手' });
+    expect(within(panel()).queryByRole('group', { name: '选中的文字' })).toBeNull();
+
+    await user.keyboard('{Control>}a{/Control}');
+    const bar = await within(panel()).findByRole('group', { name: '选中的文字' });
+    expect(bar.textContent).toContain('已选中 9 字：「沈砚推开当铺的门。」');
+    deps.llmResponses.push(
+      said({ message: '润色好了，放在“AI 写作”里。', actions: [{ tool: 'edit_selection', operation: 'polish', instruction: null }], done: true }),
+      { chunks: openaiChunks('m', { text: ['沈砚轻轻推开', '当铺的门。'], end: 'stop' }) },
+    );
+    await user.click(within(bar).getByRole('button', { name: '润色' }));
+    const drawer = await screen.findByRole('complementary', { name: 'AI 写作' });
+    const pending = await within(drawer).findByRole('region', { name: '本章待处理的候选稿' });
+    expect(pending.textContent).toContain('轻轻');
+    await within(panel()).findByText('润色好了，放在“AI 写作”里。');
+    // 第一步给模型的现状里有选中的文字；候选稿要作者接受，正文没有变。
+    expect(JSON.stringify(deps.llmRequests.at(-2)?.body)).toContain('「沈砚推开当铺的门。」');
+    expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('沈砚推开当铺的门。');
+
+    // 不带上：这次的选区不交给助手。
+    await user.click(screen.getByRole('textbox', { name: '正文' }));
+    await user.keyboard('{Control>}a{/Control}');
+    const again = await within(panel()).findByRole('group', { name: '选中的文字' });
+    await user.click(within(again).getByRole('button', { name: '不带上选中的文字' }));
+    expect(within(panel()).queryByRole('group', { name: '选中的文字' })).toBeNull();
+    deps.llmResponses.push(said({ message: '请先选中要改的文字。', actions: [], done: true }));
+    await user.type(within(panel()).getByRole('textbox', { name: '给助手的话' }), '扩写一下{Enter}');
+    await within(panel()).findByText('请先选中要改的文字。');
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).not.toContain('「沈砚推开当铺的门。」');
+  });
+
+  it('模型输出时回复逐字出现；动作结果里不显示内部标识；外观可以在跟随系统、浅色、深色之间切换', async () => {
+    const { deps, service, user } = start();
+    await createWork(user, '雨夜');
+    await addTestedModel(service, deps);
+    const panel = () => screen.getByRole('complementary', { name: 'AI 助手' });
+    const text = JSON.stringify({ message: '建好了第一章。', actions: [{ tool: 'create_chapter', title: '第一章', volume: null, after: null }], done: true });
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: [text.slice(0, 16), text.slice(16)], end: 'stop' }) });
+    await user.type(within(panel()).getByRole('textbox', { name: '给助手的话' }), '建第一章{Enter}');
+    const log = within(panel()).getByRole('log', { name: '对话' });
+    await within(log).findByText('建好了第一章。');
+    const step = within(log).getByRole('list', { name: '助手执行的动作' });
+    expect(step.textContent).toContain('已新建章节《第一章》。');
+    expect(step.textContent).not.toMatch(/\[[0-9A-Z]{26}\]/);
+
+    expect(document.documentElement.dataset['theme']).toBeUndefined();
+    await user.click(screen.getByRole('button', { name: '外观：跟随系统' }));
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'));
+    await user.click(screen.getByRole('button', { name: '外观：浅色' }));
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('dark'));
+    await user.click(screen.getByRole('button', { name: '外观：深色' }));
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBeUndefined());
   });
 });

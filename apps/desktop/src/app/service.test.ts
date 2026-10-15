@@ -29,16 +29,17 @@ const titles = (view: WorkView) => view.chapters.map((c) => c.title);
 describe('作品列表', () => {
   it('首次启动时作品列表为空，作品库为文档下的“复调”', async () => {
     const { deps, app } = setup();
-    expect(value(await app.loadLibrary())).toEqual({ libraryDir: join(deps.root, 'Documents', '复调'), works: [], preferences: { showParagraphSource: true } });
+    expect(value(await app.loadLibrary())).toEqual({ libraryDir: join(deps.root, 'Documents', '复调'), works: [], preferences: { showParagraphSource: true, theme: 'system' } });
   });
 
   it('偏好：旧的作品列表文件没有偏好时用默认值；修改后写入文件', async () => {
     const { deps, app } = setup();
     mkdirSync(dirname(deps.libraryFile), { recursive: true });
     writeFileSync(deps.libraryFile, JSON.stringify({ version: 1, libraryDir: null, works: [] }));
-    expect(value(await app.loadLibrary()).preferences).toEqual({ showParagraphSource: true });
-    expect(value(await app.setPreferences({ showParagraphSource: false })).preferences).toEqual({ showParagraphSource: false });
-    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false });
+    expect(value(await app.loadLibrary()).preferences).toEqual({ showParagraphSource: true, theme: 'system' });
+    expect(value(await app.setPreferences({ showParagraphSource: false })).preferences).toEqual({ showParagraphSource: false, theme: 'system' });
+    expect(value(await app.setPreferences({ theme: 'dark' })).preferences).toEqual({ showParagraphSource: false, theme: 'dark' });
+    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark' });
   });
 
   it('新建作品：在作品库下建文件夹与作品库，加入列表并成为当前作品', async () => {

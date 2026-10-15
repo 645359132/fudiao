@@ -23,6 +23,8 @@ const TOOL_LABEL: Readonly<Record<string, string>> = {
   move_chapter: '移动章节',
   trash_chapter: '移入回收站',
   open_chapter: '打开章节',
+  restore_chapter: '从回收站恢复',
+  save_snapshot: '保存快照',
   create_entity: '新建设定',
   update_entity: '修改设定',
   delete_entity: '删除设定',
@@ -31,17 +33,32 @@ const TOOL_LABEL: Readonly<Record<string, string>> = {
   plan_chapters: '生成章节计划',
   write_chapter: '写手写章',
   continue_chapter: '续写',
+  edit_selection: '修改选中的文字',
+  review_chapter: '审核',
+  rollback_writer: '回退写手写入',
+  add_foreshadow: '记录伏笔',
+  export_book: '导出',
   open_page: '打开页面',
 };
 
 const SUGGESTIONS_NO_WORK = ['帮我开一本古风悬疑小说，主角是被革职的捕快', '打开我最近写的那部作品'];
-const SUGGESTIONS = ['给主角建一张人物卡片', '完善这部作品的世界观：地点、组织与规则', '按大纲生成 20 章的章节计划', '续写正在看的这一章', '把全书分成三卷'];
+const SUGGESTIONS = ['给主角建一张人物卡片', '完善这部作品的世界观：地点、组织与规则', '按大纲生成 20 章的章节计划', '续写正在看的这一章', '审核正在看的这一章'];
+/** 选中文字后对话框上方的快捷说法。 */
+const SELECTION_ASKS: readonly (readonly [string, string])[] = [
+  ['润色', '把选中的文字润色一下'],
+  ['扩写', '把选中的文字扩写得更细一些'],
+  ['缩写', '把选中的文字缩短一些，保留要紧的内容'],
+  ['改写', '把选中的文字改写一遍，节奏更紧一些'],
+];
+/** 动作结果里的标识是给模型看的，界面上不显示。 */
+const ID_TAG = /\s*\[[0-9A-HJKMNP-TV-Z]{26}\]/g;
+const withoutIds = (text: string) => text.replace(ID_TAG, '');
 
 function Steps({ item }: { readonly item: Extract<AssistantItem, { role: 'results' }> }) {
   return (
     <ul className="assistant-steps" aria-label="助手执行的动作">
       {item.results.map((r, i) => {
-        const [first = '', ...rest] = r.detail.split('\n');
+        const [first = '', ...rest] = withoutIds(r.detail).split('\n');
         return (
           <li key={i} className={r.ok ? 'step ok' : 'step failed'}>
             <span className="step-icon">
@@ -100,6 +117,10 @@ export function AssistantPanel() {
   const clear = useApp((s) => s.clearAssistant);
   const toggle = useApp((s) => s.toggleAssistant);
   const openModelServices = useApp((s) => s.openModelServices);
+  const draft = useApp((s) => s.assistantDraft);
+  const progress = useApp((s) => s.assistantProgress);
+  const selection = useApp((s) => (s.panel === 'chapter' && s.editorSelection !== null && s.editorSelection.key !== s.selectionDismissed ? s.editorSelection : null));
+  const dismissSelection = useApp((s) => s.dismissSelection);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
 
@@ -109,7 +130,7 @@ export function AssistantPanel() {
   }, [owner, workId, load]);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' });
-  }, [items.length, running]);
+  }, [items.length, running, draft, progress]);
 
   const submit = (value: string) => {
     if (value.trim() === '' || running) return;
@@ -140,7 +161,7 @@ export function AssistantPanel() {
           <div className="assistant-empty">
             <p className="assistant-hello">想做什么，直接告诉我。</p>
             <p className="muted">
-              我可以开新书、建卷与章节、写人物卡片和世界观、做章节计划、让写手写章或续写。用的是你在
+              我可以开新书、建卷与章节、写人物卡片和世界观、做章节计划与伏笔、让写手写章或续写、修改你选中的文字、审核与导出。用的是你在
               <button type="button" className="link" aria-label="打开模型服务" onClick={() => void openModelServices()}>
                 模型服务
               </button>
@@ -176,18 +197,42 @@ export function AssistantPanel() {
             }
           })
         )}
-        {running ? (
+        {running && draft !== null && draft.trim() !== '' ? (
+          <div className="bubble bot streaming" aria-live="polite">
+            {draft}
+            <span className="caret" aria-hidden="true" />
+          </div>
+        ) : null}
+        {running && (progress !== null || draft === null) ? (
           <div className="assistant-thinking" role="status">
             <span className="dots" aria-hidden="true">
               <i />
               <i />
               <i />
             </span>
-            正在处理……
+            {progress ?? '正在思考……'}
           </div>
         ) : null}
         <div ref={end} />
       </div>
+      {selection !== null ? (
+        <div className="assistant-selection" role="group" aria-label="选中的文字">
+          <span className="assistant-selection-text" title={selection.preview}>
+            已选中 {selection.length} 字：「{selection.preview}
+            {selection.length > selection.preview.length ? '…' : ''}」
+          </span>
+          <span className="assistant-selection-asks">
+            {SELECTION_ASKS.map(([label, ask]) => (
+              <button key={label} type="button" className="chip" disabled={running} onClick={() => submit(ask)}>
+                {label}
+              </button>
+            ))}
+          </span>
+          <button type="button" className="ghost icon-only" aria-label="不带上选中的文字" title="这次不带上选中的文字" onClick={dismissSelection}>
+            <Icon name="close" size={13} />
+          </button>
+        </div>
+      ) : null}
       <form
         className="assistant-composer"
         onSubmit={(e) => {

@@ -15,9 +15,12 @@ export type WorkEntry = z.infer<typeof WorkEntry>;
 export const Preferences = z.object({
   /** 正文左侧的段落来源色条（需求 B33）。 */
   showParagraphSource: z.boolean().default(true),
+  /** 外观：跟随系统、浅色或深色。 */
+  theme: z.enum(['system', 'light', 'dark']).default('system'),
 });
 export type Preferences = z.infer<typeof Preferences>;
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true };
+export type Theme = Preferences['theme'];
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system' };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

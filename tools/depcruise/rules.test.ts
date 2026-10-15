@@ -72,6 +72,11 @@ describe('依赖边界规则', () => {
     expect(rulesFor('packages/domain/src/testing/helper.ts')).toEqual([]);
   });
 
+  it('浏览器预览可以用开发依赖，产品代码不得导入浏览器预览', () => {
+    expect(rulesFor('apps/desktop/src/preview/uses-dev-dep.ts')).toEqual([]);
+    expect(rulesFor('apps/desktop/src/imports-preview.ts')).toEqual(['not-to-preview']);
+  });
+
   it('桌面界面不得导入 Node 内置模块，测试辅助代码可以', () => {
     expect(rulesFor('apps/desktop/src/uses-node.ts')).toEqual(['desktop-ui-no-node-builtins']);
     expect(rulesFor('apps/desktop/src/testing/helper.ts')).toEqual([]);

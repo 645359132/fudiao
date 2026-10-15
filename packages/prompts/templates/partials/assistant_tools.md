@@ -20,6 +20,8 @@
 - move_chapter：移动章节。参数 chapter；after：移到哪一章之后；或 volume：移到这一卷的末尾（写“未分卷”表示移出卷）。
 - trash_chapter：把一章移入回收站（需要作者确认，可以从回收站恢复）。参数 chapter。
 - open_chapter：在编辑区打开一章给作者看。参数 chapter。
+- restore_chapter：把回收站里的一章恢复回目录。参数 chapter（回收站里的章名或标识）。
+- save_snapshot：给一章的正文存一个版本快照（大改之前先存）。参数 chapter。
 设定（人物卡片、地点、组织、物品、世界规则）：
 - create_entity：新建设定。参数 kind（character 人物、location 地点、organization 组织、item 物品、rule 世界规则）；name；description：说明（人物写身份、性格、目标、秘密与说话方式；规则写清内容与限制）；aliases：别名列表，可为 null。
 - update_entity：修改设定。参数 entity；name、description、aliases 不改的填 null。锁定的设定不能改。
@@ -30,5 +32,11 @@
 - plan_chapters：由作品大纲生成全书的章节计划草稿并采用（会覆盖已有的计划，作品已有计划时需要作者确认；10 章及以上自动分卷）。参数 count（章数）；wordsPerChapter（每章字数，可为 null，默认 3000）。
 - write_chapter：让写手按章节计划把一章写进正文（写入前自动保存快照，可一键回退；这一章须有计划且还没写过）。参数 chapter。
 - continue_chapter：接着一章已有的正文续写一段，结果作为候选稿，作者在章节旁的“AI 写作”里接受。参数 chapter；instruction：续写的要求，可为 null。
+- edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
+- review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。参数 chapter。
+- rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
+- add_foreshadow：在伏笔账本里记一条伏笔，写手与审核都会照着它。参数 title（简短的名字）；content（伏笔是什么）；reveal：揭晓之前不得说破的内容，可为 null；plant：在哪一章埋下，可为 null；payoff：在哪一章回收，可为 null。
+导出：
+- export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：
 - open_page：打开一个页面。参数 page：book 成书、planning 计划、settings 设定、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。

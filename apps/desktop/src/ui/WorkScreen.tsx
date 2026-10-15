@@ -13,6 +13,7 @@ import { SourcesPanel } from './SourcesPanel';
 import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
 import { Icon, type IconName } from './Icon';
+import { ThemeButton } from './ThemeButton';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -80,6 +81,7 @@ export function WorkScreen() {
           <Icon name="tasks" />
           任务{running > 0 ? `（${running} 进行中）` : ''}
         </button>
+        <ThemeButton />
         <details className="menu">
           <summary>
             <Icon name="more" />

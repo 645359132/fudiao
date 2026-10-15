@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { LibraryWork } from '../app/service';
 import { Icon } from './Icon';
+import { ThemeButton } from './ThemeButton';
 import { useApp } from './store-context';
 import { TextForm } from './TextForm';
 
@@ -91,6 +92,7 @@ export function LibraryScreen() {
           导入作品包
         </button>
         <span className="spacer" />
+        <ThemeButton />
         <button type="button" className="ghost" disabled={busy} onClick={() => void openModelServices()}>
           <Icon name="settings" />
           模型服务

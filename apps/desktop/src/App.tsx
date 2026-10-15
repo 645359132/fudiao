@@ -13,9 +13,16 @@ function Screens() {
   const hasWork = useApp((s) => s.work !== null);
   const modelServices = useApp((s) => s.modelServicesOpen);
   const assistantOpen = useApp((s) => s.assistantOpen);
+  const theme = useApp((s) => s.library?.preferences.theme ?? 'system');
   useEffect(() => {
     void init();
   }, [init]);
+  // 外观：浅色或深色写在根元素上；跟随系统时去掉，由样式表按系统设置选择。
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'system') delete root.dataset['theme'];
+    else root.dataset['theme'] = theme;
+  }, [theme]);
   return (
     <div className="app-shell">
       <MessageBar />

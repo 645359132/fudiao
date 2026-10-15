@@ -4,6 +4,8 @@
 
 // 测试文件与 src/testing/ 下的测试辅助代码（夹具、随机生成器）。
 const TEST_FILE = '(\\.test\\.tsx?$|/src/testing/)';
+// 浏览器预览（只在开发时用，不随产品发布）：可以用开发依赖（sql.js），产品代码不得导入它。
+const PREVIEW = '^apps/desktop/src/preview/';
 
 // 领域内核与 shared 可以使用的第三方包。新增前须说明理由与许可证（AGENTS.md“工作方式”）。
 const PURE_NPM_ALLOWLIST = ['zod'];
@@ -80,9 +82,16 @@ module.exports = {
     {
       name: 'not-to-dev-dep',
       severity: 'error',
-      comment: '产品代码不得导入开发依赖（测试文件除外）。',
-      from: { path: '^(packages|apps)/[^/]+/src/', pathNot: TEST_FILE },
+      comment: '产品代码不得导入开发依赖（测试文件与浏览器预览除外）。',
+      from: { path: '^(packages|apps)/[^/]+/src/', pathNot: `${TEST_FILE}|${PREVIEW}` },
       to: { dependencyTypes: ['npm-dev'] },
+    },
+    {
+      name: 'not-to-preview',
+      severity: 'error',
+      comment: '产品代码不得导入浏览器预览（src/preview/ 只在开发时用）。',
+      from: { path: '^(packages|apps)/[^/]+/src/', pathNot: `${TEST_FILE}|${PREVIEW}` },
+      to: { path: PREVIEW },
     },
     {
       name: 'not-to-testing',

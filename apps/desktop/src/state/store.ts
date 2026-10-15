@@ -9,12 +9,13 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
-import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome } from '../app/assistant';
+import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection } from '../app/assistant';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
+import type { Theme } from '../app/library';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
 import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
@@ -45,6 +46,9 @@ export type EditorHandle = {
   /** 选中的文字（段落之间以换行连接）。 */
   readonly selectedText: () => string;
 };
+
+/** 正文里选中的文字：key 标识这一次选区（章节与位置），length 是字数，preview 是开头的一小段。 */
+export type EditorSelectionInfo = { readonly key: string; readonly chapterId: string; readonly length: number; readonly preview: string };
 
 /** 一次选区操作：流式生成的文字与状态（B16）。 */
 /** 成书流程正在处理的章节：写作（已写 done / total 段）、整理长篇记忆或审核；queued 是排在后面的章节。 */
@@ -124,6 +128,14 @@ export type AppState = {
   readonly assistantRunning: boolean;
   /** 对话属于哪部作品（作品标识；作品列表页为空字符串），切换作品时据此重新读取。 */
   readonly assistantFor: string | null;
+  /** 模型正在输出的这一步里给作者的话（逐字显示）；没有时为 null。 */
+  readonly assistantDraft: string | null;
+  /** 助手正在执行的耗时动作的进展（写手写到第几段、正在审核等）。 */
+  readonly assistantProgress: string | null;
+  /** 正文里当前选中的文字（助手对话框上方显示，发话时一并交给助手）；没有选中时为 null。 */
+  readonly editorSelection: EditorSelectionInfo | null;
+  /** 作者在对话框里点了“不带上”的那次选区（key）；选区变了就失效。 */
+  readonly selectionDismissed: string | null;
   readonly bookSeed: BookSeed | null;
   readonly seedDrafting: boolean;
   readonly planUnmatched: readonly string[];
@@ -256,6 +268,10 @@ export type AppState = {
   readonly resolveAssistant: (approve: boolean) => Promise<void>;
   readonly stopAssistant: () => void;
   readonly clearAssistant: () => Promise<void>;
+  /** 正文编辑器报告选区的变化。 */
+  readonly setEditorSelection: (info: EditorSelectionInfo | null) => void;
+  /** 这次的选区不交给助手。 */
+  readonly dismissSelection: () => void;
   readonly refreshQuickBook: () => Promise<void>;
   readonly draftBookSeed: (request: BookSeedRequest) => Promise<void>;
   readonly editBookSeed: (seed: BookSeed) => void;
@@ -365,6 +381,8 @@ export type AppState = {
   /** 保存正文后打开段落来源统计。 */
   readonly openSourceStats: () => Promise<void>;
   readonly setShowParagraphSource: (show: boolean) => Promise<void>;
+  /** 外观：跟随系统、浅色或深色（对所有作品生效）。 */
+  readonly setTheme: (theme: Theme) => Promise<void>;
 
   /** 保存正文后按当前光标计算上下文清单并打开抽屉。 */
   readonly openContext: () => Promise<void>;
@@ -610,11 +628,32 @@ export function createAppStore(service: AppService): AppStore {
         if (planning.ok) set({ planning: planning.value });
       }
     }
+    /** 打开一章（不在这一章时重新载入正文）。助手工作期间正文只读，不需要先保存。 */
+    const showChapter = (chapterId: string): Partial<AppState> =>
+      get().selectedChapterId === chapterId && get().panel === 'chapter'
+        ? {}
+        : { selectedChapterId: chapterId, panel: 'chapter', chapterContent: null, drawerEntityId: null, snapshots: null, previewSnapshot: null };
     async function applyEffect(effect: AssistantEffect) {
       switch (effect.kind) {
         case 'open_chapter':
-          set({ selectedChapterId: effect.chapterId, panel: 'chapter', chapterContent: null, drawerEntityId: null });
+          set(showChapter(effect.chapterId));
           return;
+        case 'chapter_changed':
+          if (get().selectedChapterId === effect.chapterId && get().panel === 'chapter') set({ chapterContent: null, contentRevision: get().contentRevision + 1 });
+          return;
+        case 'show_candidates': {
+          // 候选稿放在章节旁的“AI 写作”里：打开它，作者对照差异后接受或放弃。
+          set({ ...showChapter(effect.chapterId), writeDrawerOpen: true, writeSelection: null, writeSelectedText: '', drawerEntityId: null, contextDrawerOpen: false, reviewDrawerOpen: false });
+          await run(service.listCandidates(effect.chapterId), (candidates) => ({ candidates }));
+          return;
+        }
+        case 'show_review': {
+          set(showChapter(effect.chapterId));
+          const issues = await service.reviewIssues(effect.chapterId);
+          if (!issues.ok) return;
+          set({ reviewDrawerOpen: true, review: { chapterId: effect.chapterId, issues: issues.value, running: false, revisingId: null, note: null }, drawerEntityId: null, contextDrawerOpen: false, writeDrawerOpen: false });
+          return;
+        }
         case 'open_page': {
           const page = effect.page;
           const actions = {
@@ -647,22 +686,41 @@ export function createAppStore(service: AppService): AppStore {
       }
     }
     /** 助手的一轮：逐步显示进展，界面跟着助手打开章节与页面；结束后重新载入正文。 */
-    async function assistantTurn(start: (events: AssistantEvents) => Promise<Result<AssistantOutcome, AppError>>): Promise<boolean> {
+    /** 作者选中、且没有点“不带上”的文字（发话前先取，保存正文不会改变选区）。 */
+    const chosenSelection = (): AssistantSelection | null => {
+      const state = get();
+      const info = state.editorSelection;
+      if (info === null || info.key === state.selectionDismissed || state.panel !== 'chapter' || editor === null || editor.chapterId !== info.chapterId) return null;
+      const range = editor.selection();
+      const text = editor.selectedText();
+      return range === null || text.trim() === '' ? null : { chapterId: info.chapterId, range, text };
+    };
+    async function assistantTurn(selection: AssistantSelection | null, start: (events: AssistantEvents) => Promise<Result<AssistantOutcome, AppError>>): Promise<boolean> {
       const abort = new AbortController();
       assistantAbort = abort;
-      set({ assistantRunning: true, message: null });
-      const pending: Promise<void>[] = [];
+      set({ assistantRunning: true, assistantDraft: null, assistantProgress: null, message: null });
+      // 效果按到达的顺序依次执行（打开章节之后才打开它旁边的候选稿）。
+      let effects: Promise<void> = Promise.resolve();
       const result = await start({
         signal: abort.signal,
         current: currentView,
+        selection,
         onUpdate: (items) => set({ assistantItems: items }),
+        onDraft: (draft) => set({ assistantDraft: draft }),
+        onProgress: (note) => set({ assistantProgress: note }),
         onEffect: (effect) => {
-          pending.push(applyEffect(effect));
+          effects = effects.then(() => applyEffect(effect));
         },
       });
-      await Promise.all(pending);
+      await effects;
       if (assistantAbort === abort) assistantAbort = null;
-      set({ assistantRunning: false, ...(result.ok && { assistantItems: result.value.items }), ...(!result.ok && !abort.signal.aborted && { message: describeError(result.error) }) });
+      set({
+        assistantRunning: false,
+        assistantDraft: null,
+        assistantProgress: null,
+        ...(result.ok && { assistantItems: result.value.items }),
+        ...(!result.ok && !abort.signal.aborted && { message: describeError(result.error) }),
+      });
       // 正文可能被写手、续写或章节操作改过：重新载入正在看的这一章。
       if (get().panel === 'chapter' && get().selectedChapterId !== null) set({ chapterContent: null, contentRevision: get().contentRevision + 1 });
       return result.ok;
@@ -709,6 +767,10 @@ export function createAppStore(service: AppService): AppStore {
       assistantItems: [],
       assistantRunning: false,
       assistantFor: null,
+      assistantDraft: null,
+      assistantProgress: null,
+      editorSelection: null,
+      selectionDismissed: null,
       bookSeed: null,
       seedDrafting: false,
       planDraft: null,
@@ -1101,14 +1163,24 @@ export function createAppStore(service: AppService): AppStore {
       },
       async sendAssistant(text) {
         if (get().assistantRunning || text.trim() === '') return false;
+        const selection = chosenSelection();
         // 助手会改动作品：先保存正在编辑的正文，工作期间正文只读。
         if (!(await get().leaveChapter())) return false;
-        return assistantTurn((events) => service.sendToAssistant(text, events));
+        return assistantTurn(selection, (events) => service.sendToAssistant(text, events));
       },
       async resolveAssistant(approve) {
         if (get().assistantRunning) return;
-        await assistantTurn((events) => service.resolveAssistantPending(approve, events));
+        const selection = chosenSelection();
+        if (!(await get().leaveChapter())) return;
+        await assistantTurn(selection, (events) => service.resolveAssistantPending(approve, events));
       },
+      setEditorSelection(info) {
+        const now = get().editorSelection;
+        if (now?.key === info?.key) return;
+        // 选区变了：之前点过的“不带上”不再算数。
+        set({ editorSelection: info, selectionDismissed: null });
+      },
+      dismissSelection: () => set({ selectionDismissed: get().editorSelection?.key ?? null }),
       stopAssistant: () => assistantAbort?.abort(),
       async clearAssistant() {
         if (get().assistantRunning) return;
@@ -1844,6 +1916,9 @@ export function createAppStore(service: AppService): AppStore {
       },
       async setShowParagraphSource(show) {
         await run(service.setPreferences({ showParagraphSource: show }), (library) => ({ library }));
+      },
+      async setTheme(theme) {
+        await run(service.setPreferences({ theme }), (library) => ({ library }));
       },
       async saveFact(id, input) {
         if (id === null) {

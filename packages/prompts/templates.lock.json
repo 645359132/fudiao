@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "1",
-    "sha256": "6bd5195f71906eb06b4602261832673bf74d3417e6611b4af3dbdb6e90f57e21"
+    "version": "2",
+    "sha256": "a46647542e31bfb3a2eef2eb1847d5c4a1fd3f8606aafd189df9fff25a14798d"
   },
   "baseline_scene": {
     "version": "2",

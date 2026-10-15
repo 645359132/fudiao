@@ -6,7 +6,7 @@ import { inspectRequests } from './inspect';
 import { routeByProvider } from './router';
 import { memorySamples, RecordingAdapter, ReplayAdapter } from './replay';
 import { requestHash } from './request-hash';
-import { parseModelJson, structured } from './structured';
+import { parseModelJson, partialStringField, structured } from './structured';
 import { baseRequest, scriptedPort, usage } from './testing/scripted-port';
 import type { LlmStreamEvent } from './types';
 
@@ -62,6 +62,27 @@ describe('parseModelJson', () => {
 
   it('无法修复时返回错误', () => {
     expect(parseModelJson('我拒绝回答').ok).toBe(false);
+  });
+});
+
+describe('partialStringField', () => {
+  // 引号、反斜杠、换行与控制字符、成对与落单的代理项、像键名的文字。
+  const MESSAGES = ['', '好的', '他说："走吧。"', 'C:\\书稿\\第一章', '第一行\n第二行\t缩进\r\u0001', '雨😀夜', '\ud83d落单', '"message":"假的"', '\\"\\\\'];
+
+  it.each(MESSAGES.flatMap((m) => [[m, false] as const, [m, true] as const]))('流式到达的每一段前缀，读出的都是完整值的前缀；到齐时就是完整值：%j', (message, actionsFirst) => {
+    const full = JSON.stringify(actionsFirst ? { actions: [{ tool: 'x', message: null }], message, done: true } : { message, actions: [], done: true });
+    for (let n = 0; n <= full.length; n++) {
+      const got = partialStringField(full.slice(0, n), 'message');
+      if (got !== null) expect(message.startsWith(got)).toBe(true);
+    }
+    expect(partialStringField(full, 'message')).toBe(message);
+  });
+
+  it('字段还没出现时为 null；转义按 JSON 的规则还原', () => {
+    expect(partialStringField('{"mess', 'message')).toBeNull();
+    expect(partialStringField(String.raw`{"message": "第一行\n第二行\"引号\"中`, 'message')).toBe('第一行\n第二行"引号"中');
+    expect(partialStringField(String.raw`{"message":"半个转义\u4e`, 'message')).toBe('半个转义');
+    expect(partialStringField('{"message":"末尾一个反斜杠\\', 'message')).toBe('末尾一个反斜杠');
   });
 });
 

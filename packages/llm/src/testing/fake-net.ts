@@ -26,7 +26,7 @@ export function fakeNet(inner: typeof fetch, reject: unknown = null): FakeNet {
         try {
           const response = await inner(request.url, {
             method: request.method,
-            headers: request.headers.map(([k, v]) => [k, v]),
+            headers: request.headers.map(([k, v]): [string, string] => [k, v]),
             ...(request.body !== null && { body: request.body }),
             signal: abort.signal,
           });

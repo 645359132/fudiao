@@ -83,6 +83,7 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
   const setSaveStatus = useApp((s) => s.setSaveStatus);
   const setWordCount = useApp((s) => s.setWordCount);
   const registerEditor = useApp((s) => s.registerEditor);
+  const setEditorSelection = useApp((s) => s.setEditorSelection);
   const entities = useApp((s) => s.entities);
   const openEntityDrawer = useApp((s) => s.openEntityDrawer);
   const showSource = useApp((s) => s.library?.preferences.showParagraphSource ?? true);
@@ -137,8 +138,10 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
     };
     const selection = () => {
       const { from, to } = editor.state.selection;
-      const start = at(from);
-      const end = at(to);
+      // 全选（Ctrl+A）时两端落在段落之外：收到第一段段首与最后一段段尾。
+      const size = editor.state.doc.content.size;
+      const start = at(from === 0 && size > 0 ? 1 : from);
+      const end = at(to === size && size > 0 ? size - 1 : to);
       return start === null || end === null ? null : { from: start, to: end };
     };
     const selectedText = () => {
@@ -146,8 +149,17 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
       return editor.state.doc.textBetween(from, to, '\n');
     };
     registerEditor({ chapterId, flush: () => autosave.flush(), selection, selectedText });
+    // 选中的文字报告给状态：AI 助手的对话框上方据此显示“已选中”，发话时一并交给助手。
+    const reportSelection = () => {
+      const { from, to } = editor.state.selection;
+      const text = from === to ? '' : selectedText();
+      setEditorSelection(text.trim() === '' ? null : { key: `${chapterId}:${from}-${to}`, chapterId, length: countWords(text), preview: text.slice(0, 30) });
+    };
+    editor.on('selectionUpdate', reportSelection);
     return () => {
       editor.off('update', onUpdate);
+      editor.off('selectionUpdate', reportSelection);
+      setEditorSelection(null);
       dom.removeEventListener('compositionend', onCompositionEnd);
       registerEditor(null);
       // 离开章节的动作已经先保存；这里只是兜底。

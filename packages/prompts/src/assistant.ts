@@ -9,6 +9,9 @@ const list = z.array(z.string()).nullable();
 
 export const ENTITY_KINDS_FOR_ASSISTANT = ['character', 'location', 'organization', 'item', 'rule'] as const;
 
+/** 助手对作者选中的文字可做的修改（选区操作中除续写以外的四种）。 */
+export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as const;
+
 /** 助手可以打开的页面。 */
 export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
 
@@ -35,6 +38,8 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('move_chapter'), chapter: text, volume: opt, after: opt }),
   z.object({ tool: z.literal('trash_chapter'), chapter: text }),
   z.object({ tool: z.literal('open_chapter'), chapter: text }),
+  z.object({ tool: z.literal('restore_chapter'), chapter: text }),
+  z.object({ tool: z.literal('save_snapshot'), chapter: text }),
   // 设定（人物卡片、地点、组织、物品、世界规则）
   z.object({ tool: z.literal('create_entity'), kind: z.enum(ENTITY_KINDS_FOR_ASSISTANT), name: text, description: opt, aliases: list }),
   z.object({ tool: z.literal('update_entity'), entity: text, name: opt, description: opt, aliases: list }),
@@ -45,6 +50,12 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('plan_chapters'), count: z.number().int().positive(), wordsPerChapter: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('write_chapter'), chapter: text }),
   z.object({ tool: z.literal('continue_chapter'), chapter: text, instruction: opt }),
+  z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
+  z.object({ tool: z.literal('review_chapter'), chapter: text }),
+  z.object({ tool: z.literal('rollback_writer'), chapter: text }),
+  z.object({ tool: z.literal('add_foreshadow'), title: text, content: text, reveal: opt, plant: opt, payoff: opt }),
+  // 导出
+  z.object({ tool: z.literal('export_book'), format: z.enum(['txt', 'markdown']), chapter: opt }),
   // 界面
   z.object({ tool: z.literal('open_page'), page: z.enum(ASSISTANT_PAGES) }),
 ]);

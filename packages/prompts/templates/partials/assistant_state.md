@@ -25,9 +25,16 @@
 {{^entities}}
 - 还没有设定
 {{/entities}}
+{{#hasTrashed}}
+回收站：{{#trashed}}[{{id}}] {{title}}；{{/trashed}}
+{{/hasTrashed}}
 {{#current}}
 作者正在看：{{current}}
 {{/current}}
+{{#selection}}
+作者选中的文字（在《{{chapter}}》中，共 {{length}} 字{{#clipped}}，中间有省略{{/clipped}}）：
+「{{text}}」
+{{/selection}}
 {{/work}}
 {{^work}}
 还没有打开作品。

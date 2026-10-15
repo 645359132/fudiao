@@ -73,6 +73,38 @@ function validate<T>(schema: z.ZodType<T>, text: string): Result<T, string[]> {
   return err(checked.error.issues.map((i) => `${i.path.join('.') || '(根)'}: ${i.message}`));
 }
 
+const SIMPLE_ESCAPES: Readonly<Record<string, string>> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+
+/**
+ * 流式输出还没有结束时，读出顶层对象里某个字符串字段已经到达的部分（界面逐字显示用）。
+ * 只用于显示，不进入任何状态；完整的输出仍须经过上面的管线校验。字段还没出现时为 null。
+ */
+export function partialStringField(text: string, key: string): string | null {
+  const match = new RegExp(`"${key}"\\s*:\\s*"`).exec(text);
+  if (match === null) return null;
+  let out = '';
+  for (let i = match.index + match[0].length; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === '"') return out;
+    if (c !== '\\') {
+      out += c;
+      continue;
+    }
+    const next = text[i + 1];
+    if (next === undefined) return out;
+    if (next === 'u') {
+      const hex = text.slice(i + 2, i + 6);
+      if (!/^[0-9a-fA-F]{4}$/.test(hex)) return out;
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    out += SIMPLE_ESCAPES[next] ?? next;
+    i++;
+  }
+  return out;
+}
+
 /** 解析模型输出的 JSON，并修复常见格式错误：代码块包裹、前后的说明文字、多余的逗号。 */
 export function parseModelJson(text: string): Result<unknown, string> {
   const candidates = [text.trim()];

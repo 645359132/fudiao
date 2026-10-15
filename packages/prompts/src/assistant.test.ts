@@ -21,7 +21,9 @@ const state: AssistantState = {
     chapterCount: 1,
     omitted: false,
     entities: [{ id: 'E1', kind: '人物', name: '林舟', locked: true }],
+    trashed: [],
     current: '第一章 夜叩',
+    selection: null,
   },
 };
 
@@ -65,6 +67,20 @@ describe('AI 助手的提示词（B69）', () => {
     expect(prompt.messages[2]?.content).not.toContain('【作者】');
     // 以助手的输出结尾不能再请求。
     expect(renderAssistantTurn({ history: [{ role: 'assistant', output }], state }).ok).toBe(false);
+  });
+
+  it('作者选中的文字与回收站写进现状；没有时不出现', () => {
+    const work = state.work!;
+    const withSelection: AssistantState = {
+      ...state,
+      work: { ...work, trashed: [{ id: 'C9', title: '废稿' }], selection: { chapter: '第一章 夜叩', text: '雨下得很大。', length: 6, clipped: false } },
+    };
+    const last = unwrap(renderAssistantTurn({ history: [{ role: 'user', text: '把这段润色一下' }], state: withSelection })).messages[0]!.content;
+    expect(last).toContain('回收站：[C9] 废稿；');
+    expect(last).toContain('作者选中的文字（在《第一章 夜叩》中，共 6 字）：\n「雨下得很大。」');
+    const plain = unwrap(renderAssistantTurn({ history: [{ role: 'user', text: '你好' }], state })).messages[0]!.content;
+    expect(plain).not.toContain('回收站');
+    expect(plain).not.toContain('作者选中的文字');
   });
 
   it('没有打开作品时说明这一点，并列出作品列表', () => {

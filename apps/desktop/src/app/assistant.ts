@@ -33,7 +33,7 @@ import {
   type SqlPort,
   type Volume,
 } from '@fudiao/store';
-import type { CallOptions } from '@fudiao/llm';
+import { partialStringField, type CallOptions, type LlmStreamEvent } from '@fudiao/llm';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppliedDraft, PlanningView } from './planning';
@@ -42,6 +42,8 @@ import type { SelectionOperation } from '@fudiao/prompts';
 import type { ContextOverrides } from '@fudiao/context';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
+import type { ReviewOutcome } from './review';
+import type { ForeshadowFields } from '@fudiao/store';
 
 /** 对话中的一条：作者的话、助手一步的输出、动作的结果，或等待作者确认的动作。 */
 export type AssistantItem =
@@ -50,19 +52,31 @@ export type AssistantItem =
   | { readonly id: string; readonly role: 'results'; readonly results: readonly AssistantResult[] }
   | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string };
 
-/** 助手要界面做的事：打开章节或页面；作品换了（新建或打开了另一部）；作品内容变了。 */
+/** 助手要界面做的事：打开章节或页面；打开一章旁的候选稿或审核问题；作品换了（新建或打开了另一部）；作品内容变了。 */
 export type AssistantEffect =
   | { readonly kind: 'open_chapter'; readonly chapterId: string }
+  | { readonly kind: 'show_candidates'; readonly chapterId: string }
+  | { readonly kind: 'show_review'; readonly chapterId: string }
+  | { readonly kind: 'chapter_changed'; readonly chapterId: string }
   | { readonly kind: 'open_page'; readonly page: Extract<AssistantAction, { tool: 'open_page' }>['page'] }
   | { readonly kind: 'work_opened' }
   | { readonly kind: 'changed' };
+
+/** 作者发话时在正文里选中的文字（edit_selection 的对象）。 */
+export type AssistantSelection = { readonly chapterId: string; readonly range: EditorSelection; readonly text: string };
 
 export type AssistantEvents = CallOptions & {
   /** 对话每多一条时调用（界面据此逐步显示进展）。 */
   readonly onUpdate?: (items: readonly AssistantItem[]) => void;
   readonly onEffect?: (effect: AssistantEffect) => void;
+  /** 模型正在输出的这一步里，给作者的话已经到达的部分（逐字显示）；这一步结束时为 null。 */
+  readonly onDraft?: (message: string | null) => void;
+  /** 正在执行的耗时动作（写手写章、生成计划、审核等）的进展；动作做完时为 null。 */
+  readonly onProgress?: (note: string | null) => void;
   /** 作者此刻在看什么（章节或页面），写进给模型的现状。 */
   readonly current?: () => string;
+  /** 作者选中的文字；没有选中时为 null。 */
+  readonly selection?: AssistantSelection | null;
 };
 
 /** 一轮对话的结果：最新的对话，以及是否停在等待作者确认。 */
@@ -73,7 +87,9 @@ export type AssistantHost = {
   loadLibrary(): Promise<Result<{ readonly works: readonly { readonly id: string; readonly title: string; readonly archived: boolean; readonly missing: boolean }[] }, AppError>>;
   createWork(title: string): Promise<Result<unknown, AppError>>;
   openWork(id: string): Promise<Result<unknown, AppError>>;
-  reloadWork(): Promise<Result<{ readonly project: { readonly title: string; readonly genre: string; readonly synopsis: string; readonly outline: string }; readonly chapters: readonly Chapter[]; readonly volumes: readonly Volume[] }, AppError>>;
+  reloadWork(): Promise<
+    Result<{ readonly project: { readonly title: string; readonly genre: string; readonly synopsis: string; readonly outline: string }; readonly chapters: readonly Chapter[]; readonly trashed: readonly Chapter[]; readonly volumes: readonly Volume[] }, AppError>
+  >;
   updateWorkInfo(patch: ProjectPatch): Promise<Result<unknown, AppError>>;
   createVolume(title: string, after?: string): Promise<Result<{ readonly volumes: readonly Volume[] }, AppError>>;
   updateVolume(volume: Volume, fields: { readonly title: string; readonly summary: string }): Promise<Result<unknown, AppError>>;
@@ -84,6 +100,8 @@ export type AssistantHost = {
   updateChapterNotes(chapter: Chapter, notes: { readonly summary: string; readonly notes: string }): Promise<Result<unknown, AppError>>;
   moveChapter(chapter: Chapter, target: ChapterTarget): Promise<Result<unknown, AppError>>;
   trashChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
+  restoreChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
+  createSnapshot(chapterId: string): Promise<Result<unknown, AppError>>;
   openChapter(chapterId: string): Promise<Result<{ readonly saved: readonly { readonly id: string; readonly text: string }[] }, AppError>>;
   search(query: string): Promise<Result<SearchResult, AppError>>;
   listEntities(): Promise<Result<Entity[], AppError>>;
@@ -97,6 +115,10 @@ export type AssistantHost = {
   draftPlans(request: { readonly chapterCount: number; readonly wordsPerChapter: number }, options?: CallOptions): Promise<Result<PlanDraftData, AppError>>;
   applyPlanDraft(draft: PlanDraftData): Promise<Result<AppliedDraft, AppError>>;
   writeChapter(chapterId: string, events?: WriterEvents): Promise<Result<WriterOutcome, AppError>>;
+  rollbackWriter(chapterId: string): Promise<Result<unknown, AppError>>;
+  reviewChapter(chapterId: string, options?: CallOptions): Promise<Result<ReviewOutcome, AppError>>;
+  addForeshadow(fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
+  exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   runSelectionOperation(
     request: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: SelectionOperation; readonly instruction: string; readonly overrides: ContextOverrides },
     options?: CallOptions,
@@ -112,10 +134,16 @@ const MAX_LISTED_CHAPTERS = 120;
 const MAX_LISTED_ENTITIES = 200;
 /** 读一章时最多给出的字数：太长时给开头与结尾。 */
 const READ_LIMIT = 6_000;
+/** 现状中作者选中的文字最多给出的字数：太长时给开头与结尾。 */
+const SELECTION_LIMIT = 2_000;
+/** 审核结果在对话里列出的问题数。 */
+const LISTED_ISSUES = 6;
 export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
 
 const KIND_LABEL: Readonly<Record<EntityKind, string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
 const PLAN_LABEL = { todo: '待写', writing: '写作中', written: '已写', reviewed: '已审核' } as const;
+const SEVERITY_LABEL = { high: '严重', medium: '一般', low: '轻微' } as const;
+const EDIT_LABEL = { rewrite: '改写', expand: '扩写', shorten: '缩写', polish: '润色' } as const;
 const UNVOLUMED = '未分卷';
 
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
@@ -154,8 +182,12 @@ const describeError = (e: AppError): string => {
 
 /** 需要作者确认的动作：删除与覆盖。plan_chapters 只在作品已有章节计划时需要（会覆盖它们）。 */
 function needsConfirm(action: AssistantAction, hasPlans: boolean): boolean {
-  return action.tool === 'delete_volume' || action.tool === 'trash_chapter' || action.tool === 'delete_entity' || (action.tool === 'plan_chapters' && hasPlans);
+  return action.tool === 'delete_volume' || action.tool === 'trash_chapter' || action.tool === 'delete_entity' || action.tool === 'rollback_writer' || (action.tool === 'plan_chapters' && hasPlans);
 }
+
+/** 太长的文字只留开头与结尾。 */
+const clip = (text: string, limit: number): { readonly text: string; readonly clipped: boolean } =>
+  text.length <= limit ? { text, clipped: false } : { text: `${text.slice(0, limit / 2)}\n……\n${text.slice(-limit / 2)}`, clipped: true };
 
 export function assistantUseCases({
   deps,
@@ -193,7 +225,8 @@ export function assistantUseCases({
 
   // —— 现状 ——
 
-  async function state(current: string): Promise<AssistantState> {
+  async function state(events: AssistantEvents): Promise<AssistantState> {
+    const current = events.current?.() ?? '';
     const library = await host.loadLibrary();
     const works = library.ok ? library.value.works.filter((w) => !w.archived && !w.missing).map((w) => w.title) : [];
     const port = project();
@@ -208,9 +241,17 @@ export function assistantUseCases({
     const omitted = all.length > MAX_LISTED_CHAPTERS;
     const chapters = omitted ? [...all.slice(0, 40), ...all.slice(-(MAX_LISTED_CHAPTERS - 40))] : all;
     const p = work.value.project;
+    const chosen = events.selection ?? null;
+    const chosenChapter = chosen === null ? undefined : work.value.chapters.find((c) => c.id === chosen.chapterId);
+    let selection: NonNullable<AssistantState['work']>['selection'] = null;
+    if (chosen !== null && chosenChapter !== undefined && chosen.text.trim() !== '') {
+      selection = { chapter: chosenChapter.title, length: chosen.text.length, ...clip(chosen.text, SELECTION_LIMIT) };
+    }
     return {
       works,
       work: {
+        trashed: work.value.trashed.slice(0, 30).map((c) => ({ id: c.id, title: c.title })),
+        selection,
         title: p.title,
         genre: p.genre,
         synopsis: p.synopsis,
@@ -593,6 +634,7 @@ export function assistantUseCases({
         return done(`已保存《${c.value.title}》的章节计划${unmatched.length > 0 ? `；这些人物还没有人物卡片，没有加入出场人物：${unmatched.join('、')}` : ''}。`);
       }
       case 'plan_chapters': {
+        events.onProgress?.(`正在按大纲生成 ${action.count} 章的章节计划`);
         const draft = await host.draftPlans({ chapterCount: action.count, wordsPerChapter: action.wordsPerChapter ?? 3000 }, withSignal(events));
         if (!draft.ok) return fail(draft.error);
         const applied = await host.applyPlanDraft(draft.value);
@@ -607,7 +649,15 @@ export function assistantUseCases({
         const c = await findChapter(action.chapter);
         if (!c.ok) return failed(c.error);
         events.onEffect?.({ kind: 'open_chapter', chapterId: c.value.id });
-        const written = await host.writeChapter(c.value.id, withSignal(events));
+        events.onProgress?.(`写手正在写《${c.value.title}》`);
+        const written = await host.writeChapter(c.value.id, {
+          ...withSignal(events),
+          onSegment: (n, total) => {
+            events.onProgress?.(`写手正在写《${c.value.title}》：已写 ${n}/${total} 段`);
+            // 每写完一段就让界面重新载入这一章，作者看得到正文在长。
+            events.onEffect?.({ kind: 'chapter_changed', chapterId: c.value.id });
+          },
+        });
         if (!written.ok) return fail(written.error);
         changed(events);
         const o = written.value;
@@ -617,6 +667,7 @@ export function assistantUseCases({
       case 'continue_chapter': {
         const c = await findChapter(action.chapter);
         if (!c.ok) return failed(c.error);
+        events.onProgress?.(`正在续写《${c.value.title}》`);
         const content = await host.openChapter(c.value.id);
         if (!content.ok) return fail(content.error);
         const last = content.value.saved.at(-1);
@@ -627,8 +678,102 @@ export function assistantUseCases({
           withSignal(events),
         );
         if (!result.ok) return fail(result.error);
-        events.onEffect?.({ kind: 'open_chapter', chapterId: c.value.id });
-        return result.value.candidate === null ? failed('续写没有完成') : done(`已为《${c.value.title}》续写一段，作为候选稿放在章节旁的“AI 写作”里，作者接受后才写入正文。`);
+        if (result.value.candidate === null) return failed('续写没有完成');
+        events.onEffect?.({ kind: 'show_candidates', chapterId: c.value.id });
+        return done(`已为《${c.value.title}》续写一段，作为候选稿放在章节旁的“AI 写作”里，作者接受后才写入正文。`);
+      }
+      case 'edit_selection': {
+        const chosen = events.selection ?? null;
+        if (chosen === null || chosen.text.trim() === '') return failed('作者没有在正文里选中文字：请作者先选中要改的那段，再说要怎么改');
+        const c = await findChapter(chosen.chapterId);
+        if (!c.ok) return failed(c.error);
+        events.onProgress?.(`正在${EDIT_LABEL[action.operation]}选中的文字`);
+        const result = await host.runSelectionOperation(
+          { chapterId: chosen.chapterId, selection: chosen.range, operation: action.operation, instruction: action.instruction ?? '', overrides: { include: [], exclude: [] } },
+          withSignal(events),
+        );
+        if (!result.ok) return fail(result.error);
+        if (result.value.candidate === null) return failed(`${EDIT_LABEL[action.operation]}没有完成`);
+        events.onEffect?.({ kind: 'show_candidates', chapterId: chosen.chapterId });
+        return done(`已${EDIT_LABEL[action.operation]}《${c.value.title}》中选中的 ${chosen.text.length} 字，作为候选稿放在章节旁的“AI 写作”里，作者对照差异后接受。`);
+      }
+      case 'review_chapter': {
+        const c = await findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        events.onProgress?.(`正在审核《${c.value.title}》`);
+        const reviewed = await host.reviewChapter(c.value.id, withSignal(events));
+        if (!reviewed.ok) return fail(reviewed.error);
+        events.onEffect?.({ kind: 'show_review', chapterId: c.value.id });
+        const { issues, modelReviewed, reason } = reviewed.value;
+        const note = modelReviewed ? '' : `（模型审核没有完成：${reason ?? '原因不明'}；下面只有程序检查的结果）`;
+        if (issues.length === 0) return done(`审核完《${c.value.title}》，没有发现问题${note}。`);
+        const listed = issues.slice(0, LISTED_ISSUES).map((i) => `- ${SEVERITY_LABEL[i.severity]}：${i.description}${i.suggestion === '' ? '' : `（建议：${i.suggestion}）`}`);
+        const more = issues.length > LISTED_ISSUES ? '\n……' : '';
+        return done(`审核完《${c.value.title}》，有 ${issues.length} 个待处理的问题${note}，列在章节旁的“审核”里：\n${listed.join('\n')}${more}`);
+      }
+      case 'rollback_writer': {
+        const c = await findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        const rolled = await host.rollbackWriter(c.value.id);
+        if (!rolled.ok) return fail(rolled.error);
+        changed(events);
+        events.onEffect?.({ kind: 'chapter_changed', chapterId: c.value.id });
+        return done(`已把《${c.value.title}》回退到写手写入之前；回退前的正文存为了快照。`);
+      }
+      case 'add_foreshadow': {
+        let plantChapterId: string | null = null;
+        let payoffChapterId: string | null = null;
+        if (action.plant !== null) {
+          const c = await findChapter(action.plant);
+          if (!c.ok) return failed(c.error);
+          plantChapterId = c.value.id;
+        }
+        if (action.payoff !== null) {
+          const c = await findChapter(action.payoff);
+          if (!c.ok) return failed(c.error);
+          payoffChapterId = c.value.id;
+        }
+        const added = await host.addForeshadow({
+          title: action.title,
+          content: action.content,
+          reveal: action.reveal ?? '',
+          plantChapterId,
+          plantAnchor: null,
+          payoffChapterId,
+          payoffAnchor: null,
+          status: 'planned',
+        });
+        if (!added.ok) return fail(added.error);
+        changed(events);
+        return done(`已在伏笔账本里记下“${action.title.trim()}”。`);
+      }
+      case 'restore_chapter': {
+        const work = await chapters();
+        if (!work.ok) return fail(work.error);
+        const c = pick(work.value.trashed, action.chapter, (x) => [x.title], '回收站里的章节');
+        if (!c.ok) return failed(c.error);
+        const restored = await host.restoreChapter(c.value);
+        if (!restored.ok) return fail(restored.error);
+        changed(events);
+        return done(`已把《${c.value.title}》从回收站恢复。`);
+      }
+      case 'save_snapshot': {
+        const c = await findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        const saved = await host.createSnapshot(c.value.id);
+        if (!saved.ok) return fail(saved.error);
+        return done(`已给《${c.value.title}》存了一个版本快照，在章节的“版本快照”里。`);
+      }
+      case 'export_book': {
+        let chapterId: string | undefined;
+        if (action.chapter !== null) {
+          const c = await findChapter(action.chapter);
+          if (!c.ok) return failed(c.error);
+          chapterId = c.value.id;
+        }
+        const exported = await host.exportText(action.format === 'txt' ? 'txt' : 'md', chapterId);
+        if (!exported.ok) return fail(exported.error);
+        return exported.value ? done('已导出。') : failed('作者取消了保存，没有导出');
       }
       case 'open_page': {
         events.onEffect?.({ kind: 'open_page', page: action.page });
@@ -648,6 +793,7 @@ export function assistantUseCases({
     if (action.tool === 'trash_chapter') return `把“${action.chapter}”移入回收站`;
     if (action.tool === 'delete_entity') return `删除设定“${action.entity}”`;
     if (action.tool === 'plan_chapters') return `按大纲重新生成 ${action.count} 章的章节计划并采用（会覆盖已有的计划）`;
+    if (action.tool === 'rollback_writer') return `把“${action.chapter}”回退到写手写入之前（现稿会先存为快照）`;
     return action.tool;
   }
 
@@ -672,12 +818,25 @@ export function assistantUseCases({
     let workBefore = project();
     for (let step = 0; step < MAX_ASSISTANT_STEPS; step++) {
       if (aborted(events)) break;
-      const prompt = renderAssistantTurn({ history: history(items), state: await state(events.current?.() ?? '') });
+      const prompt = renderAssistantTurn({ history: history(items), state: await state(events) });
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: ASSISTANT_OUTPUT_TOKENS, effort: 'medium' }, AssistantTurnOutput, events);
-      if (!result.ok) return result;
+      // 流式到达时把给作者的话逐字交给界面；只用于显示，动作在整步输出通过校验后才执行。
+      let streamed = '';
+      const onEvent = (event: LlmStreamEvent) => {
+        events.onEvent?.(event);
+        if (event.type !== 'text') return;
+        streamed += event.delta;
+        const message = partialStringField(streamed, 'message');
+        if (message !== null) events.onDraft?.(message);
+      };
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: ASSISTANT_OUTPUT_TOKENS, effort: 'medium' }, AssistantTurnOutput, { ...withSignal(events), onEvent });
+      if (!result.ok) {
+        events.onDraft?.(null);
+        return result;
+      }
       const output = result.value.value;
       await append(items, [{ id: deps.ids.next(), role: 'assistant', output }], events);
+      events.onDraft?.(null);
       if (output.actions.length === 0) return ok({ items, pending: false });
       const results: AssistantResult[] = [];
       const planned = await hasPlans();
@@ -691,6 +850,7 @@ export function assistantUseCases({
           return ok({ items, pending: true });
         }
         const outcome = await execute(action, events);
+        events.onProgress?.(null);
         results.push({ tool: action.tool, ok: outcome.ok, detail: outcome.detail });
         // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
         const now = project();
@@ -745,6 +905,7 @@ export function assistantUseCases({
         const last = items.at(-1);
         if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
         const outcome = approve ? await execute(last.action, events) : failed('作者没有同意，这个动作没有执行。');
+        events.onProgress?.(null);
         await append(items, [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: outcome.ok, detail: approve ? `作者确认后执行：${outcome.detail}` : outcome.detail }] }], events);
         return await proceed(items, events);
       } finally {

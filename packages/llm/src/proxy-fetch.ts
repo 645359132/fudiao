@@ -92,7 +92,7 @@ export function createProxyFetch(transport: NetTransport, providerId: string, ne
         switch (e.event) {
           case 'head':
             responded = true;
-            resolve(new Response(NULL_BODY.has(e.status) ? null : stream, { status: e.status, headers: e.headers.map(([k, v]) => [k, v]) }));
+            resolve(new Response(NULL_BODY.has(e.status) ? null : stream, { status: e.status, headers: e.headers.map(([k, v]): [string, string] => [k, v]) }));
             break;
           case 'chunk':
             controller?.enqueue(e.data instanceof Uint8Array ? e.data : Uint8Array.from(e.data));

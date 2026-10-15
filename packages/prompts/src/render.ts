@@ -769,8 +769,12 @@ export type AssistantState = {
     /** 章节太多时只列出前后部分。 */
     readonly omitted: boolean;
     readonly entities: readonly { readonly id: string; readonly kind: string; readonly name: string; readonly locked: boolean }[];
+    /** 回收站里的章节。 */
+    readonly trashed: readonly { readonly id: string; readonly title: string }[];
     /** 作者正在看的页面或章节；没有时为空。 */
     readonly current: string;
+    /** 作者在正文里选中的文字（edit_selection 的对象）；没有选中时为 null。太长时 text 只含开头与结尾。 */
+    readonly selection: null | { readonly chapter: string; readonly text: string; readonly length: number; readonly clipped: boolean };
   };
 };
 
@@ -797,7 +801,19 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
   if (last === undefined || last.role === 'assistant') return err('助手的一步须以作者的话或动作结果结尾');
   const rendered = renderTemplate('assistant_turn', {
     works: [...input.state.works],
-    work: input.state.work === null ? null : { ...input.state.work, volumes: [...input.state.work.volumes], chapters: [...input.state.work.chapters], entities: [...input.state.work.entities], hasVolumes: input.state.work.volumes.length > 0 },
+    work:
+      input.state.work === null
+        ? null
+        : {
+            ...input.state.work,
+            volumes: [...input.state.work.volumes],
+            chapters: [...input.state.work.chapters],
+            entities: [...input.state.work.entities],
+            trashed: [...input.state.work.trashed],
+            hasVolumes: input.state.work.volumes.length > 0,
+            hasTrashed: input.state.work.trashed.length > 0,
+            selection: input.state.work.selection === null ? null : { ...input.state.work.selection },
+          },
     hasResults: last.role === 'results',
     results: last.role === 'results' ? last.results.map((r) => ({ ...r })) : [],
     request: last.role === 'user' ? last.text : '',

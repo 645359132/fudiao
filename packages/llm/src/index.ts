@@ -20,7 +20,7 @@ export { memorySamples, RecordingAdapter, ReplayAdapter } from './replay';
 export { requestHash } from './request-hash';
 export { routeByProvider } from './router';
 export type { StructuredError, StructuredOptions, StructuredSuccess } from './structured';
-export { parseModelJson, structured } from './structured';
+export { parseModelJson, partialStringField, structured } from './structured';
 export type {
   CallOptions,
   Effort,
