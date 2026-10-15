@@ -111,6 +111,27 @@ describe('能力自检', () => {
     const failing = new AnthropicAdapter({ apiKey: 'k', fetch: fakeFetch([{ status: 429, body: errorBody(429) }]).fetch, maxRetries: 0 });
     expect((await runSelfTest(failing, model, prompt, schema, check)).reason).toMatch(/^第 1 次：调用失败（rate_limited）/);
     const truncated = new AnthropicAdapter({ apiKey: 'k', fetch: fakeFetch([{ chunks: anthropicChunks('m', { text: ['{"na'], end: 'length' }) }]).fetch, maxRetries: 0 });
-    expect((await runSelfTest(truncated, model, prompt, schema, check)).reason).toBe('第 1 次：输出被截断');
+    expect((await runSelfTest(truncated, model, prompt, schema, check)).reason).toBe('第 1 次：输出被截断（思考或回答用完了输出上限）');
+  });
+
+  it('按调用方给的输出上限与思考深度发请求（思考计入输出的服务要留出余量）；不给时上限为 1,024', async () => {
+    const good = JSON.stringify(expected);
+    const thinking: ModelProfile = { provider: 'p', model: 'm', capabilities: { ...CONSERVATIVE_CAPABILITIES, reasoningControl: 'effort', maxOutputTokens: 384_000 } };
+    const withBudget = fakeFetch([reply(good), reply(good), reply(good)]);
+    const port = new OpenAIChatAdapter({ baseURL: 'http://127.0.0.1:11434/v1', fetch: withBudget.fetch, maxRetries: 0 });
+    expect((await runSelfTest(port, thinking, prompt, schema, check, {}, { maxOutputTokens: 33_024, effort: 'low' })).passed).toBe(true);
+    // 请求体里的输出上限：OpenAI 官方的写法是 max_completion_tokens，兼容接口是 max_tokens。
+    const sent = (body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return [b['max_completion_tokens'] ?? b['max_tokens'], b['reasoning_effort']];
+    };
+    expect(withBudget.requests.map((r) => sent(r.body))).toEqual([
+      [33_024, 'low'],
+      [33_024, 'low'],
+      [33_024, 'low'],
+    ]);
+    const plain = fakeFetch([reply(good), reply(good), reply(good)]);
+    await runSelfTest(new OpenAIChatAdapter({ baseURL: 'http://127.0.0.1:11434/v1', fetch: plain.fetch, maxRetries: 0 }), thinking, prompt, schema, check);
+    expect(sent(plain.requests[0]?.body)[0]).toBe(1_024);
   });
 });

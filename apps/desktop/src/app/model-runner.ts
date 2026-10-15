@@ -106,12 +106,7 @@ export function describeStructuredFailure(error: StructuredError, modelName: str
   }
 }
 
-/**
- * 输出上限里留给思考的余量。有的服务把思考计入输出：M0 实验中 DeepSeek 的思考把 8,000 的上限用完；
- * M3 评估中一次审核的思考用完了 24,000 的上限，没有写出任何内容。
- * 写手与审核的各项任务都在正文所需之外加上它；上限只是封顶，发送时再按模型的最大输出截一次。
- */
-export const THINKING_ALLOWANCE = 32_000;
+export { THINKING_ALLOWANCE } from './thinking';
 
 export type ModelChoice = { readonly provider: ProviderView; readonly model: StoredModel };
 

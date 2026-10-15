@@ -3,6 +3,7 @@ import { buildWritingContext } from '@fudiao/context';
 import { openaiChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { THINKING_ALLOWANCE } from './model-runner';
 import { CONTINUE_LENGTH, maxOutputTokens, promptParts, targetLength } from './selection-ops';
 import { createAppService } from './service';
 
@@ -15,7 +16,7 @@ describe('选区操作的参数', () => {
     expect(targetLength('shorten', text)).toBe(50);
     expect(targetLength('shorten', '短')).toBe(20);
     expect(targetLength('rewrite', text)).toBe(100);
-    expect(maxOutputTokens(300)).toBe(1_624);
+    expect(maxOutputTokens(300)).toBe(600 + THINKING_ALLOWANCE);
   });
 
   it('从上下文清单取出材料与前后文', () => {

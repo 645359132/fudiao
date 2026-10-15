@@ -2,7 +2,7 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
 import { structured, type StructuredError } from './structured';
-import type { CallOptions, LlmError, LlmMessage, LlmPort, ModelCapabilities, ModelProfile, OutputSchema, PromptBlock } from './types';
+import type { CallOptions, Effort, LlmError, LlmMessage, LlmPort, ModelCapabilities, ModelProfile, OutputSchema, PromptBlock } from './types';
 
 /** 服务返回的一个模型。capabilities 只含服务明确给出的项，其余由内置能力表或保守能力补齐。 */
 export type ListedModel = {
@@ -41,6 +41,13 @@ export type SelfTestReport = {
 export const SELF_TEST_RUNS = 3;
 
 /**
+ * 自检请求的输出上限与思考深度。答案本身很短，但有的服务把思考计入输出（DeepSeek 默认先思考）：
+ * 上限只够答案时，偶尔一次思考得长就会被截断而判为未通过。调用方按自己的思考余量给出。
+ */
+export type SelfTestBudget = { readonly maxOutputTokens: number; readonly effort?: Effort };
+export const DEFAULT_SELF_TEST_BUDGET: SelfTestBudget = { maxOutputTokens: 1_024 };
+
+/**
  * 能力自检（B57）：按模型的能力描述发出固定的结构化输出测试，经结构化输出管线校验（不请求修正），
  * 再由 check 比对内容；连续 SELF_TEST_RUNS 次通过才算通过，一次失败即停止。
  */
@@ -51,13 +58,23 @@ export async function runSelfTest<T>(
   schema: z.ZodType<T>,
   check: (value: T) => string | null,
   options: CallOptions = {},
+  budget: SelfTestBudget = DEFAULT_SELF_TEST_BUDGET,
 ): Promise<SelfTestReport> {
   const runs: (string | null)[] = [];
   for (let i = 0; i < SELF_TEST_RUNS; i++) {
     const result = await structured(
       port,
       schema,
-      { task: 'self_test', model, template: prompt.template, system: prompt.system, messages: prompt.messages, output: prompt.output, maxOutputTokens: 1_024 },
+      {
+        task: 'self_test',
+        model,
+        template: prompt.template,
+        system: prompt.system,
+        messages: prompt.messages,
+        output: prompt.output,
+        maxOutputTokens: budget.maxOutputTokens,
+        ...(budget.effort !== undefined && { effort: budget.effort }),
+      },
       { ...options, maxRepairs: 0, repairMessage: () => '' },
     );
     const reason = result.ok ? check(result.value.value) : describe(result.error);
@@ -74,7 +91,7 @@ function describe(error: StructuredError): string {
     case 'refused':
       return '模型拒绝回答';
     case 'truncated':
-      return '输出被截断';
+      return '输出被截断（思考或回答用完了输出上限）';
     case 'cancelled':
       return '已取消';
     case 'invalid_output':

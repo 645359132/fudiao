@@ -40,6 +40,7 @@ import {
 } from '@fudiao/store';
 import { BUILTIN_MODELS, builtinModel, type BuiltinModel } from './builtin-models';
 import type { AppError } from './errors';
+import { THINKING_ALLOWANCE } from './thinking';
 import type { AppDeps, CredentialStatus, KeyHeader } from './ports';
 
 /** 新添加的模型按保守能力处理（施工文档第五章）。存储与模型端口的能力描述须一致，否则这里通不过类型检查。 */
@@ -296,6 +297,8 @@ export function modelServices(deps: AppDeps) {
         SelfTestOutput,
         checkSelfTest,
         signal === undefined ? {} : { signal },
+        // 答案很短，但思考计入输出的服务（例如 DeepSeek）要留出思考的余量；格式检查用浅的思考就够。
+        { maxOutputTokens: 1_024 + THINKING_ALLOWANCE, effort: 'low' },
       );
       const recorded = await recordSelfTest(p.value, model, { status: report.passed ? 'passed' : 'failed', at: deps.clock.now(), reason: report.reason }, ctx());
       if (!recorded.ok) return err(repo(recorded.error));

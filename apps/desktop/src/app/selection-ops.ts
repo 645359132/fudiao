@@ -2,6 +2,7 @@
 // 结果先作为候选稿交给作者（M2-06），不直接写入正文（硬性规则 21）。
 import type { ContextManifest } from '@fudiao/context';
 import type { SelectionOperation } from '@fudiao/prompts';
+import { THINKING_ALLOWANCE } from './thinking';
 
 export const OPERATION_LABELS: Readonly<Record<SelectionOperation, string>> = {
   continue: '续写',
@@ -35,8 +36,11 @@ export function targetLength(operation: SelectionOperation, selection: string): 
   }
 }
 
-/** 输出上限：目标字数的两倍再留出思考与余量，不超过模型的最大输出（由调用器再按模型截取）。 */
-export const maxOutputTokens = (length: number): number => length * 2 + 1_024;
+/**
+ * 输出上限：目标字数的两倍，再加上思考的余量（思考计入输出的服务，例如 DeepSeek，以前偶尔会因思考用完上限而截断）；
+ * 上限只是封顶，由调用器再按模型的最大输出截取。
+ */
+export const maxOutputTokens = (length: number): number => length * 2 + THINKING_ALLOWANCE;
 
 /** 除续写外都需要先选中文字。 */
 export const needsSelection = (operation: SelectionOperation): boolean => operation !== 'continue';
