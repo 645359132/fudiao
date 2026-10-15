@@ -3,6 +3,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { err, ok, ulid, type Result } from '@fudiao/shared';
 import { createProxyFetch, type NetEvent } from '@fudiao/llm';
+import { canvasImages } from '../adapters/canvas-image';
 import { tauriNet } from '../adapters/tauri-net';
 import { closeProjectDb, openAppDb, openProjectDb, tauriSqlPort } from '../adapters/tauri-sql';
 import { buildAdapter } from '../app/model-services';
@@ -55,6 +56,7 @@ export function tauriDeps(): AppDeps {
       setLimits: (limits) => invoke<void>('net_set_limits', { limits }),
     },
     llm: { forProvider: (provider) => buildAdapter(provider, providerFetch(provider.id)) },
+    images: canvasImages(),
     library: {
       read: () => call(invoke<string | null>('library_read')),
       write: (content) => call(invoke<void>('library_write', { content })),

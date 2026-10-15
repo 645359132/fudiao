@@ -12,7 +12,7 @@ import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } 
 import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection } from '../app/assistant';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
-import type { Beat } from '@fudiao/store';
+import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import type { Layout, Preferences, Theme } from '../app/library';
@@ -101,6 +101,8 @@ export type AiWriteJob = {
 export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
+  /** 作品封面（B76）：undefined 为还没读取，null 为没有封面（显示按书名排出的文字封面）。 */
+  readonly cover: Cover | null | undefined;
   readonly selectedChapterId: string | null;
   readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'relations' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book';
   readonly busy: boolean;
@@ -220,6 +222,10 @@ export type AppState = {
   readonly restoreChapter: (id: string) => Promise<void>;
   readonly selectChapter: (id: string) => Promise<void>;
   readonly showPanel: (panel: AppState['panel']) => Promise<void>;
+  /** 作品封面（B76）：读取、用作者选的图片设定或更换、去掉。 */
+  readonly loadCover: () => Promise<void>;
+  readonly setCover: (image: Blob) => Promise<boolean>;
+  readonly removeCover: () => Promise<void>;
   readonly dismissMessage: () => void;
 
   /** 离开当前章节前保存正文；保存失败时留在本章并说明原因，返回能否离开。 */
@@ -808,6 +814,7 @@ export function createAppStore(service: AppService): AppStore {
 
     const opened = (work: WorkView): Partial<AppState> => ({
       work,
+      cover: undefined,
       selectedChapterId: work.chapters[0]?.id ?? null,
       // 还没有章节的作品从成书页开始（B67）；已有章节的作品打开第一章。
       panel: work.chapters.length === 0 ? 'book' : 'chapter',
@@ -837,6 +844,7 @@ export function createAppStore(service: AppService): AppStore {
       selectedFactId: null,
       sourceStats: null,
       skills: null,
+      cover: undefined,
       planning: null,
       quickBook: null,
       assistantOpen: true,
@@ -919,7 +927,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1044,6 +1052,16 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         // 离开正文后丢掉缓存的内容，回来时从库中重新读取。
         set({ panel, chapterContent: null });
+        if (panel === 'info') await get().loadCover();
+      },
+      async loadCover() {
+        const cover = await service.workCover();
+        if (cover.ok) set({ cover: cover.value });
+        else set({ message: describeError(cover.error) });
+      },
+      setCover: (image) => run(service.setWorkCover(image), (cover) => ({ cover })),
+      async removeCover() {
+        await run(service.removeWorkCover(), () => ({ cover: null }));
       },
       dismissMessage: () => set({ message: null }),
 

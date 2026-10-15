@@ -181,6 +181,30 @@ describe('正文编辑', () => {
     await waitFor(() => expect(editorText()).toBe('雨下得更紧了。'));
   });
 
+  it('作品封面（B76）：作品信息里先是文字封面；上传图片后显示图片，作品列表的卡片也换上；去掉后回到文字封面', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '雨夜' }));
+    const info = await screen.findByRole('region', { name: '作品信息' });
+    const cover = within(info).getByRole('region', { name: '封面' });
+    expect(await within(cover).findByRole('img', { name: '《雨夜》的文字封面' })).toBeTruthy();
+    await user.upload(within(cover).getByLabelText('选择封面图片'), new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9])], 'cover.jpg', { type: 'image/jpeg' }));
+    const image = await within(cover).findByRole('img', { name: '《雨夜》的封面' });
+    expect(image.getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/);
+    expect(within(cover).getByText('600 × 800 像素')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    const card = (await screen.findByRole('button', { name: '雨夜' })).closest('li');
+    expect(card?.querySelector('img.book-cover')?.getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/);
+
+    await user.click(screen.getByRole('button', { name: '雨夜' }));
+    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    const again = within(await screen.findByRole('region', { name: '作品信息' })).getByRole('region', { name: '封面' });
+    await user.click(await within(again).findByRole('button', { name: '去掉封面' }));
+    expect(await within(again).findByRole('img', { name: '《雨夜》的文字封面' })).toBeTruthy();
+    expect(within(again).getByRole('button', { name: '上传封面…' })).toBeTruthy();
+  });
+
   it('去作品信息再回到本章：显示最新保存的正文，接着写也不会留下多余段落', async () => {
     const { store, user } = start();
     await chapterWithText(user, '第一句。');

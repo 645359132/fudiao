@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { LibraryWork } from '../app/service';
+import { BookCover } from './BookCover';
 import { Icon } from './Icon';
 import { ThemeButton } from './ThemeButton';
 import { useApp } from './store-context';
@@ -14,9 +15,7 @@ function WorkItem({ work }: { readonly work: LibraryWork }) {
   const busy = useApp((s) => s.busy);
   return (
     <li className={work.missing ? 'work-card missing' : 'work-card'}>
-      <span className="work-cover" aria-hidden="true">
-        {work.title.slice(0, 1)}
-      </span>
+      <BookCover title={work.title} image={work.cover} seed={work.id} size="small" decorative />
       <span className="work-meta">
         <button type="button" className="work-open" disabled={busy || work.missing} onClick={() => void openWork(work.id)}>
           {work.title}

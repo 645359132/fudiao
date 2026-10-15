@@ -20,6 +20,13 @@ export const TABLES: readonly TableSpec[] = [
     json: ['goals', 'avoid_phrases'],
   },
   {
+    // 作品封面（迁移 0015）：引用作品，排在它之后；图片是 data URL 文本。
+    name: 'cover',
+    columns: ['project_id', 'image', 'thumbnail', 'width', 'height', ...VERSIONED],
+    primaryKey: ['project_id'],
+    json: [],
+  },
+  {
     // 章节引用卷（迁移 0010），导入时须排在章节之前。
     name: 'volume',
     columns: ['id', 'order_key', 'title', 'summary', ...VERSIONED],

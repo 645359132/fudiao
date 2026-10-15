@@ -92,6 +92,7 @@ const sample: Statement[] = [
   s("INSERT INTO chapter_plan (chapter_id, created_at, updated_at) VALUES ('01C2', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W1', 'foreshadow', '伏笔埋设与回收', '', 1, '1', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, description, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '写每一章的结尾时使用', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
+  s("INSERT INTO cover (project_id, image, thumbnail, width, height, created_at, updated_at) VALUES ('01P', 'data:image/jpeg;base64,/9j/4AAQSkZJRg==', 'data:image/jpeg;base64,/9j/4AAQ', 600, 800, ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, description, instruction, builtin_version, stages, created_at, updated_at) VALUES ('01W3', 'snowflake', '雪花写作法', '', '', '1', 'planning', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, description, instruction, builtin_version, stages, created_at, updated_at) VALUES ('01W4', 'author-preferences', '作者偏好', '作者说过的偏好', '- 对白要短', NULL, 'planning writing', ?, ?)", ...T),
   s(
@@ -235,6 +236,10 @@ describe('写手与审核的约束（迁移 0005）', () => {
     const db = await seeded();
     await rejects(db, "INSERT INTO writing_skill (id, key, name, created_at, updated_at) VALUES ('x', 'empty', '空技能', ?, ?)", ...T);
     await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, created_at, updated_at) VALUES ('x', 'foreshadow', '重复', '1', ?, ?)", ...T);
+    // 封面须是图片的 data URL，尺寸为正；每部作品只有一张。
+    await rejects(db, "UPDATE cover SET image = 'https://example.com/a.jpg'");
+    await rejects(db, "UPDATE cover SET width = 0");
+    await rejects(db, "INSERT INTO cover (project_id, image, thumbnail, width, height, created_at, updated_at) VALUES ('01P', 'data:image/png;base64,AA==', 'data:image/png;base64,AA==', 1, 1, ?, ?)", ...T);
     // 阶段只能是规划、写章节或两者（按固定顺序写）。
     await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES ('x', 'review-only', '审核', '1', 'review', ?, ?)", ...T);
     await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES ('x', 'both', '两者', '1', 'writing planning', ?, ?)", ...T);
@@ -442,6 +447,14 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 14 导出的数据（没有封面）导入后封面为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'cover'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 14, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, cover: [] });
   });
 
   it('结构版本 13 导出的数据（写作技能没有 stages 列）经转换后导入：都是写章节用的，“作者偏好”在规划时也遵守', async () => {

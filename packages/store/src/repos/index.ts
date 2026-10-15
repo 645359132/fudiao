@@ -6,6 +6,8 @@ export type { Volume } from './volume';
 export type { AssistantRole, StoredAssistantMessage } from './assistant';
 export { appendAssistantMessages, ASSISTANT_ROLES, chapterLengths, clearAssistantMessages, listAssistantMessages } from './assistant';
 export { createVolume, deleteVolume, listVolumes, moveVolume, updateVolume } from './volume';
+export type { Cover, CoverImage } from './cover';
+export { getCover, getCoverThumbnail, MAX_COVER_CHARS, MAX_THUMBNAIL_CHARS, removeCover, saveCover } from './cover';
 export type { RelationCategory, RelationPosition, Relationship, RelationshipFields } from './relationship';
 export { createRelationship, deleteRelationship, listRelationPositions, listRelationships, RELATION_CATEGORIES, setRelationPosition, updateRelationship } from './relationship';
 export type { Project, ProjectPatch } from './project';

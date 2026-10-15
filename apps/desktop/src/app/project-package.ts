@@ -95,5 +95,8 @@ export function parsePackage(files: readonly PackFile[]): Result<ParsedPackage, 
 
 /** 作品标识与已有作品相同时换成新标识，避免同一部作品导入两次后在作品列表中互相覆盖。 */
 export function withProjectId(data: ExportedData, id: string): ExportedData {
-  return { ...data, tables: { ...data.tables, project: (data.tables['project'] ?? []).map((row) => ({ ...row, id })) } };
+  const tables: Record<string, ExportedRow[]> = { ...data.tables, project: (data.tables['project'] ?? []).map((row) => ({ ...row, id })) };
+  // 封面（迁移 0015）以作品标识为主键，跟着换。
+  if (data.tables['cover'] !== undefined) tables['cover'] = data.tables['cover'].map((row) => ({ ...row, project_id: id }));
+  return { ...data, tables };
 }

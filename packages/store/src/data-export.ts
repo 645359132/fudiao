@@ -56,6 +56,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   // 0013：长篇记忆增加“章尾留给后面的事”（旧数据为空）。
   13: (tables) => ({ ...tables, chapter_memory: (tables['chapter_memory'] ?? []).map((row) => ({ open_threads: [], ...row })) }),
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
+  // 0015：新增作品封面，旧版本导出的数据中没有，导入为空（界面显示按书名排出的文字封面）。
+  15: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

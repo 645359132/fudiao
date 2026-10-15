@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Chapter, Project } from '@fudiao/store';
 import { ChapterEditor } from './ChapterEditor';
 import { AiWriteDrawer } from './AiWriteDrawer';
+import { BookCover } from './BookCover';
 import { ContextDrawer } from './ContextDrawer';
 import { ReviewDrawer } from './ReviewDrawer';
 import { EntityDrawer } from './SettingsPanel';
@@ -202,12 +203,56 @@ function InfoForm({ project }: { readonly project: Project }) {
   );
 }
 
+/** 作品封面（B76）：上传、更换或去掉；没有封面时显示按书名排出的文字封面。 */
+function CoverEditor({ project }: { readonly project: Project }) {
+  const cover = useApp((s) => s.cover);
+  const setCover = useApp((s) => s.setCover);
+  const removeCover = useApp((s) => s.removeCover);
+  const busy = useApp((s) => s.busy);
+  const picker = useRef<HTMLInputElement>(null);
+  const has = cover !== undefined && cover !== null;
+  return (
+    <section className="cover-editor" aria-label="封面">
+      {cover === undefined ? <div className="book-cover large loading" aria-hidden="true" /> : <BookCover title={project.title} image={cover?.image ?? null} seed={project.id} size="large" />}
+      <div className="cover-side">
+        <h3>封面</h3>
+        <p className="muted">建议用竖版图片（宽与高约 3:4），JPG、PNG 或 WebP。没有封面时按书名排出文字封面。</p>
+        <input
+          ref={picker}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="visually-hidden"
+          aria-label="选择封面图片"
+          tabIndex={-1}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file !== undefined) void setCover(file);
+          }}
+        />
+        <div className="form-actions">
+          <button type="button" disabled={busy || cover === undefined} onClick={() => picker.current?.click()}>
+            {has ? '更换封面…' : '上传封面…'}
+          </button>
+          {has ? (
+            <button type="button" className="ghost" disabled={busy} onClick={() => void removeCover()}>
+              去掉封面
+            </button>
+          ) : null}
+        </div>
+        {has ? <span className="muted">{`${cover.width} × ${cover.height} 像素`}</span> : null}
+      </div>
+    </section>
+  );
+}
+
 export function WorkInfoPanel() {
   const project = useApp((s) => s.work?.project ?? null);
   if (project === null) return null;
   return (
     <section aria-label="作品信息">
       <h2>作品信息</h2>
+      <CoverEditor project={project} />
       <InfoForm key={`${project.id}:${project.version}`} project={project} />
     </section>
   );

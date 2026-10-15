@@ -280,6 +280,14 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
       },
     },
     llm: { forProvider: (provider) => buildAdapter(provider, createProxyFetch(proxy, provider.id, () => 'req')) },
+    // jsdom 与 Node 没有 canvas：封面原样编码，缩略图取前一段，尺寸固定为 600×800。
+    images: {
+      async prepareCover(file) {
+        if (!file.type.startsWith('image/')) return err('请选一张图片（JPG、PNG 或 WebP）');
+        const base64 = Buffer.from(await file.arrayBuffer()).toString('base64') || 'AA==';
+        return ok({ image: `data:${file.type};base64,${base64}`, thumbnail: `data:${file.type};base64,${base64.slice(0, 8)}`, width: 600, height: 800 });
+      },
+    },
     clock: { now: () => (options.realTime === true ? new Date().toISOString() : new Date(Date.UTC(2026, 9, 7, 0, 0, tick++)).toISOString()) },
     ids: {
       next: () =>

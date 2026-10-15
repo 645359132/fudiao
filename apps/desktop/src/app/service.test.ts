@@ -149,6 +149,31 @@ describe('作品信息与章节', () => {
     expect(value(await app.loadLibrary()).works[0]?.title).toBe('雨夜行');
   });
 
+  it('作品封面（B76）：上传图片后有封面，作品列表带缩略图；不是图片时说明原因；去掉后回到文字封面；重新打开时按作品库更新列表', async () => {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    const work = value(await app.createWork('雨夜'));
+    expect(value(await app.workCover())).toBeNull();
+    expect(value(await app.loadLibrary()).works[0]?.cover).toBeNull();
+    expect(await app.setWorkCover(new Blob(['文字'], { type: 'text/plain' }))).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('图片') } });
+    const cover = value(await app.setWorkCover(new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7])], { type: 'image/jpeg' })));
+    expect(cover).toMatchObject({ projectId: work.project.id, width: 600, height: 800, image: expect.stringMatching(/^data:image\/jpeg;base64,/) });
+    const listed = value(await app.loadLibrary()).works[0]?.cover ?? '';
+    expect(listed).toMatch(/^data:image\/jpeg;base64,/);
+    expect(JSON.parse(readFileSync(deps.libraryFile, 'utf8'))).toMatchObject({ works: [{ cover: listed }] });
+
+    // 列表里的缩略图只是缓存：被别处改掉时，重新打开作品按作品库更新。
+    const file = JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { works: { cover: string | null }[] };
+    writeFileSync(deps.libraryFile, JSON.stringify({ ...file, works: file.works.map((w) => ({ ...w, cover: null })) }));
+    value(await app.loadLibrary());
+    value(await app.openWork(work.project.id));
+    expect(value(await app.loadLibrary()).works[0]?.cover).toBe(listed);
+
+    value(await app.removeWorkCover());
+    expect(value(await app.workCover())).toBeNull();
+    expect(value(await app.loadLibrary()).works[0]?.cover).toBeNull();
+  });
+
   it('章节的新建、重命名、排序、回收站与恢复', async () => {
     const { app } = setup();
     await app.loadLibrary();

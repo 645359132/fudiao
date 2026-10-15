@@ -384,17 +384,106 @@ textarea {
   box-shadow: var(--shadow-md);
 }
 
-.work-cover {
-  display: grid;
-  width: 44px;
-  height: 58px;
-  place-items: center;
+/* 作品封面（B76）：图片按 3:4 铺满；没有图片时是书名竖排的文字封面，配色由作品标识决定 */
+.book-cover {
+  display: block;
+  flex-shrink: 0;
+  aspect-ratio: 3 / 4;
+  border-radius: 3px;
+  object-fit: cover;
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px rgb(0 0 0 / 8%);
+  background: var(--surface-2);
+}
+
+.book-cover.small {
+  width: 60px;
+}
+
+.book-cover.large {
+  width: 180px;
   border-radius: 4px;
-  background: linear-gradient(160deg, var(--accent), var(--accent-strong));
-  color: var(--accent-contrast);
+  box-shadow: var(--shadow-md);
+}
+
+.text-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--cover-bg) 82%, white) 0%, var(--cover-bg) 55%, color-mix(in srgb, var(--cover-bg) 80%, black) 100%);
+  color: var(--cover-ink);
+}
+
+/* 内框：像线装书的书签框 */
+.text-cover::after {
+  position: absolute;
+  inset: 6%;
+  border: 1px solid color-mix(in srgb, var(--cover-ink) 45%, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.text-cover-title {
+  max-height: 84%;
+  overflow: hidden;
   font-family: var(--font-prose);
-  font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.18em;
+  line-height: 1.25;
+  writing-mode: vertical-rl;
+}
+
+.book-cover.small .text-cover-title {
+  font-size: 12px;
+}
+
+.book-cover.small.long .text-cover-title {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.book-cover.large .text-cover-title {
+  font-size: 26px;
+}
+
+.book-cover.large.long .text-cover-title {
+  font-size: 19px;
+  letter-spacing: 0.1em;
+}
+
+.book-cover.loading {
+  box-shadow: none;
+}
+
+.cover-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.cover-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.cover-side h3,
+.cover-side p {
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .work-meta {

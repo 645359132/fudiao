@@ -1,6 +1,6 @@
 import type { Result } from '@fudiao/shared';
 import type { LlmPort } from '@fudiao/llm';
-import type { OpenError, OpenReport, Provider, SqlPort } from '@fudiao/store';
+import type { CoverImage, OpenError, OpenReport, Provider, SqlPort } from '@fudiao/store';
 
 /** 文件夹探测结果（Rust 命令 `project_probe`）。 */
 export type Probe = { readonly exists: boolean; readonly isDir: boolean; readonly hasProject: boolean };
@@ -94,6 +94,14 @@ export interface LlmFactory {
   forProvider(provider: Provider): LlmPort;
 }
 
+/**
+ * 封面图片（B76）：把作者选的图片缩放成封面（保留长宽比）与作品列表用的 3:4 缩略图，编码为 data URL。
+ * 桌面端与浏览器预览用 canvas，测试用替身。不是图片、打不开或太大时说明原因。
+ */
+export interface ImagePort {
+  prepareCover(file: Blob): Promise<Result<CoverImage, string>>;
+}
+
 export interface Clock {
   /** UTC ISO 字符串。 */
   now(): string;
@@ -114,6 +122,7 @@ export type AppDeps = {
   readonly settingsDb: SettingsDbPort;
   readonly credentials: CredentialPort;
   readonly llm: LlmFactory;
+  readonly images: ImagePort;
   readonly clock: Clock;
   readonly ids: Ids;
 };

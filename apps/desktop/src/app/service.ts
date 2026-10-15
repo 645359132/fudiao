@@ -3,6 +3,11 @@
 import { relationUseCases } from './relations';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
+  getCover,
+  getCoverThumbnail,
+  removeCover,
+  saveCover,
+  type Cover,
   createChapter,
   createVolume,
   deleteVolume,
@@ -176,7 +181,7 @@ export function createAppService(deps: AppDeps) {
    */
   async function openAt(
     path: string,
-    entryOf: (project: Project) => WorkEntry,
+    entryOf: (project: Project) => Omit<WorkEntry, 'cover'>,
     prepare?: (port: SqlPort) => Promise<Result<unknown, AppError>>,
   ): Promise<Result<WorkView, AppError>> {
     await close();
@@ -195,7 +200,9 @@ export function createAppService(deps: AppDeps) {
       await deps.opener.close();
       return project.ok ? err({ code: 'not_a_work', path }) : err(repo(project.error));
     }
-    const entry = entryOf(project.value);
+    // 作品列表里的封面缩略图是缓存，打开时按作品库更新（别处改过、或从作品包导回时带着封面）。
+    const thumbnail = await getCoverThumbnail(port);
+    const entry: WorkEntry = { ...entryOf(project.value), cover: thumbnail.ok ? thumbnail.value : null };
     const saved = await upsert(entry);
     if (!saved.ok) {
       await deps.opener.close();
@@ -477,6 +484,34 @@ export function createAppService(deps: AppDeps) {
     },
 
     reloadWork: view,
+
+    /** 作品封面（B76）：没有时为 null，界面按书名排出文字封面。 */
+    async workCover(): Promise<Result<Cover | null, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const cover = await getCover(session.port);
+      return cover.ok ? cover : err(repo(cover.error));
+    },
+
+    /** 把作者选的图片缩放成封面与缩略图后保存；作品列表的缩略图随之更新。 */
+    async setWorkCover(image: Blob): Promise<Result<Cover, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const prepared = await deps.images.prepareCover(image);
+      if (!prepared.ok) return err({ code: 'settings', detail: prepared.error });
+      const saved = await saveCover(session.port, session.entry.id, prepared.value, ctx());
+      if (!saved.ok) return err(repo(saved.error));
+      session = { ...session, entry: { ...session.entry, cover: prepared.value.thumbnail } };
+      const cached = await upsert(session.entry);
+      return cached.ok ? ok(saved.value) : cached;
+    },
+
+    /** 去掉封面，回到按书名排出的文字封面。 */
+    async removeWorkCover(): Promise<Result<void, AppError>> {
+      if (session === null) return err({ code: 'no_work' });
+      const removed = await removeCover(session.port);
+      if (!removed.ok) return err(repo(removed.error));
+      session = { ...session, entry: { ...session.entry, cover: null } };
+      return upsert(session.entry);
+    },
 
     /** 载入一章正文；草稿与库中不同时一并返回，由作者决定恢复或丢弃。 */
     async openChapter(chapterId: string): Promise<Result<ChapterContent, AppError>> {

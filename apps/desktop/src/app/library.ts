@@ -8,6 +8,8 @@ export const WorkEntry = z.object({
   title: z.string(),
   archived: z.boolean(),
   lastOpenedAt: z.string().nullable(),
+  /** 封面的缩略图（data URL，B76），同样是缓存，打开作品与更换封面时更新；没有封面时为 null。 */
+  cover: z.string().nullable().default(null),
 });
 export type WorkEntry = z.infer<typeof WorkEntry>;
 

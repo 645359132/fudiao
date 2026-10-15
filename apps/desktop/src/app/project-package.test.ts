@@ -44,6 +44,10 @@ async function sample(): Promise<ProjectDb> {
       { sql: "INSERT INTO source_ref (id, from_type, from_id, to_type, to_id, created_at) VALUES ('r1', 'fact', 'f1', 'paragraph', 'a', ?)", params: [ctx.now] },
       { sql: "INSERT INTO story_event (id, summary, origin_run_id, origin_seq, created_at, updated_at) VALUES ('v1', '对峙', 'RUN', 7, ?, ?)", params: [ctx.now, ctx.now] },
       { sql: "INSERT INTO event_paragraph_link VALUES ('v1', 'a', 'direct', ?)", params: [ctx.now] },
+      {
+        sql: "INSERT INTO cover (project_id, image, thumbnail, width, height, created_at, updated_at) VALUES ('P1', 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==', 'data:image/jpeg;base64,/9j/4AAQ', 600, 800, ?, ?)",
+        params: [ctx.now, ctx.now],
+      },
     ]),
   );
   return db;
@@ -76,7 +80,9 @@ describe('作品包', () => {
     const before = value(await exportData(source));
     const after: ExportedData = value(await exportData(target));
     expect(after.tables['project']?.[0]?.['id']).toBe('P2');
-    expect({ ...after.tables, project: [] }).toEqual({ ...before.tables, project: [] });
+    // 封面（B76）跟着换成新的作品标识。
+    expect(after.tables['cover']?.map((row) => row['project_id'])).toEqual(['P2']);
+    expect({ ...after.tables, project: [], cover: after.tables['cover']?.map((row) => ({ ...row, project_id: 'P1' })) }).toEqual({ ...before.tables, project: [] });
   });
 
   it('拒绝不是复调作品包的文件、更新的格式版本与坏行', () => {

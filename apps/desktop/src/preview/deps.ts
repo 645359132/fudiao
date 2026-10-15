@@ -2,6 +2,7 @@
 // 模型是演示用的，按任务给出固定的回复（见 demo-llm.ts）。只在开发时用。
 import { err, ok, ulid } from '@fudiao/shared';
 import type { SqlJsStatic } from 'sql.js';
+import { canvasImages } from '../adapters/canvas-image';
 import type { AppDeps, CredentialStatus } from '../app/ports';
 import { demoLlm } from './demo-llm';
 import { latestVersion, openProject, openSettings, sqljsPort } from './sqljs';
@@ -79,6 +80,7 @@ export function previewDeps(SQL: SqlJsStatic): AppDeps {
       setLimits: () => Promise.resolve(),
     },
     llm: { forProvider: () => demoLlm() },
+    images: canvasImages(),
     clock: { now: () => new Date().toISOString() },
     ids: { next: () => ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))) },
   };
