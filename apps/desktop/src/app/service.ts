@@ -3,6 +3,7 @@
 import { relationUseCases } from './relations';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
+  latestCallWithUsage,
   getCover,
   getCoverThumbnail,
   removeCover,
@@ -81,7 +82,7 @@ import { candidateUseCases } from './candidates';
 import { writingSkillUseCases } from './writing-skills';
 import { planningUseCases } from './planning';
 import { memoryUseCases } from './memory';
-import { assistantUseCases } from './assistant';
+import { assistantUseCases, type AssistantUsage } from './assistant';
 import { narrationUseCases } from './narration';
 import { quickBookUseCases } from './quick-book';
 import { reviewUseCases } from './review';
@@ -769,6 +770,22 @@ export function createAppService(deps: AppDeps) {
   return {
     ...app,
     ...assistant,
+
+    /**
+     * 这部作品里 AI 助手最近一步的上下文用量（取自调用记录）：重新打开作品或重启之后，对话还在时照样显示。
+     * 上限按那一步所用模型的能力；模型已经删掉时为 null。
+     */
+    async assistantContextUsage(): Promise<Result<AssistantUsage | null, AppError>> {
+      if (session === null) return ok(null);
+      const call = await latestCallWithUsage(session.port, 'assistant');
+      if (!call.ok) return err(repo(call.error));
+      const usage = call.value?.usage ?? null;
+      if (call.value === null || usage === null) return ok(null);
+      const view = await services.loadModelServices();
+      if (!view.ok) return view;
+      const model = view.value.models.find((m) => m.providerId === call.value?.provider && m.modelId === call.value.model);
+      return ok(model === undefined ? null : { promptTokens: usage.input + usage.cacheRead + usage.cacheWrite, contextWindow: model.capabilities.contextWindow });
+    },
     ...quickBookUseCases({
       deps,
       project: () => session?.port ?? null,

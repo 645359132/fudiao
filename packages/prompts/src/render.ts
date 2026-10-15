@@ -786,6 +786,8 @@ export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, str
 /** 助手看到的作品现状（B69）：每一步都按最新的数据重新给出。 */
 export type AssistantState = {
   readonly works: readonly string[];
+  /** 正在后台进行的任务（写手、审核、推演等），一句话一项；没有时为空。 */
+  readonly running?: readonly string[];
   readonly work: null | {
     readonly title: string;
     readonly genre: string;
@@ -837,6 +839,8 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
   if (last === undefined || last.role === 'assistant') return err('助手的一步须以作者的话或动作结果结尾');
   const rendered = renderTemplate('assistant_turn', {
     works: [...input.state.works],
+    running: [...(input.state.running ?? [])],
+    hasRunning: (input.state.running ?? []).length > 0,
     work:
       input.state.work === null
         ? null

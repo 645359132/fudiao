@@ -36,6 +36,8 @@ export type AssistantEvents = ToolEvents & {
   readonly onDraft?: (message: string | null) => void;
   /** 作者此刻在看什么（章节或页面），写进给模型的现状。 */
   readonly current?: () => string;
+  /** 正在后台进行的任务（写手在写哪一章、排着几章、审核、推演等），一句话一项，写进给模型的现状。 */
+  readonly running?: () => readonly string[];
   /** 助手每一步的思考深度（作者在对话框下方选择），没有给出时为 medium。 */
   readonly effort?: 'low' | 'medium' | 'high';
   /** 每一步结束后：这一步发给模型的内容占了多少 Token，以及模型的上下文上限（服务没有返回用量时不调用）。 */
@@ -102,10 +104,11 @@ export function assistantUseCases({
     const current = events.current?.() ?? '';
     const library = await host.loadLibrary();
     const works = library.ok ? library.value.works.filter((w) => !w.archived && !w.missing).map((w) => w.title) : [];
+    const running = events.running?.() ?? [];
     const port = project();
-    if (port === null) return { works, work: null };
+    if (port === null) return { works, running, work: null };
     const work = await host.reloadWork();
-    if (!work.ok) return { works, work: null };
+    if (!work.ok) return { works, running, work: null };
     const [entities, plans, lengths, relations, skills] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port), listRelationships(port), host.listWritingSkills()]);
     const preferenceSkill = skills.ok ? skills.value.skills.find((s) => s.skill.key === PREFERENCES_KEY && s.skill.enabled) : undefined;
     const planOf = new Map(plans.ok ? plans.value.map((p) => [p.chapterId, PLAN_STATUS_LABEL[p.status]]) : []);
@@ -128,6 +131,7 @@ export function assistantUseCases({
     }
     return {
       works,
+      running,
       work: {
         trashed: work.value.trashed.slice(0, 30).map((c) => ({ id: c.id, title: c.title })),
         relations: rels.slice(0, MAX_LISTED_RELATIONS).map((r) => ({

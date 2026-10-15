@@ -1034,6 +1034,22 @@ textarea {
   justify-content: flex-end;
 }
 
+/* 有任务在进行时离开前的确认（Radix 的遮罩与内容是兄弟节点，内容自己居中） */
+.leave-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 21;
+  width: min(480px, 90vw);
+  transform: translate(-50%, -50%);
+  box-shadow: var(--shadow-md);
+}
+
+.leave-tasks {
+  margin: 0 0 8px;
+  padding-left: 1.4em;
+}
+
 .backup-list {
   margin: 0;
   padding: 0;

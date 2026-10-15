@@ -25,7 +25,7 @@ import { useApp } from './store-context';
 export function WorkScreen() {
   const title = useApp((s) => s.work?.project.title ?? '');
   const panel = useApp((s) => s.panel);
-  const closeWork = useApp((s) => s.closeWork);
+  const requestCloseWork = useApp((s) => s.requestCloseWork);
   const showPanel = useApp((s) => s.showPanel);
   const startTextImport = useApp((s) => s.startTextImport);
   const exportBook = useApp((s) => s.exportBook);
@@ -88,7 +88,7 @@ export function WorkScreen() {
           label={layout.sidebarHidden ? '显示左栏' : '收起左栏'}
           onClick={() => void setLayout({ sidebarHidden: !layout.sidebarHidden })}
         />
-        <button type="button" className="ghost" onClick={() => void closeWork()}>
+        <button type="button" className="ghost" onClick={() => void requestCloseWork()}>
           <Icon name="back" />
           作品列表
         </button>

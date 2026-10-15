@@ -152,8 +152,10 @@ export type AppState = {
   readonly assistantDraft: string | null;
   /** 助手正在执行的耗时动作的进展（写手写到第几段、正在审核等）。 */
   readonly assistantProgress: string | null;
-  /** 这段对话最近一步的上下文用量；新对话或换了作品时为 null，下一步之后才知道。 */
+  /** 这段对话最近一步的上下文用量；新对话时为 null，下一步之后才知道（打开作品时从调用记录取最近一步的）。 */
   readonly assistantContext: AssistantUsage | null;
+  /** 有任务在进行时要离开（回到作品列表或关闭窗口）：先请作者确认。tasks 是正在进行的任务，一句话一项。 */
+  readonly leaveConfirm: { readonly to: 'library' | 'exit'; readonly tasks: readonly string[] } | null;
   /** 正文里当前选中的文字（助手对话框上方显示，发话时一并交给助手）；没有选中时为 null。 */
   readonly editorSelection: EditorSelectionInfo | null;
   /** 作者在对话框里点了“不带上”的那次选区（key）；选区变了就失效。 */
@@ -296,6 +298,16 @@ export type AppState = {
   readonly clearAssistant: () => Promise<void>;
   /** 助手每一步的思考深度（对所有作品生效）。 */
   readonly setAssistantEffort: (effort: AssistantEffort) => Promise<void>;
+  /** 正在后台进行的任务（写手在写哪一章、排着几章、审核、推演、AI 写作等），一句话一项；AI 助手的现状与离开前的确认都用它。 */
+  readonly backgroundWork: () => string[];
+  /** 回到作品列表：有任务在进行时先请作者确认（停下的任务已写的部分都保留，下次可以接着做）。 */
+  readonly requestCloseWork: () => Promise<void>;
+  /** 关闭窗口前：有任务在进行时返回 false 并请作者确认（确认后由 setExit 注册的函数关闭窗口）。 */
+  readonly requestExit: () => boolean;
+  readonly confirmLeave: () => Promise<void>;
+  readonly cancelLeave: () => void;
+  /** 桌面端注册关闭窗口的函数（作者确认停下任务并退出时调用）。 */
+  readonly setExit: (exit: () => void) => void;
   /** 读取模型列表与默认模型（对话框下方的模型选择用），不打开模型服务页。 */
   readonly loadAssistantModels: () => Promise<void>;
   /** 正文编辑器报告选区的变化。 */
@@ -499,6 +511,8 @@ export function createAppStore(service: AppService): AppStore {
     const taskAborts = new Map<string, AbortController>();
     let taskSeq = 0;
     let writerAbort: AbortController | null = null;
+    /** 关闭窗口（桌面端注册）。 */
+    let exitApp: (() => void) | null = null;
     let sceneSerial = 0;
     let simAbort: AbortController | null = null;
     /** 正在进行的连续推进；暂停、停止与关闭作品时先等它停下。 */
@@ -795,6 +809,7 @@ export function createAppStore(service: AppService): AppStore {
         current: currentView,
         selection,
         effort: get().library?.preferences.assistant.effort ?? 'medium',
+        running: () => get().backgroundWork(),
         onUsage: (usage) => set({ assistantContext: usage }),
         onUpdate: (items) => set({ assistantItems: items }),
         onDraft: (draft) => set({ assistantDraft: draft }),
@@ -870,6 +885,7 @@ export function createAppStore(service: AppService): AppStore {
       assistantDraft: null,
       assistantProgress: null,
       assistantContext: null,
+      leaveConfirm: null,
       editorSelection: null,
       selectionDismissed: null,
       bookSeed: null,
@@ -1284,8 +1300,10 @@ export function createAppStore(service: AppService): AppStore {
       async loadAssistant() {
         const owner = get().work?.project.id ?? '';
         const items = await service.assistantItems();
-        // 换了作品就是另一段对话，上下文用量从头算。
-        if (items.ok) set({ assistantItems: items.value, assistantFor: owner, assistantContext: null });
+        if (!items.ok) return;
+        // 换了作品就是另一段对话；对话还在时（重新打开、重启之后），上下文用量取调用记录里最近的一步。
+        const usage = items.value.length === 0 ? null : await service.assistantContextUsage();
+        set({ assistantItems: items.value, assistantFor: owner, assistantContext: usage?.ok === true ? usage.value : null });
       },
       async sendAssistant(text) {
         if (get().assistantRunning || text.trim() === '') return false;
@@ -1313,6 +1331,55 @@ export function createAppStore(service: AppService): AppStore {
         await run(service.clearAssistant(), () => ({ assistantItems: [], assistantContext: null }));
       },
       setAssistantEffort: (effort) => savePreferences({ assistant: { effort } }),
+      backgroundWork() {
+        const s = get();
+        const title = (id: string) => `《${chapter(id)?.title ?? ''}》`;
+        const out: string[] = [];
+        const job = s.writerJob;
+        if (job !== null) {
+          const now =
+            job.stage === 'writing'
+              ? `写手在写${title(job.chapterId)}${job.total > 0 ? `（已写 ${job.done} / ${job.total} 段）` : ''}`
+              : job.stage === 'memory'
+                ? `写手写完了${title(job.chapterId)}，正在整理它的长篇记忆`
+                : `写手写完了${title(job.chapterId)}，正在审核`;
+          const later = job.queued.slice(0, 10).map(title).join('、');
+          out.push(job.queued.length === 0 ? now : `${now}；后面还排着 ${job.queued.length} 章：${later}${job.queued.length > 10 ? '等' : ''}`);
+        }
+        // 写手一章里的写作、记忆与审核已经在上面说了；助手自己的这一轮不算。
+        for (const t of s.tasks) {
+          if (t.status !== 'running' || t.kind === 'assistant') continue;
+          if (job !== null && t.chapterId === job.chapterId && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'review')) continue;
+          out.push(t.title);
+        }
+        if (s.simAdvancing) out.push('角色推演正在推进');
+        return out;
+      },
+      async requestCloseWork() {
+        const tasks = get().backgroundWork();
+        if (get().assistantRunning) tasks.push('AI 助手正在处理你的话');
+        if (tasks.length === 0) await get().closeWork();
+        else set({ leaveConfirm: { to: 'library', tasks } });
+      },
+      requestExit() {
+        const tasks = get().backgroundWork();
+        if (get().assistantRunning) tasks.push('AI 助手正在处理你的话');
+        if (tasks.length === 0) return true;
+        set({ leaveConfirm: { to: 'exit', tasks } });
+        return false;
+      },
+      async confirmLeave() {
+        const leave = get().leaveConfirm;
+        set({ leaveConfirm: null });
+        if (leave === null) return;
+        assistantAbort?.abort();
+        if (leave.to === 'library') await get().closeWork();
+        else exitApp?.();
+      },
+      cancelLeave: () => set({ leaveConfirm: null }),
+      setExit(exit) {
+        exitApp = exit;
+      },
       async loadAssistantModels() {
         // 不进入忙碌状态：对话框下方的小部件，读取失败时只是不显示模型名。
         const loaded = await service.loadModelServices();

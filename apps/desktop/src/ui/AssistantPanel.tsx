@@ -197,7 +197,7 @@ function ContextMeter({ usage }: { readonly usage: AssistantUsage }) {
         <circle className="context-track" cx="8" cy="8" r={radius} />
         <circle className="context-fill" cx="8" cy="8" r={radius} strokeDasharray={`${circumference * ratio} ${circumference}`} transform="rotate(-90 8 8)" />
       </svg>
-      {percent}
+      上下文 {percent}
     </span>
   );
 }

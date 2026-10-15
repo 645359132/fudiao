@@ -147,6 +147,11 @@ export async function findCallByRequestHash(port: SqlPort, requestHash: string):
 }
 
 /** 最近的调用，新的在前。 */
+/** 某种任务最近一次有用量的调用（AI 助手据此在重新打开作品后显示上下文用了多少）。 */
+export function latestCallWithUsage(port: SqlPort, taskKind: string): Promise<Result<LlmCallRow | null, RepoError>> {
+  return queryOne(port, Row, `SELECT ${COLUMNS} FROM llm_call WHERE task_kind = ? AND input_tokens IS NOT NULL ORDER BY finished_at DESC, id DESC LIMIT 1`, [taskKind]);
+}
+
 export function listLlmCalls(port: SqlPort, limit = 100): Promise<Result<LlmCallRow[], RepoError>> {
   return queryAll(port, Row, `SELECT ${COLUMNS} FROM llm_call ORDER BY finished_at DESC, id DESC LIMIT ?`, [limit]);
 }

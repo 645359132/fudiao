@@ -1970,6 +1970,59 @@ describe('分卷的界面（B68）', () => {
   });
 });
 
+describe('后台任务不被打断', () => {
+  it('写手写到一半时和助手说话：写手照常接着写', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章 夜叩');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [], beats: ['叩门', '压价', '起疑', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+    deps.llmRequests.length = 0;
+    // 第一段写完，第二段的调用挂起；接着排好助手的回复。
+    deps.llmResponses.push(reply('林舟又叩响了门。'), { chunks: openaiChunks('m', { text: ['钱四'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    await user.click(screen.getByRole('button', { name: '让写手写这一章' }));
+    const banner = await screen.findByRole('status', { name: '写手进度' });
+    await waitFor(() => expect(banner.textContent).toContain('已写 1 / 2 段'));
+    await waitFor(() => expect(deps.llmRequests).toHaveLength(2));
+    deps.llmResponses.push(reply(JSON.stringify({ message: '在写第一章。', actions: [], done: true })));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '现在在做什么？{Enter}');
+    await waitFor(() => expect(store.getState().assistantRunning).toBe(false));
+    await waitFor(() => expect(screen.getByText('在写第一章。')).toBeTruthy());
+    expect(store.getState().writerJob).toMatchObject({ chapterId, stage: 'writing', done: 1, total: 2 });
+    expect(store.getState().message).toBeNull();
+    // 助手的现状里写着写手正在写哪一章，不会再提议写同一章。
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).toContain('写手在写《第一章 夜叩》（已写 1 / 2 段）');
+
+    // 写手还在写：回到作品列表前先确认；留在这里时什么也不变。
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    const dialog = await screen.findByRole('alertdialog', { name: '还有任务在进行' });
+    expect(dialog.textContent).toContain('写手在写《第一章 夜叩》');
+    await user.click(within(dialog).getByRole('button', { name: '留在这里' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(store.getState().writerJob).not.toBeNull();
+    expect(screen.getByRole('navigation', { name: '章节目录' })).toBeTruthy();
+    // 确认停下：写手停下，回到作品列表。
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '停下并返回作品列表' }));
+    await screen.findByRole('button', { name: '新建作品' });
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+
+    // 重新打开作品：对话还在，上下文用量取最近一步的调用记录。
+    await user.click(screen.getByRole('button', { name: '当铺夜谈' }));
+    await screen.findByRole('navigation', { name: '章节目录' });
+    expect(await screen.findByRole('img', { name: /^上下文用了/ })).toBeTruthy();
+  });
+
+  it('没有任务在进行时，回到作品列表不用确认', async () => {
+    const { user } = start();
+    await createWork(user, '雨夜');
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await screen.findByRole('button', { name: '新建作品' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+});
+
 describe('AI 助手的输入框：模型、思考深度与上下文用量', () => {
   it('列出模型并可切换默认模型；模型不能调节思考时不可选；选了深度后请求带上它；回复后显示上下文用了多少，新对话后清掉', async () => {
     const { user, service, store, deps } = start();

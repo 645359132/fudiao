@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import { openaiChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
@@ -75,6 +76,22 @@ describe('写手成章', () => {
     expect(body).toContain('【作者偏好】');
     expect(body).not.toContain('雪花写作法');
     expect(body).not.toContain('【三幕】');
+  });
+
+  it('同一章同时只有一个写手：写作期间再写或回退这一章都被拒绝，停下以后可以接着写', async () => {
+    const { deps, app, c2 } = await setup();
+    const abort = new AbortController();
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['林舟'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    const first = app.writeChapter(c2, { signal: abort.signal });
+    while (deps.llmRequests.length === 0) await new Promise((r) => setTimeout(r, 5));
+    expect(await app.writeChapter(c2)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写手正在写这一章') } });
+    expect(await app.rollbackWriter(c2)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写手正在写这一章') } });
+    expect(app.writingChapters()).toEqual([c2]);
+    abort.abort();
+    expect(value(await first).status).toBe('cancelled');
+    expect(app.writingChapters()).toEqual([]);
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('他没回头。'));
+    expect(value(await app.writeChapter(c2)).status).toBe('written');
   });
 
   it('写入正文前规范标点（B74）：半角标点、直引号与省略号换成中文的写法', async () => {

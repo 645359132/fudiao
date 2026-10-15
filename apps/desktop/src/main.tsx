@@ -11,9 +11,19 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('缺少根节点');
 const store = createAppStore(createAppService(tauriDeps()));
 
-// 关闭窗口前先保存正文。保存失败时第一次关闭被拦下并说明原因；再次关闭则直接退出（草稿仍在，下次打开可恢复）。
+// 关闭窗口前：有任务在进行时先请作者确认（确认后经 setExit 再次关闭）；再保存正文。
+// 保存失败时第一次关闭被拦下并说明原因；再次关闭则直接退出（草稿仍在，下次打开可恢复）。
 let warned = false;
+let confirmed = false;
+store.getState().setExit(() => {
+  confirmed = true;
+  void getCurrentWindow().close();
+});
 void getCurrentWindow().onCloseRequested(async (event) => {
+  if (!confirmed && !store.getState().requestExit()) {
+    event.preventDefault();
+    return;
+  }
   if (warned || (await store.getState().leaveChapter())) return;
   warned = true;
   event.preventDefault();

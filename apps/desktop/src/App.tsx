@@ -4,6 +4,7 @@ import { DEFAULT_LAYOUT, LAYOUT_LIMITS } from './app/library';
 import type { AppStore } from './state/store';
 import { AssistantPanel } from './ui/AssistantPanel';
 import { ImportPreview } from './ui/ImportPreview';
+import { LeaveDialog } from './ui/LeaveDialog';
 import { LibraryScreen } from './ui/LibraryScreen';
 import { MessageBar } from './ui/MessageBar';
 import { ModelServicesScreen } from './ui/ModelServicesScreen';
@@ -50,6 +51,7 @@ function Screens() {
       ) : null}
       {showAssistant ? <AssistantPanel /> : null}
       <ImportPreview />
+      <LeaveDialog />
     </div>
   );
 }

@@ -1,4 +1,10 @@
 【当前状态】
+{{#hasRunning}}
+正在进行的任务（在后台进行，不要重复发起）：
+{{#running}}
+- {{.}}
+{{/running}}
+{{/hasRunning}}
 {{#work}}
 打开的作品：《{{title}}》{{#genre}}（{{genre}}）{{/genre}}
 {{#synopsis}}

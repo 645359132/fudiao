@@ -171,7 +171,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     });
   }
 
-  return {
+  const cases = {
     /**
      * 写一章（或接着写）：计划必须已有；已经写完的章节要先回退才能重写。
      * 这一章有未保存的草稿时不写（先保存或丢弃），写作过程中这一章被改动则停下，不覆盖作者的修改。
@@ -267,5 +267,28 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       const reset = await resetWriterRun(s.port, plan.value, ctx());
       return reset.ok ? reset : err(repo(reset.error));
     },
+  };
+
+  // 正在写的章节。同一章同时只能有一个写手：作者在成书进度里点了“依次写完”，AI 助手又被要求写同一章时，
+  // 两个写手会互相当成“作者改了本章”而停下。写作期间也不能回退这一章。
+  const writing = new Set<string>();
+  const busy = (chapterId: string) => (writing.has(chapterId) ? err(settings('写手正在写这一章：等它写完，或在“任务”里停下以后再说')) : null);
+  return {
+    ...cases,
+    async writeChapter(chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> {
+      const refused = busy(chapterId);
+      if (refused !== null) return refused;
+      writing.add(chapterId);
+      try {
+        return await cases.writeChapter(chapterId, events);
+      } finally {
+        writing.delete(chapterId);
+      }
+    },
+    async rollbackWriter(chapterId: string): Promise<Result<ChapterPlan, AppError>> {
+      return busy(chapterId) ?? cases.rollbackWriter(chapterId);
+    },
+    /** 正在由写手写作的章节（AI 助手的现状里列出）。 */
+    writingChapters: (): readonly string[] => [...writing],
   };
 }
