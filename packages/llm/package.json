@@ -2,6 +2,7 @@
   "name": "@fudiao/llm",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "模型端口、适配器、结构化输出管线、预算守卫、录制回放",
   "type": "module",
   "sideEffects": false,

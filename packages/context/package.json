@@ -2,6 +2,7 @@
   "name": "@fudiao/context",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "上下文构建：信息权限过滤、预算裁剪、上下文清单",
   "type": "module",
   "exports": {

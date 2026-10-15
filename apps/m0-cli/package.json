@@ -2,6 +2,7 @@
   "name": "@fudiao/m0-cli",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "M0 命令行：运行场景、对照组、生成评估材料",
   "type": "module",
   "scripts": {

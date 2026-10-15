@@ -2,6 +2,7 @@
   "name": "@fudiao/writing",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "写手与审核的纯函数：章节计划与伏笔账本的规则、写作技能组合、审核的程序检查（无 IO）",
   "type": "module",
   "exports": {

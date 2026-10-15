@@ -2,6 +2,7 @@
   "name": "@fudiao/store",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "SQL 迁移、仓储、事件存储、投影",
   "type": "module",
   "exports": {

@@ -2,6 +2,7 @@
   "name": "@fudiao/prompts",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "提示词模板、输出 schema、模板版本",
   "type": "module",
   "exports": {

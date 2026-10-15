@@ -2,6 +2,7 @@
   "name": "@fudiao/engine",
   "version": "0.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "推演编排：回合状态机、运行模式、批量推演、介入、恢复",
   "type": "module",
   "exports": {
