@@ -2014,6 +2014,30 @@ describe('后台任务不被打断', () => {
     expect(await screen.findByRole('img', { name: /^上下文用了/ })).toBeTruthy();
   });
 
+  it('让助手审核全书：动作立即返回，审核在后台依次进行，成书进度显示进度，审完后各章为已审核', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    for (const title of ['第一章', '第二章']) {
+      await addChapter(user, title);
+      await user.click(await screen.findByRole('textbox', { name: '正文' }));
+      await user.keyboard(`${title}的正文。`);
+      await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual([`${title}的正文。`]), { timeout: 3_000 });
+    }
+    await addTestedModel(service, deps);
+    deps.llmResponses.push(
+      reply(JSON.stringify({ message: '已经排上，在后台依次审核两章。', actions: [{ tool: 'review_chapters', chapters: null }], done: true })),
+      reply(JSON.stringify({ issues: [] })),
+      reply(JSON.stringify({ issues: [] })),
+    );
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '审核整本书{Enter}');
+    expect(await screen.findByText('已经排上，在后台依次审核两章。')).toBeTruthy();
+    await waitFor(() => expect(store.getState().reviewQueue).toBeNull());
+    await waitFor(() => expect(store.getState().tasks.filter((t) => t.kind === 'review').map((t) => [t.title, t.status])).toEqual([
+      ['审核 · 第二章', 'done'],
+      ['审核 · 第一章', 'done'],
+    ]));
+  });
+
   it('没有任务在进行时，回到作品列表不用确认', async () => {
     const { user } = start();
     await createWork(user, '雨夜');

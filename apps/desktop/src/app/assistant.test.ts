@@ -40,10 +40,10 @@ const roles = (items: readonly AssistantItem[]) => items.map((i) => i.role);
 const lastResults = (items: readonly AssistantItem[]) => items.filter((i): i is Extract<AssistantItem, { role: 'results' }> => i.role === 'results').at(-1);
 
 /** 一章，带一段正文。 */
-async function chapterWith(app: Awaited<ReturnType<typeof setup>>['app'], title: string, text: string) {
+async function chapterWith(app: Awaited<ReturnType<typeof setup>>['app'], title: string, text: string, paragraphId = 'p0') {
   const chapter = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!;
   const opened = value(await app.openChapter(chapter.id));
-  value(await app.saveChapter(chapter.id, opened.saved, [{ id: 'p0', text, source: 'handwritten' }], { splits: [], merges: [] }));
+  value(await app.saveChapter(chapter.id, opened.saved, [{ id: paragraphId, text, source: 'handwritten' }], { splits: [], merges: [] }));
   return chapter.id;
 }
 
@@ -231,6 +231,57 @@ describe('AI 助手（B69）', () => {
     expect(notes).toEqual(['正在审核《第一章 夜叩》', null]);
     expect(detail).toContain('- 一般：开头的动作描写太长（建议：压缩成一句）');
     expect(value(await app.reviewIssues(chapterId))).toContainEqual(expect.objectContaining({ description: '开头的动作描写太长', source: 'model' }));
+  });
+
+  it('写或审核多章交给后台：动作立即返回“已排上”，后台收到按书中顺序的章节；没有后台时说明不能用', async () => {
+    const { deps, app } = await setup();
+    const one = await chapterWith(app, '第一章 夜叩', '门在他身后合上了。');
+    const two = await chapterWith(app, '第二章 夜雨', '雨下得更紧了。', 'p1');
+    const three = value(await app.createChapter('第三章 揭晓')).chapters.find((c) => c.title === '第三章 揭晓')!.id;
+    value(await app.savePlan(three, { goal: '真相揭晓', castIds: [], beats: ['对质'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    const reviewed: (readonly string[])[] = [];
+    const written: [readonly string[], boolean][] = [];
+    const background = {
+      reviewChapters: (ids: readonly string[]) => {
+        reviewed.push(ids);
+        return null;
+      },
+      writeChapters: (ids: readonly string[], review: boolean) => {
+        written.push([ids, review]);
+        return null;
+      },
+    };
+    step(deps, {
+      message: '排上了。',
+      actions: [
+        { tool: 'review_chapters', chapters: null },
+        { tool: 'write_chapters', chapters: null, review: true },
+      ],
+      done: true,
+    });
+    const outcome = value(await app.sendToAssistant('审核写好的章节，再把剩下的写完', { background }));
+    expect(reviewed).toEqual([[one, two]]);
+    expect(written).toEqual([[[three], true]]);
+    expect(lastResults(outcome.items)?.results.map((r) => [r.tool, r.ok, r.detail.startsWith('已排上')])).toEqual([
+      ['review_chapters', true, true],
+      ['write_chapters', true, true],
+    ]);
+
+    // 后台已有一批时说明原因；指名的章节里没有正文的不排。
+    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null };
+    // 动作失败时助手会再走一步说明：每次排两步。
+    const failing = (actions: AssistantTurnOutput['actions']) => {
+      step(deps, { message: '', actions, done: true });
+      step(deps, { message: '没有排上。', actions: [], done: true });
+    };
+    const results = (items: readonly AssistantItem[]) => items.filter((i): i is Extract<AssistantItem, { role: 'results' }> => i.role === 'results').at(-1);
+    failing([{ tool: 'review_chapters', chapters: ['第一章 夜叩'] }]);
+    expect(results(value(await app.sendToAssistant('再审第一章', { background: busy })).items)).toMatchObject({ results: [{ ok: false, detail: '已经有一批在依次审核' }] });
+    failing([{ tool: 'review_chapters', chapters: ['第三章 揭晓'] }]);
+    expect(results(value(await app.sendToAssistant('审第三章', { background })).items)).toMatchObject({ results: [{ ok: false, detail: expect.stringContaining('还没有正文') }] });
+    // 没有后台（例如测试与命令行）时不能用，提示改用一章一章的动作。
+    failing([{ tool: 'review_chapters', chapters: null }]);
+    expect(results(value(await app.sendToAssistant('审全书')).items)).toMatchObject({ results: [{ ok: false, detail: expect.stringContaining('review_chapter') }] });
   });
 
   it('写手写章时报告进度；回退写手写入要作者确认，确认后正文回到写入之前', async () => {

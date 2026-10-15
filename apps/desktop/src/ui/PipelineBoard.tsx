@@ -42,6 +42,9 @@ export function PipelineBoard() {
   const write = useApp((s) => s.writeChapters);
   const stop = useApp((s) => s.cancelWriting);
   const reviewOne = useApp((s) => s.reviewFromBoard);
+  const queue = useApp((s) => s.reviewQueue);
+  const reviewAll = useApp((s) => s.reviewChapters);
+  const stopQueue = useApp((s) => s.cancelReviewQueue);
   const openIssues = useApp((s) => s.openChapterReview);
   const [review, setReview] = useState(false);
   const [from, setFrom] = useState('');
@@ -54,7 +57,10 @@ export function PipelineBoard() {
   const fromId = ids.includes(from) ? from : (ids[0] ?? '');
   const toId = ids.includes(to) ? to : (ids.at(-1) ?? '');
   const range = ids.slice(ids.indexOf(fromId), ids.indexOf(toId) + 1);
-  const idle = !busy && job === null && reviewing === null && building === null;
+  const idle = !busy && job === null && reviewing === null && building === null && queue === null;
+  // 已经写好的章节（写手没在写的），按书中顺序：可以依次审核。
+  const written = planning.chapters.filter((c) => c.hasText && c.plan?.status !== 'writing').map((c) => c.chapter.id);
+  const titleOf = (id: string) => planning.chapters.find((c) => c.chapter.id === id)?.chapter.title ?? '';
   const count = (f: (c: PlanChapterView) => boolean) => planning.chapters.filter(f).length;
   const issues = planning.chapters.reduce((n, c) => n + c.pendingIssues, 0);
 
@@ -65,6 +71,16 @@ export function PipelineBoard() {
         共 {planning.chapters.length} 章：有计划 {count((c) => c.plan !== null)} 章，已写 {count((c) => c.plan?.status === 'written' || c.plan?.status === 'reviewed')} 章，已审核{' '}
         {count((c) => c.plan?.status === 'reviewed')} 章；待处理的审核问题 {issues} 条。
       </p>
+      {queue !== null ? (
+        <p role="status" aria-label="依次审核" className="skill-actions">
+          <span>
+            正在依次审核：第 {queue.done + 1} / {queue.total} 章《{titleOf(queue.chapterId)}》{queue.queued.length > 0 ? `，后面还有 ${queue.queued.length} 章` : ''}
+          </span>
+          <button type="button" onClick={stopQueue}>
+            停下审核
+          </button>
+        </p>
+      ) : null}
       <table className="source-table" aria-label="各章进度">
         <thead>
           <tr>
@@ -115,6 +131,9 @@ export function PipelineBoard() {
           <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} />
           写完后审核
         </label>
+        <button type="button" disabled={!idle || written.length === 0} onClick={() => void reviewAll(written)}>
+          依次审核已写好的 {written.length} 章
+        </button>
         {job !== null ? (
           <button type="button" onClick={stop}>
             停下

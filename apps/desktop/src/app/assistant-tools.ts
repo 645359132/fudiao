@@ -46,13 +46,24 @@ export type AssistantEffect =
 /** 作者发话时在正文里选中的文字（edit_selection 的对象）。 */
 export type AssistantSelection = { readonly chapterId: string; readonly range: EditorSelection; readonly text: string };
 
-/** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展与作者选中的文字。 */
+/**
+ * 交给后台的长任务（桌面端由状态层实现）：开始后立即返回，任务在后台依次进行，进度出现在任务页与“正在进行的任务”里。
+ * 返回 null 表示已经排上，否则是没有排上的原因（例如已有一批在进行）。
+ */
+export type BackgroundJobs = {
+  writeChapters(chapterIds: readonly string[], review: boolean): string | null;
+  reviewChapters(chapterIds: readonly string[]): string | null;
+};
+
+/** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展、作者选中的文字与后台任务。 */
 export type ToolEvents = CallOptions & {
   readonly onEffect?: (effect: AssistantEffect) => void;
   /** 正在执行的耗时动作（写手写章、生成计划、审核等）的进展；动作做完时为 null。 */
   readonly onProgress?: (note: string | null) => void;
   /** 作者选中的文字；没有选中时为 null。 */
   readonly selection?: AssistantSelection | null;
+  /** 后台任务；没有时（例如测试与命令行）后台动作说明不能用。 */
+  readonly background?: BackgroundJobs;
 };
 
 /** 作品的现状（章节、回收站与卷），由应用服务的 reloadWork 给出。 */
@@ -156,6 +167,9 @@ export function describeForModel(e: AppError): string {
 }
 
 const failWith = (e: AppError): Outcome => failed(describeForModel(e));
+/** 章节名列出前几个，太多时省略。 */
+const titles = (chapters: readonly Chapter[]): string =>
+  chapters.length <= 6 ? chapters.map((c) => `《${c.title}》`).join('') : `${chapters.slice(0, 3).map((c) => `《${c.title}》`).join('')}……${chapters.slice(-2).map((c) => `《${c.title}》`).join('')}`;
 
 /** 关系读成一句话（给模型看的结果说明）。 */
 const relationText = (r: { readonly fromId: string; readonly toId: string; readonly label: string; readonly mutual: boolean }, nameOf: ReadonlyMap<string, string>) =>
@@ -818,6 +832,41 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       return failed(`写手${o.status === 'cancelled' ? '被取消' : '中途停下'}：${o.reason ?? ''}（已写 ${o.segmentsDone}/${o.segmentsTotal} 段，可以接着写）`);
     },
   },
+  write_chapters: {
+    label: '交给写手依次写',
+    async run(action, env) {
+      const jobs = env.events.background;
+      if (jobs === undefined) return failed('这里不能在后台写作；请用 write_chapter 一章一章地写');
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      const writable = (c: (typeof view.value.chapters)[number]) => c.plan !== null && (c.plan.status === 'todo' || c.plan.status === 'writing');
+      let targets: readonly Chapter[];
+      const skipped: string[] = [];
+      if (action.chapters === null) {
+        targets = view.value.chapters.filter(writable).map((c) => c.chapter);
+      } else {
+        const found: Chapter[] = [];
+        for (const ref of action.chapters) {
+          const c = await env.findChapter(ref);
+          if (!c.ok) return failed(c.error);
+          const entry = view.value.chapters.find((x) => x.chapter.id === c.value.id);
+          if (entry?.plan === null || entry === undefined) skipped.push(`《${c.value.title}》还没有章节计划`);
+          else if (!writable(entry)) skipped.push(`《${c.value.title}》已经写过`);
+          else if (!found.some((f) => f.id === c.value.id)) found.push(c.value);
+        }
+        targets = found;
+      }
+      if (targets.length === 0) return failed(skipped.length > 0 ? `没有可以写的章节：${skipped.join('；')}` : '没有有计划、还没写完的章节；先用 plan_chapters 或 save_chapter_plan 做计划');
+      const refused = jobs.writeChapters(
+        targets.map((c) => c.id),
+        action.review,
+      );
+      if (refused !== null) return failed(refused);
+      return done(
+        `已排上：写手在后台依次写 ${targets.length} 章（${titles(targets)}），每章写完整理长篇记忆${action.review ? '并审核' : ''}。这一轮不用等，进度在成书进度与“任务”页；问进度时看当前状态里的“正在进行的任务”。${skipped.length > 0 ? `没排上的：${skipped.join('；')}。` : ''}`,
+      );
+    },
+  },
   continue_chapter: {
     label: '续写',
     async run(action, env) {
@@ -855,6 +904,37 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (result.value.candidate === null) return failed(`${EDIT_LABEL[action.operation]}没有完成`);
       env.events.onEffect?.({ kind: 'show_candidates', chapterId: chosen.chapterId });
       return done(`已${EDIT_LABEL[action.operation]}《${c.value.title}》中选中的 ${chosen.text.length} 字，作为候选稿放在章节旁的“AI 写作”里，作者对照差异后接受。`);
+    },
+  },
+  review_chapters: {
+    label: '交给后台依次审核',
+    async run(action, env) {
+      const jobs = env.events.background;
+      if (jobs === undefined) return failed('这里不能在后台审核；请用 review_chapter 一章一章地审');
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      let targets: readonly Chapter[];
+      const skipped: string[] = [];
+      if (action.chapters === null) {
+        // 所有已经写好的章节，按书中顺序。
+        targets = view.value.chapters.filter((c) => c.hasText && (c.plan === null || c.plan.status !== 'writing')).map((c) => c.chapter);
+      } else {
+        const found: Chapter[] = [];
+        for (const ref of action.chapters) {
+          const c = await env.findChapter(ref);
+          if (!c.ok) return failed(c.error);
+          const entry = view.value.chapters.find((x) => x.chapter.id === c.value.id);
+          if (entry === undefined || !entry.hasText) skipped.push(`《${c.value.title}》还没有正文`);
+          else if (!found.some((f) => f.id === c.value.id)) found.push(c.value);
+        }
+        targets = found;
+      }
+      if (targets.length === 0) return failed(skipped.length > 0 ? `没有可以审核的章节：${skipped.join('；')}` : '没有已经写好的章节可以审核');
+      const refused = jobs.reviewChapters(targets.map((c) => c.id));
+      if (refused !== null) return failed(refused);
+      return done(
+        `已排上：在后台依次审核 ${targets.length} 章（${titles(targets)}）。这一轮不用等，问题会列在各章旁的“审核”里，进度在“任务”页；问进度时看当前状态里的“正在进行的任务”。${skipped.length > 0 ? `没排上的：${skipped.join('；')}。` : ''}`,
+      );
     },
   },
   review_chapter: {

@@ -80,9 +80,11 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('save_chapter_plan'), chapter: text, goal: text, beats: z.array(z.string()), cast: list, targetWords: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('plan_chapters'), count: z.number().int().positive(), wordsPerChapter: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('write_chapter'), chapter: text }),
+  z.object({ tool: z.literal('write_chapters'), chapters: list, review: z.boolean() }),
   z.object({ tool: z.literal('continue_chapter'), chapter: text, instruction: opt }),
   z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
   z.object({ tool: z.literal('review_chapter'), chapter: text }),
+  z.object({ tool: z.literal('review_chapters'), chapters: list }),
   z.object({ tool: z.literal('rollback_writer'), chapter: text }),
   z.object({ tool: z.literal('add_foreshadow'), title: text, content: text, reveal: opt, plant: opt, payoff: opt }),
   // 导出
