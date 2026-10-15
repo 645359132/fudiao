@@ -1,5 +1,6 @@
 import type { Theme } from '../app/library';
-import { Icon, type IconName } from './Icon';
+import type { IconName } from './Icon';
+import { IconButton } from './IconButton';
 import { useApp } from './store-context';
 
 const NEXT: Readonly<Record<Theme, Theme>> = { system: 'light', light: 'dark', dark: 'system' };
@@ -10,9 +11,5 @@ const ICON: Readonly<Record<Theme, IconName>> = { system: 'monitor', light: 'sun
 export function ThemeButton() {
   const theme = useApp((s) => s.library?.preferences.theme ?? 'system');
   const setTheme = useApp((s) => s.setTheme);
-  return (
-    <button type="button" className="ghost icon-only" aria-label={`外观：${LABEL[theme]}`} title={`外观：${LABEL[theme]}（点击切换为${LABEL[NEXT[theme]]}）`} onClick={() => void setTheme(NEXT[theme])}>
-      <Icon name={ICON[theme]} />
-    </button>
-  );
+  return <IconButton icon={ICON[theme]} label={`外观：${LABEL[theme]}`} tip={`外观：${LABEL[theme]}，点击切换为${LABEL[NEXT[theme]]}`} onClick={() => void setTheme(NEXT[theme])} />;
 }

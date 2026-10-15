@@ -15,7 +15,7 @@ import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluatio
 import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
-import type { Theme } from '../app/library';
+import type { Layout, Preferences, Theme } from '../app/library';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
 import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
@@ -383,6 +383,8 @@ export type AppState = {
   readonly setShowParagraphSource: (show: boolean) => Promise<void>;
   /** 外观：跟随系统、浅色或深色（对所有作品生效）。 */
   readonly setTheme: (theme: Theme) => Promise<void>;
+  /** 调整左栏、助手的宽度或收起左栏（对所有作品生效）。 */
+  readonly setLayout: (patch: Partial<Layout>) => Promise<void>;
 
   /** 保存正文后按当前光标计算上下文清单并打开抽屉。 */
   readonly openContext: () => Promise<void>;
@@ -559,6 +561,15 @@ export function createAppStore(service: AppService): AppStore {
     }
 
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
+    /** 外观与布局：界面先变，再在后台写入作品列表文件（不进入忙碌状态，界面不闪）；写入失败时说明。 */
+    async function savePreferences(patch: Partial<Preferences>) {
+      const library = get().library;
+      if (library === null) return;
+      set({ library: { ...library, preferences: { ...library.preferences, ...patch } } });
+      const saved = await service.setPreferences(patch);
+      if (!saved.ok) set({ message: `偏好没有保存：${describeError(saved.error)}` });
+    }
+
     async function run<T>(task: Promise<Result<T, AppError>>, apply: (value: T) => Partial<AppState>): Promise<boolean> {
       set({ busy: true });
       const result = await task;
@@ -1917,8 +1928,10 @@ export function createAppStore(service: AppService): AppStore {
       async setShowParagraphSource(show) {
         await run(service.setPreferences({ showParagraphSource: show }), (library) => ({ library }));
       },
-      async setTheme(theme) {
-        await run(service.setPreferences({ theme }), (library) => ({ library }));
+      setTheme: (theme) => savePreferences({ theme }),
+      setLayout: (patch) => {
+        const layout = get().library?.preferences.layout;
+        return layout === undefined ? Promise.resolve() : savePreferences({ layout: { ...layout, ...patch } });
       },
       async saveFact(id, input) {
         if (id === null) {

@@ -11,16 +11,25 @@ export const WorkEntry = z.object({
 });
 export type WorkEntry = z.infer<typeof WorkEntry>;
 
+export const DEFAULT_LAYOUT = { sidebar: 248, assistant: 380, sidebarHidden: false };
+/** 左栏与助手可以调整的范围（像素）。 */
+export const LAYOUT_LIMITS = { sidebar: { min: 180, max: 480 }, assistant: { min: 300, max: 760 } } as const;
+
 /** 对所有作品生效的偏好。新增字段一律带默认值，旧文件不必迁移。 */
 export const Preferences = z.object({
   /** 正文左侧的段落来源色条（需求 B33）。 */
   showParagraphSource: z.boolean().default(true),
   /** 外观：跟随系统、浅色或深色。 */
   theme: z.enum(['system', 'light', 'dark']).default('system'),
+  /** 左栏与 AI 助手的宽度（像素，拖动分隔条调整），以及是否收起左栏。 */
+  layout: z
+    .object({ sidebar: z.number().default(DEFAULT_LAYOUT.sidebar), assistant: z.number().default(DEFAULT_LAYOUT.assistant), sidebarHidden: z.boolean().default(false) })
+    .default(DEFAULT_LAYOUT),
 });
 export type Preferences = z.infer<typeof Preferences>;
 export type Theme = Preferences['theme'];
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system' };
+export type Layout = Preferences['layout'];
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

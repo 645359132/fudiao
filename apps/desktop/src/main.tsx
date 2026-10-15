@@ -19,6 +19,18 @@ void getCurrentWindow().onCloseRequested(async (event) => {
   event.preventDefault();
   store.setState({ message: '本章正文没有保存成功。可以复制全文或导出本章；再次关闭将直接退出，未保存的编辑留在草稿中。' });
 });
+// 窗口标题栏随外观变化；跟随系统时交给系统。
+let titleBarTheme: string | null = null;
+const syncTitleBar = () => {
+  const theme = store.getState().library?.preferences.theme ?? 'system';
+  if (theme === titleBarTheme) return;
+  titleBarTheme = theme;
+  getCurrentWindow()
+    .setTheme(theme === 'system' ? null : theme)
+    .catch(() => undefined);
+};
+store.subscribe(syncTitleBar);
+
 createRoot(root).render(
   <StrictMode>
     <App store={store} />

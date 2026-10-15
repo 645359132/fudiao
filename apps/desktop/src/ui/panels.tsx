@@ -5,6 +5,8 @@ import { AiWriteDrawer } from './AiWriteDrawer';
 import { ContextDrawer } from './ContextDrawer';
 import { ReviewDrawer } from './ReviewDrawer';
 import { EntityDrawer } from './SettingsPanel';
+import { Icon } from './Icon';
+import { IconButton, Tip } from './IconButton';
 import { NO_CHAPTERS, useApp } from './store-context';
 
 function ChapterNotes({ chapter }: { readonly chapter: Chapter }) {
@@ -70,27 +72,32 @@ export function ChapterPanel() {
     <section aria-label="章节" className="chapter-panel">
       <div className="chapter-head">
         <h2>{chapter.title}</h2>
-        <button type="button" disabled={busy} onClick={() => void createSnapshot()}>
-          保存快照
-        </button>
-        <button type="button" disabled={busy} onClick={() => void openHistory()}>
-          版本快照
-        </button>
-        <button type="button" disabled={busy} title="把本章已保存的正文导出为 TXT" onClick={() => void exportChapter(chapter.id, 'txt')}>
-          导出 TXT
-        </button>
-        <button type="button" disabled={busy} title="对选中的文字续写、改写、扩写、缩写或润色" onClick={() => void openAiWrite()}>
-          AI 写作
-        </button>
-        <button type="button" disabled={busy} title="查看 AI 会用到的章节、设定与事实" onClick={() => void openContext()}>
-          AI 上下文
-        </button>
-        <button type="button" disabled={busy || writerJob !== null} title="按本章的计划由写手写出正文，接在本章末尾" onClick={() => void writeChapters([chapter.id])}>
-          让写手写这一章
-        </button>
-        <button type="button" disabled={busy} title="检查本章与设定、事实、伏笔和章节计划不一致的地方" onClick={() => void openReview()}>
-          审核
-        </button>
+        {/* 常用的三项带文字，其余只留图标，悬停时显示说明。 */}
+        <div className="chapter-tools" role="toolbar" aria-label="本章工具">
+          <Tip label="对选中的文字续写、改写、扩写、缩写或润色">
+            <button type="button" className="ghost" disabled={busy} onClick={() => void openAiWrite()}>
+              <Icon name="wand" />
+              AI 写作
+            </button>
+          </Tip>
+          <Tip label="按本章的计划由写手写出正文，接在本章末尾">
+            <button type="button" className="ghost" disabled={busy || writerJob !== null} onClick={() => void writeChapters([chapter.id])}>
+              <Icon name="writer" />
+              让写手写这一章
+            </button>
+          </Tip>
+          <Tip label="检查本章与设定、事实、伏笔和章节计划不一致的地方">
+            <button type="button" className="ghost" disabled={busy} onClick={() => void openReview()}>
+              <Icon name="review" />
+              审核
+            </button>
+          </Tip>
+          <span className="tool-divider" aria-hidden="true" />
+          <IconButton icon="layers" label="AI 上下文" tip="AI 上下文：查看 AI 会用到的章节、设定与事实" disabled={busy} onClick={() => void openContext()} />
+          <IconButton icon="bookmark" label="保存快照" tip="保存快照：给本章现在的正文存一个版本" disabled={busy} onClick={() => void createSnapshot()} />
+          <IconButton icon="history" label="版本快照" tip="版本快照：查看、预览与恢复本章的历史版本" disabled={busy} onClick={() => void openHistory()} />
+          <IconButton icon="download" label="导出 TXT" tip="把本章已保存的正文导出为 TXT" disabled={busy} onClick={() => void exportChapter(chapter.id, 'txt')} />
+        </div>
       </div>
       {revisingHere ? (
         <div className="writer-banner" role="status" aria-label="写手修订">

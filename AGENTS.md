@@ -82,6 +82,7 @@
 - 计划草稿自动分卷（M1-13 补充）：`plan_draft` 版本 2（10 章及以上按故事的大段落分卷，输出 `volumes` 与每章的 `volume`，已有卷沿用卷名）；采用草稿时建卷、写梗概、把章节放进各自的卷（作者已归卷的章节不动）；计划页与成书页的草稿按卷列出（`PlanDraftChapters.tsx`）。
 - M5-01 已完成（需求 B69、B70，作者要求 2026-10-14）：AI 助手——`packages/prompts` 的 `AssistantTurnOutput`（动作的可辨识联合，27 个动作）、`assistant_turn` 模板与 `assistant_tools`、`assistant_state`、`assistant_results` 局部模板、`renderAssistantTurn`；迁移 `0011_assistant.sql`（`assistant_message`）；用例 `apps/desktop/src/app/assistant.ts`（工具执行、确认、最多 8 步、对话保存与随作品切换）；右侧对话框 `AssistantPanel.tsx`；三栏布局（左侧作品导航与目录、右侧助手）、新的视觉规范（`app.css` 的设计变量）、作品列表卡片、手写图标 `Icon.tsx`。
 - M5-02 已完成（需求 B71，作者要求 2026-10-14“我要最好的方案”）：AI 助手的回复逐字出现（`packages/llm` 的 `partialStringField`，只用于显示）、耗时动作的进展；选中正文后对话框上方的选区条与快捷说法，`edit_selection` 把选中的文字改成候选稿；新动作 `review_chapter`、`rollback_writer`（须确认）、`add_foreshadow`、`save_snapshot`、`restore_chapter`、`export_book`（`assistant_turn` 版本 2，共 34 个动作）；外观设置（偏好 `theme`，`ThemeButton.tsx`）；章节旁抽屉打开时的排版；浏览器预览 `apps/desktop/preview.html`（sql.js，MIT，开发依赖）。
+- M5-03 已完成（需求 B72，作者反馈 2026-10-15 界面还需调整、两栏要能调宽度）：左栏与助手可拖动调整宽度（`Splitter.tsx`，偏好 `layout`），左栏可收起；Radix UI 原语（`radix-ui`，MIT）的下拉菜单与提示气泡（`IconButton.tsx`），Lucide 图标（`lucide-react`，ISC）；更中性的配色、细滚动条、章节工具栏、空白章节的提示（TipTap Placeholder）、标题栏随外观（权限 `core:window:allow-set-theme`）。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式
@@ -96,7 +97,7 @@
 
 ## 技术栈
 
-- 桌面：Tauri 2；前端：React 19 + React Compiler、TypeScript strict、Vite、Zustand；编辑器：TipTap 3（关闭按事务重渲染）。
+- 桌面：Tauri 2；前端：React 19 + React Compiler、TypeScript strict、Vite、Zustand；编辑器：TipTap 3（关闭按事务重渲染）；界面组件：Radix UI 原语（菜单、提示气泡等的行为，样式用 `app.css` 的设计变量）与 Lucide 图标。
 - 数据：SQLite（WAL），桌面端经 Rust（rusqlite）命令访问，Node 端用 better-sqlite3，两端共用迁移 SQL；全文检索用 FTS5 trigram。
 - 校验：Zod，同一定义生成类型与模型结构化输出所需的 JSON Schema。
 - 模型：TypeScript 适配器（Anthropic 官方 SDK；OpenAI 官方 SDK），Rust 只做凭据代理；所有服务由用户自填 API Key。

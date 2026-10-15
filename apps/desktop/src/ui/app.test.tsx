@@ -23,6 +23,12 @@ Element.prototype.getClientRects = noRects;
 Range.prototype.getClientRects = noRects;
 Range.prototype.getBoundingClientRect = zeroRect;
 document.elementFromPoint = () => null;
+// Radix 的菜单与气泡用 ResizeObserver 量尺寸；jsdom 没有，给一个空实现。
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -324,6 +330,8 @@ describe('导入、导出与备份', () => {
     await user.click(screen.getByRole('menuitem', { name: '导入章节（TXT/Markdown）' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '导入' }));
     await waitFor(() => expect(chapterTitles()).toEqual(['楔子', '第一章 雨夜', '第二章 当铺']));
+    // 菜单选过一项后就收起，再打开一次。
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '导入章节（TXT/Markdown）' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '取消' }));
     expect(chapterTitles()).toEqual(['楔子', '第一章 雨夜', '第二章 当铺']);
@@ -337,6 +345,7 @@ describe('导入、导出与备份', () => {
     await waitFor(() => expect(chapterTitles()).toHaveLength(2));
     await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '导出整本 TXT' }));
+    await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '导出作品包' }));
     await user.click(await screen.findByRole('button', { name: '导出 TXT' }));
     await waitFor(() => expect(deps.exported.map((e) => e.name)).toEqual(['雨夜.txt', '第一章 雨夜.txt']));
@@ -553,7 +562,7 @@ describe('段落来源', () => {
     await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '段落来源' }));
     await user.click(await screen.findByRole('checkbox', { name: /显示来源色条/ }));
-    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'system' }));
+    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toMatchObject({ showParagraphSource: false, theme: 'system' }));
     await user.click(screen.getByRole('button', { name: '第一章' }));
     await screen.findByRole('textbox', { name: '正文' });
     expect(document.querySelectorAll('.chapter-text p.source')).toHaveLength(0);
@@ -1898,6 +1907,75 @@ describe('分卷的界面（B68）', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('“第一卷 雨夜”里还有章节');
     await user.click(within(nav()).getByRole('button', { name: '删除 第二卷' }));
     await waitFor(() => expect(store.getState().work?.volumes.map((v) => v.title)).toEqual(['第一卷 雨夜']));
+  });
+});
+
+describe('布局与外观（B71）', () => {
+  const savedLayout = (deps: TestDeps) => (JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: { layout: unknown } }).preferences.layout;
+  const shell = () => document.querySelector<HTMLElement>('.app-shell')!;
+
+  it('拖动分隔条调整左栏与助手的宽度，松开后保存；方向键、Home 与双击；宽度在上下限之内', async () => {
+    const { deps, user } = start();
+    await createWork(user, '雨夜');
+    const left = screen.getByRole('separator', { name: '调整左栏的宽度' });
+    expect(left.getAttribute('aria-valuenow')).toBe('248');
+
+    fireEvent.pointerDown(left, { button: 0, clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(left, { clientX: 160, pointerId: 1 });
+    // 拖动中只改 CSS 变量，还没有保存。
+    expect(shell().style.getPropertyValue('--sidebar-width')).toBe('308px');
+    fireEvent.pointerUp(left, { clientX: 160, pointerId: 1 });
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ sidebar: 308 }));
+    expect(left.getAttribute('aria-valuenow')).toBe('308');
+
+    left.focus();
+    await user.keyboard('{ArrowLeft}');
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ sidebar: 292 }));
+    await user.keyboard('{Home}');
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ sidebar: 180 }));
+    await user.keyboard('{ArrowLeft}');
+    expect(left.getAttribute('aria-valuenow')).toBe('180');
+    await user.dblClick(left);
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ sidebar: 248 }));
+
+    // 助手在右侧：向左拖变宽，上限 760。
+    const right = screen.getByRole('separator', { name: '调整 AI 助手的宽度' });
+    fireEvent.pointerDown(right, { button: 0, clientX: 1000, pointerId: 2 });
+    fireEvent.pointerMove(right, { clientX: 100, pointerId: 2 });
+    fireEvent.pointerUp(right, { clientX: 100, pointerId: 2 });
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ assistant: 760 }));
+    expect(shell().style.getPropertyValue('--assistant-width')).toBe('760px');
+  });
+
+  it('收起与显示左栏；空白章节显示提示；“更多”是可以用键盘操作的菜单', async () => {
+    const { deps, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    const editor = await screen.findByRole('textbox', { name: '正文' });
+    expect(editor.querySelector('p')?.getAttribute('data-placeholder')).toContain('从这里开始写');
+
+    await user.click(screen.getByRole('button', { name: '收起左栏' }));
+    expect(screen.queryByRole('navigation', { name: '作品导航' })).toBeNull();
+    expect(screen.queryByRole('separator', { name: '调整左栏的宽度' })).toBeNull();
+    await waitFor(() => expect(savedLayout(deps)).toMatchObject({ sidebarHidden: true }));
+    await user.click(screen.getByRole('button', { name: '显示左栏' }));
+    expect(screen.getByRole('navigation', { name: '作品导航' })).toBeTruthy();
+
+    await user.click(screen.getByText('更多'));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual([
+      '导入章节（TXT/Markdown）',
+      '导出整本 TXT',
+      '导出整本 Markdown',
+      '导出作品包',
+      '备份与恢复',
+      '写作技能',
+      '段落来源',
+      '用量与费用',
+      '模型服务',
+    ]);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   });
 });
 

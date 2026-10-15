@@ -492,7 +492,7 @@ textarea {
 .work-body {
   display: grid;
   flex: 1;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: var(--sidebar-width, 248px) 0 minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -861,39 +861,6 @@ textarea {
 .toolbar .spacer,
 .provider-head .spacer {
   flex: 1;
-}
-
-.menu {
-  position: relative;
-}
-
-.menu summary {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  cursor: pointer;
-  list-style: none;
-}
-
-.menu-items {
-  position: absolute;
-  right: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  min-width: 200px;
-  margin-top: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
-}
-
-.menu-items button {
-  border: none;
-  text-align: left;
 }
 
 .overlay {
@@ -1847,45 +1814,8 @@ fieldset.plain {
 }
 
 /* ——————————————————————————————————————————————
-   产品化的细节：菜单、正文纸面、提示条
+   产品化的细节：正文纸面、提示条
    —————————————————————————————————————————————— */
-
-.menu summary {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  padding: 5px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-}
-
-.menu summary:hover,
-.menu[open] summary {
-  background: var(--accent-soft);
-}
-
-.menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.menu-items {
-  min-width: 220px;
-  padding: 6px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
-}
-
-.menu-items button {
-  justify-content: flex-start;
-  padding: 7px 10px;
-  border: none;
-  background: none;
-}
-
-.menu-items button:hover:not(:disabled) {
-  background: var(--accent-soft);
-}
 
 .chapter-panel {
   max-width: 860px;
@@ -1938,7 +1868,7 @@ fieldset.plain {
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 360px;
+  width: var(--assistant-width, 380px);
   min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--surface);
@@ -2276,4 +2206,398 @@ fieldset.plain {
   .chapter-text {
     padding: 24px 22px;
   }
+}
+
+/* ——————————————————————————————————————————————
+   M5-03 界面打磨：更中性的配色、轻量的悬停、细滚动条、
+   可调宽度的分隔条、下拉菜单与提示气泡（Radix）、章节工具栏
+   —————————————————————————————————————————————— */
+
+:root {
+  --bg: #f6f5f2;
+  --panel: #f1efeb;
+  --surface: #ffffff;
+  --surface-2: #faf9f7;
+  --text: #1f1d1a;
+  --text-2: #4b4741;
+  --muted: #868077;
+  --border: #e7e3dc;
+  --border-strong: #d5cfc5;
+  --hover: rgb(31 29 26 / 5%);
+  --active: rgb(31 29 26 / 8%);
+  --scrollbar: rgb(31 29 26 / 18%);
+  --tooltip-bg: #262421;
+  --tooltip-text: #f4f2ee;
+  --shadow-lg: 0 12px 32px rgb(31 29 26 / 14%), 0 2px 6px rgb(31 29 26 / 6%);
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #141413;
+    --panel: #18181a;
+    --surface: #1e1e1e;
+    --surface-2: #222221;
+    --text: #ebe8e2;
+    --text-2: #c8c3ba;
+    --muted: #8e8981;
+    --border: #2b2a28;
+    --border-strong: #3b3936;
+    --hover: rgb(255 255 255 / 5%);
+    --active: rgb(255 255 255 / 8%);
+    --scrollbar: rgb(255 255 255 / 16%);
+    --tooltip-bg: #ebe8e2;
+    --tooltip-text: #1b1a18;
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 50%), 0 2px 6px rgb(0 0 0 / 30%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #141413;
+  --panel: #18181a;
+  --surface: #1e1e1e;
+  --surface-2: #222221;
+  --text: #ebe8e2;
+  --text-2: #c8c3ba;
+  --muted: #8e8981;
+  --border: #2b2a28;
+  --border-strong: #3b3936;
+  --hover: rgb(255 255 255 / 5%);
+  --active: rgb(255 255 255 / 8%);
+  --scrollbar: rgb(255 255 255 / 16%);
+  --tooltip-bg: #ebe8e2;
+  --tooltip-text: #1b1a18;
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 50%), 0 2px 6px rgb(0 0 0 / 30%);
+}
+
+/* 细滚动条：没有箭头，轨道透明，颜色随亮暗。WebView2 是 Chromium：用 ::-webkit-scrollbar
+   （设置了标准的 scrollbar-color 时它会被忽略，且 Windows 上仍画出箭头）。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background: var(--scrollbar);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* 悬停只加一层浅底色，不再给边框和文字染上强调色。 */
+button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: inherit;
+}
+
+button.ghost:hover:not(:disabled),
+.nav-item:hover:not(:disabled),
+.chapter-item:hover {
+  background: var(--hover);
+}
+
+button.ghost[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--active);
+  color: inherit;
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+button.icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+input,
+textarea,
+select {
+  border-color: var(--border-strong);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.work-bar {
+  height: 48px;
+  gap: 4px;
+  padding: 0 10px;
+}
+
+.work-bar .ghost {
+  color: var(--text-2);
+}
+
+.sidebar {
+  padding: 10px 8px;
+}
+
+.nav-item {
+  color: var(--text-2);
+}
+
+.nav-item .icon {
+  color: var(--muted);
+}
+
+.nav-item[aria-pressed='true'] {
+  color: var(--text);
+}
+
+.nav-item[aria-pressed='true'] .icon {
+  color: var(--accent);
+}
+
+/* —— 可以拖动的分隔条 —— */
+
+.work-body.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.splitter {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  width: 0;
+}
+
+.splitter-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.splitter-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: '';
+  transition: background 0.15s 0.05s;
+}
+
+.splitter-handle:hover::after,
+.splitter-handle:focus-visible::after,
+body.resizing .splitter-handle::after {
+  background: var(--accent);
+}
+
+.splitter-handle:focus-visible {
+  outline: none;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* 拖动时正文与助手不接收指针，避免选中文字或触发悬停。 */
+body.resizing .app-main,
+body.resizing .assistant {
+  pointer-events: none;
+}
+
+@media (max-width: 1100px) {
+  .app-shell > .splitter {
+    display: none;
+  }
+}
+
+/* —— 下拉菜单（Radix DropdownMenu） —— */
+
+.menu-content {
+  z-index: 50;
+  min-width: 232px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  animation: pop-in 0.12s ease-out;
+}
+
+.menu-label {
+  padding: 6px 10px 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+}
+
+.menu-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  outline: none;
+  cursor: default;
+  user-select: none;
+}
+
+.menu-item .icon {
+  color: var(--muted);
+}
+
+.menu-item[data-highlighted] {
+  background: var(--hover);
+}
+
+.menu-item[data-disabled] {
+  opacity: 0.45;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 5px -5px;
+  background: var(--border);
+}
+
+/* —— 提示气泡（Radix Tooltip） —— */
+
+.tooltip {
+  z-index: 60;
+  max-width: 280px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-md);
+  animation: fade-in 0.12s ease-out;
+  user-select: none;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-content,
+  .tooltip {
+    animation: none;
+  }
+}
+
+/* —— 章节标题与工具栏 —— */
+
+.chapter-head {
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 18px;
+}
+
+.chapter-head h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 0.02em;
+}
+
+.chapter-tools {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.chapter-tools button {
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.chapter-tools button.icon-only {
+  width: 30px;
+  padding: 0;
+}
+
+.chapter-tools .icon {
+  color: var(--muted);
+}
+
+.chapter-tools button:hover:not(:disabled) .icon {
+  color: var(--accent);
+}
+
+.tool-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+/* 正文为空时的提示（TipTap Placeholder 加的装饰）。 */
+.chapter-text p.is-editor-empty:first-child::before {
+  float: left;
+  height: 0;
+  color: var(--muted);
+  content: attr(data-placeholder);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.chapter-text {
+  border-color: var(--border);
+}
+
+/* 助手与目录的标题行更安静。 */
+.assistant-head .ghost,
+.sidebar-head button {
+  color: var(--text-2);
+}
+
+.chapter-item.selected:hover {
+  background: var(--surface);
 }

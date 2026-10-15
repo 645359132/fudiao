@@ -77,6 +77,9 @@ function DraftNotice({ editor, content }: { readonly editor: Editor; readonly co
 }
 
 /** 一章正文的编辑器。编辑状态不经过 React 渲染（关闭按事务重渲染，施工文档第二章）。 */
+/** 空白章节里的提示。 */
+const PLACEHOLDER = '从这里开始写。也可以在右侧对 AI 助手说“续写这一章”，或让写手按章节计划写。';
+
 export function ChapterEditor({ content, title }: { readonly content: ChapterContent; readonly title: string }) {
   const saveChapter = useApp((s) => s.saveChapter);
   const writeDraft = useApp((s) => s.writeDraft);
@@ -95,7 +98,7 @@ export function ChapterEditor({ content, title }: { readonly content: ChapterCon
 
   const editor = useEditor(
     {
-      extensions: [...chapterExtensions({ newId }), EntityHighlight.configure({ onOpen: openEntityDrawer }), SourceMarks],
+      extensions: [...chapterExtensions({ newId, placeholder: PLACEHOLDER }), EntityHighlight.configure({ onOpen: openEntityDrawer }), SourceMarks],
       content: toDoc(content.saved, newId),
       shouldRerenderOnTransaction: false,
       editorProps: { attributes: { class: 'chapter-text', 'aria-label': '正文', spellcheck: 'false' } },

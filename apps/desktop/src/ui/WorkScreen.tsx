@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { DropdownMenu } from 'radix-ui';
+import { DEFAULT_LAYOUT, LAYOUT_LIMITS } from '../app/library';
 import { ChapterSidebar } from './ChapterSidebar';
 import { BackupsPanel } from './BackupsPanel';
 import { FactsPanel } from './FactsPanel';
@@ -14,6 +16,8 @@ import { TasksPanel } from './TasksPanel';
 import { UsagePanel } from './UsagePanel';
 import { Icon, type IconName } from './Icon';
 import { ThemeButton } from './ThemeButton';
+import { IconButton } from './IconButton';
+import { Splitter } from './Splitter';
 import { ChapterPanel, TrashPanel, WorkInfoPanel } from './panels';
 import { useApp } from './store-context';
 
@@ -42,6 +46,8 @@ export function WorkScreen() {
   const busy = useApp((s) => s.busy);
   const assistantOpen = useApp((s) => s.assistantOpen);
   const toggleAssistant = useApp((s) => s.toggleAssistant);
+  const layout = useApp((s) => s.library?.preferences.layout ?? DEFAULT_LAYOUT);
+  const setLayout = useApp((s) => s.setLayout);
 
   // Ctrl+F（或 Ctrl+Shift+F）打开全文查找；正文中选中的一行文字作为查询。
   useEffect(() => {
@@ -65,9 +71,21 @@ export function WorkScreen() {
     </button>
   );
 
+  const menuItem = (icon: IconName, label: string, onSelect: () => void) => (
+    <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={onSelect}>
+      <Icon name={icon} />
+      {label}
+    </DropdownMenu.Item>
+  );
+
   return (
     <div className="work">
       <header className="work-bar">
+        <IconButton
+          icon={layout.sidebarHidden ? 'sidebarOpen' : 'sidebarClose'}
+          label={layout.sidebarHidden ? '显示左栏' : '收起左栏'}
+          onClick={() => void setLayout({ sidebarHidden: !layout.sidebarHidden })}
+        />
         <button type="button" className="ghost" onClick={() => void closeWork()}>
           <Icon name="back" />
           作品列表
@@ -82,41 +100,30 @@ export function WorkScreen() {
           任务{running > 0 ? `（${running} 进行中）` : ''}
         </button>
         <ThemeButton />
-        <details className="menu">
-          <summary>
-            <Icon name="more" />
-            更多
-          </summary>
-          <div className="menu-items" role="menu">
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void startTextImport('current')}>
-              导入章节（TXT/Markdown）
+        <DropdownMenu.Root modal={false}>
+          <DropdownMenu.Trigger asChild>
+            <button type="button" className="ghost">
+              <Icon name="more" />
+              更多
             </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void exportBook('txt')}>
-              导出整本 TXT
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void exportBook('md')}>
-              导出整本 Markdown
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void exportProject()}>
-              导出作品包
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void openBackups()}>
-              备份与恢复
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void openSkills()}>
-              写作技能
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void openSourceStats()}>
-              段落来源
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void openUsage()}>
-              用量与费用
-            </button>
-            <button type="button" role="menuitem" disabled={busy} onClick={() => void openModelServices()}>
-              模型服务
-            </button>
-          </div>
-        </details>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="menu-content" align="end" sideOffset={6} collisionPadding={8}>
+              <DropdownMenu.Label className="menu-label">导入与导出</DropdownMenu.Label>
+              {menuItem('upload', '导入章节（TXT/Markdown）', () => void startTextImport('current'))}
+              {menuItem('download', '导出整本 TXT', () => void exportBook('txt'))}
+              {menuItem('download', '导出整本 Markdown', () => void exportBook('md'))}
+              {menuItem('download', '导出作品包', () => void exportProject())}
+              {menuItem('history', '备份与恢复', () => void openBackups())}
+              <DropdownMenu.Separator className="menu-separator" />
+              <DropdownMenu.Label className="menu-label">写作与模型</DropdownMenu.Label>
+              {menuItem('pen', '写作技能', () => void openSkills())}
+              {menuItem('layers', '段落来源', () => void openSourceStats())}
+              {menuItem('tasks', '用量与费用', () => void openUsage())}
+              {menuItem('settings', '模型服务', () => void openModelServices())}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
         {assistantOpen ? null : (
           <button type="button" className="primary" onClick={toggleAssistant}>
             <Icon name="sparkle" />
@@ -124,19 +131,33 @@ export function WorkScreen() {
           </button>
         )}
       </header>
-      <div className="work-body">
-        <aside className="sidebar">
-          {/* 一页走完成书流程放在最前；推演、事实与查找等进阶功能在下面。 */}
-          <nav className="nav" aria-label="作品导航">
-            {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '快速成书：想法、大纲、章节计划、写完、导出')}
-            {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
-            {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
-            {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
-            {navItem('simulation', 'stage', '推演', panel === 'simulation', () => void openSimulation(), undefined, '角色推演：设置场景，让角色各自依据所知行动')}
-            {navItem('search', 'search', '查找', panel === 'search', () => void openSearch(), undefined, '全文查找（Ctrl+F）')}
-          </nav>
-          <ChapterSidebar />
-        </aside>
+      <div className={layout.sidebarHidden ? 'work-body sidebar-hidden' : 'work-body'}>
+        {layout.sidebarHidden ? null : (
+          <>
+            <aside className="sidebar">
+              {/* 一页走完成书流程放在最前；推演、事实与查找等进阶功能在下面。 */}
+              <nav className="nav" aria-label="作品导航">
+                {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '快速成书：想法、大纲、章节计划、写完、导出')}
+                {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
+                {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
+                {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
+                {navItem('simulation', 'stage', '推演', panel === 'simulation', () => void openSimulation(), undefined, '角色推演：设置场景，让角色各自依据所知行动')}
+                {navItem('search', 'search', '查找', panel === 'search', () => void openSearch(), undefined, '全文查找（Ctrl+F）')}
+              </nav>
+              <ChapterSidebar />
+            </aside>
+            <Splitter
+              label="调整左栏的宽度"
+              side="left"
+              cssVar="--sidebar-width"
+              value={layout.sidebar}
+              min={LAYOUT_LIMITS.sidebar.min}
+              max={LAYOUT_LIMITS.sidebar.max}
+              defaultValue={DEFAULT_LAYOUT.sidebar}
+              onCommit={(sidebar) => void setLayout({ sidebar })}
+            />
+          </>
+        )}
         <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</div></main>
       </div>
     </div>

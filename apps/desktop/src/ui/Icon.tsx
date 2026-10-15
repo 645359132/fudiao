@@ -1,37 +1,84 @@
-// 界面图标：手写的线条图标（24×24，描边），不引入图标库。装饰用，读屏软件忽略（按钮自有文字或 aria-label）。
-const PATHS = {
-  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
-  plan: 'M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01',
-  people: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
-  facts: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
-  stage: 'M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z',
-  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
-  tasks: 'M12 8v4l3 3M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
-  sparkle: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9zM5 3l.6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6z',
-  send: 'M22 2L11 13M22 2l-7 20-4-9-9-4z',
-  stop: 'M6 6h12v12H6z',
-  plus: 'M12 5v14M5 12h14',
-  back: 'M15 18l-6-6 6-6',
-  more: 'M5 12h.01M12 12h.01M19 12h.01',
-  close: 'M18 6L6 18M6 6l12 12',
-  check: 'M20 6L9 17l-5-5',
-  alert: 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z',
-  panel: 'M3 4h18v16H3zM15 4v16',
-  folder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
-  upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
-  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
-  pen: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
-  sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
-  moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
-  monitor: 'M2 4h20v13H2zM8 21h8M12 17v4',
-} as const;
+// 界面图标：Lucide（ISC 许可证）的线条图标，按名称取用。装饰用，读屏软件忽略（按钮自有文字或 aria-label）。
+import {
+  ArrowUp,
+  BookOpen,
+  Bookmark,
+  Check,
+  ChevronLeft,
+  ClipboardCheck,
+  Download,
+  Drama,
+  Ellipsis,
+  Feather,
+  FolderOpen,
+  History,
+  Layers,
+  ListChecks,
+  ListTodo,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRight,
+  PenLine,
+  Plus,
+  Redo2,
+  ScanSearch,
+  Search,
+  Settings,
+  Sparkles,
+  Square,
+  Sun,
+  TriangleAlert,
+  Undo2,
+  Upload,
+  Users,
+  WandSparkles,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 
-export type IconName = keyof typeof PATHS;
+const ICONS = {
+  book: BookOpen,
+  plan: ListChecks,
+  people: Users,
+  facts: ClipboardCheck,
+  stage: Drama,
+  search: Search,
+  tasks: ListTodo,
+  sparkle: Sparkles,
+  send: ArrowUp,
+  stop: Square,
+  plus: Plus,
+  back: ChevronLeft,
+  more: Ellipsis,
+  close: X,
+  check: Check,
+  alert: TriangleAlert,
+  panel: PanelRight,
+  sidebarClose: PanelLeftClose,
+  sidebarOpen: PanelLeftOpen,
+  folder: FolderOpen,
+  upload: Upload,
+  download: Download,
+  settings: Settings,
+  pen: PenLine,
+  wand: WandSparkles,
+  writer: Feather,
+  review: ScanSearch,
+  layers: Layers,
+  bookmark: Bookmark,
+  history: History,
+  undo: Undo2,
+  redo: Redo2,
+  sun: Sun,
+  moon: Moon,
+  monitor: Monitor,
+} as const satisfies Record<string, LucideIcon>;
+
+export type IconName = keyof typeof ICONS;
 
 export function Icon({ name, size = 16 }: { readonly name: IconName; readonly size?: number }) {
-  return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      <path d={PATHS[name]} />
-    </svg>
-  );
+  const Glyph = ICONS[name];
+  return <Glyph className="icon" size={size} strokeWidth={1.75} aria-hidden="true" focusable="false" />;
 }
