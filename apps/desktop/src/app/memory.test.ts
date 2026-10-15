@@ -29,6 +29,7 @@ const output: ChapterMemoryOutput = {
     { title: '玉佩的来历', progress: '钱四盯着玉佩的缺口看了很久' },
     { title: '没有这条伏笔', progress: '不该记下' },
   ],
+  openThreads: [' 林舟答应三天后再来 ', '', '钱四要人去打听玉的来历'],
 };
 
 /** 两章：第一章有正文与作者写的梗概；第二章有计划，回收“玉佩的来历”。 */
@@ -69,6 +70,8 @@ describe('长篇记忆（B66）', () => {
       foreshadowProgress: { [jade]: '钱四盯着玉佩的缺口看了很久' },
       basedOn: { [paragraph.id]: paragraph.version },
       status: 'valid',
+      // 章尾留给后面的事（B74）：去掉空白与空的条目。
+      openThreads: ['林舟答应三天后再来', '钱四要人去打听玉的来历'],
     });
     expect(Object.keys(memory.castState)).toEqual([lin]);
     expect(Object.keys(memory.foreshadowProgress)).toEqual([jade]);
@@ -124,6 +127,8 @@ describe('长篇记忆（B66）', () => {
       '第一章 夜叩：林舟深夜到当铺当玉，钱四压价，林舟没有当成，带着玉离开。',
       '林舟（最近的状态：玉还在手里，三天后赌债到期）',
       '前文中的进展：第一章 夜叩：钱四盯着玉佩的缺口看了很久；',
+      // 请求体是 JSON：换行写作 \n。
+      '上一章结尾留下的事（本章要接住，不一定都在本章了结，但不能当作没发生）：\\n- 林舟答应三天后再来\\n- 钱四要人去打听玉的来历',
     ]) {
       expect(request).toContain(part);
     }

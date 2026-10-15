@@ -305,6 +305,32 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.relationsView()).relationships).toEqual([]);
   });
 
+  it('作者偏好（B74）：记下明确说出的偏好（重复的不再记），写进“作者偏好”技能与现状；作者讨厌的说法加进规避词表', async () => {
+    const { deps, app } = await setup();
+    step(deps, {
+      message: '记下了。',
+      actions: [
+        { tool: 'remember_preference', preference: '对白要短，不要长篇独白' },
+        { tool: 'remember_preference', preference: ' 主角不说脏话 ' },
+        { tool: 'add_avoid_phrases', phrases: ['嘴角上扬', ' 不禁 ', ''] },
+      ],
+      done: true,
+    });
+    const first = value(await app.sendToAssistant('以后对白要短，主角不说脏话；别再写“嘴角上扬”'));
+    expect(lastResults(first.items)).toMatchObject({ results: [{ ok: true }, { ok: true }, { ok: true, detail: '已把“嘴角上扬”加进规避词表，审核时会逐处标出。' }] });
+    const skills = value(await app.listWritingSkills());
+    const pref = skills.skills.find((s) => s.skill.key === 'author-preferences')!;
+    expect(pref.skill).toMatchObject({ name: '作者偏好', enabled: true, instruction: '- 对白要短，不要长篇独白\n- 主角不说脏话' });
+    expect(skills.avoidPhrases).toContain('嘴角上扬');
+    expect(skills.avoidPhrasesCustom).toBe(true);
+
+    step(deps, { message: '', actions: [{ tool: 'remember_preference', preference: '主角不说脏话' }], done: true });
+    const again = value(await app.sendToAssistant('再说一遍：主角不说脏话'));
+    expect(lastResults(again.items)).toMatchObject({ results: [{ ok: true, detail: '“主角不说脏话”已经记下了。' }] });
+    // 已记下的偏好列在给模型的现状里。
+    expect(body(deps, 1)).toContain('作者偏好（已记下）：\\n- 对白要短，不要长篇独白\\n- 主角不说脏话');
+  });
+
   it('章节计划、移动章节与打开页面：计划写入、章节进卷、界面收到打开的请求', async () => {
     const { deps, app } = await setup();
     value(await app.createEntity('character', '林舟'));

@@ -13,7 +13,7 @@ import {
 import { partialStringField, type LlmStreamEvent } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
-import { clip, confirmationFor, runTool, toolEnv, type AssistantHost, type ToolEvents } from './assistant-tools';
+import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, type AssistantHost, type ToolEvents } from './assistant-tools';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
@@ -99,7 +99,8 @@ export function assistantUseCases({
     if (port === null) return { works, work: null };
     const work = await host.reloadWork();
     if (!work.ok) return { works, work: null };
-    const [entities, plans, lengths, relations] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port), listRelationships(port)]);
+    const [entities, plans, lengths, relations, skills] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port), listRelationships(port), host.listWritingSkills()]);
+    const preferenceSkill = skills.ok ? skills.value.skills.find((s) => s.skill.key === PREFERENCES_KEY && s.skill.enabled) : undefined;
     const planOf = new Map(plans.ok ? plans.value.map((p) => [p.chapterId, PLAN_STATUS_LABEL[p.status]]) : []);
     const lengthOf = new Map(lengths.ok ? lengths.value.map((l) => [l.chapterId, l.length]) : []);
     const volumeTitle = new Map(work.value.volumes.map((v) => [v.id, v.title]));
@@ -133,6 +134,7 @@ export function assistantUseCases({
           range: range(r.validFromChapterId, r.validToChapterId),
         })),
         relationCount: rels.length,
+        preferences: preferenceSkill === undefined ? [] : preferenceLines(preferenceSkill.skill.instruction),
         selection,
         title: p.title,
         genre: p.genre,

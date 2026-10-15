@@ -405,6 +405,13 @@ function MemoryBlock({ item }: { readonly item: PlanChapterView }) {
               ))}
             </ul>
           ) : null}
+          {memory.openThreads.length > 0 ? (
+            <ul aria-label="章尾留给后面的事">
+              {memory.openThreads.map((t, i) => (
+                <li key={i}>{t}</li>
+              ))}
+            </ul>
+          ) : null}
         </details>
       ) : null}
     </div>

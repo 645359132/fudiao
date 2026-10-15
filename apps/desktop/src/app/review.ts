@@ -41,6 +41,7 @@ import {
   dropHandled,
   effectiveAvoidPhrases,
   foreshadowsForChapter,
+  normalizePunctuation,
   paragraphLabel,
   resolveModelIssues,
   runProgramChecks,
@@ -399,7 +400,7 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
       if (!result.ok) return result;
       if (result.value.outcome === 'cancelled') return err(settings('已取消'));
       if (result.value.outcome === 'refused') return err(settings(`模型拒绝了这次修订${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`));
-      const revised = splitParagraphs(result.value.text).join('\n');
+      const revised = splitParagraphs(normalizePunctuation(result.value.text)).join('\n');
       if (revised === '') return err(settings('模型没有写出修订后的文字'));
       if (revised === paragraph.text) return err(settings('写手没有改动这一段；可以自己修改，或忽略这条问题'));
 

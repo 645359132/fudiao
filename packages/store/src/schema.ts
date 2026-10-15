@@ -151,9 +151,10 @@ export const TABLES: readonly TableSpec[] = [
   },
   {
     name: 'chapter_memory',
-    columns: ['chapter_id', 'summary', 'cast_state', 'foreshadow_progress', 'based_on', 'status', 'llm_call_id', ...VERSIONED],
+    // open_threads 由迁移 0013 追加在末尾。
+    columns: ['chapter_id', 'summary', 'cast_state', 'foreshadow_progress', 'based_on', 'status', 'llm_call_id', ...VERSIONED, 'open_threads'],
     primaryKey: ['chapter_id'],
-    json: ['cast_state', 'foreshadow_progress', 'based_on'],
+    json: ['cast_state', 'foreshadow_progress', 'based_on', 'open_threads'],
   },
   {
     name: 'review_issue',

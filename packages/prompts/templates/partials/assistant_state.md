@@ -25,6 +25,12 @@
 {{^entities}}
 - 还没有设定
 {{/entities}}
+{{#hasPreferences}}
+作者偏好（已记下）：
+{{#preferences}}
+- {{.}}
+{{/preferences}}
+{{/hasPreferences}}
 {{#hasRelations}}
 人物关系（共 {{relationCount}} 条{{#relationsOmitted}}，只列出前面的部分{{/relationsOmitted}}）：
 {{#relations}}

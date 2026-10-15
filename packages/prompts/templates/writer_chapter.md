@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 6
+version: 7
 task: writer
 ---
 @@system
@@ -83,6 +83,12 @@ task: writer
 {{/hasProgress}}
 {{/toPayoff}}
 {{/hasToPayoff}}
+{{#hasOpenThreads}}
+上一章结尾留下的事（本章要接住，不一定都在本章了结，但不能当作没发生）：
+{{#openThreads}}
+- {{.}}
+{{/openThreads}}
+{{/hasOpenThreads}}
 {{#hasMustNotReveal}}
 不得说破：
 {{#mustNotReveal}}

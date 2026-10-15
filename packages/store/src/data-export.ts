@@ -53,6 +53,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   11: (tables) => tables,
   // 0012：新增人物关系与关系图上的位置，旧版本导出的数据中没有，导入为空。
   12: (tables) => tables,
+  // 0013：长篇记忆增加“章尾留给后面的事”（旧数据为空）。
+  13: (tables) => ({ ...tables, chapter_memory: (tables['chapter_memory'] ?? []).map((row) => ({ open_threads: [], ...row })) }),
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
 };
 

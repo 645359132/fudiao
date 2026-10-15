@@ -18,6 +18,7 @@ const MemoryRow = z
     version: z.number().int(),
     created_at: z.string(),
     updated_at: z.string(),
+    open_threads: jsonColumn(z.array(z.string())),
   })
   .transform((r) => ({
     chapterId: r.chapter_id,
@@ -26,6 +27,8 @@ const MemoryRow = z
     castState: r.cast_state,
     /** 伏笔标识 → 本章中的进展。 */
     foreshadowProgress: r.foreshadow_progress,
+    /** 章尾留给后面的事：悬而未决的问题、承诺或约定、没有完成的动作（迁移 0013）。 */
+    openThreads: r.open_threads,
     /** 生成时依据的段落：段落标识 → 版本。 */
     basedOn: r.based_on,
     status: r.status,
@@ -36,13 +39,14 @@ const MemoryRow = z
   }));
 export type ChapterMemory = z.output<typeof MemoryRow>;
 
-const COLUMNS = 'chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, version, created_at, updated_at';
+const COLUMNS = 'chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, version, created_at, updated_at, open_threads';
 
 export type MemoryInput = {
   readonly chapterId: string;
   readonly summary: string;
   readonly castState: Readonly<Record<string, string>>;
   readonly foreshadowProgress: Readonly<Record<string, string>>;
+  readonly openThreads?: readonly string[];
   readonly basedOn: Readonly<Record<string, number>>;
   readonly llmCallId: string | null;
 };
@@ -76,10 +80,10 @@ export async function listChaptersWithText(port: SqlPort): Promise<Result<string
 export async function saveChapterMemory(port: SqlPort, input: MemoryInput, ctx: WriteContext): Promise<Result<ChapterMemory, RepoError>> {
   const result = await port.transaction([
     {
-      sql: `INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'valid', ?, ?, ?)
+      sql: `INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at, open_threads)
+            VALUES (?, ?, ?, ?, ?, 'valid', ?, ?, ?, ?)
             ON CONFLICT (chapter_id) DO UPDATE SET summary = excluded.summary, cast_state = excluded.cast_state,
-              foreshadow_progress = excluded.foreshadow_progress, based_on = excluded.based_on, status = 'valid',
+              foreshadow_progress = excluded.foreshadow_progress, based_on = excluded.based_on, status = 'valid', open_threads = excluded.open_threads,
               llm_call_id = excluded.llm_call_id, version = chapter_memory.version + 1, updated_at = excluded.updated_at
             RETURNING ${COLUMNS}`,
       params: [
@@ -91,6 +95,7 @@ export async function saveChapterMemory(port: SqlPort, input: MemoryInput, ctx: 
         input.llmCallId,
         ctx.now,
         ctx.now,
+        JSON.stringify((input.openThreads ?? []).map((t) => t.trim()).filter((t) => t !== '')),
       ],
     },
   ]);

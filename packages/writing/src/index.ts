@@ -12,3 +12,5 @@ export type { SegmentPlan } from './segments';
 export { DEFAULT_CHAPTER_WORDS, planSegments, SEGMENT_WORDS, splitParagraphs } from './segments';
 export type { RelationLike } from './relations';
 export { relationApplies, relationsForCast } from './relations';
+export { maskDialogue, MAX_HITS_PER_RULE, proseChecks, visibleLength } from './prose';
+export { normalizePunctuation } from './punctuation';

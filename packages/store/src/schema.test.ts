@@ -93,7 +93,7 @@ const sample: Statement[] = [
   s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W1', 'foreshadow', '伏笔埋设与回收', '', 1, '1', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, description, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '写每一章的结尾时使用', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
   s(
-    "INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at) VALUES ('01C1', '林舟深夜当玉，掌柜起疑', '{\"01E1\":\"急需用钱\"}', '{\"01H1\":\"planted\"}', '{\"01G1\":1,\"01G2\":3}', 'stale', '01L1', ?, ?)",
+    "INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at, open_threads) VALUES ('01C1', '林舟深夜当玉，掌柜起疑', '{\"01E1\":\"急需用钱\"}', '{\"01H1\":\"planted\"}', '{\"01G1\":1,\"01G2\":3}', 'stale', '01L1', ?, ?, '[\"林舟答应三天后再来\"]')",
     ...T,
   ),
   s(
@@ -437,6 +437,16 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 12 导出的数据（长篇记忆没有 open_threads 列）经转换后导入，章尾留下的事为空', async () => {
+    const data = await exported(await seeded());
+    const memories = (data.tables['chapter_memory'] ?? []).map(({ open_threads: _dropped, ...row }) => row);
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 12, tables: { ...data.tables, chapter_memory: memories } })).toMatchObject({ ok: true });
+    const after = (await exported(target)).tables['chapter_memory'] ?? [];
+    expect(after.map((row) => row['open_threads'])).toEqual(memories.map(() => []));
+    expect(after.map(({ open_threads: _x, ...row }) => row)).toEqual(memories);
   });
 
   it('结构版本 11 导出的数据（没有人物关系）导入后关系与位置为空', async () => {

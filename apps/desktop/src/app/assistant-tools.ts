@@ -28,6 +28,7 @@ import type { AppError } from './errors';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppliedDraft, PlanningView } from './planning';
 import type { RelationsView } from './relations';
+import type { SkillsView } from './writing-skills';
 import type { ReviewOutcome } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
@@ -89,6 +90,10 @@ export type AssistantHost = {
   listFacts(): Promise<Result<Fact[], AppError>>;
   createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
   relationsView(): Promise<Result<RelationsView, AppError>>;
+  listWritingSkills(): Promise<Result<SkillsView, AppError>>;
+  addCustomSkill(name: string, instruction: string, description?: string, key?: string): Promise<Result<SkillsView, AppError>>;
+  updateWritingSkill(skill: SkillsView['skills'][number]['skill'], patch: { readonly enabled?: boolean; readonly instruction?: string }): Promise<Result<SkillsView, AppError>>;
+  setAvoidPhrases(phrases: readonly string[] | null): Promise<Result<SkillsView, AppError>>;
   addRelationship(fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
   updateRelationship(relationship: RelationsView['relationships'][number], fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
   deleteRelationship(relationship: RelationsView['relationships'][number]): Promise<Result<RelationsView, AppError>>;
@@ -155,6 +160,18 @@ const failWith = (e: AppError): Outcome => failed(describeForModel(e));
 /** 关系读成一句话（给模型看的结果说明）。 */
 const relationText = (r: { readonly fromId: string; readonly toId: string; readonly label: string; readonly mutual: boolean }, nameOf: ReadonlyMap<string, string>) =>
   r.mutual ? `${nameOf.get(r.fromId) ?? ''}与${nameOf.get(r.toId) ?? ''}：${r.label}` : `${nameOf.get(r.fromId) ?? ''}是${nameOf.get(r.toId) ?? ''}的${r.label}`;
+
+/** 作者偏好存为一项自定义写作技能（SKILL.md），写手写每一章都会带上。 */
+export const PREFERENCES_KEY = 'author-preferences';
+const PREFERENCES_NAME = '作者偏好';
+const PREFERENCES_DESCRIPTION = '作者明确说过的文风偏好与禁忌，每一章都遵守';
+
+/** 偏好技能的指令里一行一条（去掉列表符号）。 */
+export const preferenceLines = (instruction: string): string[] =>
+  instruction
+    .split('\n')
+    .map((l) => l.replace(/^\s*[-*•]\s*/, '').trim())
+    .filter((l) => l !== '');
 
 /** 太长的文字只留开头与结尾。 */
 export const clip = (text: string, limit: number): { readonly text: string; readonly clipped: boolean } =>
@@ -691,6 +708,39 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (!deleted.ok) return failWith(deleted.error);
       env.changed();
       return done(`已删除关系：${relationText(current, new Map(view.value.members.map((m) => [m.id, m.name])))}。`);
+    },
+  },
+  remember_preference: {
+    label: '记下作者偏好',
+    async run(action, env) {
+      const preference = action.preference.trim();
+      if (preference === '') return failed('偏好是空的');
+      const view = await env.host.listWritingSkills();
+      if (!view.ok) return failWith(view.error);
+      const current = view.value.skills.find((s) => s.skill.key === PREFERENCES_KEY)?.skill;
+      const lines = current === undefined ? [] : preferenceLines(current.instruction);
+      if (lines.includes(preference)) return done(`“${preference}”已经记下了。`);
+      const instruction = [...lines, preference].map((l) => `- ${l}`).join('\n');
+      const saved =
+        current === undefined
+          ? await env.host.addCustomSkill(PREFERENCES_NAME, instruction, PREFERENCES_DESCRIPTION, PREFERENCES_KEY)
+          : await env.host.updateWritingSkill(current, { instruction, enabled: true });
+      if (!saved.ok) return failWith(saved.error);
+      env.changed();
+      return done(`已记下作者偏好“${preference}”，写手写每一章都会遵守（在“写作技能”的“${PREFERENCES_NAME}”里可以修改）。`);
+    },
+  },
+  add_avoid_phrases: {
+    label: '加入规避词表',
+    async run(action, env) {
+      const view = await env.host.listWritingSkills();
+      if (!view.ok) return failWith(view.error);
+      const current = view.value.avoidPhrases;
+      const added = [...new Set(action.phrases.map((p) => p.trim()).filter((p) => p !== '' && !current.includes(p)))];
+      if (added.length === 0) return done('这些说法已经在规避词表里了。');
+      const saved = await env.host.setAvoidPhrases([...current, ...added]);
+      if (!saved.ok) return failWith(saved.error);
+      return done(`已把${added.map((p) => `“${p}”`).join('、')}加进规避词表，审核时会逐处标出。`);
     },
   },
   save_chapter_plan: {

@@ -1,6 +1,7 @@
 // 审核的程序检查（需求 B64）：不需要模型就能确定的问题，先于模型审核运行。
 // 结果都定位到段落；针对整章的问题锚在相关段落上，引文为空。
 import type { CastMember, ChapterOrder, ForeshadowItem, IssueAnchor, ParagraphText, ProgramIssue } from './types';
+import { proseChecks } from './prose';
 
 /** 揭晓内容短于此长度时不做字面检查：太短的词组在正文里出现未必是说破，交给模型审核。 */
 export const MIN_REVEAL_LENGTH = 6;
@@ -115,5 +116,7 @@ export function runProgramChecks(input: ProgramCheckInput): ProgramIssue[] {
     ...revealLeaks(input.paragraphs, input.mustNotReveal),
     ...overdueForeshadows(input.chapterId, input.paragraphs, input.foreshadows, input.order),
     ...missingCast(input.paragraphs, input.cast),
+    // 文字体检（B74）：AI 常见句式、生成退化与写作材料泄漏。
+    ...proseChecks(input.paragraphs),
   ];
 }

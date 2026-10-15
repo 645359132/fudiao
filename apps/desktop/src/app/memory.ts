@@ -3,6 +3,9 @@
 // 它是派生结论（硬性规则 21）：记录依据的段落版本与调用记录；正文改过后标为待复核，作者可以重建。
 import type { CallOptions } from '@fudiao/llm';
 import { ChapterMemoryOutput, renderChapterMemory } from '@fudiao/prompts';
+
+/** 每章最多记几件留给后面的事。 */
+export const MAX_OPEN_THREADS = 5;
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   findCallByRequestHash,
@@ -78,6 +81,7 @@ export function memoryUseCases(deps: AppDeps, project: () => SqlPort | null, run
           summary: output.summary.trim(),
           castState: byId(output.cast.map((c) => [characterOf.get(c.name.trim()), c.state])),
           foreshadowProgress: byId(output.foreshadows.map((f) => [foreshadowOf.get(f.title.trim()), f.progress])),
+          openThreads: output.openThreads.slice(0, MAX_OPEN_THREADS),
           basedOn: Object.fromEntries(paragraphs.value.map((p) => [p.id, p.version])),
           llmCallId: call?.ok === true ? (call.value?.id ?? null) : null,
         },

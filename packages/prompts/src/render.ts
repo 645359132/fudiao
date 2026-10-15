@@ -546,6 +546,8 @@ export type WriterChapterInput = {
   readonly toPayoff: readonly { readonly title: string; readonly content: string; readonly reveal: string; readonly progress: readonly string[] }[];
   /** 本章不得说破的揭晓内容。 */
   readonly mustNotReveal: readonly string[];
+  /** 上一章结尾留下、本章要接住的事（B74，取自上一章的长篇记忆）。 */
+  readonly openThreads?: readonly string[];
   readonly beatsBefore: readonly string[];
   readonly beatsNow: readonly string[];
   readonly beatsAfter: readonly string[];
@@ -591,6 +593,8 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasToPayoff: input.toPayoff.length > 0,
     mustNotReveal: [...input.mustNotReveal],
     hasMustNotReveal: input.mustNotReveal.length > 0,
+    openThreads: [...(input.openThreads ?? [])],
+    hasOpenThreads: (input.openThreads ?? []).length > 0,
     beatsBefore: [...input.beatsBefore],
     beatsNow: [...input.beatsNow],
     beatsAfter: [...input.beatsAfter],
@@ -787,6 +791,8 @@ export type AssistantState = {
      */
     readonly relations?: readonly { readonly id: string; readonly from: string; readonly to: string; readonly label: string; readonly mutual: boolean; readonly secret: boolean; readonly category: string; readonly range: string }[];
     readonly relationCount?: number;
+    /** 已记下的作者偏好（B74）。 */
+    readonly preferences?: readonly string[];
     /** 作者正在看的页面或章节；没有时为空。 */
     readonly current: string;
     /** 作者在正文里选中的文字（edit_selection 的对象）；没有选中时为 null。太长时 text 只含开头与结尾。 */
@@ -828,6 +834,8 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
             trashed: [...input.state.work.trashed],
             hasVolumes: input.state.work.volumes.length > 0,
             hasTrashed: input.state.work.trashed.length > 0,
+            preferences: [...(input.state.work.preferences ?? [])],
+            hasPreferences: (input.state.work.preferences ?? []).length > 0,
             relations: [...(input.state.work.relations ?? [])],
             hasRelations: (input.state.work.relations ?? []).length > 0,
             relationCount: input.state.work.relationCount ?? (input.state.work.relations ?? []).length,

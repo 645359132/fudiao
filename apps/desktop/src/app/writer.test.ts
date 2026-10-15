@@ -63,6 +63,13 @@ describe('写手成章', () => {
     expect(deps.llmRequests).toHaveLength(2);
   });
 
+  it('写入正文前规范标点（B74）：半角标点、直引号与省略号换成中文的写法', async () => {
+    const { deps, app, c2 } = await setup();
+    deps.llmResponses.push(reply('林舟推开门,看见掌柜...\n\n掌柜说:"这玉不对."'), reply('他没回头.'));
+    value(await app.writeChapter(c2));
+    expect(await texts(app, c2)).toEqual(['林舟推开门，看见掌柜……', '掌柜说：“这玉不对。”', '他没回头。']);
+  });
+
   it('请求中带上本章成立、至少一端出场的人物关系（B73）；隐秘的关系要求只暗示', async () => {
     const { deps, app, c1, c2 } = await setup();
     const lin = value(await app.listEntities()).find((e) => e.name === '林舟')!;

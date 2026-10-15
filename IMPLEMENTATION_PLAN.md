@@ -146,7 +146,7 @@ fudiao/
 | `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、progress（写手的进度 JSON：这次写作的标识、情节点的分段与每段字数、已写入的段数、写入前快照的标识；没让写手写过时为空）、version；迁移 0005 | B65、B59 |
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key（SKILL.md 的 name）、name（界面上的名称，SKILL.md 的 metadata.title）、description（适用说明，SKILL.md 的 description；只存自定义或导入的技能的，内置技能的在模板里；迁移 0009）、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能是 `packages/prompts/templates/skills/` 下的 SKILL.md 文件，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
-| `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
+| `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、open_threads（章尾留给后面的事，JSON 数组；迁移 0013）、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
 | `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
 | `relationship` | id、from_id 与 to_id（两项不同的设定，删除设定时级联删除）、category（亲属、情感、师承、友盟、竞争、敌对、从属、其他）、label（读作“from 是 to 的 label”）、mutual（双方相同）、description、secret（读者还不知道）、适用章节范围（valid_from/to_chapter_id，章节删除时置空）、version；迁移 0012 | B73 |
 | `relation_position` | entity_id（删除设定时级联删除）、x、y（关系图逻辑坐标 1000×640 中作者拖定的位置，只影响显示）；迁移 0012 | B73 |
@@ -720,6 +720,7 @@ pnpm m0 report --experiment m0/experiments/round1.yaml --out m0/packets/round1
 | --- | --- | --- |
 | M5-01 | AI 助手：动作协议与工具、执行循环与确认、对话保存、右侧对话框；三栏布局与视觉规范、作品列表的卡片与开书入口 | B69、B70，验收“AI 助手” |
 | M5-02 | AI 助手的进一步能力：流式显示与进展、选中文字的修改、审核与回退等七个新动作、外观设置；章节旁抽屉打开时的排版；浏览器预览 | B71，验收“AI 助手” |
+| M5-06 | 吸纳 oh-story-claudecode 与 zenstory 的长处：确定性的文字体检、写手输出的标点规范化、长篇记忆的“章尾留给后面的事”、AI 助手记下作者偏好与规避词 | B74，验收“文字体检与连贯” |
 | M5-05 | 人物关系网：迁移 0012 与仓储、关系页（关系图、按章节查看、表单与列表）、写手与“AI 写作”的上下文、AI 助手的关系动作、快速成书生成关系 | B73，验收“人物关系网” |
 | M5-04 | 按设计模式自查与修正：正文旁抽屉改为可辨识联合、只读原因的派生函数；任务中心的任务句柄（时间取自时钟端口），AI 助手的每一轮登记为任务；助手动作改为命令表；场景配置的 JSON 解析移到应用层并以 Result 表达；设定种类与计划状态的名称统一 | 设计模式第六章、第七章 |
 | M5-03 | 界面的打磨：可拖动调整宽度的左栏与助手、收起左栏；Radix 的下拉菜单与提示气泡、Lucide 图标；配色、悬停、滚动条、章节工具栏、空白章节的提示、标题栏随外观 | B72 |
@@ -735,6 +736,13 @@ M5-02 的设计：
 - 外观：作品列表文件的偏好增加 `theme`（跟随系统、浅色、深色），根元素的 `data-theme` 决定样式表用哪套变量；顶栏与作品列表的按钮依次轮换。
 - 排版：左栏 240 像素、助手 360 像素；章节旁打开抽屉时收窄页边，正文窄于 560 像素时纸面的内边距随之变小。
 - 浏览器预览（只在开发时用，不随产品发布）：`apps/desktop/preview.html` 与 `src/preview/`，用 sql.js（MIT，开发依赖）在内存里执行与桌面端相同的迁移（FTS5 的 0002 跳过，查找不可用），经真实的用例写入演示数据，演示模型按关键词给出动作，便于在浏览器里看界面与截图。
+
+M5-06 的设计（参考 oh-story-claudecode 与 zenstory，均为 MIT；只借鉴思路，代码按复调的结构重写）：
+
+- 文字体检：`packages/writing/src/prose.ts` 的 `proseChecks`（纯函数），并入审核的 `runProgramChecks`。引号里的对白先遮住（长度不变，位置对得上原文）再匹配。AI 常见句式为轻微（章尾的总结或预告为一般），生成退化与写作材料泄漏为严重；同一规则在一段里只报第一处、一章最多报五处。复读、截断等不靠模型就能确定的问题，模型审核没有完成时也能标出。
+- 标点规范化：`packages/writing/src/punctuation.ts` 的 `normalizePunctuation`，只在紧挨汉字或中文标点处改（半角逗号句号问叹号冒号分号、省略号、破折号、汉字间的空格、半角括号、成对的直引号），数字、英文与网址不动；规范两次与一次相同。写手成章与写手修订写入正文前使用；候选稿由作者看过再接受，不改。
+- 章尾留给后面的事：`chapter_memory` 版本 2 输出 `openThreads`（最多 5 条，较早的输出按空处理），迁移 0013 加列；`writer_chapter` 版本 7 带上上一章记忆里的这一项，要求接住、不能当作没发生。
+- 作者偏好：只记作者明确说出的（不从改稿推测，参考 oh-story 的作者记忆）。存为自定义写作技能 `author-preferences`（“作者偏好”，SKILL.md，一行一条），写手每章随技能带上，作者在“写作技能”页可以改；`assistant_turn` 版本 4 增加 `remember_preference`（重复的不再记）与 `add_avoid_phrases`，现状里列出已记下的偏好。
 
 M5-05 的设计（人物关系网）：
 

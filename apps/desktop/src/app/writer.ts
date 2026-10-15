@@ -29,7 +29,7 @@ import {
   type SavedParagraph,
   type SqlPort,
 } from '@fudiao/store';
-import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
+import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -166,6 +166,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       toPlant: fs.toPlant.map((f) => ({ title: f.title, content: f.content })),
       toPayoff: fs.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal, progress: progressOf.get(f.id) ?? [] })),
       mustNotReveal: fs.mustNotReveal.map((f) => f.reveal.trim()),
+      // 上一章结尾留下的事（B74）：上一章的长篇记忆里有就带上。
+      openThreads: previous === undefined ? [] : (memoryOf.get(previous.id)?.openThreads ?? []),
       previousEnding,
     });
   }
@@ -236,7 +238,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
         if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
         if (result.value.outcome === 'cancelled') return outcome('cancelled', null);
         if (result.value.outcome === 'refused') return outcome('stopped', `模型拒绝了这一段${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`);
-        const texts = splitParagraphs(result.value.text);
+        // 写手的输出先规范标点（B74），再按行切成段落。
+        const texts = splitParagraphs(normalizePunctuation(result.value.text));
         if (texts.length === 0) return outcome('stopped', '模型没有写出文字');
 
         const written = await appendWrittenSegment(port, { plan, paragraphs: paragraphs.value, texts, newId: () => deps.ids.next() }, ctx());

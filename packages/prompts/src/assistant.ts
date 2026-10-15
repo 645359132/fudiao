@@ -73,6 +73,9 @@ export const AssistantAction = z.discriminatedUnion('tool', [
     validTo: opt,
   }),
   z.object({ tool: z.literal('delete_relationship'), relationship: text }),
+  // 作者偏好
+  z.object({ tool: z.literal('remember_preference'), preference: text }),
+  z.object({ tool: z.literal('add_avoid_phrases'), phrases: z.array(z.string()) }),
   // 计划与写作
   z.object({ tool: z.literal('save_chapter_plan'), chapter: text, goal: text, beats: z.array(z.string()), cast: list, targetWords: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('plan_chapters'), count: z.number().int().positive(), wordsPerChapter: z.number().int().positive().nullable() }),

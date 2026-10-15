@@ -247,6 +247,8 @@ export const ChapterMemoryOutput = z.object({
   summary: z.string(),
   cast: z.array(z.object({ name: z.string(), state: z.string() })),
   foreshadows: z.array(z.object({ title: z.string(), progress: z.string() })),
+  /** 章尾留给后面的事（B74）。较早的输出没有这一项。 */
+  openThreads: z.array(z.string()).default([]),
 });
 export type ChapterMemoryOutput = z.infer<typeof ChapterMemoryOutput>;
 
