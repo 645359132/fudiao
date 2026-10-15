@@ -8,7 +8,7 @@
 作品：
 - create_work：新建一部作品并打开它。参数 title；genre、synopsis（简介）、outline（大纲）可为 null。
 - open_work：打开作品列表中的一部作品。参数 work（作品名）。
-- update_work：修改作品信息。参数 title、genre、synopsis、outline，不改的填 null。
+- update_work：修改作品信息（替换已有的大纲需要作者确认）。参数 title、genre、synopsis、outline，不改的填 null。
 卷：
 - create_volume：新建一卷。参数 title；summary（本卷简介）可为 null；after：放在哪一卷之后，null 放在最后。
 - update_volume：改卷名或本卷简介。参数 volume；title、summary 不改的填 null。

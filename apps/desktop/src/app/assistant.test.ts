@@ -305,6 +305,24 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.relationsView()).relationships).toEqual([]);
   });
 
+  it('改写已有的大纲前请作者确认（大纲没有历史版本）；大纲是空的或没改大纲时直接执行', async () => {
+    const { deps, app } = await setup();
+    step(deps, { message: '', actions: [{ tool: 'update_work', title: null, genre: null, synopsis: null, outline: '开端：林舟当玉。' }], done: true });
+    expect(value(await app.sendToAssistant('写个大纲')).pending).toBe(false);
+    expect(value(await app.reloadWork()).project.outline).toBe('开端：林舟当玉。');
+
+    step(deps, { message: '', actions: [{ tool: 'update_work', title: null, genre: '古风悬疑', synopsis: null, outline: null }], done: true });
+    expect(value(await app.sendToAssistant('类型改成古风悬疑')).pending).toBe(false);
+
+    step(deps, { message: '要换大纲。', actions: [{ tool: 'update_work', title: null, genre: null, synopsis: null, outline: '开端：沈砚下山。' }], done: false });
+    const paused = value(await app.sendToAssistant('大纲重写'));
+    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: '用新写的大纲替换现在的作品大纲（原来的大纲不保留）' });
+    expect(value(await app.reloadWork()).project.outline).toBe('开端：林舟当玉。');
+    step(deps, { message: '换好了。', actions: [], done: true });
+    value(await app.resolveAssistantPending(true));
+    expect(value(await app.reloadWork()).project.outline).toBe('开端：沈砚下山。');
+  });
+
   it('作者偏好（B74）：记下明确说出的偏好（重复的不再记），写进“作者偏好”技能与现状；作者讨厌的说法加进规避词表', async () => {
     const { deps, app } = await setup();
     step(deps, {

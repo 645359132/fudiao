@@ -378,6 +378,12 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_work: {
     label: '修改作品信息',
+    confirm: async (action, env) => {
+      if (action.outline === null) return null;
+      const w = await env.host.reloadWork();
+      const current = w.ok ? w.value.project.outline.trim() : '';
+      return current !== '' && current !== action.outline.trim() ? '用新写的大纲替换现在的作品大纲（原来的大纲不保留）' : null;
+    },
     async run(action, env) {
       const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
       if (action.title !== null) patch.title = action.title;
