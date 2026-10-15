@@ -1,7 +1,7 @@
 // 写作类 AI 任务的上下文构建（需求 B18，施工文档第五章“上下文构建”）：收集候选条目 → 按信息状态过滤 → 按相关性排序 →
 // 按预算裁剪，同时产出上下文清单（纳入与排除的条目及原因），供作者查看与增减。纯函数，不访问存储与编辑器。
 
-export type ContextKind = 'project' | 'chapter_notes' | 'before' | 'selection' | 'after' | 'previous_chapter' | 'entity' | 'fact';
+export type ContextKind = 'project' | 'chapter_notes' | 'before' | 'selection' | 'after' | 'previous_chapter' | 'entity' | 'relation' | 'fact';
 
 export type ContextItem = {
   /** 在一次构建中唯一，作者的增减按它记录，例如 `entity:<设定标识>`。 */
@@ -53,6 +53,20 @@ export type WritingContextInput = {
     readonly mentions: number;
     readonly nearSelection: boolean;
   }[];
+  /**
+   * 人物关系网（B73）中适用于本章、至少一端在本章出现的关系：读作“from 是 to 的 label”，mutual 时“from 与 to：label”；
+   * bothPresent 表示两端都在本章出现；secret 为读者还不知道的关系。
+   */
+  readonly relations?: readonly {
+    readonly id: string;
+    readonly from: string;
+    readonly to: string;
+    readonly label: string;
+    readonly mutual: boolean;
+    readonly description: string;
+    readonly secret: boolean;
+    readonly bothPresent: boolean;
+  }[];
   /** 与本章出现的设定相关、适用于本章的事实。 */
   readonly facts: readonly {
     readonly id: string;
@@ -63,7 +77,7 @@ export type WritingContextInput = {
   }[];
 };
 
-const KIND_ORDER: readonly ContextKind[] = ['project', 'chapter_notes', 'previous_chapter', 'entity', 'fact', 'before', 'selection', 'after'];
+const KIND_ORDER: readonly ContextKind[] = ['project', 'chapter_notes', 'previous_chapter', 'entity', 'relation', 'fact', 'before', 'selection', 'after'];
 
 /** 收集候选条目。相关性：选区附近的设定高于只在本章出现的；近的章节高于远的。 */
 export function collectWritingCandidates(input: WritingContextInput): ContextItem[] {
@@ -104,6 +118,17 @@ export function collectWritingCandidates(input: WritingContextInput): ContextIte
       text: lines.length === 0 ? '' : `${e.name}：${lines.join('；')}`,
       required: false,
       relevance: (e.nearSelection ? 80 : 60) + Math.min(e.mentions, 10),
+    });
+  }
+  for (const r of input.relations ?? []) {
+    const sentence = r.mutual ? `${r.from}与${r.to}：${r.label}` : `${r.from}是${r.to}的${r.label}`;
+    add({
+      id: `relation:${r.id}`,
+      kind: 'relation',
+      title: `关系：${sentence}`,
+      text: `${sentence}${r.description.trim() === '' ? '' : `（${r.description.trim()}）`}${r.secret ? '〔隐秘：读者还不知道，只能暗示，不要点明〕' : ''}`,
+      required: false,
+      relevance: r.bothPresent ? 58 : 52,
     });
   }
   for (const f of input.facts) {

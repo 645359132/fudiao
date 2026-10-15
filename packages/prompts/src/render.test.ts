@@ -486,6 +486,28 @@ describe('写手成章（B59）', () => {
     expect(bare).toContain('本卷：第一卷 雨夜\n本章：');
     expect(bare).not.toContain('本卷梗概');
   });
+
+  it('人物关系（B73）写在出场人物之后；单向读作“甲是乙的…”，双向读作“甲与乙：…”；有隐秘关系时要求不要点明；没有关系时省略', () => {
+    const text = fullText(
+      unwrap(
+        renderWriterChapter({
+          ...base,
+          relations: [
+            { from: '钱四', to: '林舟', label: '债主', mutual: false, description: ' 林舟欠他三百两 ', secret: false },
+            { from: '林舟', to: '阿青', label: '旧识', mutual: true, description: '', secret: false },
+            { from: '钱四', to: '阿青', label: '生父', mutual: false, description: '', secret: true },
+          ],
+        }),
+      ),
+    );
+    expect(text).toContain('人物关系：\n- 钱四是林舟的债主（林舟欠他三百两）\n- 林舟与阿青：旧识\n- 钱四是阿青的生父〔隐秘〕\n');
+    expect(text.indexOf('出场人物：')).toBeLessThan(text.indexOf('人物关系：'));
+    expect(text).toContain('标为“隐秘”的人物关系读者还不知道');
+    const plain = fullText(unwrap(renderWriterChapter({ ...base, relations: [{ from: '林舟', to: '阿青', label: '旧识', mutual: true, description: '', secret: false }] })));
+    expect(plain).not.toContain('隐秘');
+    const none = fullText(unwrap(renderWriterChapter(base)));
+    expect(none).not.toContain('人物关系');
+  });
 });
 
 describe('长篇记忆（B66）', () => {

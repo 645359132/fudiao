@@ -19,13 +19,15 @@ import {
   type ForeshadowFields,
   type PlanFields,
   type ProjectPatch,
+  type RelationshipFields,
   type SearchResult,
   type SqlPort,
   type Volume,
 } from '@fudiao/store';
 import type { AppError } from './errors';
-import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL } from './labels';
+import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppliedDraft, PlanningView } from './planning';
+import type { RelationsView } from './relations';
 import type { ReviewOutcome } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
@@ -86,6 +88,10 @@ export type AssistantHost = {
   deleteEntity(entity: Entity): Promise<Result<unknown, AppError>>;
   listFacts(): Promise<Result<Fact[], AppError>>;
   createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
+  relationsView(): Promise<Result<RelationsView, AppError>>;
+  addRelationship(fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
+  updateRelationship(relationship: RelationsView['relationships'][number], fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
+  deleteRelationship(relationship: RelationsView['relationships'][number]): Promise<Result<RelationsView, AppError>>;
   planningView(): Promise<Result<PlanningView, AppError>>;
   savePlan(chapterId: string, fields: PlanFields): Promise<Result<unknown, AppError>>;
   draftPlans(request: { readonly chapterCount: number; readonly wordsPerChapter: number }, options?: CallOptions): Promise<Result<PlanDraftData, AppError>>;
@@ -146,6 +152,10 @@ export function describeForModel(e: AppError): string {
 
 const failWith = (e: AppError): Outcome => failed(describeForModel(e));
 
+/** 关系读成一句话（给模型看的结果说明）。 */
+const relationText = (r: { readonly fromId: string; readonly toId: string; readonly label: string; readonly mutual: boolean }, nameOf: ReadonlyMap<string, string>) =>
+  r.mutual ? `${nameOf.get(r.fromId) ?? ''}与${nameOf.get(r.toId) ?? ''}：${r.label}` : `${nameOf.get(r.fromId) ?? ''}是${nameOf.get(r.toId) ?? ''}的${r.label}`;
+
 /** 太长的文字只留开头与结尾。 */
 export const clip = (text: string, limit: number): { readonly text: string; readonly clipped: boolean } =>
   text.length <= limit ? { text, clipped: false } : { text: `${text.slice(0, limit / 2)}\n……\n${text.slice(-limit / 2)}`, clipped: true };
@@ -194,6 +204,28 @@ export function toolEnv(host: AssistantHost, project: () => SqlPort | null, even
     changed: () => events.onEffect?.({ kind: 'changed' }),
     call: () => (events.signal === undefined ? {} : { signal: events.signal }),
   };
+}
+
+/**
+ * 关系适用的章节范围：给出章节时按名称或标识找，“不限”表示取消限制，null 表示不改（新建时即不限）。
+ */
+async function chapterRange(
+  env: ToolEnv,
+  from: string | null,
+  to: string | null,
+  current: { readonly from: string | null; readonly to: string | null },
+): Promise<Result<{ readonly from: string | null; readonly to: string | null }, string>> {
+  const resolve = async (ref: string | null, now: string | null): Promise<Result<string | null, string>> => {
+    if (ref === null) return ok(now);
+    if (ref.trim() === '不限' || ref.trim() === '') return ok(null);
+    const c = await env.findChapter(ref);
+    return c.ok ? ok(c.value.id) : c;
+  };
+  const f = await resolve(from, current.from);
+  if (!f.ok) return f;
+  const t = await resolve(to, current.to);
+  if (!t.ok) return t;
+  return ok({ from: f.value, to: t.value });
 }
 
 type ActionOf<K extends AssistantTool> = Extract<AssistantAction, { readonly tool: K }>;
@@ -538,7 +570,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   delete_entity: {
     label: '删除设定',
-    confirm: (action) => `删除设定“${action.entity}”`,
+    confirm: (action) => `删除设定“${action.entity}”（与它有关的人物关系也一并删除）`,
     async run(action, env) {
       const e = await env.findEntity(action.entity);
       if (!e.ok) return failed(e.error);
@@ -583,6 +615,82 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (!created.ok) return failWith(created.error);
       env.changed();
       return done(`已记为候选事实，等作者在“事实”页确认${missing.length > 0 ? `；这些设定没有找到，没有关联：${missing.join('、')}` : ''}。`);
+    },
+  },
+  add_relationship: {
+    label: '建立人物关系',
+    async run(action, env) {
+      const from = await env.findEntity(action.from);
+      if (!from.ok) return failed(from.error);
+      const to = await env.findEntity(action.to);
+      if (!to.ok) return failed(to.error);
+      const range = await chapterRange(env, action.validFrom, action.validTo, { from: null, to: null });
+      if (!range.ok) return failed(range.error);
+      const added = await env.host.addRelationship({
+        fromId: from.value.id,
+        toId: to.value.id,
+        category: action.category,
+        label: action.label,
+        mutual: action.mutual,
+        description: action.description ?? '',
+        secret: action.secret,
+        validFromChapterId: range.value.from,
+        validToChapterId: range.value.to,
+      });
+      if (!added.ok) return failWith(added.error);
+      env.changed();
+      const created = added.value.relationships.at(-1);
+      const nameOf = new Map([
+        [from.value.id, from.value.name],
+        [to.value.id, to.value.name],
+      ]);
+      return done(`已建立关系：${relationText({ fromId: from.value.id, toId: to.value.id, label: action.label.trim(), mutual: action.mutual }, nameOf)}${created === undefined ? '' : `[${created.id}]`}。`);
+    },
+  },
+  update_relationship: {
+    label: '修改人物关系',
+    async run(action, env) {
+      const view = await env.host.relationsView();
+      if (!view.ok) return failWith(view.error);
+      const current = view.value.relationships.find((r) => r.id === action.relationship.trim());
+      if (current === undefined) return failed(`找不到关系“${action.relationship}”：请用当前状态里关系前面的标识`);
+      const range = await chapterRange(env, action.validFrom, action.validTo, { from: current.validFromChapterId, to: current.validToChapterId });
+      if (!range.ok) return failed(range.error);
+      const fields: RelationshipFields = {
+        fromId: current.fromId,
+        toId: current.toId,
+        category: action.category ?? current.category,
+        label: action.label ?? current.label,
+        mutual: action.mutual ?? current.mutual,
+        description: action.description ?? current.description,
+        secret: action.secret ?? current.secret,
+        validFromChapterId: range.value.from,
+        validToChapterId: range.value.to,
+      };
+      const updated = await env.host.updateRelationship(current, fields);
+      if (!updated.ok) return failWith(updated.error);
+      env.changed();
+      const nameOf = new Map(view.value.members.map((m) => [m.id, m.name]));
+      return done(`已修改关系：${relationText(fields, nameOf)}（${RELATION_CATEGORY_LABEL[fields.category]}${fields.secret ? '，隐秘' : ''}）。`);
+    },
+  },
+  delete_relationship: {
+    label: '删除人物关系',
+    confirm: async (action, env) => {
+      const view = await env.host.relationsView();
+      const r = view.ok ? view.value.relationships.find((x) => x.id === action.relationship.trim()) : undefined;
+      if (r === undefined || !view.ok) return `删除关系“${action.relationship}”`;
+      return `删除关系“${relationText(r, new Map(view.value.members.map((m) => [m.id, m.name])))}”`;
+    },
+    async run(action, env) {
+      const view = await env.host.relationsView();
+      if (!view.ok) return failWith(view.error);
+      const current = view.value.relationships.find((r) => r.id === action.relationship.trim());
+      if (current === undefined) return failed(`找不到关系“${action.relationship}”：请用当前状态里关系前面的标识`);
+      const deleted = await env.host.deleteRelationship(current);
+      if (!deleted.ok) return failWith(deleted.error);
+      env.changed();
+      return done(`已删除关系：${relationText(current, new Map(view.value.members.map((m) => [m.id, m.name])))}。`);
     },
   },
   save_chapter_plan: {

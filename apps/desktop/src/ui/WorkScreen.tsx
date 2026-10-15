@@ -4,6 +4,7 @@ import { DEFAULT_LAYOUT, LAYOUT_LIMITS } from '../app/library';
 import { ChapterSidebar } from './ChapterSidebar';
 import { BackupsPanel } from './BackupsPanel';
 import { FactsPanel } from './FactsPanel';
+import { RelationsPanel } from './RelationsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
@@ -32,6 +33,7 @@ export function WorkScreen() {
   const openBackups = useApp((s) => s.openBackups);
   const openSettings = useApp((s) => s.openSettings);
   const openFacts = useApp((s) => s.openFacts);
+  const openRelations = useApp((s) => s.openRelations);
   const openSourceStats = useApp((s) => s.openSourceStats);
   const openSearch = useApp((s) => s.openSearch);
   const openModelServices = useApp((s) => s.openModelServices);
@@ -140,7 +142,8 @@ export function WorkScreen() {
                 {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '快速成书：想法、大纲、章节计划、写完、导出')}
                 {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
                 {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
-                {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
+                {navItem('relations', 'relations', '人物关系', panel === 'relations', () => void openRelations(), undefined, '人物关系网：谁和谁是什么关系，随章节变化')}
+            {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
                 {navItem('simulation', 'stage', '推演', panel === 'simulation', () => void openSimulation(), undefined, '角色推演：设置场景，让角色各自依据所知行动')}
                 {navItem('search', 'search', '查找', panel === 'search', () => void openSearch(), undefined, '全文查找（Ctrl+F）')}
               </nav>
@@ -158,7 +161,7 @@ export function WorkScreen() {
             />
           </>
         )}
-        <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</div></main>
+        <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'relations' ? <RelationsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : <ChapterPanel />}</div></main>
       </div>
     </div>
   );

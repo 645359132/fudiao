@@ -148,6 +148,8 @@ fudiao/
 | `writing_skill` | id、key（SKILL.md 的 name）、name（界面上的名称，SKILL.md 的 metadata.title）、description（适用说明，SKILL.md 的 description；只存自定义或导入的技能的，内置技能的在模板里；迁移 0009）、instruction、enabled、builtin_version（内置技能的模板版本）、version；内置技能是 `packages/prompts/templates/skills/` 下的 SKILL.md 文件，作品中只存启用状态与作者的改动；迁移 0005 | B61 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
 | `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
+| `relationship` | id、from_id 与 to_id（两项不同的设定，删除设定时级联删除）、category（亲属、情感、师承、友盟、竞争、敌对、从属、其他）、label（读作“from 是 to 的 label”）、mutual（双方相同）、description、secret（读者还不知道）、适用章节范围（valid_from/to_chapter_id，章节删除时置空）、version；迁移 0012 | B73 |
+| `relation_position` | entity_id（删除设定时级联删除）、x、y（关系图逻辑坐标 1000×640 中作者拖定的位置，只影响显示）；迁移 0012 | B73 |
 | `evaluation` | id、run_id 或 batch_id（恰有其一，各自唯一）、answers（JSON：评分 characters、intel、twist、adopt 为 1 至 5，edits 为 0 至 3，不评为空，与 M0 评价表相同；可采用的转折与其他说明；保存时记下的运行、采纳进作品的故事事件、调用次数、费用、费用未知的次数与模型耗时）、version；迁移 0008 | B46 |
 | `paragraph_fts` | FTS5 trigram 虚拟表，内容来自 `paragraph.text`；rowid 取自 `paragraph_search_key` 的整数主键（`paragraph` 的隐式 rowid 在 VACUUM 后可能改变）；由触发器随段落的插入、修改与删除维护，是派生数据，不导出（迁移 0002） | B04 |
 
@@ -718,6 +720,7 @@ pnpm m0 report --experiment m0/experiments/round1.yaml --out m0/packets/round1
 | --- | --- | --- |
 | M5-01 | AI 助手：动作协议与工具、执行循环与确认、对话保存、右侧对话框；三栏布局与视觉规范、作品列表的卡片与开书入口 | B69、B70，验收“AI 助手” |
 | M5-02 | AI 助手的进一步能力：流式显示与进展、选中文字的修改、审核与回退等七个新动作、外观设置；章节旁抽屉打开时的排版；浏览器预览 | B71，验收“AI 助手” |
+| M5-05 | 人物关系网：迁移 0012 与仓储、关系页（关系图、按章节查看、表单与列表）、写手与“AI 写作”的上下文、AI 助手的关系动作、快速成书生成关系 | B73，验收“人物关系网” |
 | M5-04 | 按设计模式自查与修正：正文旁抽屉改为可辨识联合、只读原因的派生函数；任务中心的任务句柄（时间取自时钟端口），AI 助手的每一轮登记为任务；助手动作改为命令表；场景配置的 JSON 解析移到应用层并以 Result 表达；设定种类与计划状态的名称统一 | 设计模式第六章、第七章 |
 | M5-03 | 界面的打磨：可拖动调整宽度的左栏与助手、收起左栏；Radix 的下拉菜单与提示气泡、Lucide 图标；配色、悬停、滚动条、章节工具栏、空白章节的提示、标题栏随外观 | B72 |
 
@@ -732,6 +735,15 @@ M5-02 的设计：
 - 外观：作品列表文件的偏好增加 `theme`（跟随系统、浅色、深色），根元素的 `data-theme` 决定样式表用哪套变量；顶栏与作品列表的按钮依次轮换。
 - 排版：左栏 240 像素、助手 360 像素；章节旁打开抽屉时收窄页边，正文窄于 560 像素时纸面的内边距随之变小。
 - 浏览器预览（只在开发时用，不随产品发布）：`apps/desktop/preview.html` 与 `src/preview/`，用 sql.js（MIT，开发依赖）在内存里执行与桌面端相同的迁移（FTS5 的 0002 跳过，查找不可用），经真实的用例写入演示数据，演示模型按关键词给出动作，便于在浏览器里看界面与截图。
+
+M5-05 的设计（人物关系网）：
+
+- 数据：关系是作者的设定，不是派生结论，作者直接编辑；随两端的设定级联删除。适用的章节范围与事实相同，用书中顺序判断（`packages/writing` 的 `relationApplies`、`relationsForCast`，纯函数）。
+- 写手：`writer_chapter` 版本 6 在出场人物之后列出“人物关系”（本章成立、至少一端出场，两端都出场的在前，最多 30 条），句子由模板按 mutual 拼出；有隐秘关系时加一条要求：可以暗示，不要点明，除非本章要揭晓。
+- “AI 写作”的上下文：`packages/context` 增加 `relation` 类条目（排在设定之后、事实之前，两端都在本章出现的优先），作者在“AI 上下文”里照样可以增减。
+- AI 助手：`assistant_turn` 版本 3；动作 `add_relationship`、`update_relationship`（“不限”取消章节限制）、`delete_relationship`（须确认，说明里读出这条关系）；现状里列出已有关系（最多 80 条，附类别、隐秘与章节范围）；`open_page` 可以打开关系页。
+- 快速成书：`book_seed` 版本 2 输出 `relationships`（较早的输出没有，按空处理）；采用骨架时按名字（含别名）建立，对不上的、重复的跳过；骨架编辑器里可以删去。
+- 关系图：`app/relations.ts` 的 `layoutGraph`（力导向，起点按顺序排在圆上、迭代次数固定，结果只由输入决定；斥力在一定距离内起作用，向中心收拢；没有关系的人物排在底部一行；没有拖定位置时缩放到画布中间）。拖动人物即固定位置（`relation_position`），可以取消或整张图重新排布。排布用全部关系，按章节查看时人物不跳动。同一对人物之间的几条关系画成错开的弧线，单向带箭头，隐秘为虚线，颜色按类别。
 
 M5-03 的设计：
 

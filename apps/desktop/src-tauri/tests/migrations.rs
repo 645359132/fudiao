@@ -273,6 +273,8 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "sim_snapshot",
         "beat_sheet",
         "assistant_message",
+        "relationship",
+        "relation_position",
         "evaluation",
         "schema_migrations",
         // 全文查找的派生表（schema.ts 的 DERIVED_TABLES）。

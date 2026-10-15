@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 5
+version: 6
 task: writer
 ---
 @@system
@@ -15,6 +15,9 @@ task: writer
 {{#hasMustNotReveal}}
 - “不得说破”的内容一个字也不要写出来，也不要写出能直接推出它的话。
 {{/hasMustNotReveal}}
+{{#hasSecretRelations}}
+- 标为“隐秘”的人物关系读者还不知道：可以留下暗示，不要在正文里点明，除非本章目标或情节点要揭晓它。
+{{/hasSecretRelations}}
 {{#hasSkills}}
 
 写作技能（每项先写明适用的情况；按情况运用，不适用的这次不用）：
@@ -35,6 +38,12 @@ task: writer
 - {{name}}{{#description}}：{{description}}{{/description}}{{#state}}（最近的状态：{{state}}）{{/state}}
 {{/cast}}
 {{/hasCast}}
+{{#hasRelations}}
+人物关系：
+{{#relations}}
+- {{#mutual}}{{from}}与{{to}}：{{label}}{{/mutual}}{{^mutual}}{{from}}是{{to}}的{{label}}{{/mutual}}{{#description}}（{{description}}）{{/description}}{{#secret}}〔隐秘〕{{/secret}}
+{{/relations}}
+{{/hasRelations}}
 {{#hasFacts}}
 已确认的事实：
 {{#facts}}

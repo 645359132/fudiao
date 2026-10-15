@@ -87,7 +87,7 @@ describe('AI 助手（B69）', () => {
     step(deps, { message: '要删掉钱四，请确认。', actions: [{ tool: 'delete_entity', entity: '钱四' }], done: false });
     const paused = value(await app.sendToAssistant('把钱四删了'));
     expect(paused.pending).toBe(true);
-    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: '删除设定“钱四”' });
+    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: '删除设定“钱四”（与它有关的人物关系也一并删除）' });
     expect(value(await app.listEntities()).map((e) => e.name)).toContain('钱四');
 
     step(deps, { message: '已删除钱四。', actions: [], done: true });
@@ -265,6 +265,44 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.reloadWork()).chapters.map((c) => c.title)).toEqual(['第一章 夜叩', '废稿']);
     expect(deps.exported.map((e) => e.name)).toEqual(['当铺夜谈.md']);
     expect(deps.exported[0]?.content).toContain('门在他身后合上了。');
+  });
+
+  it('人物关系（B73）：建立、修改与删除（删除须确认）；现状里列出已有的关系与适用章节', async () => {
+    const { deps, app } = await setup();
+    const chapterId = await chapterWith(app, '第一章 夜叩', '门在他身后合上了。');
+    value(await app.createEntity('character', '林舟'));
+    value(await app.createEntity('character', '钱四'));
+    step(deps, {
+      message: '关系建好了。',
+      actions: [
+        { tool: 'add_relationship', from: '钱四', to: '林舟', category: 'enemy', label: '债主', mutual: false, description: '林舟欠他三百两', secret: true, validFrom: '夜叩', validTo: null },
+        { tool: 'add_relationship', from: '林舟', to: '无名氏', category: 'ally', label: '朋友', mutual: true, description: null, secret: false, validFrom: null, validTo: null },
+      ],
+      done: true,
+    });
+    step(deps, { message: '无名氏还没有人物卡片。', actions: [], done: true });
+    const added = value(await app.sendToAssistant('钱四是林舟的债主，林舟和无名氏是朋友'));
+    expect(lastResults(added.items)).toMatchObject({
+      results: [
+        { tool: 'add_relationship', ok: true, detail: expect.stringContaining('钱四是林舟的债主') },
+        { tool: 'add_relationship', ok: false, detail: expect.stringContaining('找不到设定“无名氏”') },
+      ],
+    });
+    const relation = value(await app.relationsView()).relationships[0]!;
+    expect(relation).toMatchObject({ category: 'enemy', label: '债主', secret: true, description: '林舟欠他三百两', validFromChapterId: chapterId });
+    // 第二步给模型的现状里列出了这条关系。
+    expect(body(deps, 1)).toContain(`[${relation.id}] 钱四是林舟的债主（敌对，隐秘，《第一章 夜叩》起）`);
+
+    step(deps, { message: '', actions: [{ tool: 'update_relationship', relationship: relation.id, category: null, label: '旧债主', mutual: null, description: null, secret: false, validFrom: '不限', validTo: null }], done: true });
+    value(await app.sendToAssistant('债已经还清了'));
+    expect(value(await app.relationsView()).relationships[0]).toMatchObject({ label: '旧债主', secret: false, description: '林舟欠他三百两', validFromChapterId: null });
+
+    step(deps, { message: '要删掉这条关系。', actions: [{ tool: 'delete_relationship', relationship: relation.id }], done: false });
+    const paused = value(await app.sendToAssistant('删掉他们的关系'));
+    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: '删除关系“钱四是林舟的旧债主”' });
+    step(deps, { message: '删了。', actions: [], done: true });
+    value(await app.resolveAssistantPending(true));
+    expect(value(await app.relationsView()).relationships).toEqual([]);
   });
 
   it('章节计划、移动章节与打开页面：计划写入、章节进卷、界面收到打开的请求', async () => {

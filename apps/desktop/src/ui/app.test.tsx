@@ -8,7 +8,7 @@ import { fakeModel } from '@fudiao/engine/testing';
 import type { LlmPort } from '@fudiao/llm';
 import { anthropicChunks, openaiChunks } from '@fudiao/llm/testing';
 import { renderConnectionTest, SELF_TEST_EXPECTED } from '@fudiao/prompts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { createAppService } from '../app/service';
 import { createAppStore } from '../state/store';
@@ -23,6 +23,8 @@ Element.prototype.getClientRects = noRects;
 Range.prototype.getClientRects = noRects;
 Range.prototype.getBoundingClientRect = zeroRect;
 document.elementFromPoint = () => null;
+// 界面测试在 jsdom 里驱动整个应用，整套测试并行时较慢：单个测试的上限放宽到 20 秒。
+vi.setConfig({ testTimeout: 20_000 });
 // Radix 的菜单与气泡用 ResizeObserver 量尺寸；jsdom 没有，给一个空实现。
 globalThis.ResizeObserver ??= class {
   observe() {}
@@ -1907,6 +1909,67 @@ describe('分卷的界面（B68）', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('“第一卷 雨夜”里还有章节');
     await user.click(within(nav()).getByRole('button', { name: '删除 第二卷' }));
     await waitFor(() => expect(store.getState().work?.volumes.map((v) => v.title)).toEqual(['第一卷 雨夜']));
+  });
+});
+
+describe('人物关系网（B73）', () => {
+  it('新建关系：表单预览读法；图上出现人物与关系；点关系修改、点人物看他的关系；按章节查看；删除须先确认', async () => {
+    const { store, user } = start();
+    await createWork(user, '雨夜');
+    await addChapter(user, '第一章');
+    await addChapter(user, '第二章');
+    await store.getState().createEntity('character', '林舟');
+    await store.getState().createEntity('character', '钱四');
+    await store.getState().createEntity('organization', '聚宝当铺');
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '人物关系' }));
+    const page = await screen.findByRole('region', { name: '人物关系' });
+    expect(within(page).getByText(/还没有关系/)).toBeTruthy();
+
+    await user.click(within(page).getByRole('button', { name: '新建关系' }));
+    const form = within(page).getByRole('form', { name: '新建关系' });
+    const people = store.getState().relations!.members;
+    const idOf = (name: string) => people.find((m) => m.name === name)!.id;
+    await user.selectOptions(within(form).getByRole('combobox', { name: '一方' }), idOf('钱四'));
+    await user.selectOptions(within(form).getByRole('combobox', { name: '另一方' }), idOf('林舟'));
+    await user.selectOptions(within(form).getByRole('combobox', { name: '类别' }), 'enemy');
+    await user.type(within(form).getByRole('textbox', { name: '称谓' }), '债主');
+    expect(within(form).getByLabelText('读作').textContent).toBe('钱四是林舟的债主');
+    await user.click(within(form).getByRole('checkbox', { name: /隐秘/ }));
+    const chapters = store.getState().work!.chapters;
+    await user.selectOptions(within(form).getByRole('combobox', { name: '从哪一章起' }), chapters[1]!.id);
+    await user.click(within(form).getByRole('button', { name: '保存关系' }));
+    await waitFor(() => expect(store.getState().relations?.relationships).toHaveLength(1));
+    expect(store.getState().relations?.relationships[0]).toMatchObject({ category: 'enemy', label: '债主', secret: true, validFromChapterId: chapters[1]!.id });
+
+    // 图上：三个设定都是节点，关系可以点。
+    const graph = within(page).getByRole('img', { name: '人物关系图' });
+    for (const name of ['林舟（人物）', '钱四（人物）', '聚宝当铺（组织）']) expect(within(graph).getByRole('button', { name })).toBeTruthy();
+    expect(within(page).getByRole('list', { name: '关系列表' }).textContent).toContain('钱四是林舟的债主隐秘');
+
+    // 按章节查看：从第二章起的关系在第一章时不成立。
+    await user.selectOptions(within(page).getByRole('combobox', { name: '按章节查看' }), chapters[0]!.id);
+    expect(within(graph).queryByRole('button', { name: '钱四是林舟的债主' })).toBeNull();
+    await user.selectOptions(within(page).getByRole('combobox', { name: '按章节查看' }), chapters[1]!.id);
+    await user.click(within(graph).getByRole('button', { name: '钱四是林舟的债主' }));
+
+    const edit = within(page).getByRole('form', { name: '修改关系' });
+    await user.clear(within(edit).getByRole('textbox', { name: '称谓' }));
+    await user.type(within(edit).getByRole('textbox', { name: '称谓' }), '旧债主');
+    await user.click(within(edit).getByRole('button', { name: '保存关系' }));
+    await waitFor(() => expect(store.getState().relations?.relationships[0]?.label).toBe('旧债主'));
+
+    // 点人物：侧栏列出他的关系，可以以他为一方新建。
+    await user.click(within(graph).getByRole('button', { name: '林舟（人物）' }));
+    expect(within(page).getByRole('list', { name: '林舟的关系' }).textContent).toContain('钱四是林舟的旧债主');
+    await user.click(within(page).getByRole('button', { name: '与他人新建关系' }));
+    expect(within(page).getByRole<HTMLSelectElement>('combobox', { name: '一方' }).value).toBe(idOf('林舟'));
+    await user.click(within(page).getByRole('button', { name: '取消' }));
+
+    await user.click(within(within(page).getByRole('list', { name: '关系列表' })).getByRole('button', { name: /旧债主/ }));
+    await user.click(within(page).getByRole('button', { name: '删除关系' }));
+    const confirm = within(page).getByRole('group', { name: '确认删除' });
+    await user.click(within(confirm).getByRole('button', { name: '确定删除' }));
+    await waitFor(() => expect(store.getState().relations?.relationships).toEqual([]));
   });
 });
 

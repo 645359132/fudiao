@@ -71,6 +71,19 @@ export async function seedDemo(app: AppService): Promise<{ readonly mainWorkId: 
   const rule = must(await app.createEntity('rule', '江湖令')).created;
   must(await app.updateEntity(rule, { description: '持令者可以调动沿河三十六处码头；令牌失落即作废，失主要付出性命。' }));
 
+  const master = must(await app.createEntity('character', '青崖老人')).created;
+  must(await app.updateEntity(master, { description: '沈砚的师父，十年前替朝廷背了黑锅，临终只留下一句话。' }));
+  const all = must(await app.listEntities());
+  const id = (name: string) => all.find((e) => e.name === name)!.id;
+  const rel = (fromId: string, toId: string, category: 'family' | 'mentor' | 'ally' | 'enemy' | 'affiliation', label: string, extra: { mutual?: boolean; secret?: boolean; description?: string } = {}) =>
+    app.addRelationship({ fromId, toId, category, label, mutual: extra.mutual ?? false, description: extra.description ?? '', secret: extra.secret ?? false, validFromChapterId: null, validToChapterId: null });
+  must(await rel(id('青崖老人'), id('沈砚'), 'mentor', '师父', { description: '一手带大' }));
+  must(await rel(id('卫七'), id('沈砚'), 'family', '叔父', { secret: true, description: '沈砚还不知道' }));
+  must(await rel(id('沈砚'), id('卫七'), 'ally', '同路人', { mutual: true }));
+  must(await rel(id('卫七'), id('漕帮'), 'affiliation', '前账房'));
+  must(await rel(id('漕帮'), id('沈砚'), 'enemy', '追杀者'));
+  must(await rel(id('青崖老人'), id('漕帮'), 'enemy', '旧仇'));
+
   const shen = must(await app.listEntities()).find((e) => e.name === '沈砚')!;
   for (const [i, goal] of ['沈砚下山，茶棚里有人认出了他的袍子', '渡口夜雨，卫七收下了信却不肯开船', '当铺里，掌柜认出了师父的玉佩'].entries()) {
     must(await app.savePlan(chapters[i]!.id, { goal, castIds: [shen.id], beats: [goal], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));

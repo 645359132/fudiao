@@ -13,7 +13,10 @@ export const ENTITY_KINDS_FOR_ASSISTANT = ['character', 'location', 'organizatio
 export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as const;
 
 /** 助手可以打开的页面。 */
-export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
+export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
+
+/** 人物关系的类别（与存储层的取值相同）。 */
+export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;
 
 export const AssistantAction = z.discriminatedUnion('tool', [
   // 读取
@@ -45,6 +48,31 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('update_entity'), entity: text, name: opt, description: opt, aliases: list }),
   z.object({ tool: z.literal('delete_entity'), entity: text }),
   z.object({ tool: z.literal('add_fact'), kind: z.enum(['world', 'belief']), content: text, holder: opt, subjects: list }),
+  // 人物关系
+  z.object({
+    tool: z.literal('add_relationship'),
+    from: text,
+    to: text,
+    category: z.enum(RELATION_KINDS_FOR_ASSISTANT),
+    label: text,
+    mutual: z.boolean(),
+    description: opt,
+    secret: z.boolean(),
+    validFrom: opt,
+    validTo: opt,
+  }),
+  z.object({
+    tool: z.literal('update_relationship'),
+    relationship: text,
+    category: z.enum(RELATION_KINDS_FOR_ASSISTANT).nullable(),
+    label: opt,
+    mutual: z.boolean().nullable(),
+    description: opt,
+    secret: z.boolean().nullable(),
+    validFrom: opt,
+    validTo: opt,
+  }),
+  z.object({ tool: z.literal('delete_relationship'), relationship: text }),
   // 计划与写作
   z.object({ tool: z.literal('save_chapter_plan'), chapter: text, goal: text, beats: z.array(z.string()), cast: list, targetWords: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('plan_chapters'), count: z.number().int().positive(), wordsPerChapter: z.number().int().positive().nullable() }),

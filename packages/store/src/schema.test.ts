@@ -43,6 +43,13 @@ const sample: Statement[] = [
   s("INSERT INTO chapter_snapshot (id, chapter_id, reason, title, paragraphs, created_at) VALUES ('01S1', '01C1', 'manual', '第一章 雨夜', '[{\"id\":\"01G1\",\"text\":\"雨下得更紧了。\"}]', ?)", NOW),
   s("INSERT INTO entity (id, kind, name, aliases, data, locked, created_at, updated_at) VALUES ('01E1', 'character', '沈砚', '[\"沈先生\"]', '{\"age\":28}', 1, ?, ?)", ...T),
   s("INSERT INTO entity (id, kind, name, created_at, updated_at) VALUES ('01E2', 'location', '当铺', ?, ?)", ...T),
+  s("INSERT INTO entity (id, kind, name, created_at, updated_at) VALUES ('01E3', 'character', '钱四', ?, ?)", ...T),
+  s(
+    "INSERT INTO relationship (id, from_id, to_id, category, label, mutual, description, secret, valid_from_chapter_id, valid_to_chapter_id, version, created_at, updated_at) VALUES ('01R1', '01E3', '01E1', 'enemy', '债主', 0, '沈砚欠他赌债', 1, '01C1', NULL, 2, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO relationship (id, from_id, to_id, category, label, mutual, created_at, updated_at) VALUES ('01R2', '01E1', '01E3', 'ally', '旧识', 1, ?, ?)", ...T),
+  s("INSERT INTO relation_position (entity_id, x, y, updated_at) VALUES ('01E1', 120.5, -40, ?)", NOW),
   s("INSERT INTO fact (id, kind, subject_ids, content, status, created_at, updated_at) VALUES ('01F1', 'world', '[\"01E1\"]', '沈砚欠下赌债', 'confirmed', ?, ?)", ...T),
   s(
     "INSERT INTO fact (id, kind, holder_id, content, modality, confidence, valid_from_chapter_id, valid_from_label, valid_from_order, valid_to_label, status, review_reason, created_at, updated_at) VALUES ('01F2', 'belief', '01E1', '掌柜认得那块玉', 'inferred', 0.6, '01C1', '第三年春', 3.5, '入冬以前', 'needs_review', '设定条目“当铺”已修改', ?, ?)",
@@ -430,6 +437,14 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 11 导出的数据（没有人物关系）导入后关系与位置为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'relationship' && name !== 'relation_position'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 11, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, relationship: [], relation_position: [] });
   });
 
   it('结构版本 10 导出的数据（没有助手的对话）导入后对话为空', async () => {

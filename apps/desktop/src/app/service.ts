@@ -1,5 +1,6 @@
 // 应用服务层（DESIGN_PATTERNS 第六章）：每个作者操作对应一个用例，协调作品列表、作品库与仓储。
 // 界面组件只调用这里的用例、订阅状态，不直接访问仓储或端口。
+import { relationUseCases } from './relations';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
@@ -12,6 +13,7 @@ import {
   createFact,
   deleteFact,
   listFacts,
+  listRelationships,
   reviewStaleFacts,
   setFactStatus,
   updateFact,
@@ -303,8 +305,10 @@ export function createAppService(deps: AppDeps) {
     if (!entities.ok) return err(repo(entities.error));
     const facts = await listFacts(port);
     if (!facts.ok) return err(repo(facts.error));
+    const relationships = await listRelationships(port);
+    if (!relationships.ok) return err(repo(relationships.error));
     const input = gatherWritingInput(
-      { project: project.value, chapters: chapters.value, chapterId, paragraphs: paragraphs.value, entities: entities.value, facts: facts.value },
+      { project: project.value, chapters: chapters.value, chapterId, paragraphs: paragraphs.value, entities: entities.value, facts: facts.value, relationships: relationships.value },
       selection,
     );
     if (input === null) return err({ code: 'not_found' });
@@ -325,6 +329,7 @@ export function createAppService(deps: AppDeps) {
   const narration = narrationUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const simEvaluation = simEvaluationUseCases(deps, () => session?.port ?? null);
+  const relations = relationUseCases(deps, () => session?.port ?? null);
   const simulation = simulationUseCases({
     deps,
     project: () => session?.port ?? null,
@@ -349,6 +354,7 @@ export function createAppService(deps: AppDeps) {
     ...review,
     ...simulation,
     ...simEvaluation,
+    ...relations,
 
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {

@@ -63,6 +63,29 @@ describe('写手成章', () => {
     expect(deps.llmRequests).toHaveLength(2);
   });
 
+  it('请求中带上本章成立、至少一端出场的人物关系（B73）；隐秘的关系要求只暗示', async () => {
+    const { deps, app, c1, c2 } = await setup();
+    const lin = value(await app.listEntities()).find((e) => e.name === '林舟')!;
+    const qian = value(await app.createEntity('character', '钱四')).created;
+    const qing = value(await app.createEntity('character', '阿青')).created;
+    const ghost = value(await app.createEntity('character', '无关的人')).created;
+    const rel = (fromId: string, toId: string, label: string, extra: Partial<{ secret: boolean; validFromChapterId: string; validToChapterId: string }> = {}) =>
+      app.addRelationship({ fromId, toId, category: 'enemy', label, mutual: false, description: '', secret: false, validFromChapterId: null, validToChapterId: null, ...extra });
+    value(await rel(qian.id, lin.id, '债主'));
+    value(await rel(qing.id, lin.id, '亲妹妹', { secret: true }));
+    value(await rel(qian.id, lin.id, '岳父', { validToChapterId: c1 }));
+    value(await rel(qian.id, ghost.id, '东家'));
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'));
+    value(await app.writeChapter(c2));
+    const body = bodyText(deps, 0);
+    expect(body).toContain('钱四是林舟的债主');
+    expect(body).toContain('阿青是林舟的亲妹妹〔隐秘〕');
+    expect(body).toContain('标为“隐秘”的人物关系读者还不知道');
+    // 第一章结束就不成立的关系、两端都不出场的关系不带。
+    expect(body).not.toContain('岳父');
+    expect(body).not.toContain('东家');
+  });
+
   it('请求中带上作品材料：技能、规避词、人物设定、前文梗概、上一章结尾、要埋的伏笔与不得说破的内容；第二段带上已写的结尾与情节点的进度', async () => {
     const { deps, app, c2 } = await setup();
     deps.llmResponses.push(reply('林舟又叩响了门。'), reply('林舟转身走进雨里。'));

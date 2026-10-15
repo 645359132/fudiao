@@ -25,6 +25,12 @@
 {{^entities}}
 - 还没有设定
 {{/entities}}
+{{#hasRelations}}
+人物关系（共 {{relationCount}} 条{{#relationsOmitted}}，只列出前面的部分{{/relationsOmitted}}）：
+{{#relations}}
+- [{{id}}] {{#mutual}}{{from}}与{{to}}：{{label}}{{/mutual}}{{^mutual}}{{from}}是{{to}}的{{label}}{{/mutual}}（{{category}}{{#secret}}，隐秘{{/secret}}{{#range}}，{{range}}{{/range}}）
+{{/relations}}
+{{/hasRelations}}
 {{#hasTrashed}}
 回收站：{{#trashed}}[{{id}}] {{title}}；{{/trashed}}
 {{/hasTrashed}}

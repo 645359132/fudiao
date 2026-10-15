@@ -242,6 +242,19 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['id'],
     json: ['payload'],
   },
+  {
+    // 人物关系网（迁移 0012）：引用设定与章节，排在它们之后。
+    name: 'relationship',
+    columns: ['id', 'from_id', 'to_id', 'category', 'label', 'mutual', 'description', 'secret', 'valid_from_chapter_id', 'valid_to_chapter_id', ...VERSIONED],
+    primaryKey: ['id'],
+    json: [],
+  },
+  {
+    name: 'relation_position',
+    columns: ['entity_id', 'x', 'y', 'updated_at'],
+    primaryKey: ['entity_id'],
+    json: [],
+  },
 ];
 
 /**

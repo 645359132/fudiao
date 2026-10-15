@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Chapter, Entity, Fact, Project, StoredModel } from '@fudiao/store';
+import type { Chapter, Entity, Fact, Project, Relationship, StoredModel } from '@fudiao/store';
 import { AFTER_CHARS, BEFORE_CHARS, contextBudget, DEFAULT_CONTEXT_BUDGET, gatherWritingInput, splitAround } from './writing-context';
 
 const paragraphs = [
@@ -97,6 +97,37 @@ describe('收集写作上下文', () => {
       ['待复核', 'needs_review'],
     ]);
     expect(gatherWritingInput({ project, chapters, chapterId: 'gone', paragraphs, entities, facts }, null)).toBeNull();
+  });
+
+  it('人物关系（B73）：适用于本章、至少一端在本章出现；两端都出现时标出', () => {
+    const rel = (id: string, fromId: string, toId: string, patch: Partial<Relationship> = {}): Relationship => ({
+      id,
+      fromId,
+      toId,
+      category: 'ally',
+      label: id,
+      mutual: false,
+      description: '',
+      secret: false,
+      validFromChapterId: null,
+      validToChapterId: null,
+      version: 1,
+      createdAt: '',
+      updatedAt: '',
+      ...patch,
+    });
+    const relationships = [
+      rel('两端出现', 'shen', 'shop'),
+      rel('一端出现', 'lin', 'shen', { secret: true }),
+      rel('都不出现', 'lin', 'ghost'),
+      rel('之后才成立', 'shen', 'shop', { validFromChapterId: 'c4' }),
+      rel('已经结束', 'shen', 'shop', { validToChapterId: 'c2' }),
+    ];
+    const input = gatherWritingInput({ project, chapters, chapterId: 'c3', paragraphs, entities, facts: [], relationships }, null);
+    expect(input?.relations?.map((r) => [r.id, r.from, r.to, r.bothPresent, r.secret])).toEqual([
+      ['两端出现', '沈砚', '当铺', true, false],
+      ['一端出现', '林晚', '沈砚', false, true],
+    ]);
   });
 
   it('预算：默认模型上下文长度的 60%，最多 32,000；没有默认模型时用保守值', () => {

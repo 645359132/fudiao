@@ -10,3 +10,5 @@ export { dropHandled, paragraphLabel, resolveModelIssues } from './review';
 export { DEFAULT_AVOID_PHRASES, effectiveAvoidPhrases } from './avoid';
 export type { SegmentPlan } from './segments';
 export { DEFAULT_CHAPTER_WORDS, planSegments, SEGMENT_WORDS, splitParagraphs } from './segments';
+export type { RelationLike } from './relations';
+export { relationApplies, relationsForCast } from './relations';

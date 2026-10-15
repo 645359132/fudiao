@@ -63,7 +63,8 @@ describe('快速成书（B67）', () => {
     deps.llmRequests.length = 0;
     deps.llmResponses.push(reply(JSON.stringify(seed)));
     const drafted = value(await app.draftBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '古风悬疑', chapterCount: 12, wordsPerChapter: 3000 }));
-    expect(drafted).toEqual(seed);
+    // 较早格式的输出没有人物关系，解析后为空。
+    expect(drafted).toEqual({ ...seed, relationships: [] });
     const body = JSON.stringify(deps.llmRequests[0]?.body ?? {});
     for (const part of ['落魄书生当铺夜遇旧主', '计划写 12 章', '已有的人物：林舟；', '作品名：新作品']) expect(body).toContain(part);
     expect(value(await app.reloadWork()).project).toMatchObject({ outline: '', title: '新作品' });
@@ -74,7 +75,7 @@ describe('快速成书（B67）', () => {
     const { app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;
     value(await app.updateEntity(lin, { description: '作者写的说明', aliases: ['林生'] }));
-    expect(value(await app.applyBookSeed({ ...seed, characters: [...seed.characters, { name: '林生', description: '别名' }] }))).toEqual({ created: 1 });
+    expect(value(await app.applyBookSeed({ ...seed, characters: [...seed.characters, { name: '林生', description: '别名' }] }))).toEqual({ created: 1, relations: 0 });
     const work = value(await app.reloadWork());
     expect(work.project).toMatchObject({ title: '当铺夜谈', genre: '古风悬疑', synopsis: seed.synopsis, outline: seed.outline });
     expect(work.entry.title).toBe('当铺夜谈');
@@ -86,8 +87,44 @@ describe('快速成书（B67）', () => {
       ]),
     );
     expect(characters).toHaveLength(2);
-    expect(value(await app.applyBookSeed(seed))).toEqual({ created: 0 });
+    expect(value(await app.applyBookSeed(seed))).toEqual({ created: 0, relations: 0 });
     expect(await app.applyBookSeed({ ...seed, outline: ' ' })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('大纲不能为空') } });
+  });
+
+  it('骨架里的人物关系（B73）按名字（含别名）建立；对不上的人物、自己连自己与重复的关系跳过', async () => {
+    const { app } = await setup();
+    const relation = (from: string, to: string, label: string, extra: Partial<NonNullable<BookSeed['relationships']>[number]> = {}) => ({
+      from,
+      to,
+      label,
+      category: 'enemy' as const,
+      mutual: false,
+      secret: false,
+      description: '',
+      ...extra,
+    });
+    const withRelations: BookSeed = {
+      ...seed,
+      characters: [...seed.characters, { name: '阿青', description: '' }],
+      relationships: [
+        relation('钱四', '林舟', '债主', { description: '林舟欠他三百两' }),
+        relation('钱四', '阿青', '生父', { category: 'family', secret: true }),
+        relation('林舟', '阿青', '旧识', { category: 'ally', mutual: true }),
+        relation('林舟', '无名氏', '仇人'),
+        relation('林舟', '林舟', '自己'),
+        relation('钱四', '林舟', '债主'),
+      ],
+    };
+    expect(value(await app.applyBookSeed(withRelations))).toEqual({ created: 3, relations: 3 });
+    const view = value(await app.relationsView());
+    const name = new Map(view.members.map((m) => [m.id, m.name]));
+    expect(view.relationships.map((r) => [name.get(r.fromId), r.label, name.get(r.toId), r.category, r.mutual, r.secret, r.description])).toEqual([
+      ['钱四', '债主', '林舟', 'enemy', false, false, '林舟欠他三百两'],
+      ['钱四', '生父', '阿青', 'family', false, true, ''],
+      ['林舟', '旧识', '阿青', 'ally', true, false, ''],
+    ]);
+    // 再采用一次不重复建。
+    expect(value(await app.applyBookSeed(withRelations))).toEqual({ created: 0, relations: 0 });
   });
 
   it('采用骨架之后，计划草稿里的人物都能对上设定', async () => {

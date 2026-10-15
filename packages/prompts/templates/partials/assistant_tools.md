@@ -27,6 +27,10 @@
 - update_entity：修改设定。参数 entity；name、description、aliases 不改的填 null。锁定的设定不能改。
 - delete_entity：删除设定（需要作者确认）。参数 entity。
 - add_fact：记一条事实，作为“候选”交给作者在事实页确认。参数 kind（world 世界事实、belief 某人的认知）；content；holder：belief 的持有人；subjects：涉及的设定列表，可为 null。
+人物关系（人物与人物、人物与组织之间的关系网，写手写章时会带上出场人物的关系）：
+- add_relationship：新建一条关系，读作“from 是 to 的 label”（例如 from 青崖老人、to 沈砚、label 师父）；双方相同的关系（朋友、同门）mutual 为 true，读作“from 与 to：label”。参数 from、to（设定的名字或标识）；category（family 亲属、romance 情感、mentor 师承、ally 友盟、rival 竞争、enemy 敌对、affiliation 从属、other 其他）；label（称谓，简短）；mutual；description：来历与现状，可为 null；secret：读者还不知道这层关系时为 true（写手只暗示不点明）；validFrom、validTo：从哪一章起、到哪一章止成立（关系会变，例如结盟后反目），不限时为 null。
+- update_relationship：修改一条关系。参数 relationship（关系的标识，见当前状态）；其余参数同 add_relationship，不改的填 null；validFrom、validTo 填“不限”表示取消章节限制。
+- delete_relationship：删除一条关系（需要作者确认）。参数 relationship。
 计划与写作：
 - save_chapter_plan：写入或替换一章的章节计划。参数 chapter；goal（本章目标）；beats（情节点，按顺序）；cast（出场人物的名字列表，可为 null）；targetWords（字数，可为 null）。
 - plan_chapters：由作品大纲生成全书的章节计划草稿并采用（会覆盖已有的计划，作品已有计划时需要作者确认；10 章及以上自动分卷）。参数 count（章数）；wordsPerChapter（每章字数，可为 null，默认 3000）。
@@ -39,4 +43,4 @@
 导出：
 - export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：
-- open_page：打开一个页面。参数 page：book 成书、planning 计划、settings 设定、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。
+- open_page：打开一个页面。参数 page：book 成书、planning 计划、settings 设定、relations 人物关系、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。

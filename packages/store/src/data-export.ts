@@ -51,6 +51,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   // 0010：新增卷；章节增加 volume_id（旧数据都是未分卷）。
   // 0011：新增 AI 助手的对话，旧版本导出的数据中没有，导入为空。
   11: (tables) => tables,
+  // 0012：新增人物关系与关系图上的位置，旧版本导出的数据中没有，导入为空。
+  12: (tables) => tables,
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
 };
 

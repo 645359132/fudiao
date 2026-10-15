@@ -223,8 +223,24 @@ export const BookSeedOutput = z.object({
   synopsis: z.string(),
   outline: z.string(),
   characters: z.array(z.object({ name: z.string(), description: z.string() })),
+  /** 主要人物之间的关系（B73）：读作“from 是 to 的 label”，mutual 时双方相同。较早的输出没有这一项。 */
+  relationships: z
+    .array(
+      z.object({
+        from: z.string(),
+        to: z.string(),
+        category: z.enum(['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other']),
+        label: z.string(),
+        mutual: z.boolean(),
+        secret: z.boolean(),
+        description: z.string(),
+      }),
+    )
+    .default([]),
 });
 export type BookSeedOutput = z.infer<typeof BookSeedOutput>;
+/** 作者编辑中的骨架：关系可以省略。 */
+export type BookSeedData = z.input<typeof BookSeedOutput>;
 
 /** 长篇记忆（B66）：一章的梗概、出场人物在章末的状态、有进展的伏笔。人物与伏笔用名字指代。 */
 export const ChapterMemoryOutput = z.object({

@@ -27,7 +27,7 @@ function SeedEditor({ seed }: { readonly seed: BookSeed }) {
   const setCharacter = (i: number, p: Partial<BookSeed['characters'][number]>) => patch({ characters: seed.characters.map((c, j) => (j === i ? { ...c, ...p } : c)) });
   return (
     <div className="panel-form" role="form" aria-label="作品骨架">
-      <p className="muted">这是根据你的想法生成的骨架，改到满意再采用。采用后写入作品信息，人物加进“设定”。</p>
+      <p className="muted">这是根据你的想法生成的骨架，改到满意再采用。采用后写入作品信息，人物加进“设定”，关系加进“人物关系”。</p>
       <label>
         作品名
         <input value={seed.title} onChange={(e) => patch({ title: e.currentTarget.value })} />
@@ -59,6 +59,27 @@ function SeedEditor({ seed }: { readonly seed: BookSeed }) {
           添加人物
         </button>
       </fieldset>
+      {(seed.relationships ?? []).length === 0 ? null : (
+        <fieldset>
+          <legend>人物关系</legend>
+          <p className="muted">采用后建进“人物关系”，之后可以在关系图上修改。</p>
+          <ul className="relation-list" aria-label="骨架里的人物关系">
+            {(seed.relationships ?? []).map((r, i) => (
+              <li key={i} className={`book-relation rel-${r.category}`}>
+                <span className="rel-dot" aria-hidden="true" />
+                <span>
+                  {r.mutual ? `${r.from}与${r.to}：${r.label}` : `${r.from}是${r.to}的${r.label}`}
+                  {r.secret ? '（隐秘）' : ''}
+                  {r.description.trim() === '' ? null : <span className="muted"> · {r.description}</span>}
+                </span>
+                <button type="button" className="ghost" aria-label={`删去关系 ${r.from}与${r.to}`} onClick={() => patch({ relationships: (seed.relationships ?? []).filter((_, j) => j !== i) })}>
+                  删去
+                </button>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+      )}
       <div className="form-actions">
         <button type="button" disabled={busy || seed.outline.trim() === ''} onClick={() => void apply()}>
           采用骨架

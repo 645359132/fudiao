@@ -2,7 +2,8 @@
 // 交给 packages/context 按预算选入。设定的提及用编辑器的设定名匹配器计算，与正文高亮的规则一致。
 import type { WritingContextInput } from '@fudiao/context';
 import { createEntityMatcher } from '@fudiao/editor';
-import type { Chapter, Entity, Fact, Project, StoredModel } from '@fudiao/store';
+import type { Chapter, Entity, Fact, Project, Relationship, StoredModel } from '@fudiao/store';
+import { relationApplies } from '@fudiao/writing';
 
 /** 编辑器中的选区（或光标，此时 from 与 to 相同），位置是段落标识加段内下标。 */
 export type EditorSelection = {
@@ -57,6 +58,8 @@ export type WritingSources = {
   readonly paragraphs: readonly Para[];
   readonly entities: readonly Entity[];
   readonly facts: readonly Fact[];
+  /** 人物关系网（B73）；省略时不带关系。 */
+  readonly relationships?: readonly Relationship[];
 };
 
 export function gatherWritingInput(src: WritingSources, selection: EditorSelection | null): WritingContextInput | null {
@@ -85,6 +88,11 @@ export function gatherWritingInput(src: WritingSources, selection: EditorSelecti
     return f.subjectIds.some((s) => presentIds.has(s)) || (f.holderId !== null && presentIds.has(f.holderId));
   });
 
+  // 适用于本章、至少一端在本章出现的人物关系。
+  const order = new Map(src.chapters.map((c, i) => [c.id, i]));
+  const nameOf = new Map(src.entities.map((e) => [e.id, e.name]));
+  const relations = (src.relationships ?? []).filter((r) => relationApplies(r, index, order) && (presentIds.has(r.fromId) || presentIds.has(r.toId)));
+
   return {
     project: { title: src.project.title, genre: src.project.genre, synopsis: src.project.synopsis, outline: src.project.outline },
     chapter: { id: chapter.id, title: chapter.title, summary: chapter.summary, notes: chapter.notes },
@@ -101,6 +109,16 @@ export function gatherWritingInput(src: WritingSources, selection: EditorSelecti
       attributes: e.attributes,
       mentions: mentions.get(e.id) ?? 0,
       nearSelection: nearIds.has(e.id),
+    })),
+    relations: relations.map((r) => ({
+      id: r.id,
+      from: nameOf.get(r.fromId) ?? '',
+      to: nameOf.get(r.toId) ?? '',
+      label: r.label,
+      mutual: r.mutual,
+      description: r.description,
+      secret: r.secret,
+      bothPresent: presentIds.has(r.fromId) && presentIds.has(r.toId),
     })),
     facts: facts.map((f) => ({
       id: f.id,

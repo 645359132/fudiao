@@ -6,7 +6,7 @@ import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
 import type { ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
-import type { ForeshadowFields, PlanFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
+import type { ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection } from '../app/assistant';
@@ -16,6 +16,7 @@ import type { Beat } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import type { Layout, Preferences, Theme } from '../app/library';
+import type { RelationsView } from '../app/relations';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
 import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
@@ -101,7 +102,7 @@ export type AppState = {
   readonly library: LibraryView | null;
   readonly work: WorkView | null;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'relations' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -122,6 +123,8 @@ export type AppState = {
   readonly drawer: ChapterDrawer | null;
   /** 当前作品的事实（打开作品与设定变化后重新读取，其中的待复核标记是最新的）。 */
   readonly facts: readonly Fact[];
+  /** 人物关系网（B73）：关系、可以作为一端的设定与作者拖定的位置（打开关系页时读取）。 */
+  readonly relations: RelationsView | null;
   /** 事实页中选中的事实；“new” 表示正在新建。 */
   readonly selectedFactId: string | null;
   readonly wordCount: number;
@@ -382,6 +385,14 @@ export type AppState = {
   readonly setAvoidPhrases: (phrases: readonly string[] | null) => Promise<boolean>;
 
   readonly openFacts: (factId?: string) => Promise<void>;
+  /** 保存正文后打开人物关系页。 */
+  readonly openRelations: () => Promise<void>;
+  /** 新建（id 为 null）或修改一条关系。返回是否成功。 */
+  readonly saveRelationship: (id: string | null, fields: RelationshipFields) => Promise<boolean>;
+  readonly deleteRelationship: (id: string) => Promise<boolean>;
+  /** 记下（at 为 null 时取消）一项设定在关系图上的位置。 */
+  readonly placeRelationNode: (entityId: string, at: { readonly x: number; readonly y: number } | null) => Promise<void>;
+  readonly resetRelationLayout: () => Promise<void>;
   readonly selectFact: (id: string | null) => void;
   readonly saveFact: (id: string | null, input: FactInput) => Promise<boolean>;
   readonly setFactStatus: (id: string, status: FactStatus) => Promise<void>;
@@ -640,6 +651,7 @@ export function createAppStore(service: AppService): AppStore {
       planning: '计划页',
       settings: '设定页',
       facts: '事实页',
+      relations: '人物关系页',
       simulation: '推演页',
       search: '查找页',
       skills: '写作技能页',
@@ -669,6 +681,10 @@ export function createAppStore(service: AppService): AppStore {
       if (get().panel === 'planning' || get().panel === 'book') {
         const planning = await service.planningView();
         if (planning.ok) set({ planning: planning.value });
+      }
+      if (get().panel === 'relations') {
+        const relations = await service.relationsView();
+        if (relations.ok) set({ relations: relations.value });
       }
     }
     /** 打开一章（不在这一章时重新载入正文）。助手工作期间正文只读，不需要先保存。 */
@@ -704,6 +720,7 @@ export function createAppStore(service: AppService): AppStore {
             planning: get().openPlanning,
             settings: get().openSettings,
             facts: get().openFacts,
+            relations: get().openRelations,
             simulation: get().openSimulation,
             search: get().openSearch,
             skills: get().openSkills,
@@ -811,6 +828,7 @@ export function createAppStore(service: AppService): AppStore {
       backups: null,
       entities: [],
       selectedEntityId: null,
+      relations: null,
       drawer: null,
       facts: [],
       selectedFactId: null,
@@ -898,7 +916,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1703,6 +1721,29 @@ export function createAppStore(service: AppService): AppStore {
         return skill === undefined ? false : run(service.deleteCustomSkill(skill), (skills) => ({ skills }));
       },
       setAvoidPhrases: (phrases) => run(service.setAvoidPhrases(phrases), (skills) => ({ skills })),
+      async openRelations() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.relationsView(), (relations) => ({ relations, panel: 'relations', chapterContent: null, drawer: null }));
+      },
+      async saveRelationship(id, fields) {
+        const current = id === null ? null : (get().relations?.relationships.find((r) => r.id === id) ?? null);
+        if (id !== null && current === null) return false;
+        return run(current === null ? service.addRelationship(fields) : service.updateRelationship(current, fields), (relations) => ({ relations }));
+      },
+      async deleteRelationship(id) {
+        const current = get().relations?.relationships.find((r) => r.id === id);
+        if (current === undefined) return false;
+        return run(service.deleteRelationship(current), (relations) => ({ relations }));
+      },
+      async placeRelationNode(entityId, at) {
+        // 拖动只影响显示：不进入忙碌状态，失败时说明。
+        const result = await service.setRelationPosition(entityId, at);
+        if (result.ok) set({ relations: result.value });
+        else set({ message: describeError(result.error) });
+      },
+      async resetRelationLayout() {
+        await run(service.resetRelationLayout(), (relations) => ({ relations }));
+      },
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;
         set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawer: null });

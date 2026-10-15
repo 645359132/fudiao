@@ -12,9 +12,9 @@ import {
 } from '@fudiao/prompts';
 import { partialStringField, type LlmStreamEvent } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
-import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, type SqlPort } from '@fudiao/store';
+import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
 import { clip, confirmationFor, runTool, toolEnv, type AssistantHost, type ToolEvents } from './assistant-tools';
-import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL } from './labels';
+import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -48,6 +48,7 @@ const HISTORY_LIMIT = 60;
 /** 现状中最多列出的章节与设定。 */
 const MAX_LISTED_CHAPTERS = 120;
 const MAX_LISTED_ENTITIES = 200;
+const MAX_LISTED_RELATIONS = 80;
 /** 现状中作者选中的文字最多给出的字数：太长时给开头与结尾。 */
 const SELECTION_LIMIT = 2_000;
 export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
@@ -98,7 +99,7 @@ export function assistantUseCases({
     if (port === null) return { works, work: null };
     const work = await host.reloadWork();
     if (!work.ok) return { works, work: null };
-    const [entities, plans, lengths] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port)]);
+    const [entities, plans, lengths, relations] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port), listRelationships(port)]);
     const planOf = new Map(plans.ok ? plans.value.map((p) => [p.chapterId, PLAN_STATUS_LABEL[p.status]]) : []);
     const lengthOf = new Map(lengths.ok ? lengths.value.map((l) => [l.chapterId, l.length]) : []);
     const volumeTitle = new Map(work.value.volumes.map((v) => [v.id, v.title]));
@@ -106,6 +107,11 @@ export function assistantUseCases({
     const omitted = all.length > MAX_LISTED_CHAPTERS;
     const chapters = omitted ? [...all.slice(0, 40), ...all.slice(-(MAX_LISTED_CHAPTERS - 40))] : all;
     const p = work.value.project;
+    const nameOf = new Map((entities.ok ? entities.value : []).map((e) => [e.id, e.name]));
+    const titleOf = new Map(work.value.chapters.map((c) => [c.id, c.title]));
+    const rels = relations.ok ? relations.value : [];
+    const range = (from: string | null, to: string | null) =>
+      [from === null ? '' : `《${titleOf.get(from) ?? ''}》起`, to === null ? '' : `至《${titleOf.get(to) ?? ''}》`].join('');
     const chosen = events.selection ?? null;
     const chosenChapter = chosen === null ? undefined : work.value.chapters.find((c) => c.id === chosen.chapterId);
     let selection: NonNullable<AssistantState['work']>['selection'] = null;
@@ -116,6 +122,17 @@ export function assistantUseCases({
       works,
       work: {
         trashed: work.value.trashed.slice(0, 30).map((c) => ({ id: c.id, title: c.title })),
+        relations: rels.slice(0, MAX_LISTED_RELATIONS).map((r) => ({
+          id: r.id,
+          from: nameOf.get(r.fromId) ?? '',
+          to: nameOf.get(r.toId) ?? '',
+          label: r.label,
+          mutual: r.mutual,
+          secret: r.secret,
+          category: RELATION_CATEGORY_LABEL[r.category],
+          range: range(r.validFromChapterId, r.validToChapterId),
+        })),
+        relationCount: rels.length,
         selection,
         title: p.title,
         genre: p.genre,

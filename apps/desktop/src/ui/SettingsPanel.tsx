@@ -87,7 +87,7 @@ function EntityForm({ entity }: { readonly entity: Entity }) {
           <button type="submit">保存设定</button>
           {confirmingDelete ? (
             <span className="confirm" role="group" aria-label="确认删除">
-              <span>删除后无法恢复。</span>
+              <span>删除后无法恢复，与它有关的人物关系也一并删除。</span>
               <button type="button" onClick={() => void remove(entity.id)}>
                 确定删除
               </button>

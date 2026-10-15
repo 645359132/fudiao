@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "2",
-    "sha256": "a46647542e31bfb3a2eef2eb1847d5c4a1fd3f8606aafd189df9fff25a14798d"
+    "version": "3",
+    "sha256": "dacdbd30e7fcc4bf79475e2adbbce5bc6db504673820a0f656781be9f3ccc9ce"
   },
   "baseline_scene": {
     "version": "2",
@@ -20,8 +20,8 @@
     "sha256": "31dbf4b01127e8821f526fef2e2d4fb527fd245f085cd8dd387d5b13da70d454"
   },
   "book_seed": {
-    "version": "1",
-    "sha256": "794e27d872060d2a4398b7eb843b2b225b5d95be40528edb722ad9d5ada3c56a"
+    "version": "2",
+    "sha256": "e8404afb1ae2a5f4af92bf6ddef0fdb1bf5ff3f53afd0710eeab5379dea1d8dd"
   },
   "candidate_text": {
     "version": "3",
@@ -84,8 +84,8 @@
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
   },
   "writer_chapter": {
-    "version": "5",
-    "sha256": "d65fbab4e20e9d94378b58a8964fe8b68ad1e3e3985d2a28ecd8b5ca3e8ecf0a"
+    "version": "6",
+    "sha256": "69d25e63da2c9d2af73a9175249a6b7706b15b514a3e81529041d796f48b16bf"
   },
   "writer_revise": {
     "version": "1",

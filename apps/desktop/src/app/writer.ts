@@ -18,6 +18,7 @@ import {
   listFacts,
   listForeshadows,
   listParagraphs,
+  listRelationships,
   ensureBuiltinSkills,
   resetWriterRun,
   restoreSnapshot,
@@ -28,7 +29,7 @@ import {
   type SavedParagraph,
   type SqlPort,
 } from '@fudiao/store';
-import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, planSegments, splitParagraphs } from '@fudiao/writing';
+import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -39,6 +40,8 @@ export const TAIL_CHARS = 1500;
 export const MEMORY_CHARS = 6000;
 /** 相关事实最多带多少条。 */
 export const MAX_FACTS = 30;
+/** 交给写手的人物关系最多这么多条（两端都出场的在前）。 */
+export const MAX_RELATIONS = 30;
 
 /** 每段的输出上限：目标字数的两倍，另留出思考的余量。 */
 const segmentOutputTokens = (words: number) => words * 2 + THINKING_ALLOWANCE;
@@ -67,7 +70,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
 
   /** 本章不随分段变化的材料：作品、技能、人物、事实、伏笔、前文梗概与上一章的结尾。 */
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
-    const [work, skills, entities, facts, foreshadows, memories, withText, volumes] = await Promise.all([
+    const [work, skills, entities, facts, foreshadows, memories, withText, volumes, relations] = await Promise.all([
       getProject(port),
       // 作品还没打开过“写作技能”页时，内置技能在这里登记（全部启用）。
       ensureBuiltinSkills(port, BUILTIN_SKILLS.map(({ key, name, version }) => ({ key, name, version })), () => deps.ids.next(), ctx()),
@@ -77,6 +80,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       listChapterMemories(port),
       listChaptersWithText(port),
       listVolumes(port),
+      listRelationships(port),
     ]);
     if (!work.ok) return err(repo(work.error));
     if (!skills.ok) return err(repo(skills.error));
@@ -86,12 +90,14 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     if (!memories.ok) return err(repo(memories.error));
     if (!withText.ok) return err(repo(withText.error));
     if (!volumes.ok) return err(repo(volumes.error));
+    if (!relations.ok) return err(repo(relations.error));
     const volume = volumes.value.find((v) => v.id === chapter.volumeId);
 
     const order = new Map(chapters.map((c, i) => [c.id, i]));
     const index = order.get(chapter.id) ?? 0;
     const cast = entities.value.filter((e) => plan.castIds.includes(e.id));
     const castIds = new Set(cast.map((c) => c.id));
+    const nameOf = new Map(entities.value.map((e) => [e.id, e.name]));
     const fs = foreshadowsForChapter(plan, foreshadows.value, order);
 
     // 前文梗概：优先用长篇记忆（待复核的也用，它仍是最接近正文的梗概），没有时用作者写的章节梗概；从近到远选入，超出预算时去掉最远的。
@@ -136,6 +142,15 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, description: s.description, text: s.text })),
       avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
       cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
+      // 人物关系网（B73）：本章成立、至少一端出场的关系。
+      relations: relationsForCast(relations.value, castIds, index, order, MAX_RELATIONS).map((r) => ({
+        from: nameOf.get(r.fromId) ?? '',
+        to: nameOf.get(r.toId) ?? '',
+        label: r.label,
+        mutual: r.mutual,
+        description: r.description,
+        secret: r.secret,
+      })),
       facts: facts.value
         .filter((f) => {
           if (f.status !== 'confirmed') return false;

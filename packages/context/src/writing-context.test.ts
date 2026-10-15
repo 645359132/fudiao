@@ -34,6 +34,24 @@ describe('写作上下文', () => {
     expect(items.filter((i) => i.required).map((i) => i.id)).toEqual(['selection', 'before', 'after']);
   });
 
+  it('人物关系（B73）排在设定之后、事实之前：读作一句话，带上说明，隐秘的写明只能暗示；两端都出现的优先', () => {
+    const items = collectWritingCandidates({
+      ...input,
+      relations: [
+        { id: 'r1', from: '林晚', to: '沈砚', label: '债主', mutual: false, description: '', secret: false, bothPresent: false },
+        { id: 'r2', from: '沈砚', to: '当铺', label: '常客', mutual: true, description: ' 每月一次 ', secret: true, bothPresent: true },
+      ],
+    });
+    const ids = items.map((i) => i.id);
+    expect(ids.indexOf('relation:r1')).toBeGreaterThan(ids.indexOf('entity:shop'));
+    expect(ids.indexOf('relation:r1')).toBeLessThan(ids.indexOf('fact:f1'));
+    const r1 = items.find((i) => i.id === 'relation:r1')!;
+    const r2 = items.find((i) => i.id === 'relation:r2')!;
+    expect(r1).toMatchObject({ kind: 'relation', title: '关系：林晚是沈砚的债主', text: '林晚是沈砚的债主', required: false });
+    expect(r2.text).toBe('沈砚与当铺：常客（每月一次）〔隐秘：读者还不知道，只能暗示，不要点明〕');
+    expect(r2.relevance).toBeGreaterThan(r1.relevance);
+  });
+
   it('预算足够时纳入全部可用条目；待复核与未确认的事实不用，并说明原因', () => {
     const m = buildWritingContext(input, 10_000);
     expect(ids(m.included)).toEqual(['project', 'chapter_notes', 'chapter:c2', 'chapter:c1', 'entity:shen', 'entity:shop', 'fact:f1', 'before', 'selection', 'after']);

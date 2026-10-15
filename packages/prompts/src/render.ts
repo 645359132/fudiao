@@ -533,6 +533,11 @@ export type WriterChapterInput = {
   readonly avoidPhrases: readonly string[];
   /** state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。 */
   readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string }[];
+  /**
+   * 人物关系网（B73）中适用于本章、至少一端出场的关系。读作“from 是 to 的 label”，mutual 时为“from 与 to：label”；
+   * secret 为读者还不知道的关系（可以暗示，不要点明）。
+   */
+  readonly relations?: readonly WriterRelation[];
   readonly facts: readonly string[];
   /** 前面章节的梗概，从远到近。 */
   readonly memories: readonly { readonly title: string; readonly summary: string }[];
@@ -550,6 +555,8 @@ export type WriterChapterInput = {
   readonly words: number;
   readonly isLast: boolean;
 };
+
+export type WriterRelation = { readonly from: string; readonly to: string; readonly label: string; readonly mutual: boolean; readonly description: string; readonly secret: boolean };
 
 /**
  * 写手成章（B59）：作者侧的写作，材料是作者的计划、设定、伏笔账本与前文，输出纯文本。
@@ -571,6 +578,9 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasAvoid: input.avoidPhrases.length > 0,
     cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim() })),
     hasCast: input.cast.length > 0,
+    relations: (input.relations ?? []).map((r) => ({ ...r, description: r.description.trim() })),
+    hasRelations: (input.relations ?? []).length > 0,
+    hasSecretRelations: (input.relations ?? []).some((r) => r.secret),
     facts: [...input.facts],
     hasFacts: input.facts.length > 0,
     memories: input.memories.map((m) => ({ title: m.title, summary: m.summary })),
@@ -771,6 +781,12 @@ export type AssistantState = {
     readonly entities: readonly { readonly id: string; readonly kind: string; readonly name: string; readonly locked: boolean }[];
     /** 回收站里的章节。 */
     readonly trashed: readonly { readonly id: string; readonly title: string }[];
+    /**
+     * 人物关系网（B73）：读作“from 是 to 的 label”，mutual 时“from 与 to：label”；category 为类别的中文名；
+     * range 为适用的章节范围（例如“第三章起”），不限时为空。太多时只列前面的部分。
+     */
+    readonly relations?: readonly { readonly id: string; readonly from: string; readonly to: string; readonly label: string; readonly mutual: boolean; readonly secret: boolean; readonly category: string; readonly range: string }[];
+    readonly relationCount?: number;
     /** 作者正在看的页面或章节；没有时为空。 */
     readonly current: string;
     /** 作者在正文里选中的文字（edit_selection 的对象）；没有选中时为 null。太长时 text 只含开头与结尾。 */
@@ -812,6 +828,10 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
             trashed: [...input.state.work.trashed],
             hasVolumes: input.state.work.volumes.length > 0,
             hasTrashed: input.state.work.trashed.length > 0,
+            relations: [...(input.state.work.relations ?? [])],
+            hasRelations: (input.state.work.relations ?? []).length > 0,
+            relationCount: input.state.work.relationCount ?? (input.state.work.relations ?? []).length,
+            relationsOmitted: (input.state.work.relationCount ?? 0) > (input.state.work.relations ?? []).length,
             selection: input.state.work.selection === null ? null : { ...input.state.work.selection },
           },
     hasResults: last.role === 'results',

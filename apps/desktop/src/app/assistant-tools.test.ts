@@ -7,8 +7,13 @@ function envWithPlans(hasPlans: boolean): ToolEnv {
   const unused = () => {
     throw new Error('确认阶段不应调用');
   };
+  // 删除关系的说明要读出这条关系；其余用到就失败。
+  const host = new Proxy(
+    { relationsView: () => Promise.resolve({ ok: true, value: { relationships: [], members: [], positions: [] } }) },
+    { get: (target, key) => (key in target ? target[key as keyof typeof target] : unused()) },
+  ) as unknown as ToolEnv['host'];
   return {
-    host: new Proxy({}, { get: unused }) as ToolEnv['host'],
+    host,
     project: unused,
     events: {},
     work: unused,
@@ -22,7 +27,7 @@ function envWithPlans(hasPlans: boolean): ToolEnv {
 }
 
 /** 每个动作的一个合法示例：每个字段取几个候选值中第一个能通过校验的。 */
-const CANDIDATES: readonly unknown[] = [null, 'x', 3, [], 'character', 'world', 'polish', 'txt', 'book'];
+const CANDIDATES: readonly unknown[] = [null, 'x', 3, [], false, 'character', 'world', 'polish', 'txt', 'book', 'family'];
 function sample(tool: AssistantTool): AssistantAction {
   const shape = AssistantAction.options.find((o) => o.shape.tool.value === tool)!.shape as Record<string, { safeParse: (v: unknown) => { success: boolean } }>;
   const values = Object.fromEntries(Object.entries(shape).map(([key, schema]) => [key, key === 'tool' ? tool : CANDIDATES.find((v) => schema.safeParse(v).success)]));
@@ -41,7 +46,7 @@ describe('AI 助手的命令表（B69、B71）', () => {
       const action = sample(tool);
       if ((await confirmationFor(action.tool, action, envWithPlans(true))) !== null) confirmed.push(tool);
     }
-    expect(confirmed.sort()).toEqual(['delete_entity', 'delete_volume', 'plan_chapters', 'rollback_writer', 'trash_chapter']);
+    expect(confirmed.sort()).toEqual(['delete_entity', 'delete_relationship', 'delete_volume', 'plan_chapters', 'rollback_writer', 'trash_chapter']);
     const plan = sample('plan_chapters');
     expect(await confirmationFor(plan.tool, plan, envWithPlans(false))).toBeNull();
     const trash = AssistantAction.parse({ tool: 'trash_chapter', chapter: '第三章' });

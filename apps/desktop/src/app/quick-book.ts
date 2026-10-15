@@ -2,9 +2,9 @@
 // （作品名、类型、简介、大纲、主要人物）、拆出章节计划、写手依次写完并审核、导出。这里只有骨架与各步的状态；
 // 章节计划、写作、审核与导出沿用计划页与成书进度的用例，写入的是同一份数据。
 import type { CallOptions } from '@fudiao/llm';
-import { BookSeedOutput, renderBookSeed } from '@fudiao/prompts';
+import { BookSeedOutput, renderBookSeed, type BookSeedData } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
-import { createEntity, getProject, listEntities, updateEntity, type ProjectPatch, type RepoError, type SqlPort } from '@fudiao/store';
+import { createEntity, createRelationship, getProject, listEntities, listRelationships, updateEntity, type ProjectPatch, type RepoError, type SqlPort } from '@fudiao/store';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { PlanningView } from './planning';
@@ -18,7 +18,7 @@ export type BookSeedRequest = {
   readonly wordsPerChapter: number;
 };
 
-export type BookSeed = BookSeedOutput;
+export type BookSeed = BookSeedData;
 
 /** 快速成书各步的状态：每一步做完没有，由作品里已有的数据得出。 */
 export type QuickBookStatus = {
@@ -53,6 +53,32 @@ export type QuickBookDeps = {
 
 export function quickBookUseCases({ deps, project, runner, planningView, defaultModel, updateWorkInfo }: QuickBookDeps) {
   const ctx = () => ({ now: deps.clock.now() });
+
+  /** 按名字（含别名）找到两端的人物；找不到的、自己连自己的、已经有同样关系的跳过。返回建了几条。 */
+  async function applyRelations(port: SqlPort, relations: NonNullable<BookSeed['relationships']>): Promise<Result<number, AppError>> {
+    if (relations.length === 0) return ok(0);
+    const [entities, existing] = await Promise.all([listEntities(port), listRelationships(port)]);
+    if (!entities.ok) return err(repo(entities.error));
+    if (!existing.ok) return err(repo(existing.error));
+    const idOf = new Map(entities.value.filter((e) => e.kind === 'character').flatMap((e) => [e.name, ...e.aliases].map((n) => [n.trim(), e.id] as const)));
+    const seen = new Set(existing.value.map((r) => `${r.fromId}|${r.toId}|${r.label}`));
+    let made = 0;
+    for (const r of relations) {
+      const fromId = idOf.get(r.from.trim());
+      const toId = idOf.get(r.to.trim());
+      const label = r.label.trim();
+      if (fromId === undefined || toId === undefined || fromId === toId || label === '' || seen.has(`${fromId}|${toId}|${label}`)) continue;
+      seen.add(`${fromId}|${toId}|${label}`);
+      const created = await createRelationship(
+        port,
+        { id: deps.ids.next(), fromId, toId, category: r.category, label, mutual: r.mutual, description: r.description, secret: r.secret, validFromChapterId: null, validToChapterId: null },
+        ctx(),
+      );
+      if (!created.ok) return err(repo(created.error));
+      made += 1;
+    }
+    return ok(made);
+  }
 
   return {
     /** 各步的状态：只读，不调用模型。 */
@@ -107,7 +133,8 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
      * 采用作者改过的骨架：写入作品名、类型、简介与大纲；人物按名字（含别名）对应到人物设定，
      * 没有的新建并写上说明，已有的不改（锁定与否都不动）。可以重复采用，不会重复建人物。
      */
-    async applyBookSeed(seed: BookSeed): Promise<Result<{ readonly created: number }, AppError>> {
+    /** 采用骨架：写入作品信息，建人物卡片（同名的不重复建），再按名字建立人物之间的关系（同样的关系不重复建）。 */
+    async applyBookSeed(seed: BookSeed): Promise<Result<{ readonly created: number; readonly relations: number }, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       if (seed.outline.trim() === '') return err(settings('大纲不能为空：章节计划由大纲拆出'));
@@ -130,7 +157,8 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
         }
         created += 1;
       }
-      return ok({ created });
+      const relations = await applyRelations(port, seed.relationships ?? []);
+      return relations.ok ? ok({ created, relations: relations.value }) : relations;
     },
   };
 }
