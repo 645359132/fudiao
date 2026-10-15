@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BUILTIN_SKILLS } from './skills';
 
 describe('内置写作技能', () => {
-  it('按顺序列出十项技能，名称、适用说明、版本与文字齐全', () => {
-    expect(BUILTIN_SKILLS.map((s) => s.key)).toEqual(['foreshadow', 'pacing', 'tension', 'scene', 'dialogue', 'pov', 'cliffhanger', 'polish', 'snowflake', 'no-adverbs']);
+  it('按顺序列出十一项技能，名称、适用说明、版本与文字齐全', () => {
+    expect(BUILTIN_SKILLS.map((s) => s.key)).toEqual(['foreshadow', 'pacing', 'tension', 'scene', 'dialogue', 'pov', 'cliffhanger', 'polish', 'snowflake', 'no-adverbs', 'writing-basics']);
     for (const s of BUILTIN_SKILLS) {
       expect(s.name).not.toBe('');
       expect(s.description.startsWith(`${s.name}：`)).toBe(true);
@@ -13,9 +13,9 @@ describe('内置写作技能', () => {
     }
   });
 
-  it('雪花写作法用于规划，其余九项用于写章节', () => {
+  it('雪花写作法用于规划，其余十项用于写章节', () => {
     expect(BUILTIN_SKILLS.filter((s) => s.stages.includes('planning')).map((s) => s.key)).toEqual(['snowflake']);
-    expect(BUILTIN_SKILLS.filter((s) => s.stages.includes('writing'))).toHaveLength(9);
+    expect(BUILTIN_SKILLS.filter((s) => s.stages.includes('writing'))).toHaveLength(10);
   });
 
   it('雪花写作法：一句话、三次挫折与结局、人物的动机目标冲突与领悟、按场景与后续拆章', () => {
@@ -27,6 +27,12 @@ describe('内置写作技能', () => {
     const skill = BUILTIN_SKILLS.find((s) => s.key === 'no-adverbs');
     expect(skill).toMatchObject({ name: '不用副词', stages: ['writing'] });
     for (const part of ['动词', '情绪', '对话', '程度', '非常', '不在此列', '已经']) expect(skill?.text).toContain(part);
+  });
+
+  it('写作基本功：过滤词、句内与句间及段间的关系、长短句与句式、动词的方向快慢力度与焦点、每段一句话概括', () => {
+    const skill = BUILTIN_SKILLS.find((s) => s.key === 'writing-basics');
+    expect(skill).toMatchObject({ name: '写作基本功', stages: ['writing'] });
+    for (const part of ['过滤词', '意识到', '因果', '递进', '衔接', '视线', '连接词', '长句', '短句', '反问', '方向', '力度', '焦点', '一句话', '计划']) expect(skill?.text).toContain(part);
   });
 
   it('伏笔技能要求不说破本章不得说破的内容', () => {

@@ -8,7 +8,7 @@
 
 - **正文与目录**：按卷与章组织，自动保存，意外退出后找回草稿；章节快照与恢复；正文左侧的色条标出哪些段落是 AI 写的、哪些改过；全文查找。长篇（几百章、上百万字）也流畅。
 - **快速成书**：一句话的想法 → 作品骨架（简介、大纲、主要人物与关系）→ 章节计划 → 写手逐章写 → 审核 → 导出。每一步的结果都由你改过再采用。
-- **写作技能**：采用通用的 SKILL.md 格式，分“规划”与“写章节”两个阶段。内置雪花写作法、伏笔、详略与节奏、张力、场景、对话、视角、章末钩子、润色、不用副词等，可以停用、改写、自定义，也可以导入导出。
+- **写作技能**：采用通用的 SKILL.md 格式，分“规划”与“写章节”两个阶段。内置雪花写作法、伏笔、详略与节奏、张力、场景、对话、视角、章末钩子、润色、不用副词、写作基本功等，可以停用、改写、自定义，也可以导入导出。
 - **审核**：程序检查（规避表达、伏笔提前说破或到期未回收、AI 常见句式、生成退化等）加模型审核，每个问题都定位到原文，可以交给写手只改那一段。
 - **设定与记忆**：人物、地点、组织、物品与世界规则（可锁定），世界事实与人物认知，伏笔账本，人物关系网（随章节变化），每章写完后的长篇记忆。
 - **角色推演**：设置一个场景，每个角色只依据自己知道的事行动，程序统一裁决结果；你挑选事件，再由它写成正文。
@@ -70,5 +70,5 @@ pnpm --filter @fudiao/desktop tauri build
 
 ## 致谢
 
-- 一些功能的思路参考了 [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) 与 [zenstory](https://github.com/zenstory-ai/zenstory)，内置的规划技能参考了 Randy Ingermanson 的雪花写作法，“不用副词”参考了 Shawn Whitney 关于副词的讲解；只借鉴了思路，文字与代码都是重写的。
+- 一些功能的思路参考了 [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) 与 [zenstory](https://github.com/zenstory-ai/zenstory)，内置的规划技能参考了 Randy Ingermanson 的雪花写作法，“不用副词”参考了 Shawn Whitney 关于副词的讲解，“写作基本功”参考了柳一一的“写作基本功”系列讲解；只借鉴了思路，文字与代码都是重写的。
 - 复调构建在许多开源项目之上，包括 Tauri、React、TipTap 与 ProseMirror、SQLite、Zod、Zustand、Radix UI、Lucide 与 TanStack Virtual。

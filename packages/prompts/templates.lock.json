@@ -130,5 +130,9 @@
   "skill:tension": {
     "version": "2",
     "sha256": "1a5dab433af51d6b81efcdf432af1dad395e24931fa2520aefdd0843c73ec1d6"
+  },
+  "skill:writing-basics": {
+    "version": "1",
+    "sha256": "6203f39c2084bec462a6d97d7eba52c016bee452d2ecfe67dce980374a358dfc"
   }
 }
