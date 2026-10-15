@@ -44,6 +44,12 @@ async function setup(texts: string[]) {
 const sel = (paragraphId: string, from: number, to: number): EditorSelection => ({ from: { paragraphId, offset: from }, to: { paragraphId, offset: to } });
 
 describe('候选稿', () => {
+  it('候选稿与写手写入的正文一样规范标点（B74）：半角的逗号句号、直引号与省略号换成中文的写法', async () => {
+    const { generate } = await setup(['雨下得更紧了。', '他推开门。']);
+    const candidate = await generate('rewrite', sel('p1', 0, 4), '他推开门,说:"走吧..."');
+    expect(candidate).toMatchObject({ generated: '他推开门，说：“走吧……”', content: '他推开门，说：“走吧……”' });
+  });
+
   it('改写的结果存为候选稿；接受后替换原文、记录来源、建立快照、关联生成它的调用', async () => {
     const { app, chapterId, generate } = await setup(['雨下得更紧了。', '他推开门。']);
     const candidate = await generate('rewrite', sel('p1', 1, 3), '轻轻推开了\n');

@@ -44,6 +44,7 @@ import {
   type StoredEvent,
   type StoryEvent,
 } from '@fudiao/store';
+import { normalizePunctuation } from '@fudiao/writing';
 import { insertFor, STALE_REASON } from './candidates';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
@@ -612,7 +613,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
           target: { from: end, to: end },
           baseText: '',
           baseVersions: { [last.id]: last.version },
-          generated: text,
+          generated: normalizePunctuation(text),
           llmCallId: call.ok ? (call.value?.id ?? null) : null,
           beatSheetId: sheet.value.id,
         },

@@ -90,6 +90,7 @@
 - M5-08 已完成（需求 B75，作者要求 2026-10-15 内置一项提炼自雪花写作法的技能）：写作技能分规划与写章节两个阶段（`packages/shared` 的 `SkillStage`，迁移 `0014_skill_stages.sql`，SKILL.md 的 `metadata.stages`）；内置技能“雪花写作法”（`templates/skills/snowflake.md`，用于规划）；`book_seed` 与 `plan_draft` 版本 3 带上启用的规划技能，章节计划草稿带上人物说明；`skillsForStage`（`app/writing-skills.ts`）供写手与规划共用；“写作技能”页显示与选择阶段；“作者偏好”两个阶段都用。
 - M5-09 已完成（作者要求 2026-10-15，依据作者提供的讲解视频提炼）：内置写作技能“不用副词”（`templates/skills/no-adverbs.md`，写章节）：“……地”加动作换成准确的动词，情绪写看得见的言行，不用程度副词撑形容词；“不、没、都、已经”等照常用。
 - M5-10 已完成（需求 B76，作者要求 2026-10-15）：作品封面——迁移 `0015_cover.sql`（`cover`，图片以 data URL 存在作品库，随备份与作品包走）；仓储 `repos/cover.ts`；图片缩放端口 `ImagePort`（`adapters/canvas-image.ts`）；作品信息里上传、更换与去掉封面；`library.json` 缓存缩略图，作品列表的卡片显示封面；没有封面时按书名排出文字封面（`ui/BookCover.tsx`）。
+- 全项目审查后的修正（2026-10-15）：从备份恢复后，作品列表里的书名与封面缓存、设定与事实列表及各页缓存的数据随之更新（以前要重开作品才对）；AI 助手替换已有的作品大纲前请作者确认（`assistant_turn` 版本 5，大纲没有历史版本）；“AI 写作”与推演写成正文的候选稿与写手写入一样规范标点。
 - OpenAI 写法兼容已补强（M0-04 补充）：结构化输出能力增加 `json_object`；`OpenAIChatAdapter` 按服务的写法差异处理 `max_tokens`/`max_completion_tokens`、流式用量与 `<think>` 标签；实验配置增加服务种类 `openai`，示例见 `m0/experiments/openai-compatible.example.yaml`。
 
 ## 工作方式

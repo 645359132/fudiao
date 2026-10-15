@@ -22,6 +22,7 @@ import {
   type SqlPort,
   type TextRange,
 } from '@fudiao/store';
+import { normalizePunctuation } from '@fudiao/writing';
 import type { AppError } from './errors';
 import type { AppDeps } from './ports';
 import type { EditorSelection } from './writing-context';
@@ -94,7 +95,8 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
           target: range,
           baseText,
           baseVersions: versionsIn(paragraphs.value, range),
-          generated: input.text.trim(),
+          // 与写手写入的正文一样规范标点（B74）。
+          generated: normalizePunctuation(input.text.trim()),
           llmCallId: call.ok ? (call.value?.id ?? null) : null,
         },
         ctx(),
