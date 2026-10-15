@@ -195,10 +195,18 @@ describe('正文编辑', () => {
 
     await user.click(screen.getByRole('button', { name: '作品列表' }));
     const card = (await screen.findByRole('button', { name: '雨夜' })).closest('li');
-    expect(card?.querySelector('img.book-cover')?.getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/);
+    const thumbnail = card?.querySelector<HTMLImageElement>('img.book-cover');
+    expect(thumbnail?.getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/);
 
-    await user.click(screen.getByRole('button', { name: '雨夜' }));
-    await user.click(await screen.findByRole('button', { name: '雨夜' }));
+    // 点封面直接打开作品。
+    if (thumbnail === null || thumbnail === undefined) throw new Error('卡片上应有封面');
+    await user.click(thumbnail);
+    await screen.findByRole('navigation', { name: '章节目录' });
+    expect(screen.queryByRole('region', { name: '作品信息' })).toBeNull();
+
+    // 卡片上的“更换封面”：打开作品并进入作品信息。
+    await user.click(screen.getByRole('button', { name: '作品列表' }));
+    await user.click(await screen.findByRole('button', { name: '更换 雨夜 的封面' }));
     const again = within(await screen.findByRole('region', { name: '作品信息' })).getByRole('region', { name: '封面' });
     await user.click(await within(again).findByRole('button', { name: '去掉封面' }));
     expect(await within(again).findByRole('img', { name: '《雨夜》的文字封面' })).toBeTruthy();

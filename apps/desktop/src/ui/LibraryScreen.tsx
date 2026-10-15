@@ -8,13 +8,25 @@ import { TextForm } from './TextForm';
 
 const when = (iso: string | null) => (iso === null ? '从未打开' : `上次打开：${new Date(iso).toLocaleString('zh-CN')}`);
 
+/**
+ * 一部作品的卡片。点卡片上任何地方（封面、书名、日期）都打开作品，书名是给键盘与读屏软件用的按钮；
+ * 更换封面不常用，放在下面的按钮里：打开作品并进入作品信息。
+ */
 function WorkItem({ work }: { readonly work: LibraryWork }) {
   const openWork = useApp((s) => s.openWork);
+  const openWorkCover = useApp((s) => s.openWorkCover);
   const setArchived = useApp((s) => s.setArchived);
   const removeMissing = useApp((s) => s.removeMissingWork);
   const busy = useApp((s) => s.busy);
+  const openable = !busy && !work.missing;
   return (
-    <li className={work.missing ? 'work-card missing' : 'work-card'}>
+    <li
+      className={work.missing ? 'work-card missing' : 'work-card'}
+      onClick={(e) => {
+        // 卡片上的按钮各管各的；其余地方点了打开作品。
+        if (openable && (e.target as HTMLElement).closest('button') === null) void openWork(work.id);
+      }}
+    >
       <BookCover title={work.title} image={work.cover} seed={work.id} size="small" decorative />
       <span className="work-meta">
         <button type="button" className="work-open" disabled={busy || work.missing} onClick={() => void openWork(work.id)}>
@@ -29,6 +41,11 @@ function WorkItem({ work }: { readonly work: LibraryWork }) {
         {work.missing && (
           <button type="button" className="ghost" disabled={busy} onClick={() => void removeMissing(work.id)}>
             从列表移除
+          </button>
+        )}
+        {work.missing ? null : (
+          <button type="button" className="ghost" disabled={busy} aria-label={`更换 ${work.title} 的封面`} onClick={() => void openWorkCover(work.id)}>
+            更换封面
           </button>
         )}
         <button type="button" className="ghost" disabled={busy} aria-label={`${work.archived ? '取消归档' : '归档'} ${work.title}`} onClick={() => void setArchived(work.id, !work.archived)}>

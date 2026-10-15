@@ -384,6 +384,22 @@ textarea {
   box-shadow: var(--shadow-md);
 }
 
+/* 点卡片任何地方都打开作品（丢失的作品除外） */
+.work-card:not(.missing) {
+  cursor: pointer;
+}
+
+.work-card:not(.missing):hover .book-cover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.work-card .book-cover {
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+
 /* 作品封面（B76）：图片按 3:4 铺满；没有图片时是书名竖排的文字封面，配色由作品标识决定 */
 .book-cover {
   display: block;

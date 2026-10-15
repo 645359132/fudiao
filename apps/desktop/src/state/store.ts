@@ -192,6 +192,8 @@ export type AppState = {
   readonly init: () => Promise<void>;
   readonly createWork: (title: string) => Promise<boolean>;
   readonly openWork: (id: string) => Promise<void>;
+  /** 打开作品并进入作品信息，在那里更换封面（作品列表卡片上的“更换封面”）。 */
+  readonly openWorkCover: (id: string) => Promise<void>;
   readonly addWorkFromFolder: () => Promise<void>;
   readonly closeWork: () => Promise<void>;
   readonly setArchived: (id: string, archived: boolean) => Promise<void>;
@@ -910,6 +912,10 @@ export function createAppStore(service: AppService): AppStore {
           await loadEntities();
           await autoBackup();
         }
+      },
+      async openWorkCover(id) {
+        await get().openWork(id);
+        if (get().work?.entry.id === id) await get().showPanel('info');
       },
       async addWorkFromFolder() {
         const before = get().work;
