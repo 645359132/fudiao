@@ -2291,28 +2291,130 @@ fieldset.plain {
   height: 24px;
 }
 
+/* 输入框与下方一排：模型、思考深度、上下文用量与发送，整体是一个框 */
 .assistant-composer {
-  position: relative;
+  display: flex;
   flex: none;
+  flex-direction: column;
   margin: 0 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.assistant-composer:focus-within {
+  border-color: var(--border-strong);
 }
 
 .assistant-composer textarea {
   width: 100%;
-  min-height: 76px;
+  min-height: 64px;
   max-height: 220px;
-  padding: 10px 48px 10px 12px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  padding: 10px 12px 4px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
   resize: none;
 }
 
+.assistant-composer textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.composer-bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 8px 8px;
+}
+
+.composer-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  max-width: 46%;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.composer-chip:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.composer-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-menu {
+  min-width: 240px;
+}
+
+.composer-option {
+  gap: 8px;
+}
+
+.composer-check {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+}
+
+.composer-option-name {
+  white-space: nowrap;
+}
+
+.composer-option-note {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.context-meter {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-meter .context-track {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2;
+}
+
+.context-meter .context-fill {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.context-meter.warn .context-fill {
+  stroke: #c98a1b;
+}
+
+.context-meter.danger .context-fill {
+  stroke: var(--danger);
+}
+
 .assistant-composer .send {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 32px;
-  height: 32px;
+  flex: none;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border-radius: 50%;
 }

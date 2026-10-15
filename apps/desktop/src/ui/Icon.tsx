@@ -3,8 +3,11 @@ import {
   ArrowUp,
   BookOpen,
   Bookmark,
+  Brain,
   Check,
+  ChevronDown,
   ChevronLeft,
+  Cpu,
   ClipboardCheck,
   Download,
   Drama,
@@ -76,6 +79,9 @@ const ICONS = {
   sun: Sun,
   moon: Moon,
   monitor: Monitor,
+  chevronDown: ChevronDown,
+  brain: Brain,
+  model: Cpu,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

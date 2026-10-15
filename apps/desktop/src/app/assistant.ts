@@ -36,7 +36,14 @@ export type AssistantEvents = ToolEvents & {
   readonly onDraft?: (message: string | null) => void;
   /** 作者此刻在看什么（章节或页面），写进给模型的现状。 */
   readonly current?: () => string;
+  /** 助手每一步的思考深度（作者在对话框下方选择），没有给出时为 medium。 */
+  readonly effort?: 'low' | 'medium' | 'high';
+  /** 每一步结束后：这一步发给模型的内容占了多少 Token，以及模型的上下文上限（服务没有返回用量时不调用）。 */
+  readonly onUsage?: (usage: AssistantUsage) => void;
 };
+
+/** 一步请求的上下文用量：promptTokens 含命中缓存与写入缓存的部分。 */
+export type AssistantUsage = { readonly promptTokens: number; readonly contextWindow: number };
 
 /** 一轮对话的结果：最新的对话，以及是否停在等待作者确认。 */
 export type AssistantOutcome = { readonly items: readonly AssistantItem[]; readonly pending: boolean };
@@ -180,11 +187,17 @@ export function assistantUseCases({
         const message = partialStringField(streamed, 'message');
         if (message !== null) events.onDraft?.(message);
       };
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: ASSISTANT_OUTPUT_TOKENS, effort: 'medium' }, AssistantTurnOutput, { ...(events.signal !== undefined && { signal: events.signal }), onEvent });
+      const result = await runner.structured(
+        { prompt: prompt.value, maxOutputTokens: ASSISTANT_OUTPUT_TOKENS, effort: events.effort ?? 'medium' },
+        AssistantTurnOutput,
+        { ...(events.signal !== undefined && { signal: events.signal }), onEvent },
+      );
       if (!result.ok) {
         events.onDraft?.(null);
         return result;
       }
+      const usage = result.value.attempts.at(-1)?.usage ?? null;
+      if (usage !== null) events.onUsage?.({ promptTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens, contextWindow: result.value.contextWindow });
       const output = result.value.value;
       await append(items, [{ id: deps.ids.next(), role: 'assistant', output }], events);
       events.onDraft?.(null);

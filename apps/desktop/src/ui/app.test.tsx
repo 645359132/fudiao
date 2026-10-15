@@ -1970,6 +1970,47 @@ describe('分卷的界面（B68）', () => {
   });
 });
 
+describe('AI 助手的输入框：模型、思考深度与上下文用量', () => {
+  it('列出模型并可切换默认模型；模型不能调节思考时不可选；选了深度后请求带上它；回复后显示上下文用了多少，新对话后清掉', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '雨夜');
+    await addTestedModel(service, deps);
+    await store.getState().loadAssistantModels();
+    expect(await screen.findByRole('button', { name: '模型：m' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '思考：不可调' }).matches(':disabled')).toBe(true);
+
+    // 模型能调节思考深度、上下文上限十万。
+    const services = await service.loadModelServices();
+    if (!services.ok) throw new Error('模型服务');
+    const model = services.value.models[0]!;
+    expect((await service.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 100_000 }, prices: model.prices })).ok).toBe(true);
+    await store.getState().loadAssistantModels();
+    await user.click(await screen.findByRole('button', { name: '思考：中' }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^高/ }));
+    await waitFor(() => expect(store.getState().library?.preferences.assistant.effort).toBe('high'));
+    expect(screen.getByRole('button', { name: '思考：高' })).toBeTruthy();
+
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ message: '好。', actions: [], done: true }), { input: 25_000, output: 100, cacheRead: 0 }));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '你好{Enter}');
+    expect(await screen.findByRole('img', { name: '上下文用了 25%' })).toBeTruthy();
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).toContain('"reasoning_effort":"high"');
+    await user.click(screen.getByRole('button', { name: '新对话' }));
+    await waitFor(() => expect(screen.queryByRole('img', { name: /上下文用了/ })).toBeNull());
+
+    // 再加一个模型（还没自检），在菜单里选中它：成为默认模型。
+    expect((await service.addModel(model.providerId, 'm2')).ok).toBe(true);
+    await store.getState().loadAssistantModels();
+    await user.click(screen.getByRole('button', { name: '模型：m' }));
+    const option = await screen.findByRole('menuitemradio', { name: /^m2/ });
+    expect(option.textContent).toContain('未通过能力自检');
+    await user.click(option);
+    await waitFor(() => expect(screen.getByRole('button', { name: '模型：m2' })).toBeTruthy());
+    const after = await service.loadModelServices();
+    expect(after.ok && after.value.models.find((m) => m.id === after.value.defaultModelId)?.modelId).toBe('m2');
+  });
+});
+
 describe('长篇的目录（施工文档第七章：虚拟列表）', () => {
   it('行数多时只渲染视野内外的几十行，滚动后换成那里的章节；选中远处的章节时滚到那一章', async () => {
     // jsdom 不排版：目录的滚动区高 600、每行高 32，内容的高度按 300 行算；滚动时更新位置，随后发出 scroll 事件。

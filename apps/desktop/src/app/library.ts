@@ -27,11 +27,14 @@ export const Preferences = z.object({
   layout: z
     .object({ sidebar: z.number().default(DEFAULT_LAYOUT.sidebar), assistant: z.number().default(DEFAULT_LAYOUT.assistant), sidebarHidden: z.boolean().default(false) })
     .default(DEFAULT_LAYOUT),
+  /** AI 助手每一步的思考深度（对话框下方选择）；写手、审核等任务各用自己的深度。 */
+  assistant: z.object({ effort: z.enum(['low', 'medium', 'high']).default('medium') }).default({ effort: 'medium' }),
 });
 export type Preferences = z.infer<typeof Preferences>;
 export type Theme = Preferences['theme'];
 export type Layout = Preferences['layout'];
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT };
+export type AssistantEffort = Preferences['assistant']['effort'];
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' } };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

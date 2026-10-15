@@ -127,7 +127,7 @@ export type RunnerDeps = {
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
 export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
-  async function prepare(request: RunRequest, needsStructured: boolean): Promise<Result<{ port: LlmPort; llmRequest: LlmRequest; name: string }, AppError>> {
+  async function prepare(request: RunRequest, needsStructured: boolean): Promise<Result<{ port: LlmPort; llmRequest: LlmRequest; name: string; contextWindow: number }, AppError>> {
     const choice = await defaultModel();
     if (!choice.ok) return choice;
     if (choice.value === null) return err(settings('还没有设置默认模型：请在“模型服务”中添加服务与模型'));
@@ -152,7 +152,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     const adapter = deps.llm.forProvider(provider);
     const db = project();
     const port = db === null ? adapter : withCallLog(adapter, projectCallLog(db, () => deps.ids.next()), () => deps.clock.now());
-    return ok({ port, llmRequest, name });
+    return ok({ port, llmRequest, name, contextWindow: model.capabilities.contextWindow });
   }
 
   return {
@@ -165,7 +165,12 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     },
 
     /** 结构化任务：经结构化输出管线校验，失败时最多修正 MAX_REPAIRS 次，仍失败则返回暂停原因。 */
-    async structured<T>(request: RunRequest, schema: z.ZodType<T>, options: CallOptions = {}): Promise<Result<{ value: T; attempts: readonly LlmResult[] }, AppError>> {
+    /** 结果里带上所用模型的上下文上限（AI 助手据此显示上下文用了多少）。 */
+    async structured<T>(
+      request: RunRequest,
+      schema: z.ZodType<T>,
+      options: CallOptions = {},
+    ): Promise<Result<{ value: T; attempts: readonly LlmResult[]; contextWindow: number }, AppError>> {
       const prepared = await prepare(request, true);
       if (!prepared.ok) return prepared;
       const repairMessage = (issues: readonly string[]) => {
@@ -173,7 +178,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
         return rendered.ok ? rendered.value : issues.join('\n');
       };
       const result = await structured(prepared.value.port, schema, prepared.value.llmRequest, { ...options, maxRepairs: MAX_REPAIRS, repairMessage });
-      return result.ok ? ok(result.value) : err(settings(describeStructuredFailure(result.error, prepared.value.name)));
+      return result.ok ? ok({ ...result.value, contextWindow: prepared.value.contextWindow }) : err(settings(describeStructuredFailure(result.error, prepared.value.name)));
     },
   };
 }

@@ -4,7 +4,7 @@ import type { AssistantTurnOutput } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
-import type { AssistantEffect, AssistantItem, AssistantSelection } from './assistant';
+import type { AssistantEffect, AssistantItem, AssistantSelection, AssistantUsage } from './assistant';
 import { MAX_ASSISTANT_STEPS } from './assistant';
 import { createAppService } from './service';
 
@@ -78,6 +78,23 @@ describe('AI 助手（B69）', () => {
     // 第一步时还没有作品；第二步给模型的现状里已经是新作品。
     expect(body(deps, 0)).toContain('还没有打开作品');
     expect(body(deps, 1)).toContain('打开的作品：《江湖狂想》（武侠）');
+  });
+
+  it('思考深度与上下文用量：按作者选的深度发请求；每一步结束后报告发给模型的 Token 数与模型的上下文上限', async () => {
+    const { deps, app } = await setup();
+    const model = value(await app.loadModelServices()).models[0]!;
+    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 200_000 }, prices: model.prices }));
+    deps.llmRequests.length = 0;
+    const done: AssistantTurnOutput = { message: '好的。', actions: [], done: true };
+    deps.llmResponses.push(reply(JSON.stringify(done), { input: 3_000, output: 200, cacheRead: 0 }));
+    const usages: AssistantUsage[] = [];
+    value(await app.sendToAssistant('你好', { effort: 'high', onUsage: (u) => usages.push(u) }));
+    expect(body(deps, 0)).toContain('"reasoning_effort":"high"');
+    expect(usages).toEqual([{ promptTokens: 3_000, contextWindow: 200_000 }]);
+    // 没有指定时为 medium。
+    deps.llmResponses.push(reply(JSON.stringify(done)));
+    value(await app.sendToAssistant('再说一句'));
+    expect(body(deps, 1)).toContain('"reasoning_effort":"medium"');
   });
 
   it('删除类动作先停下请作者确认；确认后执行并接着走，拒绝时不执行', async () => {

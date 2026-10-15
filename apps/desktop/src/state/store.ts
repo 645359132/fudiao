@@ -9,13 +9,13 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
-import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection } from '../app/assistant';
+import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
-import type { Layout, Preferences, Theme } from '../app/library';
+import type { AssistantEffort, Layout, Preferences, Theme } from '../app/library';
 import type { RelationsView } from '../app/relations';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
@@ -149,6 +149,8 @@ export type AppState = {
   readonly assistantDraft: string | null;
   /** 助手正在执行的耗时动作的进展（写手写到第几段、正在审核等）。 */
   readonly assistantProgress: string | null;
+  /** 这段对话最近一步的上下文用量；新对话或换了作品时为 null，下一步之后才知道。 */
+  readonly assistantContext: AssistantUsage | null;
   /** 正文里当前选中的文字（助手对话框上方显示，发话时一并交给助手）；没有选中时为 null。 */
   readonly editorSelection: EditorSelectionInfo | null;
   /** 作者在对话框里点了“不带上”的那次选区（key）；选区变了就失效。 */
@@ -289,6 +291,10 @@ export type AppState = {
   readonly resolveAssistant: (approve: boolean) => Promise<void>;
   readonly stopAssistant: () => void;
   readonly clearAssistant: () => Promise<void>;
+  /** 助手每一步的思考深度（对所有作品生效）。 */
+  readonly setAssistantEffort: (effort: AssistantEffort) => Promise<void>;
+  /** 读取模型列表与默认模型（对话框下方的模型选择用），不打开模型服务页。 */
+  readonly loadAssistantModels: () => Promise<void>;
   /** 正文编辑器报告选区的变化。 */
   readonly setEditorSelection: (info: EditorSelectionInfo | null) => void;
   /** 这次的选区不交给助手。 */
@@ -782,6 +788,8 @@ export function createAppStore(service: AppService): AppStore {
         ...t.options({ text: false }),
         current: currentView,
         selection,
+        effort: get().library?.preferences.assistant.effort ?? 'medium',
+        onUsage: (usage) => set({ assistantContext: usage }),
         onUpdate: (items) => set({ assistantItems: items }),
         onDraft: (draft) => set({ assistantDraft: draft }),
         onProgress: (note) => set({ assistantProgress: note }),
@@ -855,6 +863,7 @@ export function createAppStore(service: AppService): AppStore {
       assistantFor: null,
       assistantDraft: null,
       assistantProgress: null,
+      assistantContext: null,
       editorSelection: null,
       selectionDismissed: null,
       bookSeed: null,
@@ -1269,7 +1278,8 @@ export function createAppStore(service: AppService): AppStore {
       async loadAssistant() {
         const owner = get().work?.project.id ?? '';
         const items = await service.assistantItems();
-        if (items.ok) set({ assistantItems: items.value, assistantFor: owner });
+        // 换了作品就是另一段对话，上下文用量从头算。
+        if (items.ok) set({ assistantItems: items.value, assistantFor: owner, assistantContext: null });
       },
       async sendAssistant(text) {
         if (get().assistantRunning || text.trim() === '') return false;
@@ -1294,7 +1304,13 @@ export function createAppStore(service: AppService): AppStore {
       stopAssistant: () => assistantAbort?.abort(),
       async clearAssistant() {
         if (get().assistantRunning) return;
-        await run(service.clearAssistant(), () => ({ assistantItems: [] }));
+        await run(service.clearAssistant(), () => ({ assistantItems: [], assistantContext: null }));
+      },
+      setAssistantEffort: (effort) => savePreferences({ assistant: { effort } }),
+      async loadAssistantModels() {
+        // 不进入忙碌状态：对话框下方的小部件，读取失败时只是不显示模型名。
+        const loaded = await service.loadModelServices();
+        if (loaded.ok) set({ modelServices: loaded.value });
       },
       async openQuickBook() {
         if (!(await get().leaveChapter())) return;

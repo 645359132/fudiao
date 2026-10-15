@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AssistantItem } from '../app/assistant';
+import { DropdownMenu } from 'radix-ui';
+import type { AssistantItem, AssistantUsage } from '../app/assistant';
 import { toolLabel } from '../app/assistant-tools';
+import type { AssistantEffort } from '../app/library';
 import { Icon } from './Icon';
 import { useApp } from './store-context';
 
@@ -64,6 +66,142 @@ function Pending({ item, active }: { readonly item: Extract<AssistantItem, { rol
   );
 }
 
+const EFFORTS: readonly AssistantEffort[] = ['low', 'medium', 'high'];
+const EFFORT_LABEL: Readonly<Record<AssistantEffort, string>> = { low: '低', medium: '中', high: '高' };
+const EFFORT_HINT: Readonly<Record<AssistantEffort, string>> = {
+  low: '想得浅：回复快，费用低',
+  medium: '平衡：大多数事情用它',
+  high: '想得深：复杂的安排更稳，回复慢、费用高',
+};
+
+const tokens = (n: number) => n.toLocaleString('zh-CN');
+
+/** 对话框下方的模型选择：选中的就是默认模型，所有 AI 功能都用它（与“模型服务”页的默认模型相同）。 */
+function ModelMenu() {
+  const services = useApp((s) => s.modelServices);
+  const setDefault = useApp((s) => s.setDefaultModel);
+  const openModelServices = useApp((s) => s.openModelServices);
+  const running = useApp((s) => s.assistantRunning);
+  const models = services?.models ?? [];
+  const current = models.find((m) => m.id === services?.defaultModelId) ?? null;
+  const providerName = (id: string) => services?.providers.find((p) => p.id === id)?.name ?? '';
+  const name = current?.displayName ?? (models.length === 0 ? '还没有模型' : '选择模型');
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className="composer-chip" disabled={running} aria-label={`模型：${name}`} title="选择模型（所有 AI 功能都用它）">
+          <Icon name="model" size={14} />
+          <span className="composer-chip-text">{name}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="menu-content composer-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+          <DropdownMenu.Label className="menu-label">模型（所有 AI 功能都用它）</DropdownMenu.Label>
+          {models.length === 0 ? (
+            <DropdownMenu.Item className="menu-item" disabled>
+              还没有添加模型
+            </DropdownMenu.Item>
+          ) : (
+            <DropdownMenu.RadioGroup value={services?.defaultModelId ?? ''} onValueChange={(id) => void setDefault(id)}>
+              {models.map((m) => (
+                <DropdownMenu.RadioItem key={m.id} className="menu-item composer-option" value={m.id}>
+                  <span className="composer-check">
+                    <DropdownMenu.ItemIndicator>
+                      <Icon name="check" size={13} />
+                    </DropdownMenu.ItemIndicator>
+                  </span>
+                  <span className="composer-option-name">{m.displayName}</span>
+                  <span className="muted composer-option-note">
+                    {providerName(m.providerId)}
+                    {m.capabilities.selfTestPassed ? '' : ' · 未通过能力自检'}
+                  </span>
+                </DropdownMenu.RadioItem>
+              ))}
+            </DropdownMenu.RadioGroup>
+          )}
+          <DropdownMenu.Separator className="menu-separator" />
+          <DropdownMenu.Item className="menu-item" onSelect={() => void openModelServices()}>
+            <Icon name="settings" size={14} />
+            管理模型服务…
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+/** 助手每一步的思考深度。模型不能调节思考深度时不可选。 */
+function EffortMenu() {
+  const effort = useApp((s) => s.library?.preferences.assistant.effort ?? 'medium');
+  const setEffort = useApp((s) => s.setAssistantEffort);
+  const running = useApp((s) => s.assistantRunning);
+  const adjustable = useApp((s) => {
+    const services = s.modelServices;
+    const model = services?.models.find((m) => m.id === services.defaultModelId);
+    return model === undefined || model.capabilities.reasoningControl === 'effort';
+  });
+  const label = adjustable ? `思考：${EFFORT_LABEL[effort]}` : '思考：不可调';
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="composer-chip"
+          disabled={running || !adjustable}
+          aria-label={label}
+          title={adjustable ? 'AI 助手每一步想多深（写手、审核等任务各用自己的深度）' : '这个模型不能调节思考深度'}
+        >
+          <Icon name="brain" size={14} />
+          <span className="composer-chip-text">{label}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="menu-content composer-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+          <DropdownMenu.Label className="menu-label">AI 助手的思考深度</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup value={effort} onValueChange={(value) => void setEffort(value as AssistantEffort)}>
+            {EFFORTS.map((e) => (
+              <DropdownMenu.RadioItem key={e} className="menu-item composer-option" value={e}>
+                <span className="composer-check">
+                  <DropdownMenu.ItemIndicator>
+                    <Icon name="check" size={13} />
+                  </DropdownMenu.ItemIndicator>
+                </span>
+                <span className="composer-option-name">{EFFORT_LABEL[e]}</span>
+                <span className="muted composer-option-note">{EFFORT_HINT[e]}</span>
+              </DropdownMenu.RadioItem>
+            ))}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+/** 上下文用量：最近一步发给模型的内容占模型上下文上限的比例。新对话的第一步之前不显示。 */
+function ContextMeter({ usage }: { readonly usage: AssistantUsage }) {
+  const ratio = Math.min(1, usage.promptTokens / usage.contextWindow);
+  const percent = ratio > 0 && ratio < 0.01 ? '<1%' : `${Math.round(ratio * 100)}%`;
+  const level = ratio >= 0.9 ? ' danger' : ratio >= 0.7 ? ' warn' : '';
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <span
+      className={`context-meter${level}`}
+      role="img"
+      aria-label={`上下文用了 ${percent}`}
+      title={`上下文：最近一步发给模型约 ${tokens(usage.promptTokens)} Token，占这个模型上限 ${tokens(usage.contextWindow)} 的 ${percent}。对话很长时，较早的部分会自动不再带上；也可以点“新对话”重新开始。`}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <circle className="context-track" cx="8" cy="8" r={radius} />
+        <circle className="context-fill" cx="8" cy="8" r={radius} strokeDasharray={`${circumference * ratio} ${circumference}`} transform="rotate(-90 8 8)" />
+      </svg>
+      {percent}
+    </span>
+  );
+}
+
 /**
  * AI 助手（B69）：右侧的对话框。作者用平常的话说要做的事，助手用作者配置的默认模型理解意图、操作软件，
  * 每个动作的结果列在对话里；删除与覆盖类的动作先请作者确认。
@@ -84,8 +222,16 @@ export function AssistantPanel() {
   const progress = useApp((s) => s.assistantProgress);
   const selection = useApp((s) => (s.panel === 'chapter' && s.editorSelection !== null && s.editorSelection.key !== s.selectionDismissed ? s.editorSelection : null));
   const dismissSelection = useApp((s) => s.dismissSelection);
+  const usage = useApp((s) => s.assistantContext);
+  const modelsLoaded = useApp((s) => s.modelServices !== null);
+  const loadModels = useApp((s) => s.loadAssistantModels);
   const [text, setText] = useState('');
   const end = useRef<HTMLDivElement>(null);
+
+  // 对话框下方的模型选择要用模型列表；模型服务页打开过时已经有了。
+  useEffect(() => {
+    if (!modelsLoaded) void loadModels();
+  }, [modelsLoaded, loadModels]);
 
   // 打开或换了作品时读取那部作品的对话。
   useEffect(() => {
@@ -217,15 +363,21 @@ export function AssistantPanel() {
             }
           }}
         />
-        {running ? (
-          <button type="button" className="send" aria-label="停止" title="停止" onClick={stop}>
-            <Icon name="stop" />
-          </button>
-        ) : (
-          <button type="submit" className="send primary" aria-label="发送" title="发送（回车）" disabled={text.trim() === ''}>
-            <Icon name="send" />
-          </button>
-        )}
+        <div className="composer-bar">
+          <ModelMenu />
+          <EffortMenu />
+          <span className="spacer" />
+          {usage !== null && usage.contextWindow > 0 ? <ContextMeter usage={usage} /> : null}
+          {running ? (
+            <button type="button" className="send" aria-label="停止" title="停止" onClick={stop}>
+              <Icon name="stop" />
+            </button>
+          ) : (
+            <button type="submit" className="send primary" aria-label="发送" title="发送（回车）" disabled={text.trim() === ''}>
+              <Icon name="send" />
+            </button>
+          )}
+        </div>
       </form>
     </aside>
   );
