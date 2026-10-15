@@ -93,3 +93,15 @@ export async function seedDemo(app: AppService): Promise<{ readonly mainWorkId: 
   must(await app.sendToAssistant('给沈砚身边加一个重要的配角人物'));
   return { mainWorkId: work.project.id };
 }
+
+/** 在当前作品末尾再加 count 章，每 50 章一卷（看长篇的目录）。 */
+export async function seedChapters(app: AppService, count: number): Promise<void> {
+  let volumeId = '';
+  for (let i = 0; i < count; i++) {
+    if (i % 50 === 0) {
+      const volumes = must(await app.createVolume(`第${i / 50 + 3}卷`)).volumes;
+      volumeId = volumes.at(-1)!.id;
+    }
+    must(await app.createChapter(`第${i + 6}章`, undefined, volumeId));
+  }
+}

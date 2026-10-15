@@ -55,6 +55,12 @@ const chapterTitles = () =>
     .queryAllByRole('listitem')
     .map((li) => li.querySelector('.chapter-title')?.textContent);
 
+/** 目录从上到下的各行：卷（“卷：卷名”）、章节名，或空卷的提示。 */
+const tocOutline = () =>
+  [...screen.getByRole('navigation', { name: '章节目录' }).querySelectorAll('.chapter-list > li')].map(
+    (li) => li.querySelector('.chapter-title')?.textContent ?? li.querySelector('.volume-head')?.getAttribute('aria-label') ?? li.textContent,
+  );
+
 async function createWork(user: ReturnType<typeof userEvent.setup>, title: string) {
   await user.click(await screen.findByRole('button', { name: '新建作品' }));
   await user.type(screen.getByRole('textbox', { name: '作品名' }), `${title}{Enter}`);
@@ -1844,8 +1850,7 @@ describe('快速成书的界面（B67）', () => {
     await user.click(within(step(3)).getByRole('button', { name: '采用计划' }));
     await waitFor(() => expect(step(3).textContent).toContain('2 章，2 章有计划'));
     expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 身世']);
-    const nav = screen.getByRole('navigation', { name: '章节目录' });
-    expect(within(within(nav).getByRole('region', { name: '第二卷 身世' })).getByText('第二章 身世')).toBeTruthy();
+    expect(tocOutline()).toEqual(['卷：第一卷 当玉', '第一章 夜叩', '卷：第二卷 身世', '第二章 身世']);
     expect(within(step(4)).getByRole('region', { name: '成书进度' })).toBeTruthy();
     expect(within(step(4)).getByRole('button', { name: '依次写完待写的 2 章' })).toBeTruthy();
   });
@@ -1878,24 +1883,23 @@ describe('分卷的界面（B68）', () => {
     for (const name of ['第一卷', '第二卷']) {
       await user.click(within(nav()).getByRole('button', { name: '新建卷' }));
       await user.type(within(nav()).getByRole('textbox', { name: '新卷名' }), `${name}{Enter}`);
-      await within(nav()).findByRole('region', { name });
+      await within(nav()).findByLabelText(`卷：${name}`);
     }
-    expect(within(nav()).getByRole('region', { name: '未分卷' })).toBeTruthy();
-    expect(within(within(nav()).getByRole('region', { name: '第一卷' })).getByText('这一卷还没有章节')).toBeTruthy();
+    expect(tocOutline()).toEqual(['卷：未分卷', '楔子', '卷：第一卷', '这一卷还没有章节', '卷：第二卷', '这一卷还没有章节']);
 
     // 在第二卷里新建章节。
     await user.click(within(nav()).getByRole('button', { name: '在 第二卷 末尾新建章节' }));
     await user.type(within(nav()).getByRole('textbox', { name: '新章节名' }), '第一章{Enter}');
-    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '第二卷' })).getByText('第一章')).toBeTruthy());
+    await waitFor(() => expect(tocOutline()).toEqual(['卷：未分卷', '楔子', '卷：第一卷', '这一卷还没有章节', '卷：第二卷', '第一章']));
 
     // 上移：第一章是第二卷的第一章，上一章是未分卷的楔子，于是移到未分卷末尾（第一卷是空的，跳过）。
     await user.click(within(nav()).getByRole('button', { name: '上移 第一章' }));
-    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '未分卷' })).getByText('第一章')).toBeTruthy());
+    await waitFor(() => expect(tocOutline()).toEqual(['卷：未分卷', '楔子', '第一章', '卷：第一卷', '这一卷还没有章节', '卷：第二卷', '这一卷还没有章节']));
     // 拖到第一卷的标题上：移入第一卷。
     const chapterId = store.getState().work?.chapters.find((c) => c.title === '第一章')?.id ?? '';
     const volumeId = store.getState().work?.volumes.find((v) => v.title === '第一卷')?.id ?? null;
     await store.getState().dropChapterOnVolume(chapterId, volumeId);
-    await waitFor(() => expect(within(within(nav()).getByRole('region', { name: '第一卷' })).getByText('第一章')).toBeTruthy());
+    await waitFor(() => expect(tocOutline()).toEqual(['卷：未分卷', '楔子', '卷：第一卷', '第一章', '卷：第二卷', '这一卷还没有章节']));
 
     await user.click(within(nav()).getByRole('button', { name: '编辑 第一卷' }));
     const editor = within(nav()).getByRole('form', { name: '编辑 第一卷' });
@@ -1909,6 +1913,69 @@ describe('分卷的界面（B68）', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('“第一卷 雨夜”里还有章节');
     await user.click(within(nav()).getByRole('button', { name: '删除 第二卷' }));
     await waitFor(() => expect(store.getState().work?.volumes.map((v) => v.title)).toEqual(['第一卷 雨夜']));
+  });
+});
+
+describe('长篇的目录（施工文档第七章：虚拟列表）', () => {
+  it('行数多时只渲染视野内外的几十行，滚动后换成那里的章节；选中远处的章节时滚到那一章', async () => {
+    // jsdom 不排版：目录的滚动区高 600、每行高 32，内容的高度按 300 行算；滚动时更新位置，随后发出 scroll 事件。
+    const own = (['offsetHeight', 'clientHeight', 'scrollHeight'] as const).map((name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const);
+    const isScroller = (el: Element) => el.classList.contains('toc-scroll');
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (isScroller(this)) return 600;
+        return this.parentElement?.classList.contains('chapter-list') === true ? 32 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return isScroller(this) ? 600 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return isScroller(this) ? 300 * 32 : 0;
+      },
+    });
+    HTMLElement.prototype.scrollTo = function (this: HTMLElement, options?: ScrollToOptions | number) {
+      if (typeof options === 'object' && options.top !== undefined) this.scrollTop = options.top;
+      // 与浏览器一样，scroll 事件在之后的任务里发出。
+      setTimeout(() => this.dispatchEvent(new Event('scroll')), 0);
+    };
+    try {
+      const { user, service, store } = start();
+      await createWork(user, '长篇');
+      for (let i = 1; i < 300; i++) {
+        const created = await service.createChapter(`第${i}章`);
+        expect(created.ok).toBe(true);
+      }
+      // 经界面在末尾新建一章：它成为所选，目录滚到末尾。
+      await addChapter(user, '尾声');
+      expect(chapterTitles().length).toBeLessThan(60);
+      expect(chapterTitles()).not.toContain('第1章');
+      expect(screen.getByRole('navigation', { name: '章节目录' }).querySelector('.chapter-item')?.getAttribute('aria-setsize')).toBe('300');
+
+      const scroller = screen.getByRole('navigation', { name: '章节目录' }).querySelector<HTMLElement>('.toc-scroll');
+      if (scroller === null) throw new Error('缺少目录的滚动区');
+      scroller.scrollTo({ top: 0 });
+      await waitFor(() => expect(chapterTitles()).toContain('第1章'));
+      expect(chapterTitles()).not.toContain('尾声');
+
+      // 选中第 200 章（例如从查找跳过来）：目录滚到那一章。
+      const target = store.getState().work?.chapters.find((c) => c.title === '第200章');
+      await store.getState().selectChapter(target?.id ?? '');
+      await waitFor(() => expect(chapterTitles()).toContain('第200章'));
+      expect(chapterTitles()).not.toContain('第1章');
+    } finally {
+      for (const [name, descriptor] of own) {
+        if (descriptor === undefined) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        else Object.defineProperty(HTMLElement.prototype, name, descriptor);
+      }
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo;
+    }
   });
 });
 

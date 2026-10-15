@@ -544,7 +544,16 @@ textarea {
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 180px;
+}
+
+/* 目录自己滚动（作品导航留在上面）；行数多时是虚拟列表，行与行之间不用外边距，量出的高度才与排版一致。 */
+.toc-scroll {
+  flex: 1;
   min-height: 0;
+  margin-top: 6px;
+  overflow-y: auto;
+  overflow-anchor: none;
 }
 
 .sidebar-head {
@@ -569,7 +578,7 @@ textarea {
 }
 
 .chapter-list {
-  margin: 6px 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -1753,9 +1762,13 @@ fieldset.plain {
   margin: 4px 0 6px;
 }
 
-/* 分卷（B68）：卷的标题行，章节列表缩进在卷下 */
-.volume {
-  margin-bottom: 8px;
+/* 分卷（B68）：卷的标题行，章节缩进在卷下 */
+.toc-volume {
+  padding: 12px 0 2px;
+}
+
+.toc-volume.first {
+  padding-top: 0;
 }
 
 .volume-head {
@@ -1785,12 +1798,12 @@ fieldset.plain {
   display: flex;
 }
 
-.volume .chapter-list {
-  padding-left: 10px;
+.chapter-item.nested {
+  margin-left: 10px;
 }
 
-.volume-empty {
-  margin: 2px 0 0 16px;
+.toc-empty {
+  padding: 2px 0 2px 16px;
   font-size: 13px;
 }
 
