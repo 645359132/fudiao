@@ -1,0 +1,815 @@
+// AI 助手的动作（需求 B69、B71）：命令表，每个动作一项——名称、执行，以及须作者确认时给作者看的说明。
+// 动作的参数已由结构化输出管线按 packages/prompts 的 AssistantAction 校验；执行只调用现有的用例，
+// 锁定设定、快照、版本守卫、回收站与“候选”照常生效。表的类型要求每个动作都有一项，新增动作时漏不掉。
+import type { AssistantAction, AssistantTool, PlanDraftData, SelectionOperation } from '@fudiao/prompts';
+import type { ContextOverrides } from '@fudiao/context';
+import type { CallOptions } from '@fudiao/llm';
+import { err, ok, type Result } from '@fudiao/shared';
+import {
+  chapterLengths,
+  listChapterPlans,
+  type Chapter,
+  type ChapterTarget,
+  type Entity,
+  type EntityKind,
+  type EntityPatch,
+  type Fact,
+  type FactInput,
+  type FactStatus,
+  type ForeshadowFields,
+  type PlanFields,
+  type ProjectPatch,
+  type SearchResult,
+  type SqlPort,
+  type Volume,
+} from '@fudiao/store';
+import type { AppError } from './errors';
+import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL } from './labels';
+import type { AppliedDraft, PlanningView } from './planning';
+import type { ReviewOutcome } from './review';
+import type { EditorSelection } from './writing-context';
+import type { WriterEvents, WriterOutcome } from './writer';
+
+/** 助手要界面做的事：打开章节或页面；打开一章旁的候选稿或审核问题；作品换了（新建或打开了另一部）；作品内容变了。 */
+export type AssistantEffect =
+  | { readonly kind: 'open_chapter'; readonly chapterId: string }
+  | { readonly kind: 'show_candidates'; readonly chapterId: string }
+  | { readonly kind: 'show_review'; readonly chapterId: string }
+  | { readonly kind: 'chapter_changed'; readonly chapterId: string }
+  | { readonly kind: 'open_page'; readonly page: Extract<AssistantAction, { tool: 'open_page' }>['page'] }
+  | { readonly kind: 'work_opened' }
+  | { readonly kind: 'changed' };
+
+/** 作者发话时在正文里选中的文字（edit_selection 的对象）。 */
+export type AssistantSelection = { readonly chapterId: string; readonly range: EditorSelection; readonly text: string };
+
+/** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展与作者选中的文字。 */
+export type ToolEvents = CallOptions & {
+  readonly onEffect?: (effect: AssistantEffect) => void;
+  /** 正在执行的耗时动作（写手写章、生成计划、审核等）的进展；动作做完时为 null。 */
+  readonly onProgress?: (note: string | null) => void;
+  /** 作者选中的文字；没有选中时为 null。 */
+  readonly selection?: AssistantSelection | null;
+};
+
+/** 作品的现状（章节、回收站与卷），由应用服务的 reloadWork 给出。 */
+export type WorkSnapshot = {
+  readonly project: { readonly title: string; readonly genre: string; readonly synopsis: string; readonly outline: string };
+  readonly chapters: readonly Chapter[];
+  readonly trashed: readonly Chapter[];
+  readonly volumes: readonly Volume[];
+};
+
+/** 助手用到的现有用例（由应用服务提供）。 */
+export type AssistantHost = {
+  loadLibrary(): Promise<Result<{ readonly works: readonly { readonly id: string; readonly title: string; readonly archived: boolean; readonly missing: boolean }[] }, AppError>>;
+  createWork(title: string): Promise<Result<unknown, AppError>>;
+  openWork(id: string): Promise<Result<unknown, AppError>>;
+  reloadWork(): Promise<Result<WorkSnapshot, AppError>>;
+  updateWorkInfo(patch: ProjectPatch): Promise<Result<unknown, AppError>>;
+  createVolume(title: string, after?: string): Promise<Result<{ readonly volumes: readonly Volume[] }, AppError>>;
+  updateVolume(volume: Volume, fields: { readonly title: string; readonly summary: string }): Promise<Result<unknown, AppError>>;
+  moveVolume(volume: Volume, after: string | null): Promise<Result<unknown, AppError>>;
+  deleteVolume(volume: Volume): Promise<Result<unknown, AppError>>;
+  createChapter(title: string, after?: string, volumeId?: string | null): Promise<Result<{ readonly chapters: readonly Chapter[] }, AppError>>;
+  renameChapter(chapter: Chapter, title: string): Promise<Result<unknown, AppError>>;
+  updateChapterNotes(chapter: Chapter, notes: { readonly summary: string; readonly notes: string }): Promise<Result<unknown, AppError>>;
+  moveChapter(chapter: Chapter, target: ChapterTarget): Promise<Result<unknown, AppError>>;
+  trashChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
+  restoreChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
+  createSnapshot(chapterId: string): Promise<Result<unknown, AppError>>;
+  openChapter(chapterId: string): Promise<Result<{ readonly saved: readonly { readonly id: string; readonly text: string }[] }, AppError>>;
+  search(query: string): Promise<Result<SearchResult, AppError>>;
+  listEntities(): Promise<Result<Entity[], AppError>>;
+  createEntity(kind: EntityKind, name: string): Promise<Result<{ readonly created: Entity }, AppError>>;
+  updateEntity(entity: Entity, patch: EntityPatch): Promise<Result<unknown, AppError>>;
+  deleteEntity(entity: Entity): Promise<Result<unknown, AppError>>;
+  listFacts(): Promise<Result<Fact[], AppError>>;
+  createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
+  planningView(): Promise<Result<PlanningView, AppError>>;
+  savePlan(chapterId: string, fields: PlanFields): Promise<Result<unknown, AppError>>;
+  draftPlans(request: { readonly chapterCount: number; readonly wordsPerChapter: number }, options?: CallOptions): Promise<Result<PlanDraftData, AppError>>;
+  applyPlanDraft(draft: PlanDraftData): Promise<Result<AppliedDraft, AppError>>;
+  writeChapter(chapterId: string, events?: WriterEvents): Promise<Result<WriterOutcome, AppError>>;
+  rollbackWriter(chapterId: string): Promise<Result<unknown, AppError>>;
+  reviewChapter(chapterId: string, options?: CallOptions): Promise<Result<ReviewOutcome, AppError>>;
+  addForeshadow(fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
+  exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
+  runSelectionOperation(
+    request: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: SelectionOperation; readonly instruction: string; readonly overrides: ContextOverrides },
+    options?: CallOptions,
+  ): Promise<Result<{ readonly candidate: { readonly id: string } | null }, AppError>>;
+};
+
+/** 一个动作的结果：成功与否，以及告诉模型（也显示给作者）的说明。 */
+export type Outcome = { readonly ok: boolean; readonly detail: string };
+const done = (detail: string): Outcome => ({ ok: true, detail });
+const failed = (detail: string): Outcome => ({ ok: false, detail });
+
+/** 读一章时最多给出的字数：太长时给开头与结尾。 */
+const READ_LIMIT = 6_000;
+/** 审核结果在对话里列出的问题数。 */
+const LISTED_ISSUES = 6;
+const UNVOLUMED = '未分卷';
+
+const SEVERITY_LABEL = { high: '严重', medium: '一般', low: '轻微' } as const;
+const EDIT_LABEL = { rewrite: '改写', expand: '扩写', shorten: '缩写', polish: '润色' } as const;
+
+/** 按标识或名称找一项：标识相同、名称相同、名称包含（只有一项时）；找不到或有几项对得上时说明。 */
+export function pick<T extends { readonly id: string }>(items: readonly T[], ref: string, names: (t: T) => readonly string[], what: string): Result<T, string> {
+  const key = ref.trim();
+  const byId = items.find((t) => t.id === key);
+  if (byId !== undefined) return ok(byId);
+  const exact = items.filter((t) => names(t).some((n) => n.trim() === key));
+  if (exact.length === 1) return ok(exact[0]!);
+  const loose = exact.length > 1 ? exact : items.filter((t) => names(t).some((n) => n.includes(key) || (key.length >= 2 && key.includes(n.trim()) && n.trim().length >= 2)));
+  if (loose.length === 1) return ok(loose[0]!);
+  if (loose.length === 0) return err(`找不到${what}“${key}”`);
+  return err(`有几个${what}都对得上“${key}”：${loose.slice(0, 6).map((t) => `${names(t)[0] ?? ''}[${t.id}]`).join('、')}，请用标识指明`);
+}
+
+/** 用例的错误换成告诉模型的说明。 */
+export function describeForModel(e: AppError): string {
+  if (e.code === 'settings') return e.detail;
+  if (e.code === 'repo') {
+    const r = e.error;
+    if (r.code === 'locked') return '这是锁定设定，作者解锁后才能修改或删除';
+    if (r.code === 'invalid') return r.detail;
+    if (r.code === 'conflict') return '已在别处修改，请重试';
+    if (r.code === 'in_use') return '还有事实、章节计划或故事事件用到它，不能删除';
+    if (r.code === 'not_found') return '找不到这一项';
+    return '保存失败';
+  }
+  if (e.code === 'no_work') return '还没有打开作品：先新建或打开一部作品';
+  return e.code;
+}
+
+const failWith = (e: AppError): Outcome => failed(describeForModel(e));
+
+/** 太长的文字只留开头与结尾。 */
+export const clip = (text: string, limit: number): { readonly text: string; readonly clipped: boolean } =>
+  text.length <= limit ? { text, clipped: false } : { text: `${text.slice(0, limit / 2)}\n……\n${text.slice(-limit / 2)}`, clipped: true };
+
+/** 动作执行的环境：现有的用例、作品库、界面回调，以及按名称找卷、章节与设定。 */
+export type ToolEnv = {
+  readonly host: AssistantHost;
+  readonly project: () => SqlPort | null;
+  readonly events: ToolEvents;
+  readonly work: () => Promise<Result<WorkSnapshot, AppError>>;
+  readonly findChapter: (ref: string) => Promise<Result<Chapter, string>>;
+  readonly findVolume: (ref: string) => Promise<Result<Volume, string>>;
+  readonly findEntity: (ref: string) => Promise<Result<Entity, string>>;
+  readonly hasPlans: () => Promise<boolean>;
+  /** 告诉界面作品内容变了。 */
+  readonly changed: () => void;
+  /** 交给耗时用例的调用选项（作者停止时取消）。 */
+  readonly call: () => CallOptions;
+};
+
+export function toolEnv(host: AssistantHost, project: () => SqlPort | null, events: ToolEvents): ToolEnv {
+  const work = () => host.reloadWork();
+  return {
+    host,
+    project,
+    events,
+    work,
+    async findChapter(ref) {
+      const w = await work();
+      return w.ok ? pick(w.value.chapters, ref, (c) => [c.title], '章节') : err(describeForModel(w.error));
+    },
+    async findVolume(ref) {
+      const w = await work();
+      return w.ok ? pick(w.value.volumes, ref, (v) => [v.title], '卷') : err(describeForModel(w.error));
+    },
+    async findEntity(ref) {
+      const list = await host.listEntities();
+      return list.ok ? pick(list.value, ref, (e) => [e.name, ...e.aliases], '设定') : err(describeForModel(list.error));
+    },
+    async hasPlans() {
+      const port = project();
+      if (port === null) return false;
+      const plans = await listChapterPlans(port);
+      return plans.ok && plans.value.length > 0;
+    },
+    changed: () => events.onEffect?.({ kind: 'changed' }),
+    call: () => (events.signal === undefined ? {} : { signal: events.signal }),
+  };
+}
+
+type ActionOf<K extends AssistantTool> = Extract<AssistantAction, { readonly tool: K }>;
+
+/** 命令表的一项。confirm 给出时，返回非 null 的说明就先停下请作者确认（删除与覆盖类的动作）。 */
+type Tool<K extends AssistantTool> = {
+  readonly label: string;
+  readonly confirm?: (action: ActionOf<K>, env: ToolEnv) => string | null | Promise<string | null>;
+  readonly run: (action: ActionOf<K>, env: ToolEnv) => Promise<Outcome>;
+};
+
+const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
+  list_chapters: {
+    label: '查看章节',
+    async run(action, env) {
+      const work = await env.work();
+      if (!work.ok) return failWith(work.error);
+      const port = env.project();
+      const lengths = port === null ? null : await chapterLengths(port);
+      const lengthOf = new Map(lengths?.ok === true ? lengths.value.map((l) => [l.chapterId, l.length]) : []);
+      let list = work.value.chapters;
+      if (action.volume !== null) {
+        if (action.volume.trim() === UNVOLUMED) list = list.filter((c) => c.volumeId === null);
+        else {
+          const v = pick(work.value.volumes, action.volume, (x) => [x.title], '卷');
+          if (!v.ok) return failed(v.error);
+          list = list.filter((c) => c.volumeId === v.value.id);
+        }
+      }
+      const title = new Map(work.value.volumes.map((v) => [v.id, v.title]));
+      return done(list.length === 0 ? '没有章节。' : list.map((c) => `[${c.id}] ${c.title}${c.volumeId === null ? '' : `（${title.get(c.volumeId) ?? ''}）`}，${lengthOf.get(c.id) ?? 0} 字`).join('\n'));
+    },
+  },
+  read_chapter: {
+    label: '读章节',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const content = await env.host.openChapter(c.value.id);
+      if (!content.ok) return failWith(content.error);
+      const text = content.value.saved.map((p) => p.text).join('\n');
+      if (text.trim() === '') return done(`《${c.value.title}》还没有正文。`);
+      const shown = text.length <= READ_LIMIT ? text : `${text.slice(0, READ_LIMIT / 2)}\n……（中间省略 ${text.length - READ_LIMIT} 字）……\n${text.slice(-READ_LIMIT / 2)}`;
+      return done(`《${c.value.title}》正文：\n${shown}`);
+    },
+  },
+  search_text: {
+    label: '查找正文',
+    async run(action, env) {
+      const result = await env.host.search(action.query);
+      if (!result.ok) return failWith(result.error);
+      const hits = result.value.hits.slice(0, 20);
+      if (hits.length === 0) return done(`没有找到“${action.query}”。`);
+      return done(`${result.value.hits.length} 处${result.value.truncated ? '以上' : ''}：\n${hits.map((h) => `[${h.chapterId}] ${h.chapterTitle}：…${h.before}【${h.match}】${h.after}…`).join('\n')}`);
+    },
+  },
+  get_entity: {
+    label: '查看设定',
+    async run(action, env) {
+      const e = await env.findEntity(action.entity);
+      if (!e.ok) return failed(e.error);
+      const x = e.value;
+      const attributes = x.attributes.map((a) => `${a.label}：${a.value}`).join('；');
+      return done(`[${x.id}] ${ENTITY_KIND_LABEL[x.kind]}：${x.name}${x.aliases.length > 0 ? `（别名：${x.aliases.join('、')}）` : ''}${x.locked ? '（锁定）' : ''}\n说明：${x.description || '无'}${attributes === '' ? '' : `\n属性：${attributes}`}`);
+    },
+  },
+  list_facts: {
+    label: '查看事实',
+    async run(action, env) {
+      const facts = await env.host.listFacts();
+      if (!facts.ok) return failWith(facts.error);
+      let list = facts.value;
+      if (action.about !== null) {
+        const e = await env.findEntity(action.about);
+        if (!e.ok) return failed(e.error);
+        list = list.filter((f) => f.subjectIds.includes(e.value.id) || f.holderId === e.value.id);
+      }
+      const status = { candidate: '候选', confirmed: '已确认', needs_review: '待复核', rejected: '已驳回' } as const;
+      return done(list.length === 0 ? '没有事实记录。' : list.slice(0, 50).map((f) => `[${f.id}] ${f.content}（${status[f.status]}）`).join('\n'));
+    },
+  },
+  get_chapter_plan: {
+    label: '查看章节计划',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      const plan = view.value.chapters.find((x) => x.chapter.id === c.value.id)?.plan ?? null;
+      if (plan === null) return done(`《${c.value.title}》还没有章节计划。`);
+      const entities = await env.host.listEntities();
+      const name = new Map(entities.ok ? entities.value.map((e) => [e.id, e.name]) : []);
+      return done(
+        `《${c.value.title}》（${PLAN_STATUS_LABEL[plan.status]}）\n目标：${plan.goal}\n情节点：${plan.beats.join('；')}\n出场人物：${plan.castIds.map((id) => name.get(id) ?? id).join('、') || '无'}\n字数：${plan.targetWords ?? '未定'}`,
+      );
+    },
+  },
+  create_work: {
+    label: '新建作品',
+    async run(action, env) {
+      const created = await env.host.createWork(action.title);
+      if (!created.ok) return failWith(created.error);
+      const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
+      if (action.genre !== null) patch.genre = action.genre;
+      if (action.synopsis !== null) patch.synopsis = action.synopsis;
+      if (action.outline !== null) patch.outline = action.outline;
+      if (Object.keys(patch).length > 0) {
+        const info = await env.host.updateWorkInfo(patch);
+        if (!info.ok) return failWith(info.error);
+      }
+      env.events.onEffect?.({ kind: 'work_opened' });
+      return done(`已新建并打开《${action.title.trim()}》。`);
+    },
+  },
+  open_work: {
+    label: '打开作品',
+    async run(action, env) {
+      const library = await env.host.loadLibrary();
+      if (!library.ok) return failWith(library.error);
+      const w = pick(
+        library.value.works.filter((x) => !x.missing),
+        action.work,
+        (x) => [x.title],
+        '作品',
+      );
+      if (!w.ok) return failed(w.error);
+      const opened = await env.host.openWork(w.value.id);
+      if (!opened.ok) return failWith(opened.error);
+      env.events.onEffect?.({ kind: 'work_opened' });
+      return done(`已打开《${w.value.title}》。`);
+    },
+  },
+  update_work: {
+    label: '修改作品信息',
+    async run(action, env) {
+      const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
+      if (action.title !== null) patch.title = action.title;
+      if (action.genre !== null) patch.genre = action.genre;
+      if (action.synopsis !== null) patch.synopsis = action.synopsis;
+      if (action.outline !== null) patch.outline = action.outline;
+      if (Object.keys(patch).length === 0) return failed('没有要改的内容');
+      const info = await env.host.updateWorkInfo(patch);
+      if (!info.ok) return failWith(info.error);
+      env.changed();
+      return done(`已修改作品信息：${Object.keys(patch).map((k) => ({ title: '作品名', genre: '类型', synopsis: '简介', outline: '大纲' })[k] ?? k).join('、')}。`);
+    },
+  },
+  create_volume: {
+    label: '新建卷',
+    async run(action, env) {
+      let after: string | undefined;
+      if (action.after !== null) {
+        const v = await env.findVolume(action.after);
+        if (!v.ok) return failed(v.error);
+        after = v.value.id;
+      }
+      const before = await env.work();
+      const known = new Set(before.ok ? before.value.volumes.map((v) => v.id) : []);
+      const created = await env.host.createVolume(action.title, after);
+      if (!created.ok) return failWith(created.error);
+      const volume = created.value.volumes.find((v) => !known.has(v.id));
+      if (volume !== undefined && action.summary !== null && action.summary.trim() !== '') {
+        const described = await env.host.updateVolume(volume, { title: volume.title, summary: action.summary });
+        if (!described.ok) return failWith(described.error);
+      }
+      env.changed();
+      return done(`已新建卷“${action.title.trim()}”${volume === undefined ? '' : `[${volume.id}]`}。`);
+    },
+  },
+  update_volume: {
+    label: '修改卷',
+    async run(action, env) {
+      const v = await env.findVolume(action.volume);
+      if (!v.ok) return failed(v.error);
+      const updated = await env.host.updateVolume(v.value, { title: action.title ?? v.value.title, summary: action.summary ?? v.value.summary });
+      if (!updated.ok) return failWith(updated.error);
+      env.changed();
+      return done(`已修改卷“${action.title ?? v.value.title}”。`);
+    },
+  },
+  move_volume: {
+    label: '调整卷的顺序',
+    async run(action, env) {
+      const v = await env.findVolume(action.volume);
+      if (!v.ok) return failed(v.error);
+      let after: string | null = null;
+      if (action.after !== null) {
+        const a = await env.findVolume(action.after);
+        if (!a.ok) return failed(a.error);
+        after = a.value.id;
+      }
+      const moved = await env.host.moveVolume(v.value, after);
+      if (!moved.ok) return failWith(moved.error);
+      env.changed();
+      return done(`已调整“${v.value.title}”的顺序。`);
+    },
+  },
+  delete_volume: {
+    label: '删除卷',
+    confirm: (action) => `删除卷“${action.volume}”`,
+    async run(action, env) {
+      const v = await env.findVolume(action.volume);
+      if (!v.ok) return failed(v.error);
+      const deleted = await env.host.deleteVolume(v.value);
+      if (!deleted.ok) return failWith(deleted.error);
+      env.changed();
+      return done(`已删除卷“${v.value.title}”。`);
+    },
+  },
+  create_chapter: {
+    label: '新建章节',
+    async run(action, env) {
+      const before = await env.work();
+      if (!before.ok) return failWith(before.error);
+      const known = new Set(before.value.chapters.map((c) => c.id));
+      let created;
+      if (action.after !== null) {
+        const a = pick(before.value.chapters, action.after, (c) => [c.title], '章节');
+        if (!a.ok) return failed(a.error);
+        created = await env.host.createChapter(action.title, a.value.id);
+      } else if (action.volume !== null) {
+        let volumeId: string | null = null;
+        if (action.volume.trim() !== UNVOLUMED) {
+          const v = pick(before.value.volumes, action.volume, (x) => [x.title], '卷');
+          if (!v.ok) return failed(v.error);
+          volumeId = v.value.id;
+        }
+        created = await env.host.createChapter(action.title, undefined, volumeId);
+      } else {
+        created = await env.host.createChapter(action.title);
+      }
+      if (!created.ok) return failWith(created.error);
+      const chapter = created.value.chapters.find((c) => !known.has(c.id));
+      env.changed();
+      return done(`已新建章节《${action.title.trim()}》${chapter === undefined ? '' : `[${chapter.id}]`}。`);
+    },
+  },
+  update_chapter: {
+    label: '修改章节',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      let chapter = c.value;
+      if (action.title !== null && action.title.trim() !== chapter.title) {
+        const renamed = await env.host.renameChapter(chapter, action.title);
+        if (!renamed.ok) return failWith(renamed.error);
+        const again = await env.findChapter(chapter.id);
+        if (!again.ok) return failed(again.error);
+        chapter = again.value;
+      }
+      if (action.summary !== null || action.notes !== null) {
+        const noted = await env.host.updateChapterNotes(chapter, { summary: action.summary ?? chapter.summary, notes: action.notes ?? chapter.notes });
+        if (!noted.ok) return failWith(noted.error);
+      }
+      env.changed();
+      return done(`已修改《${chapter.title}》。`);
+    },
+  },
+  move_chapter: {
+    label: '移动章节',
+    async run(action, env) {
+      const work = await env.work();
+      if (!work.ok) return failWith(work.error);
+      const c = pick(work.value.chapters, action.chapter, (x) => [x.title], '章节');
+      if (!c.ok) return failed(c.error);
+      let target: ChapterTarget;
+      if (action.after !== null) {
+        const a = pick(work.value.chapters, action.after, (x) => [x.title], '章节');
+        if (!a.ok) return failed(a.error);
+        target = { volumeId: a.value.volumeId, after: a.value.id };
+      } else if (action.volume !== null) {
+        let volumeId: string | null = null;
+        if (action.volume.trim() !== UNVOLUMED) {
+          const v = pick(work.value.volumes, action.volume, (x) => [x.title], '卷');
+          if (!v.ok) return failed(v.error);
+          volumeId = v.value.id;
+        }
+        const members = work.value.chapters.filter((x) => x.volumeId === volumeId && x.id !== c.value.id);
+        target = { volumeId, after: members.at(-1)?.id ?? null };
+      } else {
+        return failed('请给出 after（移到哪一章之后）或 volume（移到哪一卷）');
+      }
+      const moved = await env.host.moveChapter(c.value, target);
+      if (!moved.ok) return failWith(moved.error);
+      env.changed();
+      return done(`已移动《${c.value.title}》。`);
+    },
+  },
+  trash_chapter: {
+    label: '移入回收站',
+    confirm: (action) => `把“${action.chapter}”移入回收站`,
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const trashed = await env.host.trashChapter(c.value);
+      if (!trashed.ok) return failWith(trashed.error);
+      env.changed();
+      return done(`已把《${c.value.title}》移入回收站（可以恢复）。`);
+    },
+  },
+  open_chapter: {
+    label: '打开章节',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      env.events.onEffect?.({ kind: 'open_chapter', chapterId: c.value.id });
+      return done(`已打开《${c.value.title}》。`);
+    },
+  },
+  create_entity: {
+    label: '新建设定',
+    async run(action, env) {
+      const created = await env.host.createEntity(action.kind, action.name);
+      if (!created.ok) return failWith(created.error);
+      const patch: { -readonly [K in keyof EntityPatch]: EntityPatch[K] } = {};
+      if (action.description !== null) patch.description = action.description;
+      if (action.aliases !== null) patch.aliases = action.aliases.map((a) => a.trim()).filter((a) => a !== '');
+      if (Object.keys(patch).length > 0) {
+        const described = await env.host.updateEntity(created.value.created, patch);
+        if (!described.ok) return failWith(described.error);
+      }
+      env.changed();
+      return done(`已新建${ENTITY_KIND_LABEL[action.kind]}“${action.name.trim()}”[${created.value.created.id}]。`);
+    },
+  },
+  update_entity: {
+    label: '修改设定',
+    async run(action, env) {
+      const e = await env.findEntity(action.entity);
+      if (!e.ok) return failed(e.error);
+      if (e.value.locked) return failed(`“${e.value.name}”是锁定设定，作者解锁后才能修改`);
+      const patch: { -readonly [K in keyof EntityPatch]: EntityPatch[K] } = {};
+      if (action.name !== null) patch.name = action.name;
+      if (action.description !== null) patch.description = action.description;
+      if (action.aliases !== null) patch.aliases = action.aliases.map((a) => a.trim()).filter((a) => a !== '');
+      if (Object.keys(patch).length === 0) return failed('没有要改的内容');
+      const updated = await env.host.updateEntity(e.value, patch);
+      if (!updated.ok) return failWith(updated.error);
+      env.changed();
+      return done(`已修改“${action.name ?? e.value.name}”。`);
+    },
+  },
+  delete_entity: {
+    label: '删除设定',
+    confirm: (action) => `删除设定“${action.entity}”`,
+    async run(action, env) {
+      const e = await env.findEntity(action.entity);
+      if (!e.ok) return failed(e.error);
+      const deleted = await env.host.deleteEntity(e.value);
+      if (!deleted.ok) return failWith(deleted.error);
+      env.changed();
+      return done(`已删除“${e.value.name}”。`);
+    },
+  },
+  add_fact: {
+    label: '记录事实',
+    async run(action, env) {
+      let holderId: string | null = null;
+      if (action.kind === 'belief') {
+        if (action.holder === null) return failed('人物认知须给出持有人（holder）');
+        const h = await env.findEntity(action.holder);
+        if (!h.ok) return failed(h.error);
+        holderId = h.value.id;
+      }
+      const subjectIds: string[] = [];
+      const missing: string[] = [];
+      for (const s of action.subjects ?? []) {
+        const e = await env.findEntity(s);
+        if (e.ok) subjectIds.push(e.value.id);
+        else missing.push(s);
+      }
+      const input: FactInput = {
+        kind: action.kind,
+        holderId,
+        subjectIds,
+        content: action.content,
+        modality: action.kind === 'belief' ? 'inferred' : null,
+        confidence: null,
+        validFromChapterId: null,
+        validToChapterId: null,
+        validFrom: null,
+        validTo: null,
+        basis: [],
+      };
+      // 助手记下的事实是候选，作者在事实页确认后才算数（硬性规则 21）。
+      const created = await env.host.createFact(input, 'candidate');
+      if (!created.ok) return failWith(created.error);
+      env.changed();
+      return done(`已记为候选事实，等作者在“事实”页确认${missing.length > 0 ? `；这些设定没有找到，没有关联：${missing.join('、')}` : ''}。`);
+    },
+  },
+  save_chapter_plan: {
+    label: '保存章节计划',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      const current = view.value.chapters.find((x) => x.chapter.id === c.value.id)?.plan ?? null;
+      const entities = await env.host.listEntities();
+      const characters = entities.ok ? entities.value.filter((e) => e.kind === 'character') : [];
+      const unmatched: string[] = [];
+      const castIds = (action.cast ?? []).flatMap((n) => {
+        const e = pick(characters, n, (x) => [x.name, ...x.aliases], '人物');
+        if (!e.ok) unmatched.push(n);
+        return e.ok ? [e.value.id] : [];
+      });
+      const saved = await env.host.savePlan(c.value.id, {
+        goal: action.goal,
+        castIds: action.cast === null ? (current?.castIds ?? []) : [...new Set(castIds)],
+        beats: action.beats.map((b) => b.trim()).filter((b) => b !== ''),
+        foreshadowPlant: current?.foreshadowPlant ?? [],
+        foreshadowPayoff: current?.foreshadowPayoff ?? [],
+        treatment: current?.treatment ?? '',
+        targetWords: action.targetWords ?? current?.targetWords ?? null,
+      });
+      if (!saved.ok) return failWith(saved.error);
+      env.changed();
+      return done(`已保存《${c.value.title}》的章节计划${unmatched.length > 0 ? `；这些人物还没有人物卡片，没有加入出场人物：${unmatched.join('、')}` : ''}。`);
+    },
+  },
+  plan_chapters: {
+    label: '生成章节计划',
+    confirm: async (action, env) => ((await env.hasPlans()) ? `按大纲重新生成 ${action.count} 章的章节计划并采用（会覆盖已有的计划）` : null),
+    async run(action, env) {
+      env.events.onProgress?.(`正在按大纲生成 ${action.count} 章的章节计划`);
+      const draft = await env.host.draftPlans({ chapterCount: action.count, wordsPerChapter: action.wordsPerChapter ?? 3000 }, env.call());
+      if (!draft.ok) return failWith(draft.error);
+      const applied = await env.host.applyPlanDraft(draft.value);
+      if (!applied.ok) return failWith(applied.error);
+      env.changed();
+      const volumes = new Set(draft.value.chapters.map((c) => (c.volume ?? '').trim()).filter((v) => v !== '')).size;
+      return done(
+        `已生成并采用 ${draft.value.chapters.length} 章的计划${volumes > 0 ? `，分 ${volumes} 卷` : ''}${applied.value.unmatchedCast.length > 0 ? `；这些人物还没有人物卡片：${applied.value.unmatchedCast.join('、')}` : ''}。`,
+      );
+    },
+  },
+  write_chapter: {
+    label: '写手写章',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      env.events.onEffect?.({ kind: 'open_chapter', chapterId: c.value.id });
+      env.events.onProgress?.(`写手正在写《${c.value.title}》`);
+      const written = await env.host.writeChapter(c.value.id, {
+        ...env.call(),
+        onSegment: (n, total) => {
+          env.events.onProgress?.(`写手正在写《${c.value.title}》：已写 ${n}/${total} 段`);
+          // 每写完一段就让界面重新载入这一章，作者看得到正文在长。
+          env.events.onEffect?.({ kind: 'chapter_changed', chapterId: c.value.id });
+        },
+      });
+      if (!written.ok) return failWith(written.error);
+      env.changed();
+      const o = written.value;
+      if (o.status === 'written') return done(`写手已写完《${c.value.title}》（写入前的正文在“版本快照”里，可以一键回退）。`);
+      return failed(`写手${o.status === 'cancelled' ? '被取消' : '中途停下'}：${o.reason ?? ''}（已写 ${o.segmentsDone}/${o.segmentsTotal} 段，可以接着写）`);
+    },
+  },
+  continue_chapter: {
+    label: '续写',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      env.events.onProgress?.(`正在续写《${c.value.title}》`);
+      const content = await env.host.openChapter(c.value.id);
+      if (!content.ok) return failWith(content.error);
+      const last = content.value.saved.at(-1);
+      if (last === undefined || content.value.saved.every((p) => p.text.trim() === '')) return failed(`《${c.value.title}》还没有正文可以接着写；有章节计划时用 write_chapter 让写手写`);
+      const end = { paragraphId: last.id, offset: last.text.length };
+      const result = await env.host.runSelectionOperation(
+        { chapterId: c.value.id, selection: { from: end, to: end }, operation: 'continue', instruction: action.instruction ?? '', overrides: { include: [], exclude: [] } },
+        env.call(),
+      );
+      if (!result.ok) return failWith(result.error);
+      if (result.value.candidate === null) return failed('续写没有完成');
+      env.events.onEffect?.({ kind: 'show_candidates', chapterId: c.value.id });
+      return done(`已为《${c.value.title}》续写一段，作为候选稿放在章节旁的“AI 写作”里，作者接受后才写入正文。`);
+    },
+  },
+  edit_selection: {
+    label: '修改选中的文字',
+    async run(action, env) {
+      const chosen = env.events.selection ?? null;
+      if (chosen === null || chosen.text.trim() === '') return failed('作者没有在正文里选中文字：请作者先选中要改的那段，再说要怎么改');
+      const c = await env.findChapter(chosen.chapterId);
+      if (!c.ok) return failed(c.error);
+      env.events.onProgress?.(`正在${EDIT_LABEL[action.operation]}选中的文字`);
+      const result = await env.host.runSelectionOperation(
+        { chapterId: chosen.chapterId, selection: chosen.range, operation: action.operation, instruction: action.instruction ?? '', overrides: { include: [], exclude: [] } },
+        env.call(),
+      );
+      if (!result.ok) return failWith(result.error);
+      if (result.value.candidate === null) return failed(`${EDIT_LABEL[action.operation]}没有完成`);
+      env.events.onEffect?.({ kind: 'show_candidates', chapterId: chosen.chapterId });
+      return done(`已${EDIT_LABEL[action.operation]}《${c.value.title}》中选中的 ${chosen.text.length} 字，作为候选稿放在章节旁的“AI 写作”里，作者对照差异后接受。`);
+    },
+  },
+  review_chapter: {
+    label: '审核',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      env.events.onProgress?.(`正在审核《${c.value.title}》`);
+      const reviewed = await env.host.reviewChapter(c.value.id, env.call());
+      if (!reviewed.ok) return failWith(reviewed.error);
+      env.events.onEffect?.({ kind: 'show_review', chapterId: c.value.id });
+      const { issues, modelReviewed, reason } = reviewed.value;
+      const note = modelReviewed ? '' : `（模型审核没有完成：${reason ?? '原因不明'}；下面只有程序检查的结果）`;
+      if (issues.length === 0) return done(`审核完《${c.value.title}》，没有发现问题${note}。`);
+      const listed = issues.slice(0, LISTED_ISSUES).map((i) => `- ${SEVERITY_LABEL[i.severity]}：${i.description}${i.suggestion === '' ? '' : `（建议：${i.suggestion}）`}`);
+      const more = issues.length > LISTED_ISSUES ? '\n……' : '';
+      return done(`审核完《${c.value.title}》，有 ${issues.length} 个待处理的问题${note}，列在章节旁的“审核”里：\n${listed.join('\n')}${more}`);
+    },
+  },
+  rollback_writer: {
+    label: '回退写手写入',
+    confirm: (action) => `把“${action.chapter}”回退到写手写入之前（现稿会先存为快照）`,
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const rolled = await env.host.rollbackWriter(c.value.id);
+      if (!rolled.ok) return failWith(rolled.error);
+      env.changed();
+      env.events.onEffect?.({ kind: 'chapter_changed', chapterId: c.value.id });
+      return done(`已把《${c.value.title}》回退到写手写入之前；回退前的正文存为了快照。`);
+    },
+  },
+  add_foreshadow: {
+    label: '记录伏笔',
+    async run(action, env) {
+      let plantChapterId: string | null = null;
+      let payoffChapterId: string | null = null;
+      if (action.plant !== null) {
+        const c = await env.findChapter(action.plant);
+        if (!c.ok) return failed(c.error);
+        plantChapterId = c.value.id;
+      }
+      if (action.payoff !== null) {
+        const c = await env.findChapter(action.payoff);
+        if (!c.ok) return failed(c.error);
+        payoffChapterId = c.value.id;
+      }
+      const added = await env.host.addForeshadow({
+        title: action.title,
+        content: action.content,
+        reveal: action.reveal ?? '',
+        plantChapterId,
+        plantAnchor: null,
+        payoffChapterId,
+        payoffAnchor: null,
+        status: 'planned',
+      });
+      if (!added.ok) return failWith(added.error);
+      env.changed();
+      return done(`已在伏笔账本里记下“${action.title.trim()}”。`);
+    },
+  },
+  restore_chapter: {
+    label: '从回收站恢复',
+    async run(action, env) {
+      const work = await env.work();
+      if (!work.ok) return failWith(work.error);
+      const c = pick(work.value.trashed, action.chapter, (x) => [x.title], '回收站里的章节');
+      if (!c.ok) return failed(c.error);
+      const restored = await env.host.restoreChapter(c.value);
+      if (!restored.ok) return failWith(restored.error);
+      env.changed();
+      return done(`已把《${c.value.title}》从回收站恢复。`);
+    },
+  },
+  save_snapshot: {
+    label: '保存快照',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const saved = await env.host.createSnapshot(c.value.id);
+      if (!saved.ok) return failWith(saved.error);
+      return done(`已给《${c.value.title}》存了一个版本快照，在章节的“版本快照”里。`);
+    },
+  },
+  export_book: {
+    label: '导出',
+    async run(action, env) {
+      let chapterId: string | undefined;
+      if (action.chapter !== null) {
+        const c = await env.findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        chapterId = c.value.id;
+      }
+      const exported = await env.host.exportText(action.format === 'txt' ? 'txt' : 'md', chapterId);
+      if (!exported.ok) return failWith(exported.error);
+      return exported.value ? done('已导出。') : failed('作者取消了保存，没有导出');
+    },
+  },
+  open_page: {
+    label: '打开页面',
+    run(action, env) {
+      env.events.onEffect?.({ kind: 'open_page', page: action.page });
+      return Promise.resolve(done('已打开页面。'));
+    },
+  },
+};
+
+/** 执行一个动作。 */
+export function runTool<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<Outcome> {
+  return TOOLS[tool].run(action, env);
+}
+
+/** 这个动作执行前要作者确认时，给作者看的说明；不需要确认时为 null。 */
+export async function confirmationFor<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<string | null> {
+  const confirm: Tool<K>['confirm'] = TOOLS[tool].confirm;
+  return confirm === undefined ? null : confirm(action, env);
+}
+
+/** 动作在对话里的名称；不认识的（例如旧版本记下的动作）原样显示。 */
+export function toolLabel(tool: string): string {
+  return Object.hasOwn(TOOLS, tool) ? TOOLS[tool as AssistantTool].label : tool;
+}

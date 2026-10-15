@@ -16,7 +16,7 @@ const STATUS: Record<'running' | 'done' | 'cancelled' | 'failed', string> = {
  * 结果是候选稿，不会自动写入正文。
  */
 export function AiWriteDrawer() {
-  const open = useApp((s) => s.writeDrawerOpen);
+  const open = useApp((s) => s.drawer?.kind === 'write');
   const selected = useApp((s) => s.writeSelectedText);
   const job = useApp((s) => s.aiWrite);
   const run = useApp((s) => s.runSelectionOp);

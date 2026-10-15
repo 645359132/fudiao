@@ -60,7 +60,7 @@ function Issue({ issue, locked }: { readonly issue: ReviewIssueView; readonly lo
  * 作者可以忽略、自己修改后标为已修改，或交给写手修订这一段。
  */
 export function ReviewDrawer() {
-  const open = useApp((s) => s.reviewDrawerOpen);
+  const open = useApp((s) => s.drawer?.kind === 'review');
   const review = useApp((s) => s.review);
   const chapterId = useApp((s) => s.selectedChapterId);
   const saved = useApp((s) => s.saveStatus.kind === 'saved');

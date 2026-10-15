@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { SimSceneFields } from '@fudiao/store';
-import { checkSceneConfig } from '../app/scene-editing';
+import { checkSceneConfig, parseSceneConfigText } from '../app/scene-editing';
 import { useApp } from './store-context';
 import { ZoneGraphEditor } from './ZoneGraphEditor';
 
@@ -422,16 +422,14 @@ export function SceneEditor({ id, initial, notes }: { readonly id: string | null
         <button
           type="button"
           onClick={() => {
-            try {
-              const parsed: unknown = JSON.parse(json ?? '');
-              if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('须是一个对象');
-              const next = parsed as Partial<Config>;
-              change({ ...next, zones: Array.isArray(next.zones) ? next.zones : [], actors: Array.isArray(next.actors) ? next.actors : [] });
-              setRevision(revision + 1);
-              setJsonError(null);
-            } catch (error) {
-              setJsonError(`不是合法的 JSON：${error instanceof Error ? error.message : String(error)}`);
+            const parsed = parseSceneConfigText(json ?? '');
+            if (!parsed.ok) {
+              setJsonError(parsed.error);
+              return;
             }
+            change(parsed.value);
+            setRevision(revision + 1);
+            setJsonError(null);
           }}
         >
           应用到表单

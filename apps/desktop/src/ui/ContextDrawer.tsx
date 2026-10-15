@@ -27,7 +27,7 @@ function Entry({ entry, action }: { readonly entry: ContextEntry; readonly actio
  * 作者可以加入或移除条目；增减只在本次打开的作品中保留。
  */
 export function ContextDrawer() {
-  const open = useApp((s) => s.contextDrawerOpen);
+  const open = useApp((s) => s.drawer?.kind === 'context');
   const manifest = useApp((s) => s.writingContext);
   const close = useApp((s) => s.closeContext);
   const refresh = useApp((s) => s.openContext);

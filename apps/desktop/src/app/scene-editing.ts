@@ -1,6 +1,7 @@
 // 推演场景的编辑辅助（需求 B22、B23、B39，施工文档 M4-02）：空白场景、校验结果的说明。
 // 校验本身在领域内核（parseScene）；这里只把出错的位置与原因写成作者看得懂的话。
 import { parseScene, type SceneError, type SceneSpecInput } from '@fudiao/domain';
+import { err, ok, type Result } from '@fudiao/shared';
 
 /** 从空白开始时的场景：一个区域、一个角色，作者在此基础上修改。 */
 export function blankSceneConfig(): SceneSpecInput {
@@ -102,6 +103,22 @@ export function describeSceneProblems(errors: readonly SceneError[]): string[] {
 export function checkSceneConfig(config: unknown): string[] {
   const parsed = parseScene(config);
   return parsed.ok ? [] : describeSceneProblems(parsed.error);
+}
+
+/**
+ * “高级”里直接编辑的整份场景配置：解析作者写的 JSON（这是作者的输入，不是模型输出）。须是一个对象；
+ * 区域与角色不是数组时当作空的，其余不对的地方由表单下方的校验结果说明（checkSceneConfig）。
+ */
+export function parseSceneConfigText(text: string): Result<SceneSpecInput, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return err(`不是合法的 JSON：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return err('不是合法的 JSON：须是一个对象');
+  const next = parsed as Partial<SceneSpecInput>;
+  return ok({ ...next, zones: Array.isArray(next.zones) ? next.zones : [], actors: Array.isArray(next.actors) ? next.actors : [] });
 }
 
 type Edge = NonNullable<SceneSpecInput['edges']>[number];

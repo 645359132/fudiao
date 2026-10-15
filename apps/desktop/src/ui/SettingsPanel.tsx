@@ -1,14 +1,8 @@
 import { useState } from 'react';
 import { ENTITY_KINDS, type Entity, type EntityKind } from '@fudiao/store';
+import { ENTITY_KIND_LABEL } from '../app/labels';
 import { useApp } from './store-context';
 
-export const KIND_LABEL: Record<EntityKind, string> = {
-  character: '人物',
-  location: '地点',
-  organization: '组织',
-  item: '物品',
-  rule: '世界规则',
-};
 
 /** 别名在输入框中用顿号、逗号或换行分隔。 */
 const splitAliases = (text: string) => text.split(/[、，,\n]/);
@@ -61,7 +55,7 @@ function EntityForm({ entity }: { readonly entity: Entity }) {
           <select value={kind} onChange={(e) => setKind(e.target.value as EntityKind)}>
             {ENTITY_KINDS.map((k) => (
               <option key={k} value={k}>
-                {KIND_LABEL[k]}
+                {ENTITY_KIND_LABEL[k]}
               </option>
             ))}
           </select>
@@ -128,7 +122,7 @@ function NewEntity({ onDone }: { readonly onDone: () => void }) {
       <select aria-label="新设定的种类" value={kind} onChange={(e) => setKind(e.target.value as EntityKind)}>
         {ENTITY_KINDS.map((k) => (
           <option key={k} value={k}>
-            {KIND_LABEL[k]}
+            {ENTITY_KIND_LABEL[k]}
           </option>
         ))}
       </select>
@@ -173,7 +167,7 @@ export function SettingsPanel() {
           <div className="kind-tabs" role="tablist" aria-label="设定种类">
             {(['all', ...ENTITY_KINDS] as const).map((k) => (
               <button key={k} type="button" role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}>
-                {k === 'all' ? '全部' : KIND_LABEL[k]}
+                {k === 'all' ? '全部' : ENTITY_KIND_LABEL[k]}
               </button>
             ))}
           </div>
@@ -187,7 +181,7 @@ export function SettingsPanel() {
                   <button type="button" aria-current={e.id === selectedId ? 'true' : undefined} onClick={() => select(e.id)}>
                     <span>{e.name}</span>
                     <span className="muted">
-                      {KIND_LABEL[e.kind]}
+                      {ENTITY_KIND_LABEL[e.kind]}
                       {e.locked ? ' · 已锁定' : ''}
                     </span>
                   </button>
@@ -208,7 +202,10 @@ export function SettingsPanel() {
 
 /** 正文旁的设定卡片：Ctrl + 点击高亮的名字时打开，只读，可转到设定页修改。 */
 export function EntityDrawer() {
-  const entity = useApp((s) => s.entities.find((e) => e.id === s.drawerEntityId) ?? null);
+  const entity = useApp((s) => {
+    const drawer = s.drawer;
+    return drawer?.kind === 'entity' ? (s.entities.find((e) => e.id === drawer.entityId) ?? null) : null;
+  });
   const close = useApp((s) => s.openEntityDrawer);
   const openSettings = useApp((s) => s.openSettings);
   if (entity === null) return null;
@@ -216,7 +213,7 @@ export function EntityDrawer() {
     <aside className="entity-drawer" aria-label="设定卡片">
       <div className="entity-head">
         <h3>{entity.name}</h3>
-        <span className="muted">{KIND_LABEL[entity.kind]}</span>
+        <span className="muted">{ENTITY_KIND_LABEL[entity.kind]}</span>
         {entity.locked && <span className="lock-badge">已锁定</span>}
         <button type="button" aria-label="关闭设定卡片" onClick={() => close(null)}>
           ×

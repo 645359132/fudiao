@@ -337,6 +337,8 @@ export function createAppService(deps: AppDeps) {
   });
 
   const app = {
+    /** 应用的时钟（任务的开始与结束时间等，界面不直接读系统时间）。 */
+    now: (): string => deps.clock.now(),
     ...services,
     ...candidates,
     ...writingSkills,

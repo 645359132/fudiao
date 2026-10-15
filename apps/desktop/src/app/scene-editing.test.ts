@@ -1,6 +1,6 @@
 import { warehouseSpec } from '@fudiao/domain/testing';
 import { describe, expect, it } from 'vitest';
-import { blankSceneConfig, checkSceneConfig, removeZone, renameZone, setZoneEdge, zonePairs } from './scene-editing';
+import { blankSceneConfig, checkSceneConfig, parseSceneConfigText, removeZone, renameZone, setZoneEdge, zonePairs } from './scene-editing';
 
 describe('场景配置的检查', () => {
   it('空白场景与测试场景没有问题', () => {
@@ -32,6 +32,18 @@ describe('场景配置的检查', () => {
   it('根本不是场景配置时也给出说明，而不是抛错', () => {
     expect(checkSceneConfig(null).length).toBeGreaterThan(0);
     expect(checkSceneConfig({ zones: [], actors: [] })).toEqual(expect.arrayContaining(['区域：没有填写，或格式不对', '角色：没有填写，或格式不对']));
+  });
+});
+
+describe('“高级”里直接编辑的场景配置', () => {
+  it('合法的配置原样读回；区域与角色不是数组时当作空的；不是对象或不是 JSON 时说明原因，不抛出异常', () => {
+    const spec = warehouseSpec();
+    expect(parseSceneConfigText(JSON.stringify(spec))).toEqual({ ok: true, value: spec });
+    expect(parseSceneConfigText('{"zones": 3}')).toEqual({ ok: true, value: { zones: [], actors: [] } });
+    expect(parseSceneConfigText('[1, 2]')).toEqual({ ok: false, error: '不是合法的 JSON：须是一个对象' });
+    const broken = parseSceneConfigText('{"zones": [');
+    expect(broken.ok).toBe(false);
+    expect(broken.ok ? '' : broken.error).toMatch(/^不是合法的 JSON：/);
   });
 });
 

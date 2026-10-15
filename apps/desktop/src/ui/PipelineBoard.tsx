@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import type { PlanChapterView } from '../app/planning';
 import type { WriterJob } from '../state/store';
+import { PLAN_STATUS_LABEL } from '../app/labels';
 import { useApp } from './store-context';
 
-const PLAN_STATUS = { todo: '待写', writing: '写作中', written: '已写', reviewed: '已审核' } as const;
 
 function writingCell(item: PlanChapterView, job: WriterJob | null): string {
   const { plan } = item;
@@ -12,7 +12,7 @@ function writingCell(item: PlanChapterView, job: WriterJob | null): string {
   if (plan === null) return item.hasText ? '有正文' : '—';
   if (plan.status === 'writing' && plan.progress !== null) return `写作中（${plan.progress.done} / ${plan.progress.segments.length} 段）`;
   // 审核状态在“审核”一列，这里只说写没写完。
-  return plan.status === 'reviewed' ? PLAN_STATUS.written : PLAN_STATUS[plan.status];
+  return plan.status === 'reviewed' ? PLAN_STATUS_LABEL.written : PLAN_STATUS_LABEL[plan.status];
 }
 
 function memoryCell(item: PlanChapterView, busy: boolean): string {

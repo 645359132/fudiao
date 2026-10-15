@@ -1,45 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssistantItem } from '../app/assistant';
+import { toolLabel } from '../app/assistant-tools';
 import { Icon } from './Icon';
 import { useApp } from './store-context';
-
-/** 动作在对话里的名称。 */
-const TOOL_LABEL: Readonly<Record<string, string>> = {
-  list_chapters: '查看章节',
-  read_chapter: '读章节',
-  search_text: '查找正文',
-  get_entity: '查看设定',
-  list_facts: '查看事实',
-  get_chapter_plan: '查看章节计划',
-  create_work: '新建作品',
-  open_work: '打开作品',
-  update_work: '修改作品信息',
-  create_volume: '新建卷',
-  update_volume: '修改卷',
-  move_volume: '调整卷的顺序',
-  delete_volume: '删除卷',
-  create_chapter: '新建章节',
-  update_chapter: '修改章节',
-  move_chapter: '移动章节',
-  trash_chapter: '移入回收站',
-  open_chapter: '打开章节',
-  restore_chapter: '从回收站恢复',
-  save_snapshot: '保存快照',
-  create_entity: '新建设定',
-  update_entity: '修改设定',
-  delete_entity: '删除设定',
-  add_fact: '记录事实',
-  save_chapter_plan: '保存章节计划',
-  plan_chapters: '生成章节计划',
-  write_chapter: '写手写章',
-  continue_chapter: '续写',
-  edit_selection: '修改选中的文字',
-  review_chapter: '审核',
-  rollback_writer: '回退写手写入',
-  add_foreshadow: '记录伏笔',
-  export_book: '导出',
-  open_page: '打开页面',
-};
 
 const SUGGESTIONS_NO_WORK = ['帮我开一本古风悬疑小说，主角是被革职的捕快', '打开我最近写的那部作品'];
 const SUGGESTIONS = ['给主角建一张人物卡片', '完善这部作品的世界观：地点、组织与规则', '按大纲生成 20 章的章节计划', '续写正在看的这一章', '审核正在看的这一章'];
@@ -65,7 +28,7 @@ function Steps({ item }: { readonly item: Extract<AssistantItem, { role: 'result
               <Icon name={r.ok ? 'check' : 'alert'} size={13} />
             </span>
             <span className="step-body">
-              <strong>{TOOL_LABEL[r.tool] ?? r.tool}</strong> <span className="step-detail">{first}</span>
+              <strong>{toolLabel(r.tool)}</strong> <span className="step-detail">{first}</span>
               {rest.length > 0 ? (
                 <details>
                   <summary>展开</summary>

@@ -7,6 +7,7 @@ import { ReviewDrawer } from './ReviewDrawer';
 import { EntityDrawer } from './SettingsPanel';
 import { Icon } from './Icon';
 import { IconButton, Tip } from './IconButton';
+import { chapterLock } from '../state/store';
 import { NO_CHAPTERS, useApp } from './store-context';
 
 function ChapterNotes({ chapter }: { readonly chapter: Chapter }) {
@@ -53,15 +54,10 @@ export function ChapterPanel() {
   const writeChapters = useApp((s) => s.writeChapters);
   const cancelWriting = useApp((s) => s.cancelWriting);
   const openReview = useApp((s) => s.openReview);
-  const review = useApp((s) => s.review);
   const chapterId = chapter?.id ?? null;
   const loaded = content !== null && content.chapterId === chapterId;
-  // 写手正在写这一章时正文只读：写手把段落接在章末，编辑器里的修改会与它冲突。
-  const writingHere = writerJob !== null && writerJob.chapterId === chapterId;
-  // 写手修订一段时同样只读，写入后重新载入。
-  const revisingHere = review !== null && review.revisingId !== null && review.chapterId === chapterId;
-  // AI 助手工作时正文只读：助手可能新建、移动章节或让写手写这一章，结束后重新载入。
-  const assistantRunning = useApp((s) => s.assistantRunning);
+  // 正文只读的原因（写手在写或修订、助手在工作）：写入会与编辑器里的修改冲突，结束后重新载入。
+  const lock = useApp((s) => chapterLock(s, chapterId));
 
   useEffect(() => {
     if (chapterId !== null && !loaded) void loadChapter(chapterId);
@@ -99,12 +95,12 @@ export function ChapterPanel() {
           <IconButton icon="download" label="导出 TXT" tip="把本章已保存的正文导出为 TXT" disabled={busy} onClick={() => void exportChapter(chapter.id, 'txt')} />
         </div>
       </div>
-      {revisingHere ? (
+      {lock === 'revise' ? (
         <div className="writer-banner" role="status" aria-label="写手修订">
           <span>写手正在修订这一章的一段，完成之前正文只读。</span>
         </div>
       ) : null}
-      {writingHere ? (
+      {lock === 'writer' && writerJob !== null ? (
         <div className="writer-banner" role="status" aria-label="写手进度">
           <span>
             {writerJob.stage === 'writing'
@@ -119,7 +115,7 @@ export function ChapterPanel() {
           </button>
         </div>
       ) : null}
-      {assistantRunning && !writingHere && !revisingHere ? (
+      {lock === 'assistant' ? (
         <div className="writer-banner" role="status" aria-label="助手工作中">
           <span>AI 助手正在操作作品，完成之前正文只读。</span>
         </div>
@@ -128,7 +124,7 @@ export function ChapterPanel() {
       <div className="chapter-with-drawer">
         {!loaded ? (
           <p className="muted">正在载入……</p>
-        ) : writingHere || revisingHere || assistantRunning ? (
+        ) : lock !== null ? (
           <div className="chapter-text" aria-label="正文（只读）">
             {content.saved.map((p) => (
               <p key={p.id}>{p.text}</p>

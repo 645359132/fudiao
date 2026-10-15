@@ -3,6 +3,7 @@ import type { Foreshadow, ForeshadowFields, ForeshadowStatus } from '@fudiao/sto
 import type { PlanChapterView } from '../app/planning';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
+import { PLAN_STATUS_LABEL } from '../app/labels';
 import { useApp } from './store-context';
 
 const STATUS: Record<ForeshadowStatus, string> = { planned: '计划', planted: '已埋', paid_off: '已回收', dropped: '废弃' };
@@ -294,7 +295,6 @@ function FollowUp({ text, label, disabled, onAccept }: { readonly text: string; 
   );
 }
 
-const PLAN_STATUS = { todo: '待写', writing: '写作中', written: '已写', reviewed: '已审核' } as const;
 
 /** 一章的写作状态与写手操作：写这一章、接着写、回退到写手写入前。 */
 function WriterActions({ item }: { readonly item: PlanChapterView }) {
@@ -320,7 +320,7 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
               : '已写完，正在审核'
           : queued
             ? '排队中'
-            : PLAN_STATUS[plan.status]}
+            : PLAN_STATUS_LABEL[plan.status]}
         {!here && plan.status === 'writing' && progress !== null ? `（已写 ${progress.done} / ${progress.segments.length} 段）` : ''}
       </span>
       {here ? (

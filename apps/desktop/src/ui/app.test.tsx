@@ -2070,8 +2070,8 @@ describe('AI 助手的界面（B69）', () => {
     expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).not.toContain('「沈砚推开当铺的门。」');
   });
 
-  it('模型输出时回复逐字出现；动作结果里不显示内部标识；外观可以在跟随系统、浅色、深色之间切换', async () => {
-    const { deps, service, user } = start();
+  it('模型输出时回复逐字出现；动作结果里不显示内部标识；这一轮登记在任务中心；外观可以在跟随系统、浅色、深色之间切换', async () => {
+    const { deps, service, store, user } = start();
     await createWork(user, '雨夜');
     await addTestedModel(service, deps);
     const panel = () => screen.getByRole('complementary', { name: 'AI 助手' });
@@ -2083,6 +2083,8 @@ describe('AI 助手的界面（B69）', () => {
     const step = within(log).getByRole('list', { name: '助手执行的动作' });
     expect(step.textContent).toContain('已新建章节《第一章》。');
     expect(step.textContent).not.toMatch(/\[[0-9A-Z]{26}\]/);
+    // 任务中心：这一轮可以在任务页看到；输出是结构化的动作，任务里只记给作者的话与用量。
+    expect(store.getState().tasks[0]).toMatchObject({ kind: 'assistant', title: 'AI 助手 · 建第一章', status: 'done', text: '建好了第一章。' });
 
     expect(document.documentElement.dataset['theme']).toBeUndefined();
     await user.click(screen.getByRole('button', { name: '外观：跟随系统' }));

@@ -26,7 +26,7 @@ import type { AppError, AppService, ChapterContent, LibraryView, WorkView } from
 import { splitText, type SplitRule } from '../app/text-import';
 import type { EditorSelection } from '../app/writing-context';
 import { OPERATION_LABELS } from '../app/selection-ops';
-import { reduceTasks, type TaskEvent, type TaskRecord } from '../app/tasks';
+import { reduceTasks, type TaskEvent, type TaskRecord, type TaskStatus } from '../app/tasks';
 
 /** 导入预览：选中的文件、拆分方式与导入到哪里。 */
 export type ImportDraft = { readonly decoded: DecodedText; readonly rule: SplitRule; readonly target: 'new' | 'current' };
@@ -46,6 +46,18 @@ export type EditorHandle = {
   /** 选中的文字（段落之间以换行连接）。 */
   readonly selectedText: () => string;
 };
+
+/** 任务中心里进行中的一项：交给用例的调用选项（text 为 false 时只记用量；onText 另外处理同一份流式文字）与结束。 */
+type TaskHandle = {
+  readonly signal: AbortSignal;
+  readonly options: (choices?: { readonly text?: boolean; readonly onText?: (delta: string) => void }) => CallOptions;
+  readonly finish: (status: Exclude<TaskStatus, 'running'>, details?: { readonly text?: string; readonly cost?: number | null; readonly error?: string | null }) => void;
+  /** 没有完成：作者取消时记为已取消，否则为失败。 */
+  readonly fail: (error: string) => void;
+};
+
+/** 正文旁的抽屉（共用一个位置，打开一个就换掉另一个）。 */
+export type ChapterDrawer = { readonly kind: 'entity'; readonly entityId: string } | { readonly kind: 'context' } | { readonly kind: 'write' } | { readonly kind: 'review' };
 
 /** 正文里选中的文字：key 标识这一次选区（章节与位置），length 是字数，preview 是开头的一小段。 */
 export type EditorSelectionInfo = { readonly key: string; readonly chapterId: string; readonly length: number; readonly preview: string };
@@ -106,8 +118,8 @@ export type AppState = {
   /** 当前作品的设定条目（打开作品时载入，正文高亮也用它）。 */
   readonly entities: readonly Entity[];
   readonly selectedEntityId: string | null;
-  /** 正文旁的设定卡片（Ctrl + 点击高亮的名字时打开）。 */
-  readonly drawerEntityId: string | null;
+  /** 正文旁的抽屉，同一时间只开一个：设定卡片（Ctrl + 点击高亮的名字）、AI 上下文、AI 写作或审核。 */
+  readonly drawer: ChapterDrawer | null;
   /** 当前作品的事实（打开作品与设定变化后重新读取，其中的待复核标记是最新的）。 */
   readonly facts: readonly Fact[];
   /** 事实页中选中的事实；“new” 表示正在新建。 */
@@ -142,13 +154,11 @@ export type AppState = {
   readonly planDrafting: boolean;
   /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
   readonly writerJob: WriterJob | null;
-  /** AI 上下文清单（B18）：抽屉是否打开、最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
-  readonly contextDrawerOpen: boolean;
+  /** AI 上下文清单（B18）：最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
   readonly writingContext: ContextManifest | null;
   readonly contextSelection: EditorSelection | null;
   readonly contextOverrides: Readonly<Record<string, ContextOverrides>>;
   /** AI 写作抽屉：打开时记下的选区与选中的文字，以及最近一次选区操作。 */
-  readonly writeDrawerOpen: boolean;
   readonly writeSelection: EditorSelection | null;
   readonly writeSelectedText: string;
   readonly aiWrite: AiWriteJob | null;
@@ -343,8 +353,7 @@ export type AppState = {
   readonly discardSceneDraft: () => void;
   /** 保存场景；成功后选中它。返回是否成功。 */
   readonly saveSimScene: (id: string | null, fields: SimSceneFields) => Promise<boolean>;
-  /** 审核（B64）：正文旁的审核抽屉。running 为正在审核，revisingId 为正交给写手修订的问题。 */
-  readonly reviewDrawerOpen: boolean;
+  /** 审核（B64）：running 为正在审核，revisingId 为正交给写手修订的问题。 */
   readonly review: ReviewState | null;
   readonly openReview: () => Promise<void>;
   readonly closeReview: () => void;
@@ -437,6 +446,19 @@ export type AppState = {
 
 export type AppStore = StoreApi<AppState>;
 
+/**
+ * 这一章为什么只读：写手在写（writer）、写手在修订一段（revise）、AI 助手在操作作品（assistant）；可以编辑时为 null。
+ * 正文只读的规则只在这里判断，界面据此显示说明与只读的正文。
+ */
+export type ChapterLock = 'writer' | 'revise' | 'assistant';
+export function chapterLock(state: AppState, chapterId: string | null): ChapterLock | null {
+  if (chapterId === null) return null;
+  if (state.writerJob?.chapterId === chapterId) return 'writer';
+  if (state.review !== null && state.review.revisingId !== null && state.review.chapterId === chapterId) return 'revise';
+  if (state.assistantRunning) return 'assistant';
+  return null;
+}
+
 export function createAppStore(service: AppService): AppStore {
   return createStore<AppState>()((set, get) => {
     let editor: EditorHandle | null = null;
@@ -472,6 +494,35 @@ export function createAppStore(service: AppService): AppStore {
       return done.ok;
     }
 
+    /**
+     * 任务中心（设计模式第六章）：登记一项耗时任务，交给用例取消信号与流式回调（文字与用量记入任务），结束时写明结果。
+     * 任务只结束一次；时间取自应用的时钟。
+     */
+    function startTask(kind: TaskRecord['kind'], title: string, chapterId: string | null, abort = new AbortController()): TaskHandle {
+      const id = `task-${++taskSeq}`;
+      taskAborts.set(id, abort);
+      task({ type: 'started', task: { id, kind, title, chapterId, startedAt: service.now() } });
+      const finish: TaskHandle['finish'] = (status, details = {}) => {
+        if (!taskAborts.delete(id)) return;
+        task({ type: 'finished', id, status, finishedAt: service.now(), ...details });
+      };
+      return {
+        signal: abort.signal,
+        options: ({ text = true, onText } = {}) => ({
+          signal: abort.signal,
+          onEvent: (e) => {
+            if (e.type === 'usage') task({ type: 'usage', id, usage: e.usage });
+            else {
+              if (text) task({ type: 'text', id, delta: e.delta });
+              onText?.(e.delta);
+            }
+          },
+        }),
+        finish,
+        fail: (error) => finish(abort.signal.aborted ? 'cancelled' : 'failed', { error }),
+      };
+    }
+
     /** 一次模型任务登记在任务中心：开始、流式文字、用量与结束；失败时显示原因。 */
     async function modelTask<T>(
       kind: TaskRecord['kind'],
@@ -479,19 +530,11 @@ export function createAppStore(service: AppService): AppStore {
       chapterId: string | null,
       call: (options: CallOptions) => Promise<Result<T, AppError>>,
     ): Promise<Result<T, AppError>> {
-      const taskId = `task-${++taskSeq}`;
-      const abort = new AbortController();
-      taskAborts.set(taskId, abort);
-      task({ type: 'started', task: { id: taskId, kind, title, chapterId, startedAt: new Date().toISOString() } });
-      const result = await call({
-        signal: abort.signal,
-        onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
-      });
-      taskAborts.delete(taskId);
-      const finishedAt = new Date().toISOString();
-      if (result.ok) task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+      const t = startTask(kind, title, chapterId);
+      const result = await call(t.options());
+      if (result.ok) t.finish('done');
       else {
-        task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+        t.fail(describeError(result.error));
         set({ message: describeError(result.error) });
       }
       return result;
@@ -524,43 +567,32 @@ export function createAppStore(service: AppService): AppStore {
 
     /** 审核一章，登记为任务。模型审核没有完成时结果中带原因（程序检查的问题已保存）。 */
     async function reviewTask(chapterId: string, abort: AbortController) {
-      const taskId = `task-${++taskSeq}`;
-      taskAborts.set(taskId, abort);
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
-      task({ type: 'started', task: { id: taskId, kind: 'review', title: `审核 · ${title}`, chapterId, startedAt: new Date().toISOString() } });
-      const result = await service.reviewChapter(chapterId, {
-        signal: abort.signal,
-        onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
-      });
-      taskAborts.delete(taskId);
-      const finishedAt = new Date().toISOString();
-      if (!result.ok) task({ type: 'finished', id: taskId, status: 'failed', finishedAt, error: describeError(result.error) });
-      else if (result.value.modelReviewed) task({ type: 'finished', id: taskId, status: 'done', finishedAt });
-      else task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: result.value.reason });
+      const t = startTask('review', `审核 · ${title}`, chapterId, abort);
+      const result = await service.reviewChapter(chapterId, t.options());
+      if (!result.ok) t.fail(describeError(result.error));
+      else if (result.value.modelReviewed) t.finish('done');
+      else t.fail(result.value.reason ?? '模型审核没有完成');
       return result;
     }
 
     /** 生成一章的长篇记忆，登记为任务；失败时显示原因。返回是否成功。 */
     async function memoryTask(chapterId: string, abort: AbortController): Promise<boolean> {
-      const taskId = `task-${++taskSeq}`;
-      taskAborts.set(taskId, abort);
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
-      task({ type: 'started', task: { id: taskId, kind: 'memory', title: `长篇记忆 · ${title}`, chapterId, startedAt: new Date().toISOString() } });
+      const t = startTask('memory', `长篇记忆 · ${title}`, chapterId, abort);
       set({ memoryBuilding: chapterId });
-      const result = await service.buildMemory(chapterId, {
-        signal: abort.signal,
-        onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
-      });
-      taskAborts.delete(taskId);
-      const finishedAt = new Date().toISOString();
-      if (result.ok) task({ type: 'finished', id: taskId, status: 'done', finishedAt });
-      else task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+      const result = await service.buildMemory(chapterId, t.options());
+      if (result.ok) t.finish('done');
+      else t.fail(describeError(result.error));
       const planning = get().planning === null ? null : await service.planningView();
       set({ memoryBuilding: null, ...(planning?.ok === true && { planning: planning.value }), ...(!result.ok && { message: describeError(result.error) }) });
       return result.ok;
     }
 
     /** 执行一个用例：失败时显示说明；内容在别处被修改时重新读取作品。返回是否成功。 */
+    /** 收起某一种抽屉；开着的是别的抽屉时不动。 */
+    const closeDrawer = (kind: ChapterDrawer['kind']): Partial<AppState> => (get().drawer?.kind === kind ? { drawer: null } : {});
+
     /** 外观与布局：界面先变，再在后台写入作品列表文件（不进入忙碌状态，界面不闪）；写入失败时说明。 */
     async function savePreferences(patch: Partial<Preferences>) {
       const library = get().library;
@@ -643,7 +675,7 @@ export function createAppStore(service: AppService): AppStore {
     const showChapter = (chapterId: string): Partial<AppState> =>
       get().selectedChapterId === chapterId && get().panel === 'chapter'
         ? {}
-        : { selectedChapterId: chapterId, panel: 'chapter', chapterContent: null, drawerEntityId: null, snapshots: null, previewSnapshot: null };
+        : { selectedChapterId: chapterId, panel: 'chapter', chapterContent: null, drawer: null, snapshots: null, previewSnapshot: null };
     async function applyEffect(effect: AssistantEffect) {
       switch (effect.kind) {
         case 'open_chapter':
@@ -654,7 +686,7 @@ export function createAppStore(service: AppService): AppStore {
           return;
         case 'show_candidates': {
           // 候选稿放在章节旁的“AI 写作”里：打开它，作者对照差异后接受或放弃。
-          set({ ...showChapter(effect.chapterId), writeDrawerOpen: true, writeSelection: null, writeSelectedText: '', drawerEntityId: null, contextDrawerOpen: false, reviewDrawerOpen: false });
+          set({ ...showChapter(effect.chapterId), drawer: { kind: 'write' }, writeSelection: null, writeSelectedText: '' });
           await run(service.listCandidates(effect.chapterId), (candidates) => ({ candidates }));
           return;
         }
@@ -662,7 +694,7 @@ export function createAppStore(service: AppService): AppStore {
           set(showChapter(effect.chapterId));
           const issues = await service.reviewIssues(effect.chapterId);
           if (!issues.ok) return;
-          set({ reviewDrawerOpen: true, review: { chapterId: effect.chapterId, issues: issues.value, running: false, revisingId: null, note: null }, drawerEntityId: null, contextDrawerOpen: false, writeDrawerOpen: false });
+          set({ drawer: { kind: 'review' }, review: { chapterId: effect.chapterId, issues: issues.value, running: false, revisingId: null, note: null } });
           return;
         }
         case 'open_page': {
@@ -706,14 +738,20 @@ export function createAppStore(service: AppService): AppStore {
       const text = editor.selectedText();
       return range === null || text.trim() === '' ? null : { chapterId: info.chapterId, range, text };
     };
-    async function assistantTurn(selection: AssistantSelection | null, start: (events: AssistantEvents) => Promise<Result<AssistantOutcome, AppError>>): Promise<boolean> {
+    async function assistantTurn(
+      title: string,
+      selection: AssistantSelection | null,
+      start: (events: AssistantEvents) => Promise<Result<AssistantOutcome, AppError>>,
+    ): Promise<boolean> {
       const abort = new AbortController();
       assistantAbort = abort;
       set({ assistantRunning: true, assistantDraft: null, assistantProgress: null, message: null });
+      // 这一轮登记在任务中心：可以在任务页看到与取消。模型的输出是结构化的动作，只记用量，给作者的话在对话里。
+      const t = startTask('assistant', `AI 助手 · ${title}`, null, abort);
       // 效果按到达的顺序依次执行（打开章节之后才打开它旁边的候选稿）。
       let effects: Promise<void> = Promise.resolve();
       const result = await start({
-        signal: abort.signal,
+        ...t.options({ text: false }),
         current: currentView,
         selection,
         onUpdate: (items) => set({ assistantItems: items }),
@@ -725,6 +763,12 @@ export function createAppStore(service: AppService): AppStore {
       });
       await effects;
       if (assistantAbort === abort) assistantAbort = null;
+      if (!result.ok) t.fail(describeError(result.error));
+      else if (abort.signal.aborted) t.finish('cancelled');
+      else {
+        const said = result.value.items.flatMap((i) => (i.role === 'assistant' && i.output.message.trim() !== '' ? [i.output.message] : [])).at(-1);
+        t.finish('done', { text: result.value.pending ? '等待作者确认' : (said ?? '') });
+      }
       set({
         assistantRunning: false,
         assistantDraft: null,
@@ -767,7 +811,7 @@ export function createAppStore(service: AppService): AppStore {
       backups: null,
       entities: [],
       selectedEntityId: null,
-      drawerEntityId: null,
+      drawer: null,
       facts: [],
       selectedFactId: null,
       sourceStats: null,
@@ -789,7 +833,6 @@ export function createAppStore(service: AppService): AppStore {
       planDrafting: false,
       writerJob: null,
       memoryBuilding: null,
-      reviewDrawerOpen: false,
       review: null,
       reviewingChapterId: null,
       simScenes: null,
@@ -807,11 +850,9 @@ export function createAppStore(service: AppService): AppStore {
       narrationBusy: false,
       narrationNote: null,
       usage: null,
-      contextDrawerOpen: false,
       writingContext: null,
       contextSelection: null,
       contextOverrides: {},
-      writeDrawerOpen: false,
       writeSelection: null,
       writeSelectedText: '',
       aiWrite: null,
@@ -857,7 +898,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, reviewDrawerOpen: false, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawerEntityId: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, contextDrawerOpen: false, writingContext: null, contextSelection: null, contextOverrides: {}, writeDrawerOpen: false, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1129,7 +1170,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       async openSettings(entityId) {
         if (!(await get().leaveChapter())) return;
-        set({ panel: 'settings', chapterContent: null, selectedEntityId: entityId ?? get().selectedEntityId, drawerEntityId: null });
+        set({ panel: 'settings', chapterContent: null, selectedEntityId: entityId ?? get().selectedEntityId, drawer: null });
       },
       selectEntity: (id) => set({ selectedEntityId: id }),
       async createEntity(kind, name) {
@@ -1161,10 +1202,10 @@ export function createAppStore(service: AppService): AppStore {
         return done;
       },
       // 设定卡片与上下文清单共用正文旁的位置，打开一个就收起另一个。
-      openEntityDrawer: (id) => set(id === null ? { drawerEntityId: null } : { drawerEntityId: id, contextDrawerOpen: false, writeDrawerOpen: false, reviewDrawerOpen: false }),
+      openEntityDrawer: (id) => set(id === null ? closeDrawer('entity') : { drawer: { kind: 'entity', entityId: id } }),
       async openPlanning() {
         if (!(await get().leaveChapter())) return;
-        await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawerEntityId: null }));
+        await run(service.planningView(), (planning) => ({ planning, panel: 'planning', chapterContent: null, drawer: null }));
       },
       toggleAssistant: () => set({ assistantOpen: !get().assistantOpen }),
       async loadAssistant() {
@@ -1177,13 +1218,13 @@ export function createAppStore(service: AppService): AppStore {
         const selection = chosenSelection();
         // 助手会改动作品：先保存正在编辑的正文，工作期间正文只读。
         if (!(await get().leaveChapter())) return false;
-        return assistantTurn(selection, (events) => service.sendToAssistant(text, events));
+        return assistantTurn(text.trim().slice(0, 24), selection, (events) => service.sendToAssistant(text, events));
       },
       async resolveAssistant(approve) {
         if (get().assistantRunning) return;
         const selection = chosenSelection();
         if (!(await get().leaveChapter())) return;
-        await assistantTurn(selection, (events) => service.resolveAssistantPending(approve, events));
+        await assistantTurn(approve ? '确认执行' : '不执行', selection, (events) => service.resolveAssistantPending(approve, events));
       },
       setEditorSelection(info) {
         const now = get().editorSelection;
@@ -1199,7 +1240,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       async openQuickBook() {
         if (!(await get().leaveChapter())) return;
-        set({ panel: 'book', chapterContent: null, drawerEntityId: null });
+        set({ panel: 'book', chapterContent: null, drawer: null });
         await get().refreshQuickBook();
       },
       async refreshQuickBook() {
@@ -1209,19 +1250,15 @@ export function createAppStore(service: AppService): AppStore {
       },
       async draftBookSeed(request) {
         if (get().seedDrafting) return;
-        const taskId = `task-${++taskSeq}`;
-        const abort = new AbortController();
-        taskAborts.set(taskId, abort);
-        task({ type: 'started', task: { id: taskId, kind: 'plan_draft', title: '生成大纲与人物', chapterId: null, startedAt: new Date().toISOString() } });
+        const t = startTask('plan_draft', '生成大纲与人物', null);
         set({ seedDrafting: true, message: null });
-        const result = await service.draftBookSeed(request, { signal: abort.signal, onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })) });
-        taskAborts.delete(taskId);
+        const result = await service.draftBookSeed(request, t.options());
         if (result.ok) {
           set({ bookSeed: result.value, seedDrafting: false });
-          task({ type: 'finished', id: taskId, status: 'done', finishedAt: new Date().toISOString() });
+          t.finish('done');
         } else {
           set({ seedDrafting: false, message: describeError(result.error) });
-          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt: new Date().toISOString(), error: describeError(result.error) });
+          t.fail(describeError(result.error));
         }
       },
       editBookSeed: (seed) => set({ bookSeed: seed }),
@@ -1238,20 +1275,15 @@ export function createAppStore(service: AppService): AppStore {
         return true;
       },
       async draftPlans(chapterCount, wordsPerChapter) {
-        const taskId = `task-${++taskSeq}`;
-        const abort = new AbortController();
-        taskAborts.set(taskId, abort);
-        task({ type: 'started', task: { id: taskId, kind: 'plan_draft', title: '生成章节计划草稿', chapterId: null, startedAt: new Date().toISOString() } });
+        const t = startTask('plan_draft', '生成章节计划草稿', null);
         set({ planDrafting: true, planUnmatched: [] });
-        const result = await service.draftPlans({ chapterCount, wordsPerChapter }, { signal: abort.signal, onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })) });
-        taskAborts.delete(taskId);
+        const result = await service.draftPlans({ chapterCount, wordsPerChapter }, t.options());
         if (result.ok) {
           set({ planDraft: result.value, planDrafting: false, message: null });
-          task({ type: 'finished', id: taskId, status: 'done', finishedAt: new Date().toISOString() });
+          t.finish('done');
         } else {
-          const status = abort.signal.aborted ? 'cancelled' : 'failed';
           set({ planDrafting: false, message: describeError(result.error) });
-          task({ type: 'finished', id: taskId, status, finishedAt: new Date().toISOString(), error: describeError(result.error) });
+          t.fail(describeError(result.error));
         }
       },
       async applyPlanDraft() {
@@ -1267,7 +1299,7 @@ export function createAppStore(service: AppService): AppStore {
       discardPlanDraft: () => set({ planDraft: null }),
       async openSimulation() {
         if (!(await get().leaveChapter())) return;
-        await run(service.listSimScenes(), (simScenes) => ({ simScenes, panel: 'simulation', chapterContent: null, drawerEntityId: null }));
+        await run(service.listSimScenes(), (simScenes) => ({ simScenes, panel: 'simulation', chapterContent: null, drawer: null }));
       },
       async selectSimScene(id) {
         if (get().simAdvancing) return;
@@ -1414,24 +1446,16 @@ export function createAppStore(service: AppService): AppStore {
       },
       async draftSimScene(description) {
         if (get().sceneDrafting) return;
-        const taskId = `task-${++taskSeq}`;
-        const abort = new AbortController();
-        taskAborts.set(taskId, abort);
-        task({ type: 'started', task: { id: taskId, kind: 'scene_draft', title: '生成场景配置草稿', chapterId: null, startedAt: new Date().toISOString() } });
+        const t = startTask('scene_draft', '生成场景配置草稿', null);
         set({ sceneDrafting: true, message: null });
-        const result = await service.draftSimScene(description, {
-          signal: abort.signal,
-          onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
-        });
-        taskAborts.delete(taskId);
-        const finishedAt = new Date().toISOString();
+        const result = await service.draftSimScene(description, t.options());
         if (result.ok) {
           const title = result.value.config.meta?.title?.trim() ?? '';
           set({ sceneDrafting: false, sceneDraft: { serial: ++sceneSerial, title: title === '' ? '新场景' : title, config: result.value.config, problems: result.value.problems } });
-          task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+          t.finish('done');
         } else {
           set({ sceneDrafting: false, message: describeError(result.error) });
-          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+          t.fail(describeError(result.error));
         }
       },
       blankSimScene: (config) => set({ sceneDraft: { serial: ++sceneSerial, title: '新场景', config, problems: [] } }),
@@ -1461,31 +1485,26 @@ export function createAppStore(service: AppService): AppStore {
           }
         };
         for (const [i, chapterId] of chapterIds.entries()) {
-          const taskId = `task-${++taskSeq}`;
-          taskAborts.set(taskId, abort);
           const title = chapter(chapterId)?.title ?? '';
-          task({ type: 'started', task: { id: taskId, kind: 'writer', title: `写手 · ${title}`, chapterId, startedAt: new Date().toISOString() } });
+          const t = startTask('writer', `写手 · ${title}`, chapterId, abort);
           const queued = chapterIds.slice(i + 1);
           set({ writerJob: { chapterId, stage: 'writing', done: 0, total: 0, queued }, message: null });
           const result = await service.writeChapter(chapterId, {
-            signal: abort.signal,
-            onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
+            ...t.options(),
             onSegment: (done, total) => {
               set({ writerJob: { chapterId, stage: 'writing', done, total, queued } });
               void refresh(chapterId);
             },
           });
-          taskAborts.delete(taskId);
           await refresh(chapterId);
-          const finishedAt = new Date().toISOString();
           if (!result.ok) {
             set({ message: describeError(result.error) });
-            task({ type: 'finished', id: taskId, status: 'failed', finishedAt, error: describeError(result.error) });
+            t.fail(describeError(result.error));
             break;
           }
           const { status, reason, segmentsDone, segmentsTotal } = result.value;
           if (status === 'written') {
-            task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+            t.finish('done');
             const rest = queued.length > 0 ? `；后面的 ${queued.length} 章没有接着写` : '';
             // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
             set({ writerJob: { chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal, queued } });
@@ -1504,7 +1523,7 @@ export function createAppStore(service: AppService): AppStore {
           }
           const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
           set({ message: note });
-          task({ type: 'finished', id: taskId, status: status === 'cancelled' ? 'cancelled' : 'failed', finishedAt, error: note });
+          t.finish(status === 'cancelled' ? 'cancelled' : 'failed', { error: note });
           break;
         }
         if (writerAbort === abort) writerAbort = null;
@@ -1525,9 +1544,9 @@ export function createAppStore(service: AppService): AppStore {
         const current = get().review;
         const review: ReviewState =
           current !== null && current.chapterId === chapterId ? { ...current, issues: issues.value } : { chapterId, issues: issues.value, running: false, revisingId: null, note: null };
-        set({ reviewDrawerOpen: true, review, drawerEntityId: null, contextDrawerOpen: false, writeDrawerOpen: false });
+        set({ drawer: { kind: 'review' }, review });
       },
-      closeReview: () => set({ reviewDrawerOpen: false }),
+      closeReview: () => set(closeDrawer('review')),
       cancelReview: () => reviewAbort?.abort(),
       async refreshReview() {
         const current = get().review;
@@ -1599,25 +1618,18 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         const abort = new AbortController();
         reviewAbort = abort;
-        const taskId = `task-${++taskSeq}`;
-        taskAborts.set(taskId, abort);
-        task({ type: 'started', task: { id: taskId, kind: 'writer', title: `写手修订 · ${chapter(chapterId)?.title ?? ''}`, chapterId, startedAt: new Date().toISOString() } });
+        const t = startTask('writer', `写手修订 · ${chapter(chapterId)?.title ?? ''}`, chapterId, abort);
         set({ review: { ...current, revisingId: id, note: null }, message: null });
-        const result = await service.reviseIssue(id, {
-          signal: abort.signal,
-          onEvent: (e) => (e.type === 'text' ? task({ type: 'text', id: taskId, delta: e.delta }) : task({ type: 'usage', id: taskId, usage: e.usage })),
-        });
-        taskAborts.delete(taskId);
+        const result = await service.reviseIssue(id, t.options());
         if (reviewAbort === abort) reviewAbort = null;
-        const finishedAt = new Date().toISOString();
         const now = get().review;
         const same = now !== null && now.chapterId === chapterId;
         if (!result.ok) {
-          task({ type: 'finished', id: taskId, status: abort.signal.aborted ? 'cancelled' : 'failed', finishedAt, error: describeError(result.error) });
+          t.fail(describeError(result.error));
           if (same) set({ review: { ...now, revisingId: null, note: describeError(result.error) } });
           return;
         }
-        task({ type: 'finished', id: taskId, status: 'done', finishedAt });
+        t.finish('done');
         if (same) set({ review: { ...now, issues: result.value.issues, revisingId: null, note: '写手已修订这一段；写入前的正文在“版本快照”中' } });
         if (get().selectedChapterId === chapterId) {
           set({ chapterContent: { chapterId, saved: [...result.value.paragraphs], draft: null }, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
@@ -1653,7 +1665,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       async openSkills() {
         if (!(await get().leaveChapter())) return;
-        await run(service.listWritingSkills(), (skills) => ({ skills, panel: 'skills', chapterContent: null, drawerEntityId: null }));
+        await run(service.listWritingSkills(), (skills) => ({ skills, panel: 'skills', chapterContent: null, drawer: null }));
       },
       async updateWritingSkill(id, patch) {
         const skill = get().skills?.skills.find((s) => s.skill.id === id)?.skill;
@@ -1693,13 +1705,13 @@ export function createAppStore(service: AppService): AppStore {
       setAvoidPhrases: (phrases) => run(service.setAvoidPhrases(phrases), (skills) => ({ skills })),
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;
-        set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawerEntityId: null });
+        set({ panel: 'facts', chapterContent: null, selectedFactId: factId ?? get().selectedFactId, drawer: null });
         await reloadFacts();
       },
       selectFact: (id) => set({ selectedFactId: id }),
       async openSourceStats() {
         if (!(await get().leaveChapter())) return;
-        await run(service.sourceStats(), (sourceStats) => ({ sourceStats, panel: 'sources', chapterContent: null, drawerEntityId: null }));
+        await run(service.sourceStats(), (sourceStats) => ({ sourceStats, panel: 'sources', chapterContent: null, drawer: null }));
       },
       async openContext() {
         const chapterId = get().selectedChapterId;
@@ -1710,13 +1722,10 @@ export function createAppStore(service: AppService): AppStore {
         await run(service.writingContext(chapterId, selection, overrides), (writingContext) => ({
           writingContext,
           contextSelection: selection,
-          contextDrawerOpen: true,
-          writeDrawerOpen: false,
-          reviewDrawerOpen: false,
-          drawerEntityId: null,
+          drawer: { kind: 'context' },
         }));
       },
-      closeContext: () => set({ contextDrawerOpen: false }),
+      closeContext: () => set(closeDrawer('context')),
       async toggleContextItem(id, include) {
         const chapterId = get().selectedChapterId;
         if (chapterId === null) return;
@@ -1735,12 +1744,12 @@ export function createAppStore(service: AppService): AppStore {
         const selection = handle?.selection() ?? null;
         const selectedText = handle?.selectedText() ?? '';
         if (handle !== null && !(await handle.flush())) return;
-        set({ writeDrawerOpen: true, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection, drawerEntityId: null, contextDrawerOpen: false, reviewDrawerOpen: false });
+        set({ drawer: { kind: 'write' }, writeSelection: selection, writeSelectedText: selectedText, contextSelection: selection });
         await run(service.listCandidates(chapterId), (candidates) => ({ candidates }));
       },
       closeAiWrite: () => {
         writeAbort?.abort();
-        set({ writeDrawerOpen: false });
+        set(closeDrawer('write'));
       },
       async runSelectionOp(operation, instruction) {
         const chapterId = get().selectedChapterId;
@@ -1748,25 +1757,15 @@ export function createAppStore(service: AppService): AppStore {
         const abort = new AbortController();
         writeAbort = abort;
         set({ aiWrite: { operation, instruction, status: 'running', text: '', error: null, candidateId: null } });
-        const taskId = `task-${++taskSeq}`;
-        taskAborts.set(taskId, abort);
         const chapterTitle = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
-        task({ type: 'started', task: { id: taskId, kind: 'selection_edit', title: `${OPERATION_LABELS[operation]} · ${chapterTitle}`, chapterId, startedAt: new Date().toISOString() } });
+        const t = startTask('selection_edit', `${OPERATION_LABELS[operation]} · ${chapterTitle}`, chapterId, abort);
         const update = (patch: Partial<AiWriteJob>) => {
           const job = get().aiWrite;
           if (job !== null && writeAbort === abort) set({ aiWrite: { ...job, ...patch } });
         };
         const result = await service.runSelectionOperation(
           { chapterId, selection: get().writeSelection, operation, instruction, overrides: get().contextOverrides[chapterId] ?? NO_OVERRIDES },
-          {
-            signal: abort.signal,
-            onEvent: (e) => {
-              if (e.type === 'text') {
-                update({ text: (get().aiWrite?.text ?? '') + e.delta });
-                task({ type: 'text', id: taskId, delta: e.delta });
-              } else task({ type: 'usage', id: taskId, usage: e.usage });
-            },
-          },
+          t.options({ onText: (delta) => update({ text: (get().aiWrite?.text ?? '') + delta }) }),
         );
         if (result.ok) {
           const { outcome, text, refusal } = result.value.result;
@@ -1778,27 +1777,17 @@ export function createAppStore(service: AppService): AppStore {
             status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
             error: outcome === 'refused' ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}` : outcome === 'truncated' ? '输出达到上限，结果可能不完整' : null,
           });
-          task({
-            type: 'finished',
-            id: taskId,
-            status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
-            finishedAt: new Date().toISOString(),
-            text,
-            cost: result.value.cost,
-            error: outcome === 'refused' ? '模型拒绝了这个请求' : null,
-          });
+          t.finish(outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done', { text, cost: result.value.cost, error: outcome === 'refused' ? '模型拒绝了这个请求' : null });
         } else {
-          const status = abort.signal.aborted ? 'cancelled' : 'failed';
-          update({ status, error: describeError(result.error) });
-          task({ type: 'finished', id: taskId, status, finishedAt: new Date().toISOString(), error: describeError(result.error) });
+          update({ status: abort.signal.aborted ? 'cancelled' : 'failed', error: describeError(result.error) });
+          t.fail(describeError(result.error));
         }
-        taskAborts.delete(taskId);
         if (writeAbort === abort) writeAbort = null;
       },
       cancelSelectionOp: () => writeAbort?.abort(),
       async openTasks() {
         if (!(await get().leaveChapter())) return;
-        set({ panel: 'tasks', chapterContent: null, drawerEntityId: null });
+        set({ panel: 'tasks', chapterContent: null, drawer: null });
       },
       cancelTask: (id) => taskAborts.get(id)?.abort(),
       clearFinishedTasks: () => task({ type: 'clearFinished' }),
@@ -1850,11 +1839,11 @@ export function createAppStore(service: AppService): AppStore {
       },
       async openUsage() {
         if (!(await get().leaveChapter())) return;
-        await run(service.usage(), (usage) => ({ usage, panel: 'usage', chapterContent: null, drawerEntityId: null }));
+        await run(service.usage(), (usage) => ({ usage, panel: 'usage', chapterContent: null, drawer: null }));
       },
       async openSearch(query) {
         if (!(await get().leaveChapter())) return;
-        set({ panel: 'search', chapterContent: null, drawerEntityId: null });
+        set({ panel: 'search', chapterContent: null, drawer: null });
         if (query !== undefined && query.trim() !== '') await get().runSearch(query);
       },
       async runSearch(query) {
@@ -1874,7 +1863,7 @@ export function createAppStore(service: AppService): AppStore {
       async openModelServices() {
         if (!(await get().leaveChapter())) return;
         // 作品界面回来时从库中重新读取正文。
-        set({ modelServicesOpen: true, chapterContent: null, drawerEntityId: null });
+        set({ modelServicesOpen: true, chapterContent: null, drawer: null });
         await run(service.loadModelServices(), (modelServices) => ({ modelServices }));
       },
       closeModelServices: () => set({ modelServicesOpen: false }),
