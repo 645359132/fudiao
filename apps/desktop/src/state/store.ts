@@ -1210,8 +1210,21 @@ export function createAppStore(service: AppService): AppStore {
           chapterContent: null,
           contentRevision: get().contentRevision + 1,
           selectedChapterId: work.chapters.some((c) => c.id === get().selectedChapterId) ? get().selectedChapterId : (work.chapters[0]?.id ?? null),
+          // 各页缓存的是恢复前的数据：丢掉，打开时重新读取。
+          cover: undefined,
+          relations: null,
+          skills: null,
+          planning: null,
+          quickBook: null,
+          sourceStats: null,
+          usage: null,
+          searchResult: null,
+          candidates: [],
+          writingContext: null,
         }));
-        if (ok) await run(service.listBackups(), (backups) => ({ backups }));
+        if (!ok) return;
+        await loadEntities();
+        await run(service.listBackups(), (backups) => ({ backups }));
       },
       async openSettings(entityId) {
         if (!(await get().leaveChapter())) return;

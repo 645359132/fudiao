@@ -392,8 +392,8 @@ describe('导入、导出与备份', () => {
     expect(deps.exportedPackages[0]?.files.map((f) => f.path)).toContain('chapters/0002-第二章 当铺.md');
   });
 
-  it('备份与恢复：立即备份，修改后恢复，目录回到备份时', async () => {
-    const { user } = start();
+  it('备份与恢复：立即备份，修改后恢复，目录与设定回到备份时', async () => {
+    const { user, store } = start();
     await createWork(user, '雨夜');
     await addChapter(user, '第一章');
     await user.click(screen.getByText('更多'));
@@ -403,11 +403,15 @@ describe('导入、导出与备份', () => {
     expect(within(list).getByText('手动备份')).toBeTruthy();
     await addChapter(user, '第二章');
     expect(chapterTitles()).toEqual(['第一章', '第二章']);
+    await store.getState().createEntity('character', '林舟');
+    expect(store.getState().entities.map((e) => e.name)).toEqual(['林舟']);
     await user.click(screen.getByText('更多'));
     await user.click(screen.getByRole('menuitem', { name: '备份与恢复' }));
     await user.click(await screen.findByRole('button', { name: /恢复到 .* 的备份/ }));
     await user.click(screen.getByRole('button', { name: '确定恢复' }));
     await waitFor(() => expect(chapterTitles()).toEqual(['第一章']));
+    // 设定列表也回到备份时（备份之后建的人物不在了）。
+    await waitFor(() => expect(store.getState().entities).toEqual([]));
     expect(within(screen.getByRole('list', { name: '备份列表' })).getByText('恢复前自动备份')).toBeTruthy();
   });
 

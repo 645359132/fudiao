@@ -324,4 +324,17 @@ describe('导入导出与备份', () => {
     // 恢复后作品照常可写。
     expect(titles(value(await app.createChapter('新的第三章')))).toEqual(['第一章 雨夜', '第二章 当铺', '新的第三章']);
   });
+
+  it('恢复后作品列表里的书名与封面按恢复后的作品库更新（列表里的只是缓存）', async () => {
+    const { app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    const backup = value(await app.createBackup());
+    value(await app.updateWorkInfo({ title: '雨夜行' }));
+    value(await app.setWorkCover(new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9])], { type: 'image/png' })));
+    expect(value(await app.loadLibrary()).works[0]).toMatchObject({ title: '雨夜行', cover: expect.stringMatching(/^data:image\/png/) });
+    expect(value(await app.restoreBackup(backup.name)).project.title).toBe('雨夜');
+    expect(value(await app.loadLibrary()).works[0]).toMatchObject({ title: '雨夜', cover: null });
+    expect(value(await app.workCover())).toBeNull();
+  });
 });

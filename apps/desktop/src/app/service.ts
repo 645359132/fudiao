@@ -693,6 +693,14 @@ export function createAppService(deps: AppDeps) {
       if (session === null) return err({ code: 'no_work' });
       const restored = await deps.backups.restore(name, deps.clock.now());
       if (!restored.ok) return err({ code: 'library', detail: restored.error });
+      // 作品列表里的书名与封面是缓存：恢复后按作品库更新，不然列表里还是恢复前的。
+      const project = await getProject(session.port);
+      const thumbnail = await getCoverThumbnail(session.port);
+      if (project.ok && project.value !== null && thumbnail.ok) {
+        session = { ...session, entry: { ...session.entry, title: project.value.title, cover: thumbnail.value } };
+        const cached = await upsert(session.entry);
+        if (!cached.ok) return cached;
+      }
       return view();
     },
 
