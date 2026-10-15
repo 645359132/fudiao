@@ -103,6 +103,10 @@
     "version": "2",
     "sha256": "6fafc6e232eb1670190e1b5a6a5e7b9af15112f1c0038175c8673f67b68e01c4"
   },
+  "skill:no-adverbs": {
+    "version": "1",
+    "sha256": "8169a5a24b5f16dd61b4bf8fa324210845ed4897190f29eb9f8fb1a043a3164a"
+  },
   "skill:pacing": {
     "version": "2",
     "sha256": "3b8dd7b3fe4c7e9ec19a7536ceba827aeccd9e4565bb37e6a2857f11535533be"

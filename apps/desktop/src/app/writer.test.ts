@@ -71,6 +71,7 @@ describe('写手成章', () => {
     value(await app.writeChapter(c2));
     const body = bodyText(deps, 0);
     expect(body).toContain('【章末钩子】');
+    expect(body).toContain('【不用副词】');
     expect(body).toContain('【作者偏好】');
     expect(body).not.toContain('雪花写作法');
     expect(body).not.toContain('【三幕】');
