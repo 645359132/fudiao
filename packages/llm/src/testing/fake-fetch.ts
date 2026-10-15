@@ -11,6 +11,8 @@ export type FakeResponse = {
   readonly hang?: boolean;
   /** 模拟网络故障。 */
   readonly networkError?: boolean;
+  /** 发完 chunks 后连接断开（读回复读到一半出错，如凭据代理的“error decoding response body”）。 */
+  readonly breakAfterChunks?: boolean;
 };
 
 export type RecordedRequest = {
@@ -44,6 +46,10 @@ export function fakeFetch(responses: readonly FakeResponse[]) {
         : new ReadableStream<Uint8Array>({
             start(controller) {
               for (const chunk of spec.chunks ?? []) controller.enqueue(encoder.encode(chunk));
+              if (spec.breakAfterChunks === true) {
+                controller.error(new TypeError('网络请求失败：error decoding response body'));
+                return;
+              }
               if (!spec.hang) {
                 controller.close();
                 return;

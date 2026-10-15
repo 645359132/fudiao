@@ -3,6 +3,7 @@
 import {
   structured,
   withCallLog,
+  withRetry,
   type CallLog,
   type CallOptions,
   type LlmCallRecord,
@@ -151,7 +152,8 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     };
     const adapter = deps.llm.forProvider(provider);
     const db = project();
-    const port = db === null ? adapter : withCallLog(adapter, projectCallLog(db, () => deps.ids.next()), () => deps.clock.now());
+    // 网络中断或服务端错误时整次重新请求（withRetry 在调用记录外面：每次尝试各记一条，失败的不计入完成记录）。
+    const port = withRetry(db === null ? adapter : withCallLog(adapter, projectCallLog(db, () => deps.ids.next()), () => deps.clock.now()), deps.retry);
     return ok({ port, llmRequest, name, contextWindow: model.capabilities.contextWindow });
   }
 

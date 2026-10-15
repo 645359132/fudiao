@@ -485,7 +485,7 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 - 转发时去掉界面带来的认证头（SDK 中的占位 Key）、Cookie 与逐跳头，再按服务的写法注入凭据（Anthropic 用 `x-api-key`，其余用 `Authorization: Bearer`）；响应去掉 `Set-Cookie`。TLS 用系统的 schannel（reqwest 的 native-tls），并遵循系统代理设置。
 - 事件格式：`head`（状态码与响应头）、若干 `chunk`（字节）、`end`（是否被取消）或 `failed`（原因，不含 URL）。代理在发出前拒绝时 `net_fetch` 返回错误码（`unknown_provider`、`host_not_allowed`、`insecure_scheme`、`invalid_request`、`duplicate_id`），适配器归为网络错误并带上原因。请求标识由界面生成，取消在请求开始前到达同样生效。
 - 实现：`src-tauri/src/net.rs`（凭据来源为 `Credentials` 接口，M2-02 由系统凭据管理器实现）；TypeScript 侧 `packages/llm/src/proxy-fetch.ts` 把事件还原成标准 Response，Tauri 传输层在 `apps/desktop/src/adapters/tauri-net.ts`。适配器契约测试的每个场景都直连与经代理各跑一遍。
-- 重试只做一层：由 SDK 或适配器负责（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。
+- 重试：还没收到回复的请求由 SDK 重试（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。回复读到一半连接断了（凭据代理报“error decoding response body”等）SDK 不会重试，由桌面端调用器外层的 `withRetry`（`packages/llm/src/retry.ts`）把网络故障整次重新请求，最多两次（等 3 秒、10 秒，可取消）；每次尝试各写一条调用记录，失败的不算完成记录，带步骤键的调用照样不重复计费；重新请求前发出 `retry` 事件，界面丢掉中断前收到的半截文字。凭据代理拒绝的请求（目标地址不对、没有凭据）归为 `bad_request`，不重试。
 - 并发：代理按主机设置并发上限，批量推演在同一信号量下排队。
 - 日志：普通日志不记录凭据与请求正文；完整的请求与响应只保存在作品库的 `llm_call` 表中。
 - 用量与费用：读取服务返回的用量，包括缓存读写与思考产生的输出；价格表未配置时费用记为未知（B19）。

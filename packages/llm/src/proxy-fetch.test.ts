@@ -81,7 +81,7 @@ describe('经凭据代理的 fetch', () => {
       messages: [{ role: 'user', content: '测试' }],
       maxOutputTokens: 16,
     });
-    expect(result.ok ? null : result.error).toMatchObject({ code: 'network', message: expect.stringContaining('host_not_allowed') });
+    expect(result.ok ? null : result.error).toMatchObject({ code: 'bad_request', message: expect.stringContaining('host_not_allowed') });
   });
 
   it('响应头到达前取消：fetch 以 AbortError 结束并通知代理', async () => {

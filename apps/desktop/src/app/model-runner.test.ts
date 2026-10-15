@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { openaiChunks } from '@fudiao/llm/testing';
 import { renderConnectionTest, renderSelfTest, SELF_TEST_EXPECTED, SelfTestOutput, type RenderedPrompt } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { RetryPolicy } from '@fudiao/llm';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { createAppService } from './service';
 
@@ -22,8 +23,8 @@ const prompt = (r: { ok: true; value: RenderedPrompt } | { ok: false; error: str
 const reply = (text: string, usage = { input: 1_000_000, output: 500_000, cacheRead: 0 }) => ({ chunks: openaiChunks('m', { text: [text], end: 'stop' as const, usage }) });
 
 /** 打开一部作品，配置一个服务与默认模型。 */
-async function setup(options: { prices?: boolean; selfTested?: boolean } = {}) {
-  const deps = fsDeps();
+async function setup(options: { prices?: boolean; selfTested?: boolean; retry?: RetryPolicy } = {}) {
+  const deps = fsDeps(undefined, options.retry === undefined ? {} : { retry: options.retry });
   all.push(deps);
   const app = createAppService(deps);
   value(await app.loadLibrary());
@@ -72,6 +73,25 @@ describe('模型调用', () => {
       }),
     ]);
     expect(summary.total).toMatchObject({ calls: 1, unknownCost: 1, cost: 0 });
+  });
+
+  it('读回复读到一半连接断了：整次重新请求，两次尝试各记一条调用记录，结果用重新请求的', async () => {
+    const { deps, app } = await setup({ retry: { delaysMs: [3_000], sleep: () => Promise.resolve(true) } });
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['写了一半'], end: 'stop' }).slice(0, 1), breakAfterChunks: true }, reply('雨下得更紧了。'));
+    const deltas: string[] = [];
+    let retried = 0;
+    const result = value(
+      await app.runner.text(
+        { prompt: prompt(renderConnectionTest()), maxOutputTokens: 64 },
+        { onEvent: (e) => (e.type === 'text' ? deltas.push(e.delta) : e.type === 'retry' ? retried++ : undefined) },
+      ),
+    );
+    expect(result.text).toBe('雨下得更紧了。');
+    expect(retried).toBe(1);
+    expect(deps.llmRequests).toHaveLength(2);
+    const calls = value(await app.usage()).recent;
+    expect(calls.map((c) => c.status)).toEqual(['completed', 'error']);
   });
 
   it('配置了价格时记录费用', async () => {

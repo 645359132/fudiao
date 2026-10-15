@@ -182,6 +182,12 @@ export function assistantUseCases({
       let streamed = '';
       const onEvent = (event: LlmStreamEvent) => {
         events.onEvent?.(event);
+        if (event.type === 'retry') {
+          streamed = '';
+          events.onDraft?.(null);
+          events.onProgress?.(`网络中断，正在重新请求（第 ${event.attempt} 次）`);
+          return;
+        }
         if (event.type !== 'text') return;
         streamed += event.delta;
         const message = partialStringField(streamed, 'message');

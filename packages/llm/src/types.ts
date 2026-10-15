@@ -141,7 +141,9 @@ export type LlmError = {
 
 export type LlmStreamEvent =
   | { readonly type: 'text'; readonly delta: string }
-  | { readonly type: 'usage'; readonly usage: LlmUsage };
+  | { readonly type: 'usage'; readonly usage: LlmUsage }
+  /** 网络中断或服务端错误后整次重新请求（见 withRetry）：之前收到的文字作废。attempt 从 1 起。 */
+  | { readonly type: 'retry'; readonly attempt: number; readonly reason: string };
 
 export type CallOptions = {
   readonly signal?: AbortSignal;

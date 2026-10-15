@@ -48,10 +48,13 @@ export type EditorHandle = {
   readonly selectedText: () => string;
 };
 
-/** 任务中心里进行中的一项：交给用例的调用选项（text 为 false 时只记用量；onText 另外处理同一份流式文字）与结束。 */
+/**
+ * 任务中心里进行中的一项：交给用例的调用选项（text 为 false 时只记用量；onText 另外处理同一份流式文字，
+ * 网络中断后重新请求时 onRetry 清掉它）与结束。
+ */
 type TaskHandle = {
   readonly signal: AbortSignal;
-  readonly options: (choices?: { readonly text?: boolean; readonly onText?: (delta: string) => void }) => CallOptions;
+  readonly options: (choices?: { readonly text?: boolean; readonly onText?: (delta: string) => void; readonly onRetry?: () => void }) => CallOptions;
   readonly finish: (status: Exclude<TaskStatus, 'running'>, details?: { readonly text?: string; readonly cost?: number | null; readonly error?: string | null }) => void;
   /** 没有完成：作者取消时记为已取消，否则为失败。 */
   readonly fail: (error: string) => void;
@@ -536,11 +539,14 @@ export function createAppStore(service: AppService): AppStore {
       };
       return {
         signal: abort.signal,
-        options: ({ text = true, onText } = {}) => ({
+        options: ({ text = true, onText, onRetry } = {}) => ({
           signal: abort.signal,
           onEvent: (e) => {
             if (e.type === 'usage') task({ type: 'usage', id, usage: e.usage });
-            else {
+            else if (e.type === 'retry') {
+              if (text) task({ type: 'textReset', id });
+              onRetry?.();
+            } else {
               if (text) task({ type: 'text', id, delta: e.delta });
               onText?.(e.delta);
             }
@@ -1579,7 +1585,7 @@ export function createAppStore(service: AppService): AppStore {
           const { status, reason, segmentsDone, segmentsTotal } = result.value;
           if (status === 'written') {
             t.finish('done');
-            const rest = queued.length > 0 ? `；后面的 ${queued.length} 章没有接着写` : '';
+            const rest = queued.length > 0 ? `；后面的 ${queued.length} 章没有接着写，处理好以后再点“依次写完”接着写` : '';
             // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
             set({ writerJob: { chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal, queued } });
             if (!(await memoryTask(chapterId, abort))) {
@@ -1592,7 +1598,10 @@ export function createAppStore(service: AppService): AppStore {
             const reviewed = await reviewTask(chapterId, abort);
             await refresh(chapterId);
             if (reviewed.ok && reviewed.value.modelReviewed) continue;
-            set({ message: `“${title}”已写完，但审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}${rest}` });
+            // 网络中断已经自动重试过；仍没完成时停下，这一章可以在成书进度里单独审核。
+            set({
+              message: `“${title}”已写完，但审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}。可以在“成书进度”里单独审核这一章${rest}`,
+            });
             break;
           }
           const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
@@ -1862,7 +1871,7 @@ export function createAppStore(service: AppService): AppStore {
         };
         const result = await service.runSelectionOperation(
           { chapterId, selection: get().writeSelection, operation, instruction, overrides: get().contextOverrides[chapterId] ?? NO_OVERRIDES },
-          t.options({ onText: (delta) => update({ text: (get().aiWrite?.text ?? '') + delta }) }),
+          t.options({ onText: (delta) => update({ text: (get().aiWrite?.text ?? '') + delta }), onRetry: () => update({ text: '' }) }),
         );
         if (result.ok) {
           const { outcome, text, refusal } = result.value.result;

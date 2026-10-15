@@ -28,6 +28,8 @@ export const MAX_FINISHED_TASKS = 50;
 export type TaskEvent =
   | { readonly type: 'started'; readonly task: Pick<TaskRecord, 'id' | 'kind' | 'title' | 'chapterId' | 'startedAt'> }
   | { readonly type: 'text'; readonly id: string; readonly delta: string }
+  /** 网络中断后重新请求：之前收到的文字作废。 */
+  | { readonly type: 'textReset'; readonly id: string }
   | { readonly type: 'usage'; readonly id: string; readonly usage: LlmUsage }
   | {
       readonly type: 'finished';
@@ -48,6 +50,8 @@ export function reduceTasks(tasks: readonly TaskRecord[], event: TaskEvent): Tas
       return [{ ...event.task, status: 'running', finishedAt: null, text: '', usage: null, cost: undefined, error: null }, ...tasks];
     case 'text':
       return update(event.id, (t) => ({ text: t.text + event.delta }));
+    case 'textReset':
+      return update(event.id, () => ({ text: '' }));
     case 'usage':
       return update(event.id, () => ({ usage: event.usage }));
     case 'finished': {

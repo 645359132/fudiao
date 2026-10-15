@@ -1,5 +1,5 @@
 import type { Result } from '@fudiao/shared';
-import type { LlmPort } from '@fudiao/llm';
+import type { LlmPort, RetryPolicy } from '@fudiao/llm';
 import type { CoverImage, OpenError, OpenReport, Provider, SqlPort } from '@fudiao/store';
 
 /** 文件夹探测结果（Rust 命令 `project_probe`）。 */
@@ -123,6 +123,8 @@ export type AppDeps = {
   readonly credentials: CredentialPort;
   readonly llm: LlmFactory;
   readonly images: ImagePort;
+  /** 网络中断与服务端错误后的重试；不给时用默认（等 3 秒、10 秒各重试一次）。测试中关掉，需要时注入不真等的实现。 */
+  readonly retry?: RetryPolicy;
   readonly clock: Clock;
   readonly ids: Ids;
 };

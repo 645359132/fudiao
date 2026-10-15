@@ -124,7 +124,7 @@ describe('模型服务', () => {
     value(await db.transaction([{ sql: "UPDATE provider SET base_url = 'https://evil.example.test/v1'" }]));
     deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['好'], end: 'stop' }) });
     const report = value(await app.testConnection(m?.id ?? ''));
-    expect(report).toMatchObject({ ok: false, error: { code: 'network', message: expect.stringContaining('host_not_allowed') } });
+    expect(report).toMatchObject({ ok: false, error: { code: 'bad_request', message: expect.stringContaining('host_not_allowed') } });
     expect(deps.llmRequests).toHaveLength(1);
   });
 

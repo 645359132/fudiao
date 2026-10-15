@@ -189,6 +189,12 @@ describe.each(routes)('$name（$via）', (subject) => {
     expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network' }) });
   });
 
+  it('读回复读到一半连接断了，同样转换为 network（可以重试）', async () => {
+    const { fetch } = fakeFetch([{ chunks: [], breakAfterChunks: true }]);
+    const result = await subject.build(fetch).complete(req);
+    expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', message: expect.stringContaining('error decoding response body') }) });
+  });
+
   it('结果与错误中不出现 API Key（硬性规则 15）', async () => {
     const ok = await subject.build(fakeFetch([{ chunks: subject.chunks(MODEL, normal) }]).fetch).complete(req);
     const failed = await subject.build(fakeFetch([{ status: 401, body: errorBody(401) }]).fetch).complete(req);

@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { err, ok, ulid, type Result } from '@fudiao/shared';
-import { createProxyFetch, type NetTransport } from '@fudiao/llm';
+import { createProxyFetch, type NetTransport, type RetryPolicy } from '@fudiao/llm';
 import { fakeFetch, fakeNet, type FakeResponse } from '@fudiao/llm/testing';
 import type { SqlPort } from '@fudiao/store';
 import { APP_DB_FILE, appMigrationsDir, loadMigrations, openProjectDb, PROJECT_DB_FILE, type ProjectDb } from '@fudiao/store/node';
@@ -56,9 +56,12 @@ export type FsDepsOptions = {
   readonly fetch?: typeof fetch;
   /** 用真实的时间与随机的标识；默认是确定的时钟与标识，测试结果可以复现。 */
   readonly realTime?: boolean;
+  /** 失败调用的重试。预设响应时默认不重试（否则排好的回复会被重试用掉）；用真实的 fetch 时默认与桌面端相同。 */
+  readonly retry?: RetryPolicy;
 };
 
 export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), options: FsDepsOptions = {}): TestDeps {
+  const retryPolicy: RetryPolicy | undefined = options.retry ?? (options.fetch === undefined ? { delaysMs: [] } : undefined);
   const libraryFile = join(root, 'appdata', 'library.json');
   const documents = join(root, 'Documents', '复调');
   const picks: (string | null)[] = [];
@@ -280,6 +283,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
       },
     },
     llm: { forProvider: (provider) => buildAdapter(provider, createProxyFetch(proxy, provider.id, () => 'req')) },
+    ...(retryPolicy !== undefined && { retry: retryPolicy }),
     // jsdom 与 Node 没有 canvas：封面原样编码，缩略图取前一段，尺寸固定为 600×800。
     images: {
       async prepareCover(file) {
