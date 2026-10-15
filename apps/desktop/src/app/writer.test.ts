@@ -63,6 +63,19 @@ describe('写手成章', () => {
     expect(deps.llmRequests).toHaveLength(2);
   });
 
+  it('写手只带写章节的技能（B75）：雪花写作法不带；两个阶段都选的自定义技能带上，只用于规划的不带', async () => {
+    const { deps, app, c2 } = await setup();
+    value(await app.addCustomSkill('作者偏好', '- 不要三角恋', '规划与写每一章时都遵守', 'prefs', ['planning', 'writing']));
+    value(await app.addCustomSkill('三幕', '按三幕安排章节。', '规划时使用', 'three-acts', ['planning']));
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('他没回头。'));
+    value(await app.writeChapter(c2));
+    const body = bodyText(deps, 0);
+    expect(body).toContain('【章末钩子】');
+    expect(body).toContain('【作者偏好】');
+    expect(body).not.toContain('雪花写作法');
+    expect(body).not.toContain('【三幕】');
+  });
+
   it('写入正文前规范标点（B74）：半角标点、直引号与省略号换成中文的写法', async () => {
     const { deps, app, c2 } = await setup();
     deps.llmResponses.push(reply('林舟推开门,看见掌柜...\n\n掌柜说:"这玉不对."'), reply('他没回头.'));

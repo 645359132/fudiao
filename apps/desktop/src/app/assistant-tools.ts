@@ -4,7 +4,7 @@
 import type { AssistantAction, AssistantTool, PlanDraftData, SelectionOperation } from '@fudiao/prompts';
 import type { ContextOverrides } from '@fudiao/context';
 import type { CallOptions } from '@fudiao/llm';
-import { err, ok, type Result } from '@fudiao/shared';
+import { err, ok, type Result, type SkillStage } from '@fudiao/shared';
 import {
   chapterLengths,
   listChapterPlans,
@@ -91,7 +91,7 @@ export type AssistantHost = {
   createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
   relationsView(): Promise<Result<RelationsView, AppError>>;
   listWritingSkills(): Promise<Result<SkillsView, AppError>>;
-  addCustomSkill(name: string, instruction: string, description?: string, key?: string): Promise<Result<SkillsView, AppError>>;
+  addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<SkillsView, AppError>>;
   updateWritingSkill(skill: SkillsView['skills'][number]['skill'], patch: { readonly enabled?: boolean; readonly instruction?: string }): Promise<Result<SkillsView, AppError>>;
   setAvoidPhrases(phrases: readonly string[] | null): Promise<Result<SkillsView, AppError>>;
   addRelationship(fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
@@ -161,10 +161,11 @@ const failWith = (e: AppError): Outcome => failed(describeForModel(e));
 const relationText = (r: { readonly fromId: string; readonly toId: string; readonly label: string; readonly mutual: boolean }, nameOf: ReadonlyMap<string, string>) =>
   r.mutual ? `${nameOf.get(r.fromId) ?? ''}与${nameOf.get(r.toId) ?? ''}：${r.label}` : `${nameOf.get(r.fromId) ?? ''}是${nameOf.get(r.toId) ?? ''}的${r.label}`;
 
-/** 作者偏好存为一项自定义写作技能（SKILL.md），写手写每一章都会带上。 */
+/** 作者偏好存为一项自定义写作技能（SKILL.md）：写手写每一章、生成作品骨架与章节计划时都带上（B75）。 */
 export const PREFERENCES_KEY = 'author-preferences';
 const PREFERENCES_NAME = '作者偏好';
-const PREFERENCES_DESCRIPTION = '作者明确说过的文风偏好与禁忌，每一章都遵守';
+const PREFERENCES_DESCRIPTION = '作者明确说过的偏好与禁忌，规划与写每一章时都遵守';
+const PREFERENCES_STAGES: readonly SkillStage[] = ['planning', 'writing'];
 
 /** 偏好技能的指令里一行一条（去掉列表符号）。 */
 export const preferenceLines = (instruction: string): string[] =>
@@ -723,11 +724,11 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const instruction = [...lines, preference].map((l) => `- ${l}`).join('\n');
       const saved =
         current === undefined
-          ? await env.host.addCustomSkill(PREFERENCES_NAME, instruction, PREFERENCES_DESCRIPTION, PREFERENCES_KEY)
+          ? await env.host.addCustomSkill(PREFERENCES_NAME, instruction, PREFERENCES_DESCRIPTION, PREFERENCES_KEY, PREFERENCES_STAGES)
           : await env.host.updateWritingSkill(current, { instruction, enabled: true });
       if (!saved.ok) return failWith(saved.error);
       env.changed();
-      return done(`已记下作者偏好“${preference}”，写手写每一章都会遵守（在“写作技能”的“${PREFERENCES_NAME}”里可以修改）。`);
+      return done(`已记下作者偏好“${preference}”，生成大纲与章节计划、写手写每一章都会遵守（在“写作技能”的“${PREFERENCES_NAME}”里可以修改）。`);
     },
   },
   add_avoid_phrases: {

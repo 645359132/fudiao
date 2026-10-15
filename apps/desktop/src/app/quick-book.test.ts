@@ -71,6 +71,21 @@ describe('快速成书（B67）', () => {
     expect(await app.draftBookSeed({ idea: ' ', genre: '', chapterCount: 5, wordsPerChapter: 2000 })).toMatchObject({ ok: false, error: { code: 'settings' } });
   });
 
+  it('生成骨架时带上启用的规划技能（B75）：默认有雪花写作法，停用后不带；写章节的技能不带', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify(seed)), reply(JSON.stringify(seed)));
+    value(await app.draftBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '', chapterCount: 12, wordsPerChapter: 3000 }));
+    const first = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    for (const part of ['规划技能', '【雪花写作法】', '三次越来越重的挫折', '动机', '领悟']) expect(first).toContain(part);
+    expect(first).not.toContain('【章末钩子】');
+    const snowflake = value(await app.listWritingSkills()).skills.find((s) => s.skill.key === 'snowflake')!;
+    value(await app.updateWritingSkill(snowflake.skill, { enabled: false }));
+    value(await app.draftBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '', chapterCount: 12, wordsPerChapter: 3000 }));
+    expect(JSON.stringify(deps.llmRequests[1]?.body ?? {})).not.toContain('规划技能');
+  });
+
   it('采用骨架：写入作品名、类型、简介与大纲，作品列表随之改名；人物新建并写上说明，已有的不改，重复采用不重复建', async () => {
     const { app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;

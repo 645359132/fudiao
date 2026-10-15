@@ -58,6 +58,21 @@ describe('写作技能', () => {
     const after = value(await app.deleteCustomSkill(mine.skill));
     expect(after.skills.some((s) => s.skill.id === mine.skill.id)).toBe(false);
   });
+
+  it('技能的阶段（B75）：雪花写作法用于规划，其余内置技能写章节；自定义技能可以选阶段，内置技能的不能改', async () => {
+    const app = await setup();
+    const listed = value(await app.listWritingSkills()).skills;
+    expect(listed.filter((s) => s.skill.stages.includes('planning')).map((s) => s.skill.key)).toEqual(['snowflake']);
+    expect(listed.find((s) => s.skill.key === 'snowflake')).toMatchObject({ skill: { name: '雪花写作法', enabled: true }, description: expect.stringContaining('生成作品骨架') });
+    const plain = value(await app.addCustomSkill('对话节奏', '对话三句内要有动作。')).skills.at(-1)!;
+    expect(plain.skill.stages).toEqual(['writing']);
+    const arc = value(await app.addCustomSkill('三幕', '按三幕安排章节。', '规划时使用', 'three-acts', ['planning'])).skills.at(-1)!;
+    expect(arc.skill.stages).toEqual(['planning']);
+    const both = value(await app.updateWritingSkill(arc.skill, { stages: ['planning', 'writing'] })).skills.find((s) => s.skill.key === 'three-acts')!;
+    expect(both.skill.stages).toEqual(['planning', 'writing']);
+    const snowflake = listed.find((s) => s.skill.key === 'snowflake')!;
+    expect(await app.updateWritingSkill(snowflake.skill, { stages: ['writing'] })).toMatchObject({ ok: false });
+  });
 });
 
 describe('规避词表', () => {
@@ -126,6 +141,24 @@ ${body}
     expect(edited).toMatchObject({ name: '章末钩子', replaced: true });
     expect(edited.view.skills.find((s) => s.skill.key === 'cliffhanger')?.skill).toMatchObject({ instruction: '停在悬念上。', builtinVersion: hook.skill.builtinVersion });
     expect(edited.view.skills.filter((s) => s.skill.key === 'cliffhanger')).toHaveLength(1);
+  });
+
+  it('SKILL.md 的阶段（B75）：导入时读 metadata.stages（没写时为写章节），导出时写上；只写章节的不写', async () => {
+    const app = await setup();
+    const file = (stages: string) => `---\nname: three-acts\ndescription: 规划时使用\nmetadata:\n  title: "三幕"\n${stages}---\n\n按三幕安排章节。\n`;
+    const imported = value(await app.importSkillMd(file('  stages: "planning"\n'))).view.skills.at(-1)!;
+    expect(imported.skill).toMatchObject({ key: 'three-acts', stages: ['planning'] });
+    expect(app.skillMdOf(imported).content).toContain('stages: "planning"');
+    // 再导入一次没写阶段的版本：回到写章节。
+    const plain = value(await app.importSkillMd(file(''))).view.skills.find((s) => s.skill.key === 'three-acts')!;
+    expect(plain.skill.stages).toEqual(['writing']);
+    expect(app.skillMdOf(plain).content).not.toContain('stages');
+    // 内置的雪花写作法导出时带上阶段；导回成为对它的改写，阶段仍是内置的。
+    const snowflake = value(await app.listWritingSkills()).skills.find((s) => s.skill.key === 'snowflake')!;
+    const exported = app.skillMdOf(snowflake).content;
+    expect(exported).toContain('stages: "planning"');
+    const back = value(await app.importSkillMd(exported.replace('stages: "planning"', 'stages: "writing"'))).view.skills.find((s) => s.skill.key === 'snowflake')!;
+    expect(back.skill).toMatchObject({ stages: ['planning'], instruction: '' });
   });
 
   it('默认用内置词表；作者的词表去掉空白项；清空表示不检查；可恢复默认', async () => {

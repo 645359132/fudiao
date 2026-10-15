@@ -53,6 +53,18 @@ describe('章节计划草稿', () => {
     expect(view.foreshadows).toEqual([]);
   });
 
+  it('请求带上人物的说明与启用的规划技能（B75）：雪花写作法与要求视角人物写在详略说明开头', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    const qian = value(await app.planningView()).characters.find((c) => c.name === '钱四')!;
+    value(await app.updateEntity(qian, { description: '当铺掌柜，精明，认得这块玉' }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify(draft)));
+    value(await app.draftPlans({ chapterCount: 3, wordsPerChapter: 3000 }));
+    const body = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    for (const part of ['- 钱四：当铺掌柜，精明，认得这块玉', '- 林舟', '【雪花写作法】', '场景—后续', '写在详略说明（treatment）的开头']) expect(body).toContain(part);
+  });
+
   it('没有大纲时说明原因，不调用模型', async () => {
     const { deps, app } = await setup();
     await addTestedModel(app, deps);

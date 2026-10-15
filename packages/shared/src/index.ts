@@ -8,3 +8,5 @@ export { ulid } from './ulid';
 export { countWords } from './word-count';
 export { textDiff } from './text-diff';
 export type { DiffPart } from './text-diff';
+export { formatSkillStages, parseSkillStages, SKILL_STAGES } from './skill-stage';
+export type { SkillStage } from './skill-stage';

@@ -364,7 +364,11 @@ describe('章节计划草稿（B65）', () => {
           genre: '古代市井',
           synopsis: '',
           outline: '林舟深夜当玉，掌柜起疑；三章后真相揭晓。',
-          characters: ['林舟', '钱四'],
+          characters: [
+            { name: '林舟', description: '落魄书生，急需用钱' },
+            { name: '钱四', description: '' },
+          ],
+          skills: [],
           chapters: ['第一章 夜叩'],
           foreshadows: [{ title: '玉佩的来历', content: '掌柜多看了一眼', reveal: '玉佩是仿品' }],
           chapterCount: 5,
@@ -376,11 +380,12 @@ describe('章节计划草稿（B65）', () => {
     expect(text).toContain('约 3000 字');
     expect(text).toContain('作品：当铺夜谈（古代市井）');
     expect(text).not.toContain('简介：');
-    expect(text).toContain('人物：林舟；钱四；');
+    expect(text).toContain('人物：\n- 林舟：落魄书生，急需用钱\n- 钱四\n');
+    expect(text).not.toContain('规划技能');
     expect(text).toContain('已有的章节：第一章 夜叩；');
     expect(text).toContain('- 玉佩的来历：掌柜多看了一眼（揭晓：玉佩是仿品）');
     const empty = fullText(
-      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], chapters: [], foreshadows: [], chapterCount: 1, wordsPerChapter: 2000 })),
+      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], skills: [], chapters: [], foreshadows: [], chapterCount: 1, wordsPerChapter: 2000 })),
     );
     expect(empty).toContain('还没有人物设定');
     expect(empty).not.toContain('已有的章节：');
@@ -390,23 +395,41 @@ describe('章节计划草稿（B65）', () => {
 
   it('分卷（B68）：要求 10 章及以上时按故事的大段落分卷并列出各卷梗概；已有的卷沿用卷名', () => {
     const text = fullText(
-      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], chapters: [], volumes: ['第一卷 雨夜'], foreshadows: [], chapterCount: 30, wordsPerChapter: 3000 })),
+      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], skills: [], chapters: [], volumes: ['第一卷 雨夜'], foreshadows: [], chapterCount: 30, wordsPerChapter: 3000 })),
     );
     expect(text).toContain('30 章在 10 章及以上时');
     expect(text).toContain('每章的 volume 写它所在的卷名');
     expect(text).toContain('已有的卷：第一卷 雨夜；');
     expect(text).toContain('作品已有卷时沿用已有的卷名');
   });
+
+  it('规划技能（B75）：列出启用的技能与适用说明，视角人物写在详略说明的开头', () => {
+    const skill = { name: '雪花写作法', description: '雪花写作法：从一句话的故事逐层展开。生成章节计划时使用。', text: '每章写明视角人物。' };
+    const text = fullText(
+      unwrap(renderPlanDraft({ title: 't', genre: '', synopsis: '', outline: 'o', characters: [], skills: [skill], chapters: [], foreshadows: [], chapterCount: 3, wordsPerChapter: 3000 })),
+    );
+    expect(text).toContain('规划技能（作者选用的方法');
+    expect(text).toContain('【雪花写作法】适用：从一句话的故事逐层展开。生成章节计划时使用。\n每章写明视角人物。');
+    expect(text).toContain('写在详略说明（treatment）的开头');
+  });
 });
 
 describe('作品骨架（B67 快速成书）', () => {
   it('写出作者的想法、类型、作品名、已有人物、章数与字数，要求带结构化输出；可选部分没有时省略', () => {
-    const prompt = unwrap(renderBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '古风悬疑', title: '当铺夜谈', characters: ['林舟'], chapterCount: 12, wordsPerChapter: 3000 }));
+    const prompt = unwrap(renderBookSeed({ idea: '落魄书生当铺夜遇旧主', genre: '古风悬疑', title: '当铺夜谈', characters: ['林舟'], skills: [], chapterCount: 12, wordsPerChapter: 3000 }));
     expect(prompt).toMatchObject({ template: { id: 'book_seed' }, task: 'plan_draft', output: { name: 'BookSeedOutput' } });
     const text = fullText(prompt);
     for (const part of ['作者的想法：落魄书生当铺夜遇旧主', '类型：古风悬疑', '作品名：当铺夜谈', '已有的人物：林舟；', '约 12 章、每章约 3000 字', '计划写 12 章']) expect(text).toContain(part);
-    const bare = fullText(unwrap(renderBookSeed({ idea: '雨夜道歉', genre: '', title: '', characters: [], chapterCount: 5, wordsPerChapter: 2000 })));
-    for (const part of ['类型：', '作品名：', '已有的人物：']) expect(bare).not.toContain(part);
+    const bare = fullText(unwrap(renderBookSeed({ idea: '雨夜道歉', genre: '', title: '', characters: [], skills: [], chapterCount: 5, wordsPerChapter: 2000 })));
+    for (const part of ['类型：', '作品名：', '已有的人物：', '规划技能']) expect(bare).not.toContain(part);
+  });
+
+  it('规划技能（B75）：启用的技能写在系统提示里，输出要求优先', () => {
+    const skill = { name: '雪花写作法', description: '雪花写作法：生成作品骨架时使用。', text: '用一句话说清整个故事。' };
+    const prompt = unwrap(renderBookSeed({ idea: '雨夜道歉', genre: '', title: '', characters: [], skills: [skill], chapterCount: 5, wordsPerChapter: 2000 }));
+    const system = prompt.system.map((s) => s.text).join('\n');
+    expect(system).toContain('与上面的输出要求冲突时，以输出要求为准');
+    expect(system).toContain('【雪花写作法】适用：生成作品骨架时使用。\n用一句话说清整个故事。');
   });
 });
 

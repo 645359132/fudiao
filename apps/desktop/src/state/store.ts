@@ -1,5 +1,5 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
-import type { Result } from '@fudiao/shared';
+import type { Result, SkillStage } from '@fudiao/shared';
 import type { CallOptions } from '@fudiao/llm';
 import type { Chapter, ChapterTarget, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
@@ -373,8 +373,11 @@ export type AppState = {
   readonly buildMemory: (chapterId: string) => Promise<boolean>;
 
   readonly openSkills: () => Promise<void>;
-  readonly updateWritingSkill: (id: string, patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string; readonly description?: string }) => Promise<boolean>;
-  readonly addCustomSkill: (name: string, instruction: string, description?: string, key?: string) => Promise<boolean>;
+  readonly updateWritingSkill: (
+    id: string,
+    patch: { readonly enabled?: boolean; readonly instruction?: string; readonly name?: string; readonly description?: string; readonly stages?: readonly SkillStage[] },
+  ) => Promise<boolean>;
+  readonly addCustomSkill: (name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]) => Promise<boolean>;
   /** 选一个 SKILL.md 文件导入为技能（同一标识的自定义技能更新，内置技能成为改写）。 */
   readonly importSkillMd: () => Promise<void>;
   /** 导入粘贴进来的 SKILL.md 内容；返回是否导入成功。 */
@@ -1689,7 +1692,7 @@ export function createAppStore(service: AppService): AppStore {
         const skill = get().skills?.skills.find((s) => s.skill.id === id)?.skill;
         return skill === undefined ? false : run(service.updateWritingSkill(skill, patch), (skills) => ({ skills }));
       },
-      addCustomSkill: (name, instruction, description, key) => run(service.addCustomSkill(name, instruction, description, key), (skills) => ({ skills })),
+      addCustomSkill: (name, instruction, description, key, stages) => run(service.addCustomSkill(name, instruction, description, key, stages), (skills) => ({ skills })),
       async importSkillMd() {
         const picked = await service.pickText();
         if (!picked.ok) {

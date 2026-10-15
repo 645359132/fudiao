@@ -92,6 +92,8 @@ const sample: Statement[] = [
   s("INSERT INTO chapter_plan (chapter_id, created_at, updated_at) VALUES ('01C2', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W1', 'foreshadow', '伏笔埋设与回收', '', 1, '1', ?, ?)", ...T),
   s("INSERT INTO writing_skill (id, key, name, description, instruction, enabled, builtin_version, created_at, updated_at) VALUES ('01W2', 'my_cliffhanger', '我的章末钩子', '写每一章的结尾时使用', '每章结尾停在一个未解的问题上', 0, NULL, ?, ?)", ...T),
+  s("INSERT INTO writing_skill (id, key, name, description, instruction, builtin_version, stages, created_at, updated_at) VALUES ('01W3', 'snowflake', '雪花写作法', '', '', '1', 'planning', ?, ?)", ...T),
+  s("INSERT INTO writing_skill (id, key, name, description, instruction, builtin_version, stages, created_at, updated_at) VALUES ('01W4', 'author-preferences', '作者偏好', '作者说过的偏好', '- 对白要短', NULL, 'planning writing', ?, ?)", ...T),
   s(
     "INSERT INTO chapter_memory (chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, created_at, updated_at, open_threads) VALUES ('01C1', '林舟深夜当玉，掌柜起疑', '{\"01E1\":\"急需用钱\"}', '{\"01H1\":\"planted\"}', '{\"01G1\":1,\"01G2\":3}', 'stale', '01L1', ?, ?, '[\"林舟答应三天后再来\"]')",
     ...T,
@@ -233,6 +235,9 @@ describe('写手与审核的约束（迁移 0005）', () => {
     const db = await seeded();
     await rejects(db, "INSERT INTO writing_skill (id, key, name, created_at, updated_at) VALUES ('x', 'empty', '空技能', ?, ?)", ...T);
     await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, created_at, updated_at) VALUES ('x', 'foreshadow', '重复', '1', ?, ?)", ...T);
+    // 阶段只能是规划、写章节或两者（按固定顺序写）。
+    await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES ('x', 'review-only', '审核', '1', 'review', ?, ?)", ...T);
+    await rejects(db, "INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES ('x', 'both', '两者', '1', 'writing planning', ?, ?)", ...T);
   });
 
   it('删除章节时计划、记忆与审核问题级联删除，伏笔的章节置空', async () => {
@@ -437,6 +442,16 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 13 导出的数据（写作技能没有 stages 列）经转换后导入：都是写章节用的，“作者偏好”在规划时也遵守', async () => {
+    const data = await exported(await seeded());
+    const skills = (data.tables['writing_skill'] ?? []).map(({ stages: _dropped, ...row }) => row);
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 13, tables: { ...data.tables, writing_skill: skills } })).toMatchObject({ ok: true });
+    const after = (await exported(target)).tables['writing_skill'] ?? [];
+    expect(after.map((row) => [row['key'], row['stages']])).toEqual(skills.map((row) => [row['key'], row['key'] === 'author-preferences' ? 'planning writing' : 'writing']));
+    expect(after.map(({ stages: _x, ...row }) => row)).toEqual(skills);
   });
 
   it('结构版本 12 导出的数据（长篇记忆没有 open_threads 列）经转换后导入，章尾留下的事为空', async () => {

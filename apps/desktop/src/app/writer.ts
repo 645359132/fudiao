@@ -3,7 +3,7 @@
 // 写第一段之前保存“写手写入”快照，作者可以一键回退；写入的段落记为 AI 生成（硬性规则 21）。
 // 每段的步骤键是“章节 + 这次写作的标识 + 段号”：中断后续写时，已写入的段跳过，已完成但没写入的调用复用记录，不重复计费。
 import type { CallOptions } from '@fudiao/llm';
-import { BUILTIN_SKILLS, renderWriterChapter } from '@fudiao/prompts';
+import { renderWriterChapter } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   appendWrittenSegment,
@@ -19,7 +19,6 @@ import {
   listForeshadows,
   listParagraphs,
   listRelationships,
-  ensureBuiltinSkills,
   resetWriterRun,
   restoreSnapshot,
   startWriterRun,
@@ -29,10 +28,11 @@ import {
   type SavedParagraph,
   type SqlPort,
 } from '@fudiao/store';
-import { composeSkills, effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
+import { effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
+import { skillsForStage } from './writing-skills';
 
 /** 带给写手的上文长度（字）：上一章的结尾与本章已写的结尾。 */
 export const TAIL_CHARS = 1500;
@@ -72,8 +72,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
     const [work, skills, entities, facts, foreshadows, memories, withText, volumes, relations] = await Promise.all([
       getProject(port),
-      // 作品还没打开过“写作技能”页时，内置技能在这里登记（全部启用）。
-      ensureBuiltinSkills(port, BUILTIN_SKILLS.map(({ key, name, version }) => ({ key, name, version })), () => deps.ids.next(), ctx()),
+      skillsForStage(port, 'writing', deps),
       listEntities(port),
       listFacts(port),
       listForeshadows(port),
@@ -139,7 +138,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       ...(volume !== undefined && { volume: { title: volume.title, summary: volume.summary } }),
       goal: plan.goal,
       treatment: plan.treatment,
-      skills: composeSkills(skills.value, BUILTIN_SKILLS).map((s) => ({ name: s.name, description: s.description, text: s.text })),
+      skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
       avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
       cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
       // 人物关系网（B73）：本章成立、至少一端出场的关系。

@@ -109,8 +109,8 @@ describe('章节计划', () => {
 
 describe('写作技能', () => {
   const builtins = [
-    { key: 'foreshadow', name: '伏笔埋设与回收', version: '1' },
-    { key: 'cliffhanger', name: '章末钩子', version: '1' },
+    { key: 'foreshadow', name: '伏笔埋设与回收', version: '1', stages: ['writing'] as const },
+    { key: 'cliffhanger', name: '章末钩子', version: '1', stages: ['writing'] as const },
   ];
 
   it('登记内置技能；内置技能升级时保留作者的启用状态与改动', async () => {
@@ -127,6 +127,28 @@ describe('写作技能', () => {
     // 没有变化时不写库。
     const again = value(await ensureBuiltinSkills(db, [builtins[0]!, { ...builtins[1]!, version: '2' }], newId, later));
     expect(again.find((s) => s.key === 'cliffhanger')?.version).toBe(upgraded.find((s) => s.key === 'cliffhanger')?.version);
+  });
+
+  it('内置技能的阶段随模板登记与同步，作者不能改；自定义技能可以设阶段，没给时为写章节', async () => {
+    const db = await fresh();
+    const planning = { key: 'snowflake', name: '雪花写作法', version: '1', stages: ['planning'] as const };
+    const first = value(await ensureBuiltinSkills(db, [...builtins, planning], newId, ctx));
+    expect(first.map((s) => [s.key, s.stages])).toEqual([
+      ['foreshadow', ['writing']],
+      ['cliffhanger', ['writing']],
+      ['snowflake', ['planning']],
+    ]);
+    const snowflake = first.find((s) => s.key === 'snowflake')!;
+    expect(await updateSkill(db, snowflake, { stages: ['writing'] }, later)).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    // 模板改了阶段（同一版本也同步）。
+    const synced = value(await ensureBuiltinSkills(db, [...builtins, { ...planning, stages: ['planning', 'writing'] as const }], newId, later));
+    expect(synced.find((s) => s.key === 'snowflake')?.stages).toEqual(['planning', 'writing']);
+
+    const plain = value(await createCustomSkill(db, { id: 's1', key: 'mine', name: '我的', description: '', instruction: '对话要短' }, ctx));
+    expect(plain.stages).toEqual(['writing']);
+    const both = value(await createCustomSkill(db, { id: 's2', key: 'arc', name: '三幕', description: '', instruction: '按三幕排', stages: ['writing', 'planning'] }, ctx));
+    expect(both.stages).toEqual(['planning', 'writing']);
+    expect(value(await updateSkill(db, both, { stages: ['planning'] }, later)).stages).toEqual(['planning']);
   });
 
   it('自定义技能须写明说明，可以删除；内置技能只能停用', async () => {

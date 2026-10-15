@@ -56,6 +56,11 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   // 0013：长篇记忆增加“章尾留给后面的事”（旧数据为空）。
   13: (tables) => ({ ...tables, chapter_memory: (tables['chapter_memory'] ?? []).map((row) => ({ open_threads: [], ...row })) }),
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
+  // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
+  14: (tables) => ({
+    ...tables,
+    writing_skill: (tables['writing_skill'] ?? []).map((row) => ({ stages: row['key'] === 'author-preferences' && row['builtin_version'] === null ? 'planning writing' : 'writing', ...row })),
+  }),
 };
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {

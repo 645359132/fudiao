@@ -1,6 +1,6 @@
 ---
 id: book_seed
-version: 2
+version: 3
 task: plan_draft
 output: BookSeedOutput
 ---
@@ -12,8 +12,16 @@ output: BookSeedOutput
 - 作品名（title）简短；类型（genre）几个字，例如“古风悬疑”；简介（synopsis）两三句，说清主角、处境与悬念。
 - 大纲（outline）按故事的先后写，分开端、发展、高潮、结局，每部分一段；写清主要人物各自想要什么、谁知道什么秘密、关键的转折与真相在哪里揭开，以及结局。篇幅要够拆成约 {{chapterCount}} 章、每章约 {{wordsPerChapter}} 字。
 - 大纲里要有需要提前铺垫、后面才揭晓的事（伏笔），写明在哪里埋下、在哪里揭开。
-- 人物（characters）列 3 到 8 个推动情节的人物：name 是名字，description 一两句，写身份、性格、想要什么、藏着什么。大纲里出现的主要人物都要在这里，名字前后一致。
+- 人物（characters）列 3 到 8 个推动情节的人物：name 是名字，description 写身份、性格、想要什么、藏着什么，不超过一百字。大纲里出现的主要人物都要在这里，名字前后一致。
 - 人物关系（relationships）列 3 到 10 条推动情节的关系：from、to 用 characters 里的名字；label 是简短的称谓，读作“from 是 to 的 label”（例如师父、债主、恋人）；双方相同的关系（朋友、同门、仇敌）mutual 为 true；category 取 family 亲属、romance 情感、mentor 师承、ally 友盟、rival 竞争、enemy 敌对、affiliation 从属、other 其他；开篇时读者还不知道、要到后面才揭开的关系 secret 为 true；description 一句话写来历或张力。
+{{#hasSkills}}
+
+规划技能（作者选用的方法，按它们展开；与上面的输出要求冲突时，以输出要求为准）：
+{{#skills}}
+【{{name}}】{{#description}}适用：{{description}}{{/description}}
+{{text}}
+{{/skills}}
+{{/hasSkills}}
 输出一个 JSON 对象：title、genre、synopsis、outline、characters、relationships。
 @@user
 作者的想法：{{idea}}

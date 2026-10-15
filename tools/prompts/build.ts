@@ -1,6 +1,6 @@
 // 由提示词模板文件生成 packages/prompts/src/generated/templates.ts，并维护版本锁。
 // 修改模板必须提升版本号（硬性规则 12）：内容变了而版本没变时，生成失败。
-import { sha256 } from '@fudiao/shared';
+import { sha256, SKILL_STAGES } from '@fudiao/shared';
 import { parseSkillMd } from '../../packages/prompts/src/skill-md';
 
 export type Lock = Readonly<Record<string, { readonly version: string; readonly sha256: string }>>;
@@ -8,7 +8,7 @@ export type Lock = Readonly<Record<string, { readonly version: string; readonly 
 export type Sources = {
   readonly templates: Readonly<Record<string, string>>;
   readonly partials: Readonly<Record<string, string>>;
-  /** 内置写作技能（需求 B61）：SKILL.md 格式，文件名为技能键（与 name 相同），metadata 声明名称、版本与顺序。版本锁中记为 skill:键。 */
+  /** 内置写作技能（需求 B61）：SKILL.md 格式，文件名为技能键（与 name 相同），metadata 声明名称、版本、顺序与阶段（stages，可不写）。版本锁中记为 skill:键。 */
   readonly skills?: Readonly<Record<string, string>>;
 };
 
@@ -64,6 +64,10 @@ export function build(sources: Sources, previous: Lock): { generated: string; lo
     }
     if (doc.value.name !== key) errors.push(`${id}：name 须与文件名相同（现在是 ${doc.value.name}）`);
     if ((doc.value.metadata['title'] ?? '') === '' || !/^\d+$/.test(doc.value.metadata['order'] ?? '')) errors.push(`${id}：metadata 须有 title 与 order`);
+    const stages = doc.value.metadata['stages'];
+    if (stages !== undefined && stages.split(/\s+/).some((s) => s !== '' && !(SKILL_STAGES as readonly string[]).includes(s))) {
+      errors.push(`${id}：metadata.stages 只能是 ${SKILL_STAGES.join('、')}（空格分开），现在是 ${stages}`);
+    }
     const hash = sha256(source);
     const before = previous[id];
     if (before !== undefined && before.sha256 !== hash && before.version === version) {

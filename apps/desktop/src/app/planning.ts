@@ -37,6 +37,7 @@ import { checkPlan, suggestForeshadowStatus, type ForeshadowSuggestion, type Pla
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
+import { skillsForStage } from './writing-skills';
 
 export type PlanChapterView = {
   readonly chapter: Chapter;
@@ -182,12 +183,16 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       if (current.value.outline.trim() === '') return err({ code: 'settings', detail: '请先在作品信息中写下作品大纲' });
       const volumes = await listVolumes(port);
       if (!volumes.ok) return err(repo(volumes.error));
+      // 规划技能（B75），例如雪花写作法。
+      const skills = await skillsForStage(port, 'planning', deps);
+      if (!skills.ok) return err(repo(skills.error));
       const prompt = renderPlanDraft({
         title: work.value?.title ?? '',
         genre: work.value?.genre ?? '',
         synopsis: work.value?.synopsis ?? '',
         outline: current.value.outline,
-        characters: current.value.characters.map((c) => c.name),
+        characters: current.value.characters.map((c) => ({ name: c.name, description: c.description })),
+        skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
         chapters: current.value.chapters.map((c) => c.chapter.title),
         volumes: volumes.value.map((v) => v.title),
         foreshadows: current.value.foreshadows.filter((f) => f.status !== 'dropped').map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),

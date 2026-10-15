@@ -54,6 +54,9 @@ ${body}
     expect(build({ templates: {}, partials, skills: { hook: skill('文字', '1', 'other') } }, {}).errors).toEqual(['skill:hook：name 须与文件名相同（现在是 other）']);
     expect(build({ templates: {}, partials, skills: { bad: '---\nname: bad\ndescription: x\n---\n文字' } }, {}).errors).toEqual(['skill:bad：metadata 缺少 version']);
     expect(build({ templates: {}, partials, skills: { bad: '---\nversion: 1\n---\n文字' } }, {}).errors).toEqual(['skill:bad：SKILL.md 的文件头缺少 name（技能的标识）']);
+    const staged = (stages: string) => `---\nname: plan\ndescription: 规划时使用\nmetadata:\n  title: "规划"\n  version: "1"\n  order: "1"\n  stages: "${stages}"\n---\n文字`;
+    expect(build({ templates: {}, partials, skills: { plan: staged('planning writing') } }, {}).errors).toEqual([]);
+    expect(build({ templates: {}, partials, skills: { plan: staged('planning review') } }, {}).errors).toEqual(['skill:plan：metadata.stages 只能是 planning、writing（空格分开），现在是 planning review']);
   });
 
   it('局部模板的改动计入引用它的模板', () => {

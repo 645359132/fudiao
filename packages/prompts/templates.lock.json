@@ -20,8 +20,8 @@
     "sha256": "31dbf4b01127e8821f526fef2e2d4fb527fd245f085cd8dd387d5b13da70d454"
   },
   "book_seed": {
-    "version": "2",
-    "sha256": "e8404afb1ae2a5f4af92bf6ddef0fdb1bf5ff3f53afd0710eeab5379dea1d8dd"
+    "version": "3",
+    "sha256": "7b981ca0bcc9bf7b4e2a34255db9ea0581aca1ca899477d60d61e045dce1fe3b"
   },
   "candidate_text": {
     "version": "3",
@@ -52,8 +52,8 @@
     "sha256": "e869374a4697f13251dca189d5104ddcc5a31c4858bd8067f234523256a908d7"
   },
   "plan_draft": {
-    "version": "2",
-    "sha256": "b718fca30fb84ec8495170ea73fea08d5e3b9ba5660b930628a7f74c146e7b95"
+    "version": "3",
+    "sha256": "d226fa845e32c59e6900fc136f9b04cab263a7158fe5ee9a3e125d47c3c12504"
   },
   "run_synopsis": {
     "version": "3",
@@ -118,6 +118,10 @@
   "skill:scene": {
     "version": "2",
     "sha256": "ff3169f21c3dc48a6541b37cf6da3e27b7b31ba4190ce9e5bce85360c6ea265e"
+  },
+  "skill:snowflake": {
+    "version": "1",
+    "sha256": "f333c4c8f14963154bc8f72b434d5700b799f2f4a202a70eaf57585d0d1739e9"
   },
   "skill:tension": {
     "version": "2",

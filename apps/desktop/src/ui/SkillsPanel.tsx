@@ -1,6 +1,33 @@
 import { useState } from 'react';
+import { SKILL_STAGES, type SkillStage } from '@fudiao/shared';
+import { SKILL_STAGE_HINT, SKILL_STAGE_LABEL } from '../app/labels';
 import type { SkillView } from '../app/writing-skills';
 import { useApp } from './store-context';
+
+/** 技能用在哪些阶段（B75）：规划（作品骨架与章节计划）、写章节；至少选一个。 */
+function StageChoice({ label, stages, disabled, onChange }: { readonly label: string; readonly stages: readonly SkillStage[]; readonly disabled: boolean; readonly onChange: (stages: SkillStage[]) => void }) {
+  return (
+    <fieldset className="skill-stages" aria-label={label}>
+      <span className="muted">用在</span>
+      {SKILL_STAGES.map((stage) => {
+        const on = stages.includes(stage);
+        return (
+          <label key={stage} title={SKILL_STAGE_HINT[stage]}>
+            <input
+              type="checkbox"
+              checked={on}
+              disabled={disabled || (on && stages.length === 1)}
+              onChange={(e) => onChange(e.target.checked ? [...stages, stage] : stages.filter((s) => s !== stage))}
+            />
+            {SKILL_STAGE_LABEL[stage]}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+const stagesText = (stages: readonly SkillStage[]) => stages.map((s) => SKILL_STAGE_LABEL[s]).join('、');
 
 /**
  * 一项技能（SKILL.md 格式）：启用开关、标识、适用说明与指令。内置技能的适用说明取自模板，指令显示模板文字，
@@ -33,8 +60,14 @@ function SkillItem({ view }: { readonly view: SkillView }) {
         <code className="skill-key" title="SKILL.md 中的 name">
           {skill.key}
         </code>
+        {custom ? null : (
+          <span className="skill-stage" title={skill.stages.map((s) => SKILL_STAGE_HINT[s]).join('；')}>
+            用在{stagesText(skill.stages)}
+          </span>
+        )}
         <span className="muted">{label}</span>
       </div>
+      {custom ? <StageChoice label={`${skill.name}用在`} stages={skill.stages} disabled={busy} onChange={(stages) => void update(skill.id, { stages })} /> : null}
       {custom ? (
         <label className="skill-description">
           适用说明
@@ -79,6 +112,7 @@ function AddSkill() {
   const [key, setKey] = useState('');
   const [description, setDescription] = useState('');
   const [instruction, setInstruction] = useState('');
+  const [stages, setStages] = useState<SkillStage[]>(['writing']);
   const [pasted, setPasted] = useState('');
   return (
     <section className="panel-form" aria-label="添加技能">
@@ -96,12 +130,13 @@ function AddSkill() {
           aria-label="逐项填写技能"
           onSubmit={(e) => {
             e.preventDefault();
-            void add(name, instruction, description, key).then((done) => {
+            void add(name, instruction, description, key, stages).then((done) => {
               if (done) {
                 setName('');
                 setKey('');
                 setDescription('');
                 setInstruction('');
+                setStages(['writing']);
               }
             });
           }}
@@ -119,9 +154,10 @@ function AddSkill() {
             <input value={description} placeholder="例如：写人物对话时使用，让话里带潜台词" onChange={(e) => setDescription(e.target.value)} />
           </label>
           <label>
-            指令（写给写手的要求，可以用 Markdown）
+            指令（可以用 Markdown）
             <textarea rows={4} value={instruction} onChange={(e) => setInstruction(e.target.value)} />
           </label>
+          <StageChoice label="新技能用在" stages={stages} disabled={busy} onChange={setStages} />
           <button type="submit" disabled={busy || name.trim() === '' || description.trim() === '' || instruction.trim() === ''}>
             添加
           </button>
@@ -189,7 +225,7 @@ export function SkillsPanel() {
     <section aria-label="写作技能" className="skills">
       <h2>写作技能</h2>
       <p className="muted">
-        技能采用通用的 SKILL.md 格式（name、description 与指令），可以导入别处的技能文件，也可以把任一技能导出。写手写作时按下面的顺序运用启用的技能，每项按它的适用说明使用。内置技能可以改写指令，恢复后沿用默认文字。
+        技能采用通用的 SKILL.md 格式（name、description 与指令），可以导入别处的技能文件，也可以把任一技能导出。技能分两个阶段：“规划”的技能在生成作品骨架（大纲与人物）和章节计划时使用，例如雪花写作法；“写章节”的技能交给写手。都按下面的顺序运用启用的技能，每项按它的适用说明使用。内置技能可以改写指令，恢复后沿用默认文字。
       </p>
       <div className="skill-actions">
         <button type="button" disabled={busy} onClick={() => void importSkill()}>

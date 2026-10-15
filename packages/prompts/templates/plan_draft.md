@@ -1,6 +1,6 @@
 ---
 id: plan_draft
-version: 2
+version: 3
 task: plan_draft
 output: PlanDraftOutput
 ---
@@ -14,6 +14,15 @@ output: PlanDraftOutput
 - 已有的伏笔用相同的 title 沿用，不要重复新建；foreshadows 只列新的伏笔。
 - 分卷：{{chapterCount}} 章在 10 章及以上时，按故事的大段落（一个大事件或一个阶段）把章节分成若干卷，每卷约 8 到 20 章；卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。不到 10 章时不分卷：每章的 volume 为空字符串，volumes 为空数组。{{#hasVolumes}}作品已有卷时沿用已有的卷名，接着往后分。{{/hasVolumes}}
 - 只依据大纲与设定，不添加与大纲矛盾的情节。
+{{#hasSkills}}
+
+规划技能（作者选用的方法，按它们展开；与上面的输出要求冲突时，以输出要求为准）：
+{{#skills}}
+【{{name}}】{{#description}}适用：{{description}}{{/description}}
+{{text}}
+{{/skills}}
+技能要求写明的视角人物，写在详略说明（treatment）的开头，例如“视角：林舟。”
+{{/hasSkills}}
 输出一个 JSON 对象：volumes 为卷的数组，chapters 为章节计划的数组，foreshadows 为新伏笔的数组。
 @@user
 作品：{{title}}{{#genre}}（{{genre}}）{{/genre}}
@@ -23,7 +32,15 @@ output: PlanDraftOutput
 大纲：
 {{outline}}
 
-人物：{{#characters}}{{name}}；{{/characters}}{{^characters}}还没有人物设定{{/characters}}
+{{#hasCharacters}}
+人物：
+{{#characters}}
+- {{name}}{{#description}}：{{description}}{{/description}}
+{{/characters}}
+{{/hasCharacters}}
+{{^hasCharacters}}
+人物：还没有人物设定
+{{/hasCharacters}}
 {{#hasVolumes}}
 已有的卷：{{#volumes}}{{title}}；{{/volumes}}
 {{/hasVolumes}}

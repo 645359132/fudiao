@@ -885,7 +885,7 @@ describe('写作技能界面（B61、B37）', () => {
     const add = screen.getByRole('form', { name: '逐项填写技能' });
     await user.type(within(add).getByRole('textbox', { name: '名称' }), '对话节奏');
     await user.type(within(add).getByRole('textbox', { name: '标识（SKILL.md 的 name，可不填）' }), 'dialogue-rhythm');
-    await user.type(within(add).getByRole('textbox', { name: '指令（写给写手的要求，可以用 Markdown）' }), '对话三句内要有动作。');
+    await user.type(within(add).getByRole('textbox', { name: '指令（可以用 Markdown）' }), '对话三句内要有动作。');
     expect(within(add).getByRole('button', { name: '添加' }).matches(':disabled')).toBe(true);
     await user.type(within(add).getByRole('textbox', { name: '适用说明（description：做什么、什么时候用）' }), '写对话时使用。');
     await user.click(within(add).getByRole('button', { name: '添加' }));
@@ -895,9 +895,27 @@ describe('写作技能界面（B61、B37）', () => {
     // 内置技能显示模板里的适用说明。
     expect(within(screen.getByRole('listitem', { name: '章末钩子' })).getByText(/写每一章的结尾时使用/)).toBeTruthy();
 
+    // 阶段（B75）：内置技能显示用在哪个阶段；自定义技能默认写章节，可以改为规划，至少留一个。
+    expect(within(screen.getByRole('listitem', { name: '雪花写作法' })).getByText('用在规划')).toBeTruthy();
+    expect(within(screen.getByRole('listitem', { name: '章末钩子' })).getByText('用在写章节')).toBeTruthy();
+    const stages = within(screen.getByRole('listitem', { name: '对话节奏' })).getByRole('group', { name: '对话节奏用在' });
+    expect(within(stages).getByRole('checkbox', { name: '写章节' })).toHaveProperty('checked', true);
+    expect(within(stages).getByRole('checkbox', { name: '写章节' }).matches(':disabled')).toBe(true);
+    await user.click(within(stages).getByRole('checkbox', { name: '规划' }));
+    await waitFor(async () => {
+      const view = await service.listWritingSkills();
+      expect(view.ok && view.value.skills.find((s) => s.skill.key === 'dialogue-rhythm')?.skill.stages).toEqual(['planning', 'writing']);
+    });
+    await user.click(within(screen.getByRole('group', { name: '对话节奏用在' })).getByRole('checkbox', { name: '写章节' }));
+    await waitFor(async () => {
+      const view = await service.listWritingSkills();
+      expect(view.ok && view.value.skills.find((s) => s.skill.key === 'dialogue-rhythm')?.skill.stages).toEqual(['planning']);
+    });
+
     // 导出为 SKILL.md；导入别处的 SKILL.md。
-    await user.click(within(mine).getByRole('button', { name: '导出 SKILL.md' }));
-    await waitFor(() => expect(deps.exported.at(-1)?.content).toMatch(/^---\nname: dialogue-rhythm\ndescription: "写对话时使用。"\nmetadata:\n {2}title: "对话节奏"\n---\n\n对话三句内要有动作。\n$/));
+    // 改阶段后这一项重新渲染，按名称重新取。
+    await user.click(within(screen.getByRole('listitem', { name: '对话节奏' })).getByRole('button', { name: '导出 SKILL.md' }));
+    await waitFor(() => expect(deps.exported.at(-1)?.content).toMatch(/^---\nname: dialogue-rhythm\ndescription: "写对话时使用。"\nmetadata:\n {2}title: "对话节奏"\n {2}stages: "planning"\n---\n\n对话三句内要有动作。\n$/));
     deps.textPicks.push({ fileName: 'SKILL.md', text: '---\nname: webnovel-pacing\ndescription: 写连载章节时使用。\n---\n\n开篇三百字内进入冲突。\n' });
     await user.click(screen.getByRole('button', { name: '导入 SKILL.md' }));
     const imported = await screen.findByRole('listitem', { name: 'webnovel-pacing' });
@@ -924,7 +942,7 @@ describe('写作技能界面（B61、B37）', () => {
     await user.type(within(again).getByRole('textbox', { name: '名称' }), '另一个');
     await user.type(within(again).getByRole('textbox', { name: '标识（SKILL.md 的 name，可不填）' }), 'scene-senses');
     await user.type(within(again).getByRole('textbox', { name: '适用说明（description：做什么、什么时候用）' }), '说明');
-    await user.type(within(again).getByRole('textbox', { name: '指令（写给写手的要求，可以用 Markdown）' }), '指令');
+    await user.type(within(again).getByRole('textbox', { name: '指令（可以用 Markdown）' }), '指令');
     await user.click(within(again).getByRole('button', { name: '添加' }));
     expect(await screen.findByText(/标识“scene-senses”已被“场景五感”使用/)).toBeTruthy();
 

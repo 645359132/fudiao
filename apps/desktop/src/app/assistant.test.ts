@@ -320,7 +320,7 @@ describe('AI 助手（B69）', () => {
     expect(lastResults(first.items)).toMatchObject({ results: [{ ok: true }, { ok: true }, { ok: true, detail: '已把“嘴角上扬”加进规避词表，审核时会逐处标出。' }] });
     const skills = value(await app.listWritingSkills());
     const pref = skills.skills.find((s) => s.skill.key === 'author-preferences')!;
-    expect(pref.skill).toMatchObject({ name: '作者偏好', enabled: true, instruction: '- 对白要短，不要长篇独白\n- 主角不说脏话' });
+    expect(pref.skill).toMatchObject({ name: '作者偏好', enabled: true, instruction: '- 对白要短，不要长篇独白\n- 主角不说脏话', stages: ['planning', 'writing'] });
     expect(skills.avoidPhrases).toContain('嘴角上扬');
     expect(skills.avoidPhrasesCustom).toBe(true);
 

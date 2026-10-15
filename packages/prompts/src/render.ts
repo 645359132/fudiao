@@ -705,12 +705,22 @@ export function renderWriterRevise(input: WriterReviseInput): Result<RenderedPro
   });
 }
 
+/** 作品中启用的规划技能（B75）：生成作品骨架与章节计划时带上。 */
+export type PlanningSkill = { readonly name: string; readonly description: string; readonly text: string };
+
+const skillsData = (skills: readonly PlanningSkill[]) => ({
+  skills: skills.map((s) => ({ name: s.name, description: withoutName(s.name, s.description.trim()), text: s.text })),
+  hasSkills: skills.length > 0,
+});
+
 export type PlanDraftInput = {
   readonly title: string;
   readonly genre: string;
   readonly synopsis: string;
   readonly outline: string;
-  readonly characters: readonly string[];
+  /** 人物设定的名字与说明（说明可为空）。 */
+  readonly characters: readonly { readonly name: string; readonly description: string }[];
+  readonly skills: readonly PlanningSkill[];
   readonly chapters: readonly string[];
   /** 作品已有的卷名（B68），按顺序；没有分卷时为空。 */
   readonly volumes?: readonly string[];
@@ -726,7 +736,9 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     genre: input.genre,
     synopsis: input.synopsis,
     outline: input.outline,
-    characters: input.characters.map((name) => ({ name })),
+    characters: input.characters.map((c) => ({ name: c.name, description: c.description.trim() })),
+    hasCharacters: input.characters.length > 0,
+    ...skillsData(input.skills),
     chapters: input.chapters.map((title) => ({ title })),
     hasChapters: input.chapters.length > 0,
     volumes: (input.volumes ?? []).map((title) => ({ title })),
@@ -752,6 +764,7 @@ export type BookSeedInput = {
   /** 作者已定的作品名；没有时为空，由模型拟。 */
   readonly title: string;
   readonly characters: readonly string[];
+  readonly skills: readonly PlanningSkill[];
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
 };
@@ -764,6 +777,7 @@ export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, str
     title: input.title,
     characters: input.characters.map((name) => ({ name })),
     hasCharacters: input.characters.length > 0,
+    ...skillsData(input.skills),
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,
   });

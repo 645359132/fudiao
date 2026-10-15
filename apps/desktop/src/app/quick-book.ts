@@ -9,6 +9,7 @@ import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { PlanningView } from './planning';
 import type { AppDeps } from './ports';
+import { skillsForStage } from './writing-skills';
 
 export type BookSeedRequest = {
   /** 一句话的想法，例如“落魄书生当铺夜遇旧主”。 */
@@ -116,11 +117,15 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
       if (!work.ok) return err(repo(work.error));
       const entities = await listEntities(port);
       if (!entities.ok) return err(repo(entities.error));
+      // 规划技能（B75），例如雪花写作法。
+      const skills = await skillsForStage(port, 'planning', deps);
+      if (!skills.ok) return err(repo(skills.error));
       const prompt = renderBookSeed({
         idea: request.idea.trim(),
         genre: request.genre.trim() || (work.value?.genre ?? ''),
         title: work.value?.title ?? '',
         characters: entities.value.filter((e) => e.kind === 'character').map((e) => e.name),
+        skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
         chapterCount: request.chapterCount,
         wordsPerChapter: request.wordsPerChapter,
       });

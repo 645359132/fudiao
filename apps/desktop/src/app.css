@@ -1762,6 +1762,41 @@ fieldset.plain {
   margin: 4px 0 6px;
 }
 
+/* 技能用在哪个阶段（B75） */
+.skill-stage {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.skill-stages,
+.panel-form .skill-stages {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 13px;
+}
+
+.skill-stages label,
+.panel-form .skill-stages label {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 4px;
+  align-items: center;
+}
+
+.skill-stages input {
+  width: auto;
+}
+
 /* 分卷（B68）：卷的标题行，章节缩进在卷下 */
 .toc-volume {
   padding: 12px 0 2px;
