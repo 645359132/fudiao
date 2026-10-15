@@ -18,6 +18,24 @@ type MarksMeta = { readonly sources?: ReadonlyMap<string, SourceKind>; readonly 
 
 export const sourceMarksKey = new PluginKey<MarksState>('sourceMarks');
 
+/** 两份文档的段落标识（顺序与个数）是否相同：相同时节点装饰随文档映射即可，不必重建。 */
+function sameParagraphIds(a: PmNode, b: PmNode): boolean {
+  if (a.childCount !== b.childCount) return false;
+  for (let i = 0; i < a.childCount; i++) if (a.child(i).attrs['id'] !== b.child(i).attrs['id']) return false;
+  return true;
+}
+
+/** 应有色条的段落数。 */
+function markedCount(doc: PmNode, sources: ReadonlyMap<string, SourceKind>, enabled: boolean): number {
+  if (!enabled || sources.size === 0) return 0;
+  let n = 0;
+  doc.forEach((node) => {
+    const source = sources.get(node.attrs['id'] as string);
+    if (source !== undefined && source !== 'handwritten') n += 1;
+  });
+  return n;
+}
+
 function build(doc: PmNode, sources: ReadonlyMap<string, SourceKind>, enabled: boolean): DecorationSet {
   if (!enabled || sources.size === 0) return DecorationSet.empty;
   const decorations: Decoration[] = [];
@@ -46,6 +64,12 @@ export const SourceMarks = Extension.create({
             const enabled = meta?.enabled ?? value.enabled;
             // 拆分、合并与撤销会让映射后的节点装饰失效，所以按段落标识重建；输入法组合期间只做映射。
             if (meta === undefined && view?.composing === true) return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) };
+            // 段落标识没有变化（在段内打字、删字，每次按键都是这样）时也只做映射；
+            // 替换了段落边界的编辑会让映射丢掉节点装饰，色条数目对不上时仍然重建。
+            if (meta === undefined && sameParagraphIds(tr.before, tr.doc)) {
+              const mapped = value.decorations.map(tr.mapping, tr.doc);
+              if (mapped.find().length === markedCount(tr.doc, value.sources, value.enabled)) return { ...value, decorations: mapped };
+            }
             return { sources, enabled, decorations: build(tr.doc, sources, enabled) };
           },
         },

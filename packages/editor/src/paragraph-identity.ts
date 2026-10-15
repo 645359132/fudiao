@@ -111,6 +111,17 @@ export const ParagraphIdentity = Extension.create<ParagraphIdentityOptions>({
       // 输入法组合期间不改动文档；组合结束后的下一个事务再补。
       if (view?.composing === true) return null;
 
+      // 快速路径（每次按键都会走到这里）：每段都有标识、互不重复、都是见过的——打字、删字、合并段落都是这样——
+      // 下面的规则不会改动任何一段，不必读出各段的文字再比对。
+      let clean = true;
+      const ids = new Set<string>();
+      newState.doc.forEach((node) => {
+        const id = idOf(node);
+        if (id === null || ids.has(id) || !known.has(id)) clean = false;
+        else ids.add(id);
+      });
+      if (clean) return null;
+
       const mapping = new Mapping();
       for (const t of trs) mapping.appendMapping(t.mapping);
       const oldPos = new Map<string, { pos: number; text: string }>();

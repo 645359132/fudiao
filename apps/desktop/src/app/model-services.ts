@@ -1,11 +1,8 @@
 // 模型服务的用例（需求 B15、施工文档第五章）：服务、凭据、模型、默认模型与连接测试。
 // 服务配置在应用设置库 app.sqlite；API Key 经凭据端口写入系统凭据管理器，界面与这里都拿不到明文。
 import {
-  AnthropicAdapter,
   COMPATIBLE_DIALECT,
   CONSERVATIVE_CAPABILITIES,
-  OpenAIAdapter,
-  OpenAIChatAdapter,
   isModelLister,
   PLACEHOLDER_API_KEY,
   runSelfTest,
@@ -14,6 +11,7 @@ import {
   type ListedModel,
   type LlmPort,
   type ModelCapabilities,
+  type ModelLister,
   type SelfTestReport,
 } from '@fudiao/llm';
 import { checkSelfTest, renderConnectionTest, renderSelfTest, SelfTestOutput } from '@fudiao/prompts';
@@ -56,14 +54,25 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderKind, { readonly label: s
   local: { label: '本地端点', baseUrl: 'http://127.0.0.1:11434/v1', keyHeader: null },
 };
 
-/** 为服务建立适配器。SDK 的 API Key 填占位值，真实凭据由凭据代理注入。 */
-export function buildAdapter(provider: Provider, fetch: typeof globalThis.fetch): LlmPort {
-  if (provider.kind === 'anthropic') return new AnthropicAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
-  // OpenAI 官方接口用 Responses API；Gemini（兼容模式）、兼容接口与本地端点用 Chat Completions。
-  if (provider.kind === 'openai') return new OpenAIAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
-  // Gemini 的兼容端点不在正文中输出思考标签。
-  const base = provider.kind === 'gemini' ? { ...COMPATIBLE_DIALECT, stripThinkTags: false } : COMPATIBLE_DIALECT;
-  return new OpenAIChatAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, dialect: { ...base, ...provider.dialect }, viaCredentialProxy: true });
+/**
+ * 为服务建立适配器。SDK 的 API Key 填占位值，真实凭据由凭据代理注入。
+ * 适配器连同官方 SDK（打包后约占界面脚本的一半）在第一次调用时才载入，启动时不必解析它们。
+ */
+export function buildAdapter(provider: Provider, fetch: typeof globalThis.fetch): LlmPort & ModelLister {
+  let loaded: Promise<LlmPort & ModelLister> | null = null;
+  const load = () =>
+    (loaded ??= import('@fudiao/llm/adapters').then(({ AnthropicAdapter, OpenAIAdapter, OpenAIChatAdapter }) => {
+      if (provider.kind === 'anthropic') return new AnthropicAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
+      // OpenAI 官方接口用 Responses API；Gemini（兼容模式）、兼容接口与本地端点用 Chat Completions。
+      if (provider.kind === 'openai') return new OpenAIAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, viaCredentialProxy: true });
+      // Gemini 的兼容端点不在正文中输出思考标签。
+      const base = provider.kind === 'gemini' ? { ...COMPATIBLE_DIALECT, stripThinkTags: false } : COMPATIBLE_DIALECT;
+      return new OpenAIChatAdapter({ apiKey: PLACEHOLDER_API_KEY, baseURL: provider.baseUrl, fetch, dialect: { ...base, ...provider.dialect }, viaCredentialProxy: true });
+    }));
+  return {
+    complete: async (request, options) => (await load()).complete(request, options),
+    listModels: async (options) => (await load()).listModels(options),
+  };
 }
 
 /**

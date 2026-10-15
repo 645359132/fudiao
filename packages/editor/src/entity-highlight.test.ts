@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { Editor } from '@tiptap/core';
+import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chapterExtensions, fromDoc, toDoc } from './document';
 import { EntityHighlight, entityHighlightKey, setHighlightEntities } from './entity-highlight';
@@ -75,5 +76,54 @@ describe('设定名高亮', () => {
     expect(click(true, 2)).toBe(true);
     expect(click(true, 4)).toBeFalsy();
     expect(opened).toEqual(['shen']);
+  });
+});
+
+describe('设定名高亮的增量更新', () => {
+  // 每次编辑只重新匹配改动的段落；任意一串编辑之后，结果与整章重新匹配完全相同。
+  const fullRebuild = (editor: Editor) => {
+    const copy = new Editor({
+      element: document.createElement('div'),
+      extensions: [...chapterExtensions({ newId: () => 'x' }), EntityHighlight],
+      content: editor.getJSON(),
+    });
+    setHighlightEntities(copy, entities);
+    const out = highlighted(copy);
+    copy.destroy();
+    return out;
+  };
+
+  it('打字、拆段、合段、跨段删除、粘贴多段与撤销之后，与整章重新匹配一致', () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.oneof(
+            fc.record({ op: fc.constant('type' as const), at: fc.nat(), text: fc.constantFrom('沈', '砚', '当', '铺', '沈砚', '先生', '雨') }),
+            fc.record({ op: fc.constant('split' as const), at: fc.nat() }),
+            fc.record({ op: fc.constant('delete' as const), at: fc.nat(), length: fc.integer({ min: 1, max: 12 }) }),
+            fc.record({ op: fc.constant('paste' as const), at: fc.nat() }),
+            fc.record({ op: fc.constant('undo' as const) }),
+          ),
+          { maxLength: 15 },
+        ),
+        (ops) => {
+          const editor = setup(['沈砚走进当铺。', '沈先生没有回头，当', '铺里很暗。']);
+          setHighlightEntities(editor, entities);
+          for (const o of ops) {
+            const size = editor.state.doc.content.size;
+            const pos = (n: number) => 1 + (n % Math.max(1, size - 1));
+            if (o.op === 'type') editor.commands.insertContentAt(pos(o.at), o.text);
+            else if (o.op === 'split') editor.chain().setTextSelection(pos(o.at)).splitBlock().run();
+            else if (o.op === 'delete') {
+              const from = pos(o.at);
+              editor.commands.deleteRange({ from, to: Math.min(from + o.length, size - 1) });
+            } else if (o.op === 'paste') editor.commands.insertContentAt(pos(o.at), '<p>沈先</p><p>生进了当铺</p>');
+            else editor.commands.undo();
+          }
+          expect(highlighted(editor)).toEqual(fullRebuild(editor));
+        },
+      ),
+      { numRuns: 150 },
+    );
   });
 });

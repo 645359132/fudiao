@@ -71,15 +71,19 @@ function RelationGraph({
   const svg = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<{ readonly id: string; readonly at: Point; readonly moved: boolean } | null>(null);
   const [hover, setHover] = useState<string | null>(null);
-  const layout = useMemo(
-    () =>
-      layoutGraph(
-        members.map((m) => m.id),
-        all.map((r) => [r.fromId, r.toId] as const),
-        pinned,
-      ),
-    [members, all, pinned],
-  );
+  // 排布只取决于有哪些人物、谁和谁之间有关系、哪些位置拖定过：改称谓、说明、类别等不重新排布。
+  // 用这三样拼成的字符串做依赖，数据每次重新读取（数组换了新的）也不重算。
+  const idsKey = members.map((m) => m.id).join('\n');
+  const edgesKey = all.map((r) => `${r.fromId}\t${r.toId}`).join('\n');
+  const pinnedKey = [...pinned].map(([id, p]) => `${id}\t${p.x}\t${p.y}`).join('\n');
+  const layout = useMemo(() => {
+    const lines = (key: string) => (key === '' ? [] : key.split('\n').map((l) => l.split('\t')));
+    return layoutGraph(
+      lines(idsKey).map(([id]) => id ?? ''),
+      lines(edgesKey).map(([a, b]) => [a ?? '', b ?? ''] as const),
+      new Map(lines(pinnedKey).map(([id, x, y]) => [id ?? '', { x: Number(x), y: Number(y) }])),
+    );
+  }, [idsKey, edgesKey, pinnedKey]);
   const pos = useMemo(() => (drag === null ? layout : new Map([...layout, [drag.id, drag.at]])), [layout, drag]);
   const edges = edgeGeometry(relationships, pos);
   const nameOf = new Map(members.map((m) => [m.id, m.name]));

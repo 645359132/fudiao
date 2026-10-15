@@ -1,9 +1,11 @@
 export type { AnthropicAdapterOptions } from './adapters/anthropic';
 export { AnthropicAdapter } from './adapters/anthropic';
-export type { ChatDialect, OpenAIChatAdapterOptions } from './adapters/openai-chat';
+export type { ChatDialect } from './adapters/dialect';
+export type { OpenAIChatAdapterOptions } from './adapters/openai-chat';
 export type { OpenAIAdapterOptions } from './adapters/openai-responses';
 export { OpenAIAdapter } from './adapters/openai-responses';
-export { COMPATIBLE_DIALECT, OPENAI_DIALECT, OpenAIChatAdapter } from './adapters/openai-chat';
+export { COMPATIBLE_DIALECT, OPENAI_DIALECT } from './adapters/dialect';
+export { OpenAIChatAdapter } from './adapters/openai-chat';
 export type { Budget } from './budget';
 export type { ListedModel, ModelLister, SelfTestPrompt, SelfTestReport } from './models';
 export { isModelLister, MAX_LISTED_MODELS, runSelfTest, SELF_TEST_RUNS } from './models';

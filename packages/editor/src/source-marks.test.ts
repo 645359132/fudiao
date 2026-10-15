@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { Editor } from '@tiptap/core';
+import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chapterExtensions, fromDoc, toDoc } from './document';
 import { setParagraphSources, setSourceMarksEnabled, SourceMarks, sourceMarksKey } from './source-marks';
@@ -78,5 +79,46 @@ describe('段落来源色条', () => {
     const editor = setup(['雨很大。']);
     setParagraphSources(editor, new Map([['p0', 'ai_generated']]));
     expect(editor.can().undo()).toBe(false);
+  });
+});
+
+describe('段落来源色条的增量更新', () => {
+  it('段内打字只做映射；任意一串打字、拆段、跨段删除与撤销之后，色条与按段落标识重建的结果一致', () => {
+    const sources = new Map([
+      ['p0', 'ai_generated' as const],
+      ['p2', 'mixed' as const],
+    ]);
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.oneof(
+            fc.record({ op: fc.constant('type' as const), at: fc.nat() }),
+            fc.record({ op: fc.constant('split' as const), at: fc.nat() }),
+            fc.record({ op: fc.constant('delete' as const), at: fc.nat(), length: fc.integer({ min: 1, max: 10 }) }),
+            fc.record({ op: fc.constant('undo' as const) }),
+          ),
+          { maxLength: 12 },
+        ),
+        (ops) => {
+          const editor = setup(['雨很大。', '他没有回头。', '她站在门口。']);
+          setParagraphSources(editor, sources);
+          for (const o of ops) {
+            const size = editor.state.doc.content.size;
+            const pos = (n: number) => 1 + (n % Math.max(1, size - 1));
+            if (o.op === 'type') editor.commands.insertContentAt(pos(o.at), '字');
+            else if (o.op === 'split') editor.chain().setTextSelection(pos(o.at)).splitBlock().run();
+            else if (o.op === 'delete') editor.commands.deleteRange({ from: pos(o.at), to: Math.min(pos(o.at) + o.length, size - 1) });
+            else editor.commands.undo();
+          }
+          const expected: [string, string][] = [];
+          editor.state.doc.forEach((node) => {
+            const source = sources.get(node.attrs['id'] as string);
+            if (source !== undefined) expected.push([node.attrs['id'] as string, source]);
+          });
+          expect(marked(editor)).toEqual(expected);
+        },
+      ),
+      { numRuns: 150 },
+    );
   });
 });

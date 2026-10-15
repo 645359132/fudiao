@@ -135,52 +135,84 @@ function layoutLinked(ids: readonly string[], edges: readonly (readonly [string,
     return i === undefined || j === undefined || i === j ? [] : [[i, j] as const];
   });
   const k = Math.min(Math.sqrt((size.width * size.height) / n) * 0.75, 260);
+  const kk = k * k;
+  // 斥力只在一定距离内起作用：没有关系的人物不会被一路推到画布边上。按这个距离分格，只比较相邻格子里的人物。
+  const cutoff = 2.5 * k;
+  const cutoff2 = cutoff * cutoff;
+  const cols = Math.max(1, Math.ceil(size.width / cutoff));
+  const rows = Math.max(1, Math.ceil(size.height / cutoff));
+  const xs = new Float64Array(n);
+  const ys = new Float64Array(n);
+  pos.forEach((p, i) => {
+    xs[i] = p.x;
+    ys[i] = p.y;
+  });
+  const dx_ = new Float64Array(n);
+  const dy_ = new Float64Array(n);
+  const cellOf = new Int32Array(n);
+  const cells: number[][] = Array.from({ length: cols * rows }, () => []);
   const iterations = 300;
   for (let step = 0; step < iterations; step++) {
     const temperature = (size.width / 8) * (1 - step / iterations) + 1;
-    const disp = pos.map(() => ({ x: 0, y: 0 }));
+    dx_.fill(0);
+    dy_.fill(0);
+    for (const c of cells) c.length = 0;
     for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        let dx = pos[i]!.x - pos[j]!.x;
-        let dy = pos[i]!.y - pos[j]!.y;
-        // 两点重合时按下标错开一点，结果仍然确定。
-        if (dx === 0 && dy === 0) {
-          dx = (i - j) * 0.1;
-          dy = 0.1;
+      const c = Math.min(cols - 1, Math.max(0, Math.floor(xs[i]! / cutoff))) + Math.min(rows - 1, Math.max(0, Math.floor(ys[i]! / cutoff))) * cols;
+      cellOf[i] = c;
+      cells[c]!.push(i);
+    }
+    for (let i = 0; i < n; i++) {
+      const ci = cellOf[i]! % cols;
+      const ri = Math.floor(cellOf[i]! / cols);
+      for (let r = Math.max(0, ri - 1); r <= Math.min(rows - 1, ri + 1); r++) {
+        for (let c = Math.max(0, ci - 1); c <= Math.min(cols - 1, ci + 1); c++) {
+          for (const j of cells[c + r * cols]!) {
+            if (j <= i) continue;
+            let dx = xs[i]! - xs[j]!;
+            let dy = ys[i]! - ys[j]!;
+            // 两点重合时按下标错开一点，结果仍然确定。
+            if (dx === 0 && dy === 0) {
+              dx = (i - j) * 0.1;
+              dy = 0.1;
+            }
+            const d2 = dx * dx + dy * dy;
+            if (d2 > cutoff2) continue;
+            const d = Math.max(Math.sqrt(d2), 0.01);
+            const f = kk / d / d;
+            dx_[i]! += dx * f;
+            dy_[i]! += dy * f;
+            dx_[j]! -= dx * f;
+            dy_[j]! -= dy * f;
+          }
         }
-        const d = Math.max(Math.hypot(dx, dy), 0.01);
-        // 斥力只在一定距离内起作用：没有关系的人物不会被一路推到画布边上。
-        if (d > 2.5 * k) continue;
-        const f = (k * k) / d;
-        disp[i]!.x += (dx / d) * f;
-        disp[i]!.y += (dy / d) * f;
-        disp[j]!.x -= (dx / d) * f;
-        disp[j]!.y -= (dy / d) * f;
       }
     }
     for (const [i, j] of links) {
-      const dx = pos[i]!.x - pos[j]!.x;
-      const dy = pos[i]!.y - pos[j]!.y;
-      const d = Math.max(Math.hypot(dx, dy), 0.01);
-      const f = (d * d) / k;
-      disp[i]!.x -= (dx / d) * f;
-      disp[i]!.y -= (dy / d) * f;
-      disp[j]!.x += (dx / d) * f;
-      disp[j]!.y += (dy / d) * f;
+      const dx = xs[i]! - xs[j]!;
+      const dy = ys[i]! - ys[j]!;
+      const d = Math.max(Math.sqrt(dx * dx + dy * dy), 0.01);
+      const f = d / k;
+      dx_[i]! -= dx * f;
+      dy_[i]! -= dy * f;
+      dx_[j]! += dx * f;
+      dy_[j]! += dy * f;
     }
     for (let i = 0; i < n; i++) {
       if (fixed[i]) continue;
-      const p = pos[i]!;
-      const d = disp[i]!;
       // 向中心收拢，力度与距离成正比。
-      d.x += (cx - p.x) * 0.6;
-      d.y += (cy - p.y) * 0.6;
-      const len = Math.max(Math.hypot(d.x, d.y), 0.01);
+      const ddx = dx_[i]! + (cx - xs[i]!) * 0.6;
+      const ddy = dy_[i]! + (cy - ys[i]!) * 0.6;
+      const len = Math.max(Math.sqrt(ddx * ddx + ddy * ddy), 0.01);
       const move = Math.min(len, temperature);
-      p.x = Math.min(size.width - MARGIN, Math.max(MARGIN, p.x + (d.x / len) * move));
-      p.y = Math.min(size.height - MARGIN, Math.max(MARGIN, p.y + (d.y / len) * move));
+      xs[i] = Math.min(size.width - MARGIN, Math.max(MARGIN, xs[i]! + (ddx / len) * move));
+      ys[i] = Math.min(size.height - MARGIN, Math.max(MARGIN, ys[i]! + (ddy / len) * move));
     }
   }
+  pos.forEach((p, i) => {
+    p.x = xs[i]!;
+    p.y = ys[i]!;
+  });
   // 没有拖定的位置时，把整张图缩放到画布中间（最多放大 1.8 倍，人物少时不至于散得太开）。
   if (pinned.size === 0 && n > 1) {
     const xs = pos.map((p) => p.x);
