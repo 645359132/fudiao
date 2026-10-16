@@ -1,10 +1,10 @@
-// AI 助手的对话记录（需求 B69，迁移 0011）：每部作品一段，按 seq 只追加；内容的形状由应用层校验。
+// AI 助手的对话记录（需求 B69，迁移 0011；改动与撤销两种记录见迁移 0016）：每部作品一段，按 seq 只追加；内容的形状由应用层校验。
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort, Statement } from '../sql';
 import { jsonColumn, queryAll, queryOne, type RepoError, type WriteContext } from './common';
 
-export const ASSISTANT_ROLES = ['user', 'assistant', 'results', 'pending'] as const;
+export const ASSISTANT_ROLES = ['user', 'assistant', 'results', 'pending', 'changes', 'undo'] as const;
 export type AssistantRole = (typeof ASSISTANT_ROLES)[number];
 
 const Row = z

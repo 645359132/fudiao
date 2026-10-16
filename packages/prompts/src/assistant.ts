@@ -116,6 +116,8 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('continue_simulation'), run: text }),
   z.object({ tool: z.literal('get_simulation'), run: text }),
   z.object({ tool: z.literal('narrate_simulation'), run: text, pov: text, chapter: text, fromRound: z.number().int().positive().nullable(), toRound: z.number().int().positive().nullable() }),
+  // 撤销
+  z.object({ tool: z.literal('undo_last_turn') }),
   // 导出
   z.object({ tool: z.literal('export_book'), format: z.enum(['txt', 'markdown']), chapter: opt }),
   // 界面

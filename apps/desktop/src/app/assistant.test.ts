@@ -73,8 +73,10 @@ describe('AI 助手（B69）', () => {
 
     // 这一轮存进了新作品：作者的话、两步输出与两次结果。
     const items = value(await app.assistantItems());
-    expect(roles(items)).toEqual(['user', 'assistant', 'results', 'assistant', 'results']);
-    expect(items[2]).toMatchObject({ results: [{ tool: 'create_work', ok: true }] });
+    // 改动记录（changes）跟在动作后面：新建作品不在撤销范围（kept），卷、章节与人物记下改动前后。
+    expect(roles(items)).toEqual(['user', 'assistant', 'changes', 'results', 'assistant', 'changes', 'changes', 'changes', 'results']);
+    expect(items[2]).toMatchObject({ role: 'changes', tool: 'create_work', entries: [], kept: true });
+    expect(items[3]).toMatchObject({ results: [{ tool: 'create_work', ok: true }] });
     // 第一步时还没有作品；第二步给模型的现状里已经是新作品。
     expect(body(deps, 0)).toContain('还没有打开作品');
     expect(body(deps, 1)).toContain('打开的作品：《江湖狂想》（武侠）');
@@ -193,7 +195,7 @@ describe('AI 助手（B69）', () => {
     expect(second.messages[1]?.content).toBe('【作者】现在写到哪了');
     expect(second.messages[3]?.content).toContain('打开的作品：《当铺夜谈》');
     expect(second.messages[3]?.content).toContain('【作者】建第一章');
-    expect(roles(value(await app.assistantItems()))).toEqual(['user', 'assistant', 'user', 'assistant', 'results']);
+    expect(roles(value(await app.assistantItems()))).toEqual(['user', 'assistant', 'user', 'assistant', 'changes', 'results']);
     value(await app.clearAssistant());
     expect(value(await app.assistantItems())).toEqual([]);
   });

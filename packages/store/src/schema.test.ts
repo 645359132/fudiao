@@ -34,6 +34,8 @@ const sample: Statement[] = [
   s("INSERT INTO volume (id, order_key, title, summary, version, created_at, updated_at) VALUES ('01O1', 'a0', '第一卷 雨夜', '两人重逢', 2, ?, ?)", ...T),
   s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q1', 1, 'user', '{\"text\":\"新建一卷\"}', ?)", NOW),
   s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q2', 2, 'assistant', '{\"output\":{\"message\":\"好\",\"actions\":[],\"done\":true}}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q3', 3, 'changes', '{\"tool\":\"create_volume\",\"entries\":[{\"kind\":\"volume\",\"id\":\"01V1\",\"before\":null,\"after\":{\"title\":\"第一卷\",\"summary\":\"\",\"after\":null}}],\"kept\":false}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q4', 4, 'undo', '{\"undid\":[\"01Q3\"],\"report\":\"已撤销\",\"ok\":true,\"source\":\"button\"}', ?)", NOW),
   s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('01C3', 'a0', '第二章 当铺', '01O1', ?, ?)", ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),
   s(

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
 import { createChapter, trashChapter } from './chapter';
 import { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
-import { getChapterPlan, listChapterPlans, saveChapterPlan, setPlanStatus, type PlanFields } from './chapter-plan';
+import { deleteChapterPlan, getChapterPlan, listChapterPlans, saveChapterPlan, setPlanStatus, type PlanFields } from './chapter-plan';
 import { createForeshadow, deleteForeshadow, getForeshadow, listForeshadows, updateForeshadow, type ForeshadowFields } from './foreshadow';
 import { addIssues, countPendingIssues, getIssue, listIssues, replacePendingIssues, reviewStaleIssues, setIssueStatus, type IssueInput } from './review-issue';
 import { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
@@ -95,6 +95,16 @@ describe('章节计划', () => {
     expect(edited).toMatchObject({ targetWords: null, version: 2 });
     expect(await saveChapterPlan(db, 'c1', p, plan, later)).toEqual({ ok: false, error: { code: 'conflict' } });
     expect(value(await setPlanStatus(db, edited, 'written', later))).toMatchObject({ status: 'written', version: 3 });
+  });
+
+  it('按版本删除计划；写手写过（有写作进度）的计划不删', async () => {
+    const db = await fresh();
+    const p = value(await saveChapterPlan(db, 'c1', null, plan, ctx));
+    const edited = value(await saveChapterPlan(db, 'c1', p, { ...plan, goal: '改过' }, later));
+    expect(await deleteChapterPlan(db, p)).toEqual({ ok: false, error: { code: 'conflict' } });
+    expect(await deleteChapterPlan(db, { ...edited, progress: { runId: 'r', segments: [], words: [], done: 0, snapshotId: 's' } })).toMatchObject({ ok: false, error: { code: 'invalid' } });
+    value(await deleteChapterPlan(db, edited));
+    expect(value(await getChapterPlan(db, 'c1'))).toBeNull();
   });
 
   it('按章节顺序列出，回收站中的章节不列', async () => {

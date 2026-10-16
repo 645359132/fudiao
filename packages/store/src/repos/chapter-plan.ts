@@ -1,5 +1,5 @@
 // 章节计划（需求 B65）：每章的目标、出场人物、要写的情节点、要埋与要收的伏笔、详略说明与字数；成书流程按它推进。
-import type { Result } from '@fudiao/shared';
+import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort } from '../sql';
 import { guardedUpdate, insertReturning, jsonColumn, queryAll, queryOne, type RepoError, type WriteContext } from './common';
@@ -110,6 +110,16 @@ export function saveChapterPlan(port: SqlPort, chapterId: string, current: Chapt
             version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${COLUMNS}`,
     params: [...values, ctx.now, current.chapterId, current.version],
   }, 'chapter_id');
+}
+
+/**
+ * 删除一章的计划（AI 助手撤销自己新建的计划时用）。写手写过的计划（有写作进度）不删：先回退写手写入。
+ */
+export async function deleteChapterPlan(port: SqlPort, current: ChapterPlan): Promise<Result<void, RepoError>> {
+  if (current.progress !== null) return err({ code: 'invalid', detail: '写手写过这一章，先回退写手写入再删除计划' });
+  const result = await port.transaction([{ sql: 'DELETE FROM chapter_plan WHERE chapter_id = ? AND version = ?', params: [current.chapterId, current.version], expectChanges: 1 }]);
+  if (result.ok) return ok(undefined);
+  return err(result.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: result.error });
 }
 
 export function setPlanStatus(port: SqlPort, current: ChapterPlan, status: PlanStatus, ctx: WriteContext): Promise<Result<ChapterPlan, RepoError>> {

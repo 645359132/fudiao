@@ -221,7 +221,8 @@ export function renderReport(records: readonly TurnRecord[], meta: { readonly mo
       } else if (item.role === 'results') {
         for (const x of item.results) lines.push(`- ${x.ok ? '✓' : '✗'} ${x.tool}：${x.detail.length > 600 ? `${x.detail.slice(0, 600)}……` : x.detail}`.replace(/\n/g, '\n  '));
         lines.push('');
-      } else lines.push(`- 等待确认：${item.summary}`, '');
+      } else if (item.role === 'pending') lines.push(`- 等待确认：${item.summary}`, '');
+      else if (item.role === 'undo') lines.push(`- 撤销：${item.report}`, '');
     }
   }
   return `${lines.join('\n')}\n`;

@@ -2372,6 +2372,26 @@ describe('AI 助手的界面（B69）', () => {
     expect(screen.getByRole('button', { name: '江湖狂想' })).toBeTruthy();
   });
 
+  it('撤销这一轮的改动（M5-20）：按钮出现在最近一轮有改动的对话后面，点了以后改动改回去、对话里写明撤销了什么，按钮消失', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '雨夜');
+    await addTestedModel(service, deps);
+    const panel = () => screen.getByRole('complementary', { name: 'AI 助手' });
+    deps.llmResponses.push(said({ message: '建好了沈砚。', actions: [{ tool: 'create_entity', kind: 'character', name: '沈砚', description: '捕快', aliases: null }], done: true }));
+    await user.type(within(panel()).getByRole('textbox', { name: '给助手的话' }), '建个人物沈砚{Enter}');
+    await within(panel()).findByText('建好了沈砚。');
+    await waitFor(() => expect(store.getState().entities.map((e) => e.name)).toEqual(['沈砚']));
+    const requests = deps.llmRequests.length;
+    await user.click(await within(panel()).findByRole('button', { name: '撤销这一轮的改动' }));
+    const note = await within(panel()).findByRole('note');
+    expect(note.textContent).toContain('已撤销：新建的设定“沈砚”');
+    await waitFor(() => expect(store.getState().entities).toEqual([]));
+    expect(within(panel()).queryByRole('button', { name: '撤销这一轮的改动' })).toBeNull();
+    // 撤销不调用模型，这一次登记在任务里。
+    expect(deps.llmRequests.length).toBe(requests);
+    expect(store.getState().tasks.filter((t) => t.kind === 'assistant').map((t) => t.title)).toContain('AI 助手 · 撤销改动');
+  });
+
   it('删除类动作在对话里请作者确认；确认后执行。输入法组合中的回车不发送；可以收起再打开', async () => {
     const { deps, service, store, user } = start();
     await createWork(user, '雨夜');

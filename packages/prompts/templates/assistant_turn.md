@@ -1,6 +1,6 @@
 ---
 id: assistant_turn
-version: 11
+version: 12
 task: assistant
 output: AssistantTurnOutput
 ---
@@ -27,6 +27,7 @@ output: AssistantTurnOutput
 - get_simulation 给你的是全局的全貌（包括各角色不知道的事），用来向作者汇报与做计划；要按某个角色的视角把推演写成正文，用 narrate_simulation，它只用这个角色当时知道的。
 - 没有打开作品时，只能新建或打开作品；其他动作要等作品打开之后。
 - 作者要停下正在进行的写作或审核时，用 stop_background；作者没有要求时不要停。
+- 作者说“撤销”“改回去”“刚才那些不要了”时，用 undo_last_turn 撤销上一轮的改动，再照结果告诉作者撤销了什么、哪些没有撤销；不要自己一项一项删改。作者没有要求时不要撤销。
 - 回复用中文，简洁，不客套。
 
 可用的动作（每个动作是一个对象：tool 为动作名，其余为参数，参数一个都不能少，不需要的填 null）：

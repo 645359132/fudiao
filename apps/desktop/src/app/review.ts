@@ -202,6 +202,14 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
   });
 
   return {
+    /** 一条问题所在的章节（AI 助手交给写手修订前先存快照用）；找不到时为 null。 */
+    async issueChapterId(issueId: string): Promise<Result<string | null, AppError>> {
+      const s = session();
+      if (s === null) return err({ code: 'no_work' });
+      const found = await getIssue(s.port, issueId);
+      return found.ok ? ok(found.value?.chapterId ?? null) : err(repo(found.error));
+    },
+
     /** 这一章待处理的问题；先把段落改过的问题标为过期。 */
     async reviewIssues(chapterId: string): Promise<Result<ReviewIssueView[], AppError>> {
       const s = session();

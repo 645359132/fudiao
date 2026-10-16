@@ -58,6 +58,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   10: (tables) => ({ ...tables, chapter: (tables['chapter'] ?? []).map((row) => ({ volume_id: null, ...row })) }),
   // 0015：新增作品封面，旧版本导出的数据中没有，导入为空（界面显示按书名排出的文字封面）。
   15: (tables) => tables,
+  // 0016：AI 助手的对话增加改动与撤销两种记录，旧数据原样有效。
+  16: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

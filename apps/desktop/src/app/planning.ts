@@ -11,6 +11,7 @@ import {
   updateVolume,
   listVolumes,
   createForeshadow,
+  deleteChapterPlan,
   deleteForeshadow,
   getChapterPlan,
   getProject,
@@ -316,6 +317,15 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       return change(async (port) => {
         const current = await getChapterPlan(port, chapterId);
         return current.ok ? saveChapterPlan(port, chapterId, current.value, fields, ctx()) : current;
+      });
+    },
+
+    /** 删除一章的计划（AI 助手撤销自己新建的计划）；没有计划时什么也不做。 */
+    async deletePlan(chapterId: string): Promise<Result<PlanningView, AppError>> {
+      return change(async (port) => {
+        const current = await getChapterPlan(port, chapterId);
+        if (!current.ok || current.value === null) return current.ok ? ok(undefined) : current;
+        return deleteChapterPlan(port, current.value);
       });
     },
 

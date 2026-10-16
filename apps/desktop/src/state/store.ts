@@ -294,6 +294,8 @@ export type AppState = {
   readonly sendAssistant: (text: string) => Promise<boolean>;
   /** 确认或拒绝助手等待确认的动作。 */
   readonly resolveAssistant: (approve: boolean) => Promise<void>;
+  /** 撤销助手最近一轮对作品的改动（不调用模型）。 */
+  readonly undoAssistant: () => Promise<void>;
   readonly stopAssistant: () => void;
   readonly clearAssistant: () => Promise<void>;
   /** 助手每一步的思考深度（对所有作品生效）。 */
@@ -1470,6 +1472,11 @@ export function createAppStore(service: AppService): AppStore {
         const selection = chosenSelection();
         if (!(await get().leaveChapter())) return;
         await assistantTurn(approve ? '确认执行' : '不执行', selection, (events) => service.resolveAssistantPending(approve, events));
+      },
+      async undoAssistant() {
+        if (get().assistantRunning) return;
+        if (!(await get().leaveChapter())) return;
+        await assistantTurn('撤销改动', null, (events) => service.undoAssistantTurn(events));
       },
       setEditorSelection(info) {
         const now = get().editorSelection;

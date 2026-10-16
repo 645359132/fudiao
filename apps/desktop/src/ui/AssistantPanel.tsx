@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DropdownMenu } from 'radix-ui';
-import type { AssistantItem, AssistantUsage } from '../app/assistant';
+import { undoTarget, type AssistantItem, type AssistantUsage } from '../app/assistant';
 import { toolLabel } from '../app/assistant-tools';
 import type { AssistantEffort } from '../app/library';
 import { Icon } from './Icon';
@@ -62,6 +62,18 @@ function Pending({ item, active }: { readonly item: Extract<AssistantItem, { rol
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** 一轮对话之后的“撤销这一轮的改动”：只在最近一轮有改动、还没有撤销时出现。 */
+function UndoTurn() {
+  const undo = useApp((s) => s.undoAssistant);
+  return (
+    <div className="assistant-undo">
+      <button type="button" className="ghost" title="把助手这一轮对作品的改动改回去（候选稿、审核结果与推演记录照旧保留）" onClick={() => void undo()}>
+        <Icon name="undo" size={13} /> 撤销这一轮的改动
+      </button>
     </div>
   );
 }
@@ -250,6 +262,36 @@ export function AssistantPanel() {
     });
   };
   const last = items.at(-1);
+  const undoable = running || last?.role === 'pending' ? null : undoTarget(items);
+  const renderItem = (item: AssistantItem) => {
+    switch (item.role) {
+      case 'user':
+        return (
+          <div key={item.id} className="bubble user">
+            {item.text}
+          </div>
+        );
+      case 'assistant':
+        return item.output.message.trim() === '' ? null : (
+          <div key={item.id} className="bubble bot">
+            {item.output.message}
+          </div>
+        );
+      case 'results':
+        return <Steps key={item.id} item={item} />;
+      case 'pending':
+        return <Pending key={item.id} item={item} active={!running && last?.id === item.id} />;
+      case 'changes':
+        return null;
+      case 'undo':
+        // 助手自己做的撤销，结果已经列在动作里。
+        return item.source === 'action' ? null : (
+          <p key={item.id} className="assistant-undone" role="note">
+            <Icon name="undo" size={13} /> {withoutIds(item.report)}
+          </p>
+        );
+    }
+  };
 
   return (
     <aside className="assistant" aria-label="AI 助手">
@@ -286,24 +328,15 @@ export function AssistantPanel() {
           </div>
         ) : (
           items.map((item) => {
-            switch (item.role) {
-              case 'user':
-                return (
-                  <div key={item.id} className="bubble user">
-                    {item.text}
-                  </div>
-                );
-              case 'assistant':
-                return item.output.message.trim() === '' ? null : (
-                  <div key={item.id} className="bubble bot">
-                    {item.output.message}
-                  </div>
-                );
-              case 'results':
-                return <Steps key={item.id} item={item} />;
-              case 'pending':
-                return <Pending key={item.id} item={item} active={!running && last?.id === item.id} />;
-            }
+            const node = renderItem(item);
+            return undoable?.lastId === item.id ? (
+              <div key={item.id} className="assistant-turn-end">
+                {node}
+                <UndoTurn />
+              </div>
+            ) : (
+              node
+            );
           })
         )}
         {running && draft !== null && draft.trim() !== '' ? (

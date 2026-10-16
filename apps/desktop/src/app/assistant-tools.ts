@@ -107,7 +107,8 @@ export type AssistantHost = {
   moveChapter(chapter: Chapter, target: ChapterTarget): Promise<Result<unknown, AppError>>;
   trashChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
   restoreChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
-  createSnapshot(chapterId: string): Promise<Result<unknown, AppError>>;
+  createSnapshot(chapterId: string): Promise<Result<{ readonly id: string }, AppError>>;
+  restoreSnapshot(snapshotId: string): Promise<Result<unknown, AppError>>;
   openChapter(chapterId: string): Promise<Result<{ readonly saved: readonly { readonly id: string; readonly text: string }[] }, AppError>>;
   search(query: string): Promise<Result<SearchResult, AppError>>;
   listEntities(): Promise<Result<Entity[], AppError>>;
@@ -116,16 +117,19 @@ export type AssistantHost = {
   deleteEntity(entity: Entity): Promise<Result<unknown, AppError>>;
   listFacts(): Promise<Result<Fact[], AppError>>;
   createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
+  deleteFact(fact: Fact): Promise<Result<unknown, AppError>>;
   relationsView(): Promise<Result<RelationsView, AppError>>;
   listWritingSkills(): Promise<Result<SkillsView, AppError>>;
   addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<SkillsView, AppError>>;
   updateWritingSkill(skill: SkillsView['skills'][number]['skill'], patch: { readonly enabled?: boolean; readonly instruction?: string }): Promise<Result<SkillsView, AppError>>;
   setAvoidPhrases(phrases: readonly string[] | null): Promise<Result<SkillsView, AppError>>;
+  deleteCustomSkill(skill: SkillsView['skills'][number]['skill']): Promise<Result<unknown, AppError>>;
   addRelationship(fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
   updateRelationship(relationship: RelationsView['relationships'][number], fields: RelationshipFields): Promise<Result<RelationsView, AppError>>;
   deleteRelationship(relationship: RelationsView['relationships'][number]): Promise<Result<RelationsView, AppError>>;
   planningView(): Promise<Result<PlanningView, AppError>>;
   savePlan(chapterId: string, fields: PlanFields): Promise<Result<unknown, AppError>>;
+  deletePlan(chapterId: string): Promise<Result<unknown, AppError>>;
   draftPlans(request: { readonly chapterCount: number; readonly wordsPerChapter: number }, options?: CallOptions): Promise<Result<PlanDraftData, AppError>>;
   applyPlanDraft(draft: PlanDraftData): Promise<Result<AppliedDraft, AppError>>;
   writeChapter(chapterId: string, events?: WriterEvents): Promise<Result<WriterOutcome, AppError>>;
@@ -134,9 +138,11 @@ export type AssistantHost = {
   reviewChapter(chapterId: string, options?: CallOptions): Promise<Result<ReviewOutcome, AppError>>;
   addForeshadow(fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
   updateForeshadow(foreshadow: Foreshadow, fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
+  deleteForeshadow(foreshadow: Foreshadow): Promise<Result<unknown, AppError>>;
   reviewIssues(chapterId: string): Promise<Result<ReviewIssueView[], AppError>>;
   resolveIssue(issueId: string, status: 'ignored' | 'fixed'): Promise<Result<ReviewIssueView[], AppError>>;
   reviseIssue(issueId: string, options?: CallOptions): Promise<Result<RevisionOutcome, AppError>>;
+  issueChapterId(issueId: string): Promise<Result<string | null, AppError>>;
   exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   runSelectionOperation(
     request: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: SelectionOperation; readonly instruction: string; readonly overrides: ContextOverrides },
@@ -261,11 +267,14 @@ export type ToolEnv = {
   readonly changed: () => void;
   /** 交给耗时用例的调用选项（作者停止时取消）。 */
   readonly call: () => CallOptions;
+  /** 撤销上一轮的改动（由对话循环提供）。 */
+  readonly undoLastTurn?: () => Promise<Outcome>;
 };
 
-export function toolEnv(host: AssistantHost, project: () => SqlPort | null, events: ToolEvents): ToolEnv {
+export function toolEnv(host: AssistantHost, project: () => SqlPort | null, events: ToolEvents, undoLastTurn?: () => Promise<Outcome>): ToolEnv {
   const work = () => host.reloadWork();
   return {
+    ...(undoLastTurn !== undefined && { undoLastTurn }),
     host,
     project,
     events,
@@ -402,9 +411,17 @@ function simSummary(detail: SimRunDetail): string {
 
 type ActionOf<K extends AssistantTool> = Extract<AssistantAction, { readonly tool: K }>;
 
+/**
+ * 动作的改动怎样撤销（assistant-undo.ts）：read 不改作品；work 改作品的结构化内容，执行前后各取现状、记下差别；
+ * writer 是写手写章（撤销即回退写手写入）；revise 是写手修订（执行前存快照）；kept 的结果不在撤销范围，照旧保留
+ * （新建的作品、候选稿、审核结果、长篇记忆、推演记录、导出的文件等）。
+ */
+export type UndoMode = 'read' | 'work' | 'writer' | 'revise' | 'kept';
+
 /** 命令表的一项。confirm 给出时，返回非 null 的说明就先停下请作者确认（删除与覆盖类的动作）。 */
 type Tool<K extends AssistantTool> = {
   readonly label: string;
+  readonly undo: UndoMode;
   readonly confirm?: (action: ActionOf<K>, env: ToolEnv) => string | null | Promise<string | null>;
   readonly run: (action: ActionOf<K>, env: ToolEnv) => Promise<Outcome>;
 };
@@ -412,6 +429,7 @@ type Tool<K extends AssistantTool> = {
 const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   list_chapters: {
     label: '查看章节',
+    undo: 'read',
     async run(action, env) {
       const work = await env.work();
       if (!work.ok) return failWith(work.error);
@@ -433,6 +451,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   read_chapter: {
     label: '读章节',
+    undo: 'read',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -446,6 +465,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   search_text: {
     label: '查找正文',
+    undo: 'read',
     async run(action, env) {
       const result = await env.host.search(action.query);
       if (!result.ok) return failWith(result.error);
@@ -456,6 +476,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   get_entity: {
     label: '查看设定',
+    undo: 'read',
     async run(action, env) {
       const e = await env.findEntity(action.entity);
       if (!e.ok) return failed(e.error);
@@ -466,6 +487,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   list_facts: {
     label: '查看事实',
+    undo: 'read',
     async run(action, env) {
       const facts = await env.host.listFacts();
       if (!facts.ok) return failWith(facts.error);
@@ -481,6 +503,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   get_chapter_plan: {
     label: '查看章节计划',
+    undo: 'read',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -497,6 +520,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   build_chapter_memory: {
     label: '整理长篇记忆',
+    undo: 'kept',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -509,6 +533,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   get_chapter_memory: {
     label: '查看长篇记忆',
+    undo: 'read',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -536,6 +561,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   list_foreshadows: {
     label: '查看伏笔账本',
+    undo: 'read',
     async run(action, env) {
       const view = await env.host.planningView();
       if (!view.ok) return failWith(view.error);
@@ -556,6 +582,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   list_review_issues: {
     label: '查看审核问题',
+    undo: 'read',
     async run(action, env) {
       const view = await env.host.planningView();
       if (!view.ok) return failWith(view.error);
@@ -593,6 +620,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   list_skills: {
     label: '查看写作技能',
+    undo: 'read',
     async run(action, env) {
       const view = await env.host.listWritingSkills();
       if (!view.ok) return failWith(view.error);
@@ -607,6 +635,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   create_work: {
     label: '新建作品',
+    undo: 'kept',
     async run(action, env) {
       const created = await env.host.createWork(action.title);
       if (!created.ok) return failWith(created.error);
@@ -624,6 +653,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   open_work: {
     label: '打开作品',
+    undo: 'read',
     async run(action, env) {
       const library = await env.host.loadLibrary();
       if (!library.ok) return failWith(library.error);
@@ -642,6 +672,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_work: {
     label: '修改作品信息',
+    undo: 'work',
     confirm: async (action, env) => {
       if (action.outline === null) return null;
       const w = await env.host.reloadWork();
@@ -663,6 +694,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   create_volume: {
     label: '新建卷',
+    undo: 'work',
     async run(action, env) {
       let after: string | undefined;
       if (action.after !== null) {
@@ -685,6 +717,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_volume: {
     label: '修改卷',
+    undo: 'work',
     async run(action, env) {
       const v = await env.findVolume(action.volume);
       if (!v.ok) return failed(v.error);
@@ -696,6 +729,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   move_volume: {
     label: '调整卷的顺序',
+    undo: 'work',
     async run(action, env) {
       const v = await env.findVolume(action.volume);
       if (!v.ok) return failed(v.error);
@@ -713,6 +747,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   delete_volume: {
     label: '删除卷',
+    undo: 'work',
     confirm: (action) => `删除卷“${action.volume}”`,
     async run(action, env) {
       const v = await env.findVolume(action.volume);
@@ -725,6 +760,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   create_chapter: {
     label: '新建章节',
+    undo: 'work',
     async run(action, env) {
       const before = await env.work();
       if (!before.ok) return failWith(before.error);
@@ -753,6 +789,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_chapter: {
     label: '修改章节',
+    undo: 'work',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -774,6 +811,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   move_chapter: {
     label: '移动章节',
+    undo: 'work',
     async run(action, env) {
       const work = await env.work();
       if (!work.ok) return failWith(work.error);
@@ -804,6 +842,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   trash_chapter: {
     label: '移入回收站',
+    undo: 'work',
     confirm: (action) => `把“${action.chapter}”移入回收站`,
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
@@ -816,6 +855,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   open_chapter: {
     label: '打开章节',
+    undo: 'read',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -825,6 +865,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   create_entity: {
     label: '新建设定',
+    undo: 'work',
     async run(action, env) {
       const created = await env.host.createEntity(action.kind, action.name);
       if (!created.ok) return failWith(created.error);
@@ -841,6 +882,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_entity: {
     label: '修改设定',
+    undo: 'work',
     async run(action, env) {
       const e = await env.findEntity(action.entity);
       if (!e.ok) return failed(e.error);
@@ -858,6 +900,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   delete_entity: {
     label: '删除设定',
+    undo: 'work',
     confirm: (action) => `删除设定“${action.entity}”（与它有关的人物关系也一并删除）`,
     async run(action, env) {
       const e = await env.findEntity(action.entity);
@@ -870,6 +913,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   add_fact: {
     label: '记录事实',
+    undo: 'work',
     async run(action, env) {
       let holderId: string | null = null;
       if (action.kind === 'belief') {
@@ -907,6 +951,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   add_relationship: {
     label: '建立人物关系',
+    undo: 'work',
     async run(action, env) {
       const from = await env.findEntity(action.from);
       if (!from.ok) return failed(from.error);
@@ -937,6 +982,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_relationship: {
     label: '修改人物关系',
+    undo: 'work',
     async run(action, env) {
       const view = await env.host.relationsView();
       if (!view.ok) return failWith(view.error);
@@ -964,6 +1010,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   delete_relationship: {
     label: '删除人物关系',
+    undo: 'work',
     confirm: async (action, env) => {
       const view = await env.host.relationsView();
       const r = view.ok ? view.value.relationships.find((x) => x.id === action.relationship.trim()) : undefined;
@@ -983,6 +1030,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   remember_preference: {
     label: '记下作者偏好',
+    undo: 'work',
     async run(action, env) {
       const preference = action.preference.trim();
       if (preference === '') return failed('偏好是空的');
@@ -1003,6 +1051,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   add_avoid_phrases: {
     label: '加入规避词表',
+    undo: 'work',
     async run(action, env) {
       const view = await env.host.listWritingSkills();
       if (!view.ok) return failWith(view.error);
@@ -1016,6 +1065,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   set_skill: {
     label: '启用或停用写作技能',
+    undo: 'work',
     async run(action, env) {
       const view = await env.host.listWritingSkills();
       if (!view.ok) return failWith(view.error);
@@ -1037,6 +1087,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   save_chapter_plan: {
     label: '保存章节计划',
+    undo: 'work',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -1067,6 +1118,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   plan_chapters: {
     label: '生成章节计划',
+    undo: 'work',
     confirm: async (action, env) => ((await env.hasPlans()) ? `按大纲重新生成 ${action.count} 章的章节计划并采用（会覆盖已有的计划）` : null),
     async run(action, env) {
       env.events.onProgress?.(`正在按大纲生成 ${action.count} 章的章节计划`);
@@ -1083,6 +1135,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   write_chapter: {
     label: '写手写章',
+    undo: 'writer',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -1111,6 +1164,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   write_chapters: {
     label: '交给写手依次写',
+    undo: 'kept',
     async run(action, env) {
       const jobs = env.events.background;
       if (jobs === undefined) return failed('这里不能在后台写作；请用 write_chapter 一章一章地写');
@@ -1146,6 +1200,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   continue_chapter: {
     label: '续写',
+    undo: 'kept',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -1167,6 +1222,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   edit_selection: {
     label: '修改选中的文字',
+    undo: 'kept',
     async run(action, env) {
       const chosen = env.events.selection ?? null;
       if (chosen === null || chosen.text.trim() === '') return failed('作者没有在正文里选中文字：请作者先选中要改的那段，再说要怎么改');
@@ -1185,6 +1241,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   review_chapters: {
     label: '交给后台依次审核',
+    undo: 'kept',
     async run(action, env) {
       const jobs = env.events.background;
       if (jobs === undefined) return failed('这里不能在后台审核；请用 review_chapter 一章一章地审');
@@ -1216,6 +1273,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   stop_background: {
     label: '停下后台任务',
+    undo: 'kept',
     run(action, env) {
       const jobs = env.events.background;
       if (jobs === undefined) return Promise.resolve(failed('这里没有后台任务'));
@@ -1224,6 +1282,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   resolve_review_issue: {
     label: '处理审核问题',
+    undo: 'kept',
     async run(action, env) {
       const resolved = await env.host.resolveIssue(action.issue.trim(), action.status);
       if (!resolved.ok) return failWith(resolved.error);
@@ -1233,6 +1292,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   revise_review_issue: {
     label: '交给写手修订',
+    undo: 'revise',
     async run(action, env) {
       env.events.onProgress?.('写手正在修订问题所在的段落');
       const revised = await env.host.reviseIssue(action.issue.trim(), env.call());
@@ -1248,6 +1308,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   review_chapter: {
     label: '审核',
+    undo: 'kept',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -1265,6 +1326,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   rollback_writer: {
     label: '回退写手写入',
+    undo: 'kept',
     confirm: (action) => `把“${action.chapter}”回退到写手写入之前（现稿会先存为快照）`,
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
@@ -1278,6 +1340,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   add_foreshadow: {
     label: '记录伏笔',
+    undo: 'work',
     async run(action, env) {
       let plantChapterId: string | null = null;
       let payoffChapterId: string | null = null;
@@ -1308,6 +1371,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   update_foreshadow: {
     label: '修改伏笔',
+    undo: 'work',
     async run(action, env) {
       const view = await env.host.planningView();
       if (!view.ok) return failWith(view.error);
@@ -1342,6 +1406,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   restore_chapter: {
     label: '从回收站恢复',
+    undo: 'work',
     async run(action, env) {
       const work = await env.work();
       if (!work.ok) return failWith(work.error);
@@ -1355,6 +1420,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   save_snapshot: {
     label: '保存快照',
+    undo: 'kept',
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -1365,6 +1431,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   list_simulations: {
     label: '查看推演',
+    undo: 'read',
     async run(action, env) {
       const scenes = await env.host.listSimScenes();
       if (!scenes.ok) return failWith(scenes.error);
@@ -1398,6 +1465,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   create_sim_scene: {
     label: '建推演场景',
+    undo: 'kept',
     async run(action, env) {
       let chapterId: string | null = null;
       if (action.chapter !== null) {
@@ -1427,6 +1495,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   start_simulation: {
     label: '开始推演',
+    undo: 'kept',
     async run(action, env) {
       const jobs = env.events.background;
       if (jobs === undefined) return failed('这里不能在后台推演；请作者在推演页开始');
@@ -1448,6 +1517,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   continue_simulation: {
     label: '继续推演',
+    undo: 'kept',
     async run(action, env) {
       const jobs = env.events.background;
       if (jobs === undefined) return failed('这里不能在后台推演；请作者在推演页继续');
@@ -1467,6 +1537,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   get_simulation: {
     label: '查看推演概要',
+    undo: 'read',
     async run(action, env) {
       const found = await findRun(env, action.run);
       if (!found.ok) return failed(found.error);
@@ -1494,6 +1565,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   narrate_simulation: {
     label: '推演写成正文',
+    undo: 'kept',
     async run(action, env) {
       const found = await findRun(env, action.run);
       if (!found.ok) return failed(found.error);
@@ -1524,8 +1596,16 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       );
     },
   },
+  undo_last_turn: {
+    label: '撤销上一轮的改动',
+    undo: 'read',
+    run(_action, env) {
+      return env.undoLastTurn === undefined ? Promise.resolve(failed('这里不能撤销')) : env.undoLastTurn();
+    },
+  },
   export_book: {
     label: '导出',
+    undo: 'kept',
     async run(action, env) {
       let chapterId: string | undefined;
       if (action.chapter !== null) {
@@ -1540,6 +1620,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   },
   open_page: {
     label: '打开页面',
+    undo: 'read',
     run(action, env) {
       env.events.onEffect?.({ kind: 'open_page', page: action.page });
       return Promise.resolve(done('已打开页面。'));
@@ -1556,6 +1637,11 @@ export function runTool<K extends AssistantTool>(tool: K, action: ActionOf<K>, e
 export async function confirmationFor<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<string | null> {
   const confirm: Tool<K>['confirm'] = TOOLS[tool].confirm;
   return confirm === undefined ? null : confirm(action, env);
+}
+
+/** 动作的改动怎样撤销。 */
+export function undoModeOf(tool: AssistantTool): UndoMode {
+  return TOOLS[tool].undo;
 }
 
 /** 动作在对话里的名称；不认识的（例如旧版本记下的动作）原样显示。 */

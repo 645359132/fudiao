@@ -2213,6 +2213,34 @@ fieldset.plain {
   margin: 0 0 10px;
 }
 
+.assistant-turn-end {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assistant-undo {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assistant-undo button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.assistant-undone {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .assistant-thinking {
   display: flex;
   gap: 8px;

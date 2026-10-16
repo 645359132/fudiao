@@ -13,7 +13,8 @@ import {
 import { partialStringField, type LlmStreamEvent } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
-import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, type AssistantHost, type ToolEvents } from './assistant-tools';
+import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type Outcome, type ToolEvents } from './assistant-tools';
+import { captureWork, CHANGE_KINDS, diffWork, undoChanges, type ChangeEntry } from './assistant-undo';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
@@ -26,7 +27,38 @@ export type AssistantItem =
   | { readonly id: string; readonly role: 'user'; readonly text: string }
   | { readonly id: string; readonly role: 'assistant'; readonly output: AssistantTurnOutput }
   | { readonly id: string; readonly role: 'results'; readonly results: readonly AssistantResult[] }
-  | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string; readonly rest: readonly AssistantAction[] };
+  | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string; readonly rest: readonly AssistantAction[] }
+  /** 一个动作对作品的改动（撤销用，不给模型看）；kept 为真表示动作有结果但不在撤销范围。 */
+  | { readonly id: string; readonly role: 'changes'; readonly tool: string; readonly entries: readonly ChangeEntry[]; readonly kept: boolean }
+  /** 撤销了某一轮：undid 是撤销掉的改动（changes 条目的标识）；作者在对话框里点的撤销要告诉模型，助手自己的撤销已在动作结果里。 */
+  | {
+      readonly id: string;
+      readonly role: 'undo';
+      readonly undid: readonly string[];
+      readonly report: string;
+      readonly ok: boolean;
+      readonly source: 'button' | 'action';
+      /** 重建的记录：旧标识到新标识（之后再撤销更早的一轮时用）。 */
+      readonly rebuilt: Readonly<Record<string, string>>;
+    };
+
+/** 可以撤销的一轮：这一轮里还没有撤销的改动，与这一轮最后一条的标识（界面把“撤销”放在它后面）。 */
+export type UndoTarget = { readonly changes: readonly Extract<AssistantItem, { role: 'changes' }>[]; readonly lastId: string };
+
+/**
+ * 最近一轮有改动、还没有撤销的对话（skipCurrent 时不算最后一轮：助手在这一轮里被要求撤销的是上一轮）。
+ * 已经撤销过的轮次跳过，所以再撤销一次就是更早的一轮。
+ */
+export function undoTarget(items: readonly AssistantItem[], skipCurrent = false): UndoTarget | null {
+  const undone = new Set(items.flatMap((i) => (i.role === 'undo' ? i.undid : [])));
+  const starts = items.flatMap((i, at) => (i.role === 'user' ? [at] : []));
+  const turns = starts.map((start, n) => items.slice(start, starts[n + 1] ?? items.length));
+  for (const turn of (skipCurrent ? turns.slice(0, -1) : turns).reverse()) {
+    const changes = turn.filter((i): i is Extract<AssistantItem, { role: 'changes' }> => i.role === 'changes' && i.entries.length > 0 && !undone.has(i.id));
+    if (changes.length > 0) return { changes, lastId: turn.at(-1)?.id ?? '' };
+  }
+  return null;
+}
 
 /** 一轮对话的回调：动作执行要用的（见 ToolEvents），加上对话的更新、逐字显示与作者在看什么。 */
 export type AssistantEvents = ToolEvents & {
@@ -182,12 +214,12 @@ export function assistantUseCases({
 
 
   const history = (items: readonly AssistantItem[]): AssistantHistoryItem[] => {
-    const usable = items.filter((i) => i.role !== 'pending');
+    const usable = items.filter((i) => i.role !== 'pending' && i.role !== 'changes' && !(i.role === 'undo' && i.source === 'action'));
     const turnStart = usable.map((i) => i.role).lastIndexOf('user');
     const converted = usable.map((i, at): AssistantHistoryItem => {
       if (i.role === 'user') return { role: 'user', text: i.text };
       if (i.role === 'assistant') return { role: 'assistant', output: i.output };
-      const results = i.role === 'results' ? i.results : [];
+      const results = i.role === 'results' ? i.results : i.role === 'undo' ? [{ tool: 'undo_last_turn', ok: i.ok, detail: `作者在对话框里点了撤销：${i.report}` }] : [];
       return { role: 'results', results: at >= turnStart ? results : results.map((r) => ({ ...r, detail: clip(r.detail, EARLIER_RESULT_LIMIT).text })) };
     });
     const size = (h: AssistantHistoryItem) => (h.role === 'user' ? h.text.length : h.role === 'assistant' ? JSON.stringify(h.output).length : h.results.reduce((n, r) => n + r.detail.length + r.tool.length, 0));
@@ -216,7 +248,7 @@ export function assistantUseCases({
         results.push(...skipped(actions.slice(at), '作者停止了，这个动作没有执行。'));
         return false;
       }
-      const env = toolEnv(host, project, events);
+      const env = toolEnv(host, project, events, () => undoLast(items, events, 'action'));
       const summary = await confirmationFor(action.tool, action, env);
       if (summary !== null) {
         const added: AssistantItem[] = [];
@@ -225,7 +257,7 @@ export function assistantUseCases({
         await append(items, added, events);
         return true;
       }
-      const outcome = await runTool(action.tool, action, env);
+      const outcome = await perform(action, env, items, events);
       events.onProgress?.(null);
       results.push({ tool: action.tool, ok: outcome.ok, detail: outcome.detail });
       // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
@@ -238,6 +270,78 @@ export function assistantUseCases({
       }
     }
     return false;
+  }
+
+  /**
+   * 执行一个动作并记下它对作品的改动（撤销用）：改结构的动作前后各取一份现状、记下差别；写手写章记下章节；
+   * 写手修订前先给那一章存快照。作品在动作里换了（新建或打开了另一部）时不记。
+   */
+  async function perform(action: AssistantAction, env: ReturnType<typeof toolEnv>, items: AssistantItem[], events: AssistantEvents): Promise<Outcome> {
+    const mode = undoModeOf(action.tool);
+    const port = project();
+    let entries: ChangeEntry[] = [];
+    let outcome: Outcome;
+    if (mode === 'work') {
+      const before = await captureWork(host, port);
+      outcome = await runTool(action.tool, action, env);
+      const after = project() === port ? await captureWork(host, port) : null;
+      // 移动的那一卷或那一章，位置的变化要记下（撤销时放回去）。
+      const moved = action.tool === 'move_chapter' ? await env.findChapter(action.chapter) : action.tool === 'move_volume' ? await env.findVolume(action.volume) : null;
+      if (before !== null && after !== null) entries = diffWork(before, after, new Set(moved?.ok === true ? [moved.value.id] : []));
+    } else if (mode === 'writer' && action.tool === 'write_chapter') {
+      const chapter = await env.findChapter(action.chapter);
+      outcome = await runTool(action.tool, action, env);
+      if (outcome.ok && chapter.ok) entries = [{ kind: 'writer', id: chapter.value.id, title: chapter.value.title }];
+    } else if (mode === 'revise' && action.tool === 'revise_review_issue') {
+      const chapterId = await host.issueChapterId(action.issue.trim());
+      const chapter = chapterId.ok && chapterId.value !== null ? await env.findChapter(chapterId.value) : null;
+      const snapshot = chapter?.ok === true ? await host.createSnapshot(chapter.value.id) : null;
+      outcome = await runTool(action.tool, action, env);
+      if (outcome.ok && chapter?.ok === true && snapshot?.ok === true) entries = [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id }];
+    } else {
+      outcome = await runTool(action.tool, action, env);
+    }
+    const kept = mode === 'kept' && outcome.ok;
+    if (entries.length > 0 || kept) {
+      const item: AssistantItem = { id: deps.ids.next(), role: 'changes', tool: action.tool, entries, kept };
+      // 作品在这个动作里换了：先只放进这一轮的对话，随后整轮存进新的作品（见 runActions）。
+      if (project() === port) await append(items, [item], events);
+      else items.push(item);
+    }
+    return outcome;
+  }
+
+  /**
+   * 撤销一轮的改动，记进对话。source 为 action 时是助手在这一轮里被要求撤销（撤销上一轮），结果作为动作结果交给模型；
+   * 为 button 时是作者在对话框里点的（撤销最近一轮），之后作者再说话时模型会看到。
+   */
+  async function undoLast(items: AssistantItem[], events: AssistantEvents, source: 'button' | 'action'): Promise<Outcome> {
+    const target = undoTarget(items, source === 'action');
+    if (target === null) return { ok: false, detail: '没有可以撤销的改动（更早的改动已经撤销过，或那几轮没有改动作品）' };
+    const rebuilt: Record<string, string> = {};
+    for (const i of items) if (i.role === 'undo') Object.assign(rebuilt, i.rebuilt);
+    const done = await undoChanges(
+      host,
+      project,
+      target.changes.map((c) => c.entries),
+      rebuilt,
+    );
+    if (!done.ok) return { ok: false, detail: done.error.code === 'no_work' ? '还没有打开作品' : '撤销没有完成' };
+    events.onEffect?.({ kind: 'changed' });
+    for (const c of target.changes) for (const e of c.entries) if (e.kind === 'writer' || e.kind === 'text') events.onEffect?.({ kind: 'chapter_changed', chapterId: e.id });
+    const turn = items.slice(items.findIndex((i) => i.id === target.changes[0]?.id));
+    const kept = [...new Set(turn.flatMap((i) => (i.role === 'changes' && i.kept ? [toolLabel(i.tool)] : [])))];
+    const { undone, skipped } = done.value;
+    const report = [
+      undone.length > 0 ? `已撤销：${undone.join('；')}。` : '没有撤销任何改动。',
+      skipped.length > 0 ? `没有撤销：${skipped.join('；')}。` : '',
+      kept.length > 0 ? `这一轮里“${kept.join('、')}”的结果不在撤销范围，照旧保留。` : '',
+    ]
+      .filter((x) => x !== '')
+      .join('');
+    const ok = undone.length > 0;
+    await append(items, [{ id: deps.ids.next(), role: 'undo', undid: target.changes.map((c) => c.id), report, ok, source, rebuilt: done.value.rebuilt }], events);
+    return { ok, detail: report };
   }
 
   /** 从当前的对话往下走，直到办完、需要作者确认、出错或走满步数。 */
@@ -331,7 +435,7 @@ export function assistantUseCases({
         const last = items.at(-1);
         if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
         const turn = turnState(items);
-        const outcome = approve ? await runTool(last.action.tool, last.action, toolEnv(host, project, events)) : { ok: false, detail: '作者没有同意，这个动作没有执行。' };
+        const outcome = approve ? await perform(last.action, toolEnv(host, project, events, () => undoLast(items, events, 'action')), items, events) : { ok: false, detail: '作者没有同意，这个动作没有执行。' };
         events.onProgress?.(null);
         const results: AssistantResult[] = [{ tool: last.action.tool, ok: outcome.ok, detail: approve ? `作者确认后执行：${outcome.detail}` : outcome.detail }];
         // 同一步里排在它后面的动作：确认了就接着执行（可能又停在下一个须确认的动作上），没同意就都不执行。
@@ -340,6 +444,23 @@ export function assistantUseCases({
         } else results.push(...skipped(last.rest, '排在作者没有同意的动作后面，也没有执行；需要的话重新给出。'));
         await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
         return await proceed(items, events);
+      } finally {
+        running = false;
+      }
+    },
+
+    /** 作者在对话框里点“撤销这一轮的改动”：撤销最近一轮有改动的对话。不调用模型。 */
+    async undoAssistantTurn(events: AssistantEvents = {}): Promise<Result<AssistantOutcome, AppError>> {
+      if (running) return err(settings('助手正在处理，请稍候'));
+      running = true;
+      try {
+        const loaded = await load();
+        if (!loaded.ok) return loaded;
+        const items = loaded.value;
+        if (items.at(-1)?.role === 'pending') return err(settings('先确认或拒绝等待中的动作'));
+        const done = await undoLast(items, events, 'button');
+        if (!done.ok && undoTarget(items) !== null) return err(settings(done.detail));
+        return ok({ items, pending: false });
       } finally {
         running = false;
       }
@@ -368,6 +489,10 @@ function toStored(item: AssistantItem): Record<string, unknown> {
       return { results: item.results };
     case 'pending':
       return { action: item.action, summary: item.summary, rest: item.rest };
+    case 'changes':
+      return { tool: item.tool, entries: item.entries, kept: item.kept };
+    case 'undo':
+      return { undid: item.undid, report: item.report, ok: item.ok, source: item.source, rebuilt: item.rebuilt };
   }
 }
 
@@ -385,6 +510,17 @@ function fromStored(id: string, role: string, payload: Readonly<Record<string, u
       return typeof x['tool'] === 'string' && typeof x['ok'] === 'boolean' && typeof x['detail'] === 'string' ? [{ tool: x['tool'], ok: x['ok'], detail: x['detail'] }] : [];
     });
     return [{ id, role, results }];
+  }
+  if (role === 'changes' && typeof payload['tool'] === 'string' && Array.isArray(payload['entries'])) {
+    // 改动记录是这里自己写下的；种类不认识的（更新的版本写的）略去。
+    const entries = payload['entries'].filter((e: unknown): e is ChangeEntry => e !== null && typeof e === 'object' && CHANGE_KINDS.has(String((e as Record<string, unknown>)['kind'])));
+    return [{ id, role, tool: payload['tool'], entries, kept: payload['kept'] === true }];
+  }
+  if (role === 'undo' && Array.isArray(payload['undid']) && typeof payload['report'] === 'string') {
+    const undid = payload['undid'].filter((x: unknown): x is string => typeof x === 'string');
+    const raw = payload['rebuilt'];
+    const rebuilt = raw !== null && typeof raw === 'object' ? Object.fromEntries(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === 'string')) : {};
+    return [{ id, role, undid, report: payload['report'], ok: payload['ok'] === true, source: payload['source'] === 'action' ? 'action' : 'button', rebuilt }];
   }
   if (role === 'pending') {
     const action = AssistantTurnOutput.shape.actions.element.safeParse(payload['action']);
