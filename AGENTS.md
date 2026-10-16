@@ -13,6 +13,7 @@
 | [REQUIREMENTS.md](REQUIREMENTS.md) | 需求、术语表（第三章）、验收标准（第八章） | 实现任何功能前，查对应需求编号与验收项 |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | 技术选型、架构、数据模型、推演引擎、模型接入、任务分解（第八章） | 开始一个任务前，读该任务所在的里程碑与相关章节 |
 | [DESIGN_PATTERNS.md](DESIGN_PATTERNS.md) | 设计模式、禁止的做法（第七章） | 设计模块结构、写核心代码前 |
+| [ASSISTANT_REVIEW.md](ASSISTANT_REVIEW.md) | AI 助手的评估：现状、真实模型试用、已修正与仍存在的问题、建议的下一步 | 改动 AI 助手（`assistant*.ts`、`assistant_turn` 模板）之前 |
 
 用词以需求文档第三章的术语表为准（推演场景、推演草案、候选稿、批量推演等），代码命名、界面文案与文档保持一致。
 
