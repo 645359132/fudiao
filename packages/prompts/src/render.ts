@@ -796,6 +796,9 @@ export type AssistantState = {
     readonly volumes: readonly { readonly id: string; readonly title: string; readonly summary: string }[];
     readonly chapters: readonly { readonly id: string; readonly title: string; readonly volume: string; readonly words: number; readonly plan: string }[];
     readonly chapterCount: number;
+    /** 全书（回收站以外）的字数与有章节计划的章数：章节只列出一部分时，助手说数字也有据可依。 */
+    readonly totalWords?: number;
+    readonly plannedCount?: number;
     /** 章节太多时只列出前后部分。 */
     readonly omitted: boolean;
     readonly entities: readonly { readonly id: string; readonly kind: string; readonly name: string; readonly locked: boolean }[];

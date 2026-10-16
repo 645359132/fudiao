@@ -19,6 +19,8 @@ const state: AssistantState = {
     volumes: [{ id: 'V1', title: '第一卷 雨夜', summary: '林舟当玉' }],
     chapters: [{ id: 'C1', title: '第一章 夜叩', volume: '第一卷 雨夜', words: 1200, plan: '已写' }],
     chapterCount: 1,
+    totalWords: 1200,
+    plannedCount: 1,
     omitted: false,
     entities: [{ id: 'E1', kind: '人物', name: '林舟', locked: true }],
     trashed: [],
@@ -42,7 +44,7 @@ describe('AI 助手的提示词（B69）', () => {
     expect(prompt.system[0]?.text).not.toContain('当铺夜谈');
     expect(prompt.messages).toHaveLength(1);
     const last = prompt.messages[0]!.content;
-    for (const part of ['打开的作品：《当铺夜谈》（古风悬疑）', '大纲：还没有', '- [V1] 第一卷 雨夜：林舟当玉', '- [C1] 第一章 夜叩（第一卷 雨夜），1200 字，计划：已写', '- [E1] 人物：林舟（锁定）', '作者正在看：第一章 夜叩', '作品列表：《当铺夜谈》《雨夜》', '【作者】新建一章叫第二章']) {
+    for (const part of ['打开的作品：《当铺夜谈》（古风悬疑）', '大纲：还没有', '- [V1] 第一卷 雨夜：林舟当玉', '章节（共 1 章，合计 1200 字，其中 1 章有章节计划）', '- [C1] 第一章 夜叩（第一卷 雨夜），1200 字，计划：已写', '- [E1] 人物：林舟（锁定）', '作者正在看：第一章 夜叩', '作品列表：《当铺夜谈》《雨夜》', '【作者】新建一章叫第二章']) {
       expect(last).toContain(part);
     }
   });

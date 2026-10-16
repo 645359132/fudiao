@@ -167,6 +167,8 @@ export function assistantUseCases({
         volumes: work.value.volumes.map((v) => ({ id: v.id, title: v.title, summary: v.summary })),
         chapters,
         chapterCount: all.length,
+        totalWords: all.reduce((n, c) => n + c.words, 0),
+        plannedCount: all.filter((c) => c.plan !== '').length,
         omitted,
         entities: (entities.ok ? entities.value : []).slice(0, MAX_LISTED_ENTITIES).map((e) => ({ id: e.id, kind: ENTITY_KIND_LABEL[e.kind], name: e.name, locked: e.locked })),
         current,

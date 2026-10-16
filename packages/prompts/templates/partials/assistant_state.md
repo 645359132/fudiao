@@ -17,7 +17,7 @@
 - [{{id}}] {{title}}{{#summary}}：{{summary}}{{/summary}}
 {{/volumes}}
 {{/hasVolumes}}
-章节（共 {{chapterCount}} 章{{#omitted}}，只列出前后部分，其余用 list_chapters 查看{{/omitted}}）：
+章节（共 {{chapterCount}} 章{{#totalWords}}，合计 {{totalWords}} 字{{/totalWords}}{{#plannedCount}}，其中 {{plannedCount}} 章有章节计划{{/plannedCount}}{{#omitted}}，只列出前后部分，其余用 list_chapters 查看{{/omitted}}）：
 {{#chapters}}
 - [{{id}}] {{title}}{{#volume}}（{{volume}}）{{/volume}}，{{words}} 字{{#plan}}，计划：{{plan}}{{/plan}}
 {{/chapters}}
