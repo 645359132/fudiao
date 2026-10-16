@@ -2038,6 +2038,43 @@ describe('后台任务不被打断', () => {
     ]));
   });
 
+  it('让助手停下后台写作：写到一半的这一章不写入，后面排着的章不再写，任务记为已取消', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    for (const title of ['第一章', '第二章']) await addChapter(user, title);
+    for (const c of store.getState().work?.chapters ?? []) {
+      expect((await service.savePlan(c.id, { goal: `${c.title}的目标`, castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    }
+    await addTestedModel(service, deps);
+    const before = deps.llmRequests.length;
+    // 助手排上两章；写手写第一章的调用挂起，直到被停下。
+    deps.llmResponses.push(
+      reply(JSON.stringify({ message: '已排上，写手在后台依次写两章。', actions: [{ tool: 'write_chapters', chapters: null, review: false }], done: true })),
+      { chunks: openaiChunks('m', { text: ['林舟'], end: 'stop' }, { stopAfterText: true }), hang: true },
+    );
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '把两章写完{Enter}');
+    expect(await screen.findByText('已排上，写手在后台依次写两章。')).toBeTruthy();
+    await waitFor(() => expect(deps.llmRequests.length).toBe(before + 2));
+    expect(store.getState().writerJob).toMatchObject({ stage: 'writing', queued: [expect.any(String)] });
+    expect(store.getState().backgroundWork().join('；')).toContain('第一章');
+
+    deps.llmResponses.push(reply(JSON.stringify({ message: '已停下。', actions: [{ tool: 'stop_background', what: 'writing' }], done: true })));
+    await waitFor(() => expect(store.getState().assistantRunning).toBe(false));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '先停下{Enter}');
+    expect(await screen.findByText('已停下。')).toBeTruthy();
+    await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    const results = store.getState().assistantItems.filter((i) => i.role === 'results').at(-1);
+    expect(results).toMatchObject({ results: [{ tool: 'stop_background', ok: true, detail: expect.stringContaining('后面排着的 1 章不再写') }] });
+    // 第一章没写完的那一段没有写入，第二章没有开写；写手的任务记为已取消。
+    const [one, two] = store.getState().work?.chapters ?? [];
+    for (const c of [one, two]) {
+      const content = await service.openChapter(c!.id);
+      expect(content.ok && content.value.saved.map((p) => p.text).join('')).toBe('');
+    }
+    expect(store.getState().tasks.filter((t) => t.kind === 'writer').map((t) => [t.title, t.status])).toEqual([['写手 · 第一章', 'cancelled']]);
+    expect(deps.llmRequests.length).toBe(before + 3);
+  });
+
   it('没有任务在进行时，回到作品列表不用确认', async () => {
     const { user } = start();
     await createWork(user, '雨夜');
