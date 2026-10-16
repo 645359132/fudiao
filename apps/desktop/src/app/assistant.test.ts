@@ -169,11 +169,35 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.assistantItems())).toEqual([]);
   });
 
-  it('一句话最多走固定的步数，不会无休止地调用', async () => {
+  it('一句话最多走固定的步数，不会无休止地调用；走满时告诉作者停在这里、说“继续”接着做', async () => {
     const { deps, app } = await setup();
     for (let i = 0; i < MAX_ASSISTANT_STEPS + 2; i++) step(deps, { message: '', actions: [{ tool: 'list_chapters', volume: null }], done: false });
-    value(await app.sendToAssistant('一直列章节'));
+    const outcome = value(await app.sendToAssistant('一直列章节'));
     expect(deps.llmRequests).toHaveLength(MAX_ASSISTANT_STEPS);
+    expect(outcome.items.at(-1)).toMatchObject({ role: 'assistant', output: { message: expect.stringContaining(`已经走了 ${MAX_ASSISTANT_STEPS} 步`), actions: [], done: true } });
+  });
+
+  it('之前几轮的动作结果只留开头与结尾，这一轮的结果完整；对话太长时略去最早的几轮', async () => {
+    const { deps, app } = await setup();
+    const long = '雨'.repeat(3_000);
+    await chapterWith(app, '第一章 夜叩', `开头${long}结尾`);
+    step(deps, { message: '', actions: [{ tool: 'read_chapter', chapter: '夜叩' }], done: false });
+    step(deps, { message: '读完了。', actions: [], done: true });
+    value(await app.sendToAssistant('读第一章'));
+    // 这一轮的第二步拿到完整的结果。
+    expect(body(deps, 1)).toContain(long);
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('再说说'));
+    expect(body(deps, 2)).not.toContain(long);
+    expect(body(deps, 2)).toContain('【作者】读第一章');
+    // 很多轮之后，最早的一轮不再带上。
+    for (let i = 0; i < 40; i++) {
+      step(deps, { message: '嗯'.repeat(1_000), actions: [], done: true });
+      value(await app.sendToAssistant(`第 ${i} 句`));
+    }
+    const last = body(deps, deps.llmRequests.length - 1);
+    expect(last).not.toContain('【作者】读第一章');
+    expect(last).toContain('【作者】第 39 句');
   });
 
   it('模型流式输出时逐字交出给作者的话（只用于显示）；这一步结束后为 null', async () => {
@@ -233,6 +257,91 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.reviewIssues(chapterId))).toContainEqual(expect.objectContaining({ description: '开头的动作描写太长', source: 'model' }));
   });
 
+  it('审核问题：列出待处理的问题（带标识），标为已改好或忽略，交给写手修订那一段', async () => {
+    const { deps, app } = await setup();
+    const chapterId = await chapterWith(app, '第一章 夜叩', '林舟推门进来，雨水顺着衣角往下滴。');
+    deps.llmResponses.push(
+      reply(
+        JSON.stringify({
+          issues: [
+            { paragraph: 'P1', quote: '雨水顺着衣角往下滴', kind: 'pacing', severity: 'medium', evidence: [], description: '开头的动作描写太长', suggestion: '压缩成一句' },
+            { paragraph: 'P1', quote: '林舟推门进来', kind: 'pacing', severity: 'low', evidence: [], description: '进门太平', suggestion: '' },
+          ],
+        }),
+      ),
+    );
+    value(await app.reviewChapter(chapterId));
+    const [first, second] = value(await app.reviewIssues(chapterId));
+    step(deps, { message: '', actions: [{ tool: 'list_review_issues', chapter: null }], done: false });
+    step(deps, { message: '', actions: [{ tool: 'resolve_review_issue', issue: second!.id, status: 'ignored' }], done: false });
+    step(deps, { message: '改好了。', actions: [{ tool: 'revise_review_issue', issue: first!.id }], done: true });
+    deps.llmResponses.push(reply('林舟推门进来，带进一身雨气。'));
+    const effects: AssistantEffect[] = [];
+    const outcome = value(await app.sendToAssistant('把审核出的问题处理一下，进门那条不用管', { onEffect: (e) => effects.push(e) }));
+    const all = outcome.items.filter((i): i is Extract<AssistantItem, { role: 'results' }> => i.role === 'results').flatMap((i) => i.results);
+    expect(all.map((r) => [r.tool, r.ok])).toEqual([
+      ['list_review_issues', true],
+      ['resolve_review_issue', true],
+      ['revise_review_issue', true],
+    ]);
+    expect(all[0]?.detail).toContain(`《第一章 夜叩》2 条：\n- [${first!.id}] 一般：开头的动作描写太长（建议：压缩成一句）；原文：“雨水顺着衣角往下滴”`);
+    expect(all[1]?.detail).toContain('忽略');
+    expect(value(await app.openChapter(chapterId)).saved.map((p) => p.text)).toEqual(['林舟推门进来，带进一身雨气。']);
+    expect(effects).toContainEqual({ kind: 'show_review', chapterId });
+    expect(value(await app.reviewIssues(chapterId))).toEqual([]);
+  });
+
+  it('长篇记忆、伏笔账本与写作技能：读记忆与账本，改伏笔的状态与章节，停用与启用技能', async () => {
+    const { deps, app } = await setup();
+    const one = await chapterWith(app, '第一章 夜叩', '林舟把玉佩押在柜台上。');
+    const two = value(await app.createChapter('第二章 夜雨')).chapters.find((c) => c.title === '第二章 夜雨')!.id;
+    value(await app.createEntity('character', '林舟'));
+    value(await app.addForeshadow({ title: '玉佩', content: '掌柜多看了玉佩一眼', reveal: '玉佩是父亲的遗物', plantChapterId: one, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' }));
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉。', cast: [{ name: '林舟', state: '缺钱' }], foreshadows: [{ title: '玉佩', progress: '掌柜起了疑' }], openThreads: ['掌柜说三日后再来'] })));
+    value(await app.buildMemory(one));
+    step(deps, {
+      message: '',
+      actions: [
+        { tool: 'get_chapter_memory', chapter: '夜叩' },
+        { tool: 'get_chapter_memory', chapter: '夜雨' },
+        { tool: 'list_foreshadows', chapter: null },
+        { tool: 'update_foreshadow', foreshadow: '玉佩', title: null, content: null, reveal: null, plant: null, payoff: '夜雨', status: 'planted' },
+        { tool: 'list_skills', stage: 'planning' },
+        { tool: 'set_skill', skill: '雪花写作法', enabled: false },
+        { tool: 'set_skill', skill: '不用副词', enabled: true },
+      ],
+      done: true,
+    });
+    const outcome = value(await app.sendToAssistant('前面写了什么？玉佩埋下了，第二章收；别用雪花写作法'));
+    const results = lastResults(outcome.items)!.results;
+    expect(results.map((r) => r.ok)).toEqual([true, true, true, true, true, true, true]);
+    expect(results[0]?.detail).toBe('《第一章 夜叩》的长篇记忆\n梗概：林舟当玉。\n人物状态：林舟：缺钱\n伏笔进展：玉佩：掌柜起了疑\n章尾留给后面的事：掌柜说三日后再来');
+    expect(results[1]?.detail).toContain('还没有长篇记忆');
+    expect(results[2]?.detail).toMatch(/^- \[\w+\] 玉佩（计划；埋设 《第一章 夜叩》，回收 未定）：掌柜多看了玉佩一眼；揭晓前不得说破：玉佩是父亲的遗物/);
+    expect(results[4]?.detail).toMatch(/^- 雪花写作法（规划；启用）：/);
+    expect(results[5]?.detail).toContain('已停用写作技能“雪花写作法”');
+    expect(results[6]?.detail).toBe('“不用副词”本来就是启用的。');
+    expect(value(await app.planningView()).foreshadows).toMatchObject([{ title: '玉佩', plantChapterId: one, payoffChapterId: two, status: 'planted' }]);
+    expect(value(await app.listWritingSkills()).skills.find((s) => s.skill.name === '雪花写作法')?.skill.enabled).toBe(false);
+  });
+
+  it('停下后台任务：交给后台去停，结果原样告诉模型', async () => {
+    const { deps, app } = await setup();
+    const asked: string[] = [];
+    const background = {
+      reviewChapters: () => null,
+      writeChapters: () => null,
+      stop: (what: string) => {
+        asked.push(what);
+        return '已停下：写手停在这一段之后。';
+      },
+    };
+    step(deps, { message: '停了。', actions: [{ tool: 'stop_background', what: 'writing' }], done: true });
+    const outcome = value(await app.sendToAssistant('先别写了', { background }));
+    expect(asked).toEqual(['writing']);
+    expect(lastResults(outcome.items)).toMatchObject({ results: [{ tool: 'stop_background', ok: true, detail: '已停下：写手停在这一段之后。' }] });
+  });
+
   it('写或审核多章交给后台：动作立即返回“已排上”，后台收到按书中顺序的章节；没有后台时说明不能用', async () => {
     const { deps, app } = await setup();
     const one = await chapterWith(app, '第一章 夜叩', '门在他身后合上了。');
@@ -250,6 +359,7 @@ describe('AI 助手（B69）', () => {
         written.push([ids, review]);
         return null;
       },
+      stop: () => '后台没有在进行的写作或审核。',
     };
     step(deps, {
       message: '排上了。',
@@ -268,7 +378,7 @@ describe('AI 助手（B69）', () => {
     ]);
 
     // 后台已有一批时说明原因；指名的章节里没有正文的不排。
-    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null };
+    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, stop: () => '' };
     // 动作失败时助手会再走一步说明：每次排两步。
     const failing = (actions: AssistantTurnOutput['actions']) => {
       step(deps, { message: '', actions, done: true });

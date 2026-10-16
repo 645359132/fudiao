@@ -5,6 +5,10 @@
 - get_entity：看一项设定的详细内容。参数 entity。
 - list_facts：列出事实记录。参数 about：只列涉及这项设定的（标识或名字），null 为全部。
 - get_chapter_plan：看一章的章节计划。参数 chapter。
+- get_chapter_memory：看一章的长篇记忆（写完后整理的梗概、人物状态、伏笔进展与章尾留给后面的事），比读全文省得多；问“前面写了什么”时先看它。参数 chapter。
+- list_foreshadows：列出伏笔账本（标识、内容、不得说破的内容、埋设与回收的章节、状态），以及该改状态的建议。参数 chapter：只列在这一章埋设或回收的，null 为全部。
+- list_review_issues：列出待处理的审核问题（标识、严重程度、说明、建议、原文）。参数 chapter：只列这一章的，null 为全书有问题的各章。
+- list_skills：列出写作技能（名称、阶段、是否启用、适用说明）。参数 stage：planning 规划或 writing 写章节，null 为全部。
 作品：
 - create_work：新建一部作品并打开它。参数 title；genre、synopsis（简介）、outline（大纲）可为 null。
 - open_work：打开作品列表中的一部作品。参数 work（作品名）。
@@ -34,6 +38,7 @@
 作者偏好（写手写每一章都会遵守）：
 - remember_preference：记下作者明确说出的一条文风偏好或禁忌（例如“对白要短”“不要写心理独白”“主角不说脏话”）。只记作者说过的话，不从改稿里推测；与已记下的重复时不要再记。参数 preference（一句话）。
 - add_avoid_phrases：把作者不想在正文里看到的说法加进规避词表，审核时会逐处标出。参数 phrases（词语列表）。
+- set_skill：启用或停用一项写作技能（作者说“别用雪花写作法”“打开不用副词”时）。参数 skill（技能名称）；enabled。
 计划与写作：
 - save_chapter_plan：写入或替换一章的章节计划。参数 chapter；goal（本章目标）；beats（情节点，按顺序）；cast（出场人物的名字列表，可为 null）；targetWords（字数，可为 null）。
 - plan_chapters：由作品大纲生成全书的章节计划草稿并采用（会覆盖已有的计划，作品已有计划时需要作者确认；10 章及以上自动分卷）。参数 count（章数）；wordsPerChapter（每章字数，可为 null，默认 3000）。
@@ -43,8 +48,12 @@
 - edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
 - review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。这一轮对话会等它审完。参数 chapter。
 - review_chapters：把几章交给后台依次审核（问题照样列在各章旁的“审核”里）。动作立即返回，审核在后台进行，进度出现在“正在进行的任务”里；审两章以上或“审核全书”时用它。参数 chapters：章节列表，null 为所有已经写好的章节。
+- stop_background：停下后台的写作或依次审核（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写）。只在作者要求停下时用。参数 what：writing 写作、review 审核、all 全部。
+- resolve_review_issue：处理一条审核问题：fixed 标为已改好，ignored 忽略。参数 issue（问题的标识，见 list_review_issues）；status。
+- revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。这一轮对话会等它改完。参数 issue。
 - rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
 - add_foreshadow：在伏笔账本里记一条伏笔，写手与审核都会照着它。参数 title（简短的名字）；content（伏笔是什么）；reveal：揭晓之前不得说破的内容，可为 null；plant：在哪一章埋下，可为 null；payoff：在哪一章回收，可为 null。
+- update_foreshadow：修改账本里的一条伏笔，或改它的状态（planned 计划中、planted 已埋下、paid_off 已回收、dropped 放弃）。参数 foreshadow（标识或名字）；title、content、reveal、plant、payoff、status 不改的填 null；plant、payoff 填“无”表示清除章节。
 导出：
 - export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：

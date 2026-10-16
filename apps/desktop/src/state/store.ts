@@ -893,6 +893,22 @@ export function createAppStore(service: AppService): AppStore {
             void get().reviewChapters(chapterIds);
             return null;
           },
+          stop(what) {
+            const stopped: string[] = [];
+            const job = get().writerJob;
+            if (what !== 'review' && (writerRunning || job !== null)) {
+              writerAbort?.abort();
+              const later = job?.queued.length ?? 0;
+              stopped.push(`写手${job === null ? '' : `在《${chapter(job.chapterId)?.title ?? ''}》停下（已写完的段落保留，可以接着写）`}${later > 0 ? `，后面排着的 ${later} 章不再写` : ''}`);
+            }
+            const queue = get().reviewQueue;
+            if (what !== 'writing' && reviewQueueAbort !== null) {
+              reviewQueueAbort.abort();
+              stopped.push(`依次审核${queue === null ? '' : `停在《${chapter(queue.chapterId)?.title ?? ''}》，后面的 ${queue.queued.length} 章不再审`}`);
+            }
+            if (stopped.length > 0) return `已停下：${stopped.join('；')}。`;
+            return what === 'writing' ? '后台没有在写作。' : what === 'review' ? '后台没有在依次审核。' : '后台没有在进行的写作或审核。';
+          },
         },
         onUsage: (usage) => set({ assistantContext: usage }),
         onUpdate: (items) => set({ assistantItems: items }),

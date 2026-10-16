@@ -3,10 +3,10 @@ import type { Foreshadow, ForeshadowFields, ForeshadowStatus } from '@fudiao/sto
 import type { PlanChapterView } from '../app/planning';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
-import { PLAN_STATUS_LABEL } from '../app/labels';
+import { FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL } from '../app/labels';
 import { useApp } from './store-context';
 
-const STATUS: Record<ForeshadowStatus, string> = { planned: '计划', planted: '已埋', paid_off: '已回收', dropped: '废弃' };
+const STATUS = FORESHADOW_STATUS_LABEL;
 const PROBLEM: Record<string, string> = {
   unknown_foreshadow: '引用了账本中没有的伏笔',
   payoff_before_plant: '回收章节在埋设章节之前',

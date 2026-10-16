@@ -16,6 +16,7 @@ import {
   type Fact,
   type FactInput,
   type FactStatus,
+  type Foreshadow,
   type ForeshadowFields,
   type PlanFields,
   type ProjectPatch,
@@ -25,11 +26,11 @@ import {
   type Volume,
 } from '@fudiao/store';
 import type { AppError } from './errors';
-import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
+import { ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SKILL_STAGE_LABEL } from './labels';
 import type { AppliedDraft, PlanningView } from './planning';
 import type { RelationsView } from './relations';
 import type { SkillsView } from './writing-skills';
-import type { ReviewOutcome } from './review';
+import type { ReviewIssueView, ReviewOutcome, RevisionOutcome } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
 
@@ -53,6 +54,8 @@ export type AssistantSelection = { readonly chapterId: string; readonly range: E
 export type BackgroundJobs = {
   writeChapters(chapterIds: readonly string[], review: boolean): string | null;
   reviewChapters(chapterIds: readonly string[]): string | null;
+  /** 停下后台的写作或依次审核；返回说明（停下了什么，或没有在进行的）。 */
+  stop(what: 'writing' | 'review' | 'all'): string;
 };
 
 /** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展、作者选中的文字与后台任务。 */
@@ -116,6 +119,10 @@ export type AssistantHost = {
   rollbackWriter(chapterId: string): Promise<Result<unknown, AppError>>;
   reviewChapter(chapterId: string, options?: CallOptions): Promise<Result<ReviewOutcome, AppError>>;
   addForeshadow(fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
+  updateForeshadow(foreshadow: Foreshadow, fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
+  reviewIssues(chapterId: string): Promise<Result<ReviewIssueView[], AppError>>;
+  resolveIssue(issueId: string, status: 'ignored' | 'fixed'): Promise<Result<ReviewIssueView[], AppError>>;
+  reviseIssue(issueId: string, options?: CallOptions): Promise<Result<RevisionOutcome, AppError>>;
   exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   runSelectionOperation(
     request: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: SelectionOperation; readonly instruction: string; readonly overrides: ContextOverrides },
@@ -132,6 +139,11 @@ const failed = (detail: string): Outcome => ({ ok: false, detail });
 const READ_LIMIT = 6_000;
 /** 审核结果在对话里列出的问题数。 */
 const LISTED_ISSUES = 6;
+/** list_review_issues 一次最多列出的问题数，与全书时最多看的章数。 */
+const LISTED_PENDING = 30;
+const ISSUE_CHAPTERS = 10;
+/** “无”“不限”或空串表示清除章节。 */
+const CLEARS = new Set(['', '无', '不限', '清除']);
 const UNVOLUMED = '未分卷';
 
 const SEVERITY_LABEL = { high: '严重', medium: '一般', low: '轻微' } as const;
@@ -167,6 +179,16 @@ export function describeForModel(e: AppError): string {
 }
 
 const failWith = (e: AppError): Outcome => failed(describeForModel(e));
+
+/** 一条审核问题读成一行（带标识，供 resolve_review_issue 与 revise_review_issue 引用）。 */
+const issueLine = (i: ReviewIssueView): string =>
+  `- [${i.id}] ${SEVERITY_LABEL[i.severity]}：${i.description}${i.suggestion === '' ? '' : `（建议：${i.suggestion}）`}${i.anchor.quote === '' ? '' : `；原文：“${clip(i.anchor.quote, 60).text}”`}`;
+
+/** 一条伏笔读成一行。 */
+const foreshadowLine = (f: Foreshadow, titleOf: ReadonlyMap<string, string>): string => {
+  const at = (id: string | null) => (id === null ? '未定' : `《${titleOf.get(id) ?? id}》`);
+  return `- [${f.id}] ${f.title}（${FORESHADOW_STATUS_LABEL[f.status]}；埋设 ${at(f.plantChapterId)}，回收 ${at(f.payoffChapterId)}）：${f.content}${f.reveal.trim() === '' ? '' : `；揭晓前不得说破：${f.reveal}`}`;
+};
 /** 章节名列出前几个，太多时省略。 */
 const titles = (chapters: readonly Chapter[]): string =>
   chapters.length <= 6 ? chapters.map((c) => `《${c.title}》`).join('') : `${chapters.slice(0, 3).map((c) => `《${c.title}》`).join('')}……${chapters.slice(-2).map((c) => `《${c.title}》`).join('')}`;
@@ -352,6 +374,104 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const name = new Map(entities.ok ? entities.value.map((e) => [e.id, e.name]) : []);
       return done(
         `《${c.value.title}》（${PLAN_STATUS_LABEL[plan.status]}）\n目标：${plan.goal}\n情节点：${plan.beats.join('；')}\n出场人物：${plan.castIds.map((id) => name.get(id) ?? id).join('、') || '无'}\n字数：${plan.targetWords ?? '未定'}`,
+      );
+    },
+  },
+  get_chapter_memory: {
+    label: '查看长篇记忆',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      const memory = view.value.chapters.find((x) => x.chapter.id === c.value.id)?.memory ?? null;
+      if (memory === null) return done(`《${c.value.title}》还没有长篇记忆（写手写完一章后自动整理；也可以在计划页生成）。`);
+      const entities = await env.host.listEntities();
+      const name = new Map(entities.ok ? entities.value.map((e) => [e.id, e.name]) : []);
+      const foreshadow = new Map(view.value.foreshadows.map((f) => [f.id, f.title]));
+      const cast = Object.entries(memory.castState).map(([id, s]) => `${name.get(id) ?? id}：${s}`);
+      const progress = Object.entries(memory.foreshadowProgress).map(([id, s]) => `${foreshadow.get(id) ?? id}：${s}`);
+      return done(
+        [
+          `《${c.value.title}》的长篇记忆${memory.status === 'stale' ? '（正文在整理之后改过，可能已经过时）' : ''}`,
+          `梗概：${memory.summary}`,
+          cast.length === 0 ? '' : `人物状态：${cast.join('；')}`,
+          progress.length === 0 ? '' : `伏笔进展：${progress.join('；')}`,
+          memory.openThreads.length === 0 ? '' : `章尾留给后面的事：${memory.openThreads.join('；')}`,
+        ]
+          .filter((l) => l !== '')
+          .join('\n'),
+      );
+    },
+  },
+  list_foreshadows: {
+    label: '查看伏笔账本',
+    async run(action, env) {
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      let list = view.value.foreshadows;
+      if (action.chapter !== null) {
+        const c = await env.findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        list = list.filter((f) => f.plantChapterId === c.value.id || f.payoffChapterId === c.value.id);
+      }
+      if (list.length === 0) return done(action.chapter === null ? '伏笔账本是空的。' : '没有在这一章埋设或回收的伏笔。');
+      const titleOf = new Map(view.value.chapters.map((x) => [x.chapter.id, x.chapter.title]));
+      const shown = new Set(list.map((f) => f.id));
+      const suggestions = view.value.foreshadowSuggestions
+        .filter((s) => shown.has(s.foreshadowId))
+        .map((s) => `- “${list.find((f) => f.id === s.foreshadowId)?.title ?? ''}”可以标为${FORESHADOW_STATUS_LABEL[s.status]}（《${titleOf.get(s.chapterId) ?? ''}》已经写完）${s.progress === null ? '' : `：${s.progress}`}`);
+      return done(`${list.map((f) => foreshadowLine(f, titleOf)).join('\n')}${suggestions.length === 0 ? '' : `\n该改状态的（作者同意后用 update_foreshadow 改）：\n${suggestions.join('\n')}`}`);
+    },
+  },
+  list_review_issues: {
+    label: '查看审核问题',
+    async run(action, env) {
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      let chapters: readonly Chapter[];
+      if (action.chapter !== null) {
+        const c = await env.findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        chapters = [c.value];
+      } else {
+        chapters = view.value.chapters.filter((x) => x.pendingIssues > 0).map((x) => x.chapter);
+        if (chapters.length === 0) return done('没有待处理的审核问题。');
+      }
+      const lines: string[] = [];
+      let listed = 0;
+      let total = 0;
+      for (const [i, c] of chapters.entries()) {
+        if (i >= ISSUE_CHAPTERS) {
+          lines.push(`……还有 ${chapters.length - ISSUE_CHAPTERS} 章有待处理的问题（${titles(chapters.slice(ISSUE_CHAPTERS))}），指明章节再看`);
+          break;
+        }
+        const issues = await env.host.reviewIssues(c.id);
+        if (!issues.ok) return failWith(issues.error);
+        total += issues.value.length;
+        if (issues.value.length === 0) {
+          if (action.chapter !== null) lines.push(`《${c.title}》没有待处理的审核问题${view.value.chapters.find((x) => x.chapter.id === c.id)?.plan?.status === 'reviewed' ? '' : '（这一章可能还没有审核过）'}。`);
+          continue;
+        }
+        const room = Math.max(0, LISTED_PENDING - listed);
+        lines.push(`《${c.title}》${issues.value.length} 条：`, ...issues.value.slice(0, room).map(issueLine));
+        if (issues.value.length > room) lines.push('……');
+        listed += Math.min(room, issues.value.length);
+      }
+      return done(action.chapter === null ? `共 ${total} 条待处理（严重的在前）：\n${lines.join('\n')}` : lines.join('\n'));
+    },
+  },
+  list_skills: {
+    label: '查看写作技能',
+    async run(action, env) {
+      const view = await env.host.listWritingSkills();
+      if (!view.ok) return failWith(view.error);
+      const list = view.value.skills.filter((s) => action.stage === null || s.skill.stages.includes(action.stage));
+      if (list.length === 0) return done('没有写作技能。');
+      return done(
+        list
+          .map((s) => `- ${s.skill.name}（${s.skill.stages.map((x) => SKILL_STAGE_LABEL[x]).join('、')}；${s.skill.enabled ? '启用' : '停用'}${s.builtinText === null ? '；自定义' : ''}）：${clip(s.description, 120).text}`)
+          .join('\n'),
       );
     },
   },
@@ -764,6 +884,27 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       return done(`已把${added.map((p) => `“${p}”`).join('、')}加进规避词表，审核时会逐处标出。`);
     },
   },
+  set_skill: {
+    label: '启用或停用写作技能',
+    async run(action, env) {
+      const view = await env.host.listWritingSkills();
+      if (!view.ok) return failWith(view.error);
+      const found = pick(
+        view.value.skills.map((s) => ({ ...s, id: s.skill.id })),
+        action.skill,
+        (s) => [s.skill.name, s.skill.key],
+        '写作技能',
+      );
+      if (!found.ok) return failed(found.error);
+      const skill = found.value.skill;
+      const state = action.enabled ? '启用' : '停用';
+      if (skill.enabled === action.enabled) return done(`“${skill.name}”本来就是${state}的。`);
+      const saved = await env.host.updateWritingSkill(skill, { enabled: action.enabled });
+      if (!saved.ok) return failWith(saved.error);
+      env.changed();
+      return done(`已${state}写作技能“${skill.name}”${action.enabled ? '，之后写的章节会带上它' : '，之后写的章节不再带上它'}（已写的章节不变）。`);
+    },
+  },
   save_chapter_plan: {
     label: '保存章节计划',
     async run(action, env) {
@@ -937,6 +1078,36 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       );
     },
   },
+  stop_background: {
+    label: '停下后台任务',
+    run(action, env) {
+      const jobs = env.events.background;
+      if (jobs === undefined) return Promise.resolve(failed('这里没有后台任务'));
+      return Promise.resolve(done(jobs.stop(action.what)));
+    },
+  },
+  resolve_review_issue: {
+    label: '处理审核问题',
+    async run(action, env) {
+      const resolved = await env.host.resolveIssue(action.issue.trim(), action.status);
+      if (!resolved.ok) return failWith(resolved.error);
+      env.changed();
+      return done(`已把这条问题${action.status === 'fixed' ? '标为已改好' : '忽略'}；这一章还有 ${resolved.value.length} 条待处理。`);
+    },
+  },
+  revise_review_issue: {
+    label: '交给写手修订',
+    async run(action, env) {
+      env.events.onProgress?.('写手正在修订问题所在的段落');
+      const revised = await env.host.reviseIssue(action.issue.trim(), env.call());
+      if (!revised.ok) return failWith(revised.error);
+      const { chapterId } = revised.value;
+      env.events.onEffect?.({ kind: 'chapter_changed', chapterId });
+      env.events.onEffect?.({ kind: 'show_review', chapterId });
+      env.changed();
+      return done(`写手已修订这一段（修订前的正文存为了快照，可以恢复）；这一章还有 ${revised.value.issues.length} 条待处理。`);
+    },
+  },
   review_chapter: {
     label: '审核',
     async run(action, env) {
@@ -995,6 +1166,40 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (!added.ok) return failWith(added.error);
       env.changed();
       return done(`已在伏笔账本里记下“${action.title.trim()}”。`);
+    },
+  },
+  update_foreshadow: {
+    label: '修改伏笔',
+    async run(action, env) {
+      const view = await env.host.planningView();
+      if (!view.ok) return failWith(view.error);
+      const found = pick(view.value.foreshadows, action.foreshadow, (f) => [f.title], '伏笔');
+      if (!found.ok) return failed(found.error);
+      const f = found.value;
+      const chapterOf = async (ref: string | null, now: string | null): Promise<Result<string | null, string>> => {
+        if (ref === null) return ok(now);
+        if (CLEARS.has(ref.trim())) return ok(null);
+        const c = await env.findChapter(ref);
+        return c.ok ? ok(c.value.id) : c;
+      };
+      const plant = await chapterOf(action.plant, f.plantChapterId);
+      if (!plant.ok) return failed(plant.error);
+      const payoff = await chapterOf(action.payoff, f.payoffChapterId);
+      if (!payoff.ok) return failed(payoff.error);
+      const saved = await env.host.updateForeshadow(f, {
+        title: action.title ?? f.title,
+        content: action.content ?? f.content,
+        reveal: action.reveal ?? f.reveal,
+        plantChapterId: plant.value,
+        // 换了章节，原来那一章里的段落锚点就不再适用。
+        plantAnchor: plant.value === f.plantChapterId ? f.plantAnchor : null,
+        payoffChapterId: payoff.value,
+        payoffAnchor: payoff.value === f.payoffChapterId ? f.payoffAnchor : null,
+        status: action.status ?? f.status,
+      });
+      if (!saved.ok) return failWith(saved.error);
+      env.changed();
+      return done(`已修改伏笔“${action.title ?? f.title}”${action.status === null ? '' : `，状态为${FORESHADOW_STATUS_LABEL[action.status]}`}。`);
     },
   },
   restore_chapter: {

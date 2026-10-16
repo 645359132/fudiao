@@ -76,7 +76,7 @@ export type ReviewOutcome = {
   readonly dropped: number;
 };
 
-export type RevisionOutcome = { readonly issues: readonly ReviewIssueView[]; readonly paragraphs: readonly SavedParagraph[] };
+export type RevisionOutcome = { readonly chapterId: string; readonly issues: readonly ReviewIssueView[]; readonly paragraphs: readonly SavedParagraph[] };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
@@ -420,7 +420,7 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
       const rechecked = await refreshProgramIssues(port, { ...m, paragraphs: after.value });
       if (!rechecked.ok) return rechecked;
       const issues = await pendingView(port, chapterId, { ...m, paragraphs: after.value });
-      return issues.ok ? ok({ issues: issues.value, paragraphs: after.value }) : issues;
+      return issues.ok ? ok({ chapterId, issues: issues.value, paragraphs: after.value }) : issues;
     },
   };
 }

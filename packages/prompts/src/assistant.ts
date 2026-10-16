@@ -18,6 +18,9 @@ export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'fa
 /** 人物关系的类别（与存储层的取值相同）。 */
 export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;
 
+/** 伏笔账本的状态（与存储层的取值相同）。 */
+export const FORESHADOW_STATUSES_FOR_ASSISTANT = ['planned', 'planted', 'paid_off', 'dropped'] as const;
+
 export const AssistantAction = z.discriminatedUnion('tool', [
   // 读取
   z.object({ tool: z.literal('list_chapters'), volume: opt }),
@@ -26,6 +29,10 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('get_entity'), entity: text }),
   z.object({ tool: z.literal('list_facts'), about: opt }),
   z.object({ tool: z.literal('get_chapter_plan'), chapter: text }),
+  z.object({ tool: z.literal('get_chapter_memory'), chapter: text }),
+  z.object({ tool: z.literal('list_foreshadows'), chapter: opt }),
+  z.object({ tool: z.literal('list_review_issues'), chapter: opt }),
+  z.object({ tool: z.literal('list_skills'), stage: z.enum(['planning', 'writing']).nullable() }),
   // 作品
   z.object({ tool: z.literal('create_work'), title: text, genre: opt, synopsis: opt, outline: opt }),
   z.object({ tool: z.literal('open_work'), work: text }),
@@ -76,6 +83,7 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   // 作者偏好
   z.object({ tool: z.literal('remember_preference'), preference: text }),
   z.object({ tool: z.literal('add_avoid_phrases'), phrases: z.array(z.string()) }),
+  z.object({ tool: z.literal('set_skill'), skill: text, enabled: z.boolean() }),
   // 计划与写作
   z.object({ tool: z.literal('save_chapter_plan'), chapter: text, goal: text, beats: z.array(z.string()), cast: list, targetWords: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('plan_chapters'), count: z.number().int().positive(), wordsPerChapter: z.number().int().positive().nullable() }),
@@ -85,8 +93,21 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
   z.object({ tool: z.literal('review_chapter'), chapter: text }),
   z.object({ tool: z.literal('review_chapters'), chapters: list }),
+  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'all']) }),
+  z.object({ tool: z.literal('resolve_review_issue'), issue: text, status: z.enum(['fixed', 'ignored']) }),
+  z.object({ tool: z.literal('revise_review_issue'), issue: text }),
   z.object({ tool: z.literal('rollback_writer'), chapter: text }),
   z.object({ tool: z.literal('add_foreshadow'), title: text, content: text, reveal: opt, plant: opt, payoff: opt }),
+  z.object({
+    tool: z.literal('update_foreshadow'),
+    foreshadow: text,
+    title: opt,
+    content: opt,
+    reveal: opt,
+    plant: opt,
+    payoff: opt,
+    status: z.enum(FORESHADOW_STATUSES_FOR_ASSISTANT).nullable(),
+  }),
   // 导出
   z.object({ tool: z.literal('export_book'), format: z.enum(['txt', 'markdown']), chapter: opt }),
   // 界面

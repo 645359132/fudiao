@@ -50,10 +50,17 @@ export type AssistantUsage = { readonly promptTokens: number; readonly contextWi
 /** 一轮对话的结果：最新的对话，以及是否停在等待作者确认。 */
 export type AssistantOutcome = { readonly items: readonly AssistantItem[]; readonly pending: boolean };
 
-/** 一轮请求中模型最多走几步（每步一次调用），防止来回打转。 */
-export const MAX_ASSISTANT_STEPS = 8;
+/** 一轮请求中模型最多走几步（每步一次调用），防止来回打转；走满时告诉作者停在了哪里。 */
+export const MAX_ASSISTANT_STEPS = 12;
 /** 给模型的对话最多带最近这么多条（从作者的一句话开始）。 */
 const HISTORY_LIMIT = 60;
+/**
+ * 之前几轮的动作结果（读章节、列问题等）在对话里只留这么多字：那一轮已经用过了，留着全文只会让每一步越来越长。
+ * 这一轮的结果照原样给出。
+ */
+const EARLIER_RESULT_LIMIT = 600;
+/** 带给模型的对话（不含现状）最多这么多字，超过时从最早的一轮开始略去。 */
+const HISTORY_CHARS = 40_000;
 /** 现状中最多列出的章节与设定。 */
 const MAX_LISTED_CHAPTERS = 120;
 const MAX_LISTED_ENTITIES = 200;
@@ -168,9 +175,25 @@ export function assistantUseCases({
 
   const history = (items: readonly AssistantItem[]): AssistantHistoryItem[] => {
     const usable = items.filter((i) => i.role !== 'pending');
-    let start = Math.max(0, usable.length - HISTORY_LIMIT);
-    while (start > 0 && usable[start]?.role !== 'user') start--;
-    return usable.slice(start).map((i): AssistantHistoryItem => (i.role === 'user' ? { role: 'user', text: i.text } : i.role === 'assistant' ? { role: 'assistant', output: i.output } : { role: 'results', results: i.role === 'results' ? i.results : [] }));
+    const turnStart = usable.map((i) => i.role).lastIndexOf('user');
+    const converted = usable.map((i, at): AssistantHistoryItem => {
+      if (i.role === 'user') return { role: 'user', text: i.text };
+      if (i.role === 'assistant') return { role: 'assistant', output: i.output };
+      const results = i.role === 'results' ? i.results : [];
+      return { role: 'results', results: at >= turnStart ? results : results.map((r) => ({ ...r, detail: clip(r.detail, EARLIER_RESULT_LIMIT).text })) };
+    });
+    const size = (h: AssistantHistoryItem) => (h.role === 'user' ? h.text.length : h.role === 'assistant' ? JSON.stringify(h.output).length : h.results.reduce((n, r) => n + r.detail.length + r.tool.length, 0));
+    // 从最近的往前数，条数或字数超出时从那一轮的开头（作者的话）截断；这一轮总是完整保留。
+    let start = converted.length;
+    let chars = 0;
+    while (start > 0) {
+      const item = converted[start - 1]!;
+      if (start - 1 < turnStart && (converted.length - (start - 1) > HISTORY_LIMIT || chars + size(item) > HISTORY_CHARS)) break;
+      chars += size(item);
+      start--;
+    }
+    while (start < converted.length && start > 0 && converted[start]?.role !== 'user') start++;
+    return converted.slice(start);
   };
 
   /** 从当前的对话往下走，直到办完、需要作者确认、出错或走满步数。 */
@@ -240,6 +263,10 @@ export function assistantUseCases({
       // 说办完了而动作都成功，就停下；有动作失败时再走一步，让助手说明或换个办法。
       if (output.done && results.every((r) => r.ok)) return ok({ items, pending: false });
     }
+    // 作者停止了，或走满了步数：说清楚停在哪里，不让上一步“还要继续”的话悬着。
+    const stopped = aborted(events) ? '已按作者的要求停下，' : `这一轮已经走了 ${MAX_ASSISTANT_STEPS} 步，先停在这里；`;
+    const note = `${stopped}上面列出的是已经做完的。要接着做，说“继续”即可。`;
+    await append(items, [{ id: deps.ids.next(), role: 'assistant', output: { message: note, actions: [], done: true } }], events);
     return ok({ items, pending: false });
   }
 
