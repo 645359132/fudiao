@@ -29,6 +29,7 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('get_entity'), entity: text }),
   z.object({ tool: z.literal('list_facts'), about: opt }),
   z.object({ tool: z.literal('get_chapter_plan'), chapter: text }),
+  z.object({ tool: z.literal('build_chapter_memory'), chapter: text }),
   z.object({ tool: z.literal('get_chapter_memory'), chapter: text }),
   z.object({ tool: z.literal('list_foreshadows'), chapter: opt }),
   z.object({ tool: z.literal('list_review_issues'), chapter: opt }),

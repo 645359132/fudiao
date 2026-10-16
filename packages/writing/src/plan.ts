@@ -22,7 +22,13 @@ export function foreshadowsForChapter<F extends ForeshadowItem>(plan: PlanItem, 
     const payoff = f.payoffChapterId === null ? undefined : order.get(f.payoffChapterId);
     return payoff === undefined || here === undefined || payoff > here;
   });
-  return { toPlant: pick(plan.foreshadowPlant), toPayoff: pick(plan.foreshadowPayoff), mustNotReveal };
+  // 账本里写明在本章埋设或回收的也算：计划先做好、伏笔后来才记进账本时，计划里没有它。按账本顺序接在计划列出的后面。
+  const union = (listed: readonly F[], fromLedger: (f: F) => boolean) => [...listed, ...foreshadows.filter((f) => fromLedger(f) && !listed.includes(f))];
+  return {
+    toPlant: union(pick(plan.foreshadowPlant), (f) => f.status === 'planned' && f.plantChapterId === plan.chapterId),
+    toPayoff: union(pick(plan.foreshadowPayoff), (f) => !CLOSED.has(f.status) && f.payoffChapterId === plan.chapterId),
+    mustNotReveal,
+  };
 }
 
 export type PlanProblem = {

@@ -88,6 +88,7 @@
 - M5-04 已完成（作者要求 2026-10-15 按设计模式自查）：正文旁的抽屉由四个布尔标志改为可辨识联合 `drawer`，只读原因由 `chapterLock` 给出；状态层的任务句柄 `startTask`（时间取自时钟端口 `service.now()`），AI 助手的每一轮登记为任务；助手动作改为命令表 `app/assistant-tools.ts`（`assistant.ts` 只管对话循环）；`parseSceneConfigText` 把“高级”编辑的 JSON 解析移到应用层；`app/labels.ts` 统一设定种类与计划状态的名称。设计模式文档 v0.2 增加相应两节，并写明任务列表只保留本次运行。
 - M5-07 已完成（作者要求 2026-10-15 从性能的角度自查）：模型 SDK 改为第一次调用时载入（`@fudiao/llm/adapters`，主包 2,137 kB 降到 1,552 kB）；正文每次按键的段落标识、设定高亮与来源色条只处理改动的段落（3.4 万字的一章每次按键约 10 毫秒降到 0.8 毫秒，属性测试保证与整章重建一致）；关系图布局按网格只比较相近的人物（200 人 243 毫秒降到 46 毫秒）；关系页的布局按内容缓存；章节目录改为虚拟列表（`@tanstack/react-virtual`，MIT；800 章时切换章节不再重渲染整个目录）；字数统计 `countWords` 改为逐字分类（全书约 195 毫秒降到 14 毫秒，属性测试对照原写法）。结果见 `tools/bench/README.md`。
 - M5-08 已完成（需求 B75，作者要求 2026-10-15 内置一项提炼自雪花写作法的技能）：写作技能分规划与写章节两个阶段（`packages/shared` 的 `SkillStage`，迁移 `0014_skill_stages.sql`，SKILL.md 的 `metadata.stages`）；内置技能“雪花写作法”（`templates/skills/snowflake.md`，用于规划）；`book_seed` 与 `plan_draft` 版本 3 带上启用的规划技能，章节计划草稿带上人物说明；`skillsForStage`（`app/writing-skills.ts`）供写手与规划共用；“写作技能”页显示与选择阶段；“作者偏好”两个阶段都用。
+- M5-16 已完成（作者要求 2026-10-16 用真实模型试一下助手）：试用脚本 `tools/assistant-eval`（`pnpm assistant:eval`，可用 `--base-url` 指向 OpenAI 兼容服务，Key 取自环境变量 `FUDIAO_EVAL_KEY`）；按两次试用修正：助手写完单章整理长篇记忆、新动作 `build_chapter_memory`；须确认的动作后面的动作随确认执行、拒绝时逐条说明没执行；不在待处理里的审核问题处理时返回原因；`foreshadowsForChapter` 并入账本里写明在本章埋设或回收的伏笔；`assistant_turn` 版本 9（没看过正文与审核结果不下结论）。
 - M5-15 已完成（作者问 2026-10-16 助手是否仍有缺陷）：新动作 `get_chapter_memory`、`list_foreshadows`、`update_foreshadow`、`list_review_issues`、`resolve_review_issue`、`revise_review_issue`、`list_skills`、`set_skill`、`stop_background`（`BackgroundJobs.stop`）；`assistant_turn` 版本 8；一轮最多 12 步，走满或停止时说明；之前几轮的动作结果截到 600 字，对话按条数与字数截断；伏笔状态的名称统一到 `labels.ts`。
 - M5-14 已完成（作者要求 2026-10-15，依据作者提供的“写作基本功”系列九个讲解视频提炼）：内置写作技能“写作基本功”（`templates/skills/writing-basics.md`，写章节）：去过滤词，句内、句间与段间的关系，少用连接词，长短句与句式随情绪，动词的方向、快慢、力度与焦点，写完每段能一句话概括并与本章计划对上。
 - M5-09 已完成（作者要求 2026-10-15，依据作者提供的讲解视频提炼）：内置写作技能“不用副词”（`templates/skills/no-adverbs.md`，写章节）：“……地”加动作换成准确的动词，情绪写看得见的言行，不用程度副词撑形容词；“不、没、都、已经”等照常用。
@@ -216,6 +217,12 @@ pnpm m0 outcomes <运行标识…>
 ```
 
 运行记录写在 `m0/runs/`（不入库）。
+
+AI 助手的真实模型试用（14 句对话，其间写 3 章并审核；报告写在 `m3/runs/`，不入库）：
+
+```bash
+pnpm assistant:eval --base-url https://example.com/v1
+```
 
 Rust 测试（`generate_context!` 在编译期读取前端产物，首次运行前先构建界面）：
 

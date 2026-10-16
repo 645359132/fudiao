@@ -348,10 +348,10 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
       const issue = await getIssue(s.port, issueId);
       if (!issue.ok) return err(repo(issue.error));
       if (issue.value === null) return err(repo({ code: 'not_found' }));
-      if (issue.value.status === 'pending') {
-        const done = await setIssueStatus(s.port, issue.value, status, ctx());
-        if (!done.ok) return err(repo(done.error));
-      }
+      // 已经不在待处理里的（处理过，或正文改过后重新标出、换了标识）不再改，说清楚，免得以为处理了。
+      if (issue.value.status !== 'pending') return err(settings('这条问题已经不在待处理里：处理过了，或正文改过后重新标出、换了标识'));
+      const done = await setIssueStatus(s.port, issue.value, status, ctx());
+      if (!done.ok) return err(repo(done.error));
       const m = await materials(s.port, issue.value.chapterId);
       return m.ok ? pendingView(s.port, issue.value.chapterId, m.value) : m;
     },

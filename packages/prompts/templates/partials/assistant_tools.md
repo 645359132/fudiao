@@ -5,6 +5,7 @@
 - get_entity：看一项设定的详细内容。参数 entity。
 - list_facts：列出事实记录。参数 about：只列涉及这项设定的（标识或名字），null 为全部。
 - get_chapter_plan：看一章的章节计划。参数 chapter。
+- build_chapter_memory：按现在的正文重新整理一章的长篇记忆（改过正文、修订过问题之后，记忆会过时）。参数 chapter。
 - get_chapter_memory：看一章的长篇记忆（写完后整理的梗概、人物状态、伏笔进展与章尾留给后面的事），比读全文省得多；问“前面写了什么”时先看它。参数 chapter。
 - list_foreshadows：列出伏笔账本（标识、内容、不得说破的内容、埋设与回收的章节、状态），以及该改状态的建议。参数 chapter：只列在这一章埋设或回收的，null 为全部。
 - list_review_issues：列出待处理的审核问题（标识、严重程度、说明、建议、原文）。参数 chapter：只列这一章的，null 为全书有问题的各章。

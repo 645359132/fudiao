@@ -97,11 +97,18 @@ describe('AI 助手（B69）', () => {
     expect(body(deps, 1)).toContain('"reasoning_effort":"medium"');
   });
 
-  it('删除类动作先停下请作者确认；确认后执行并接着走，拒绝时不执行', async () => {
+  it('删除类动作先停下请作者确认；确认后执行并接着执行同一步里排在后面的动作，拒绝时它们都不执行并如实告诉模型', async () => {
     const { deps, app } = await setup();
     value(await app.createEntity('character', '钱四'));
     value(await app.createEntity('character', '路人'));
-    step(deps, { message: '要删掉钱四，请确认。', actions: [{ tool: 'delete_entity', entity: '钱四' }], done: false });
+    step(deps, {
+      message: '要删掉钱四，请确认。',
+      actions: [
+        { tool: 'delete_entity', entity: '钱四' },
+        { tool: 'create_chapter', title: '第二章', volume: null, after: null },
+      ],
+      done: false,
+    });
     const paused = value(await app.sendToAssistant('把钱四删了'));
     expect(paused.pending).toBe(true);
     expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: '删除设定“钱四”（与它有关的人物关系也一并删除）' });
@@ -109,15 +116,37 @@ describe('AI 助手（B69）', () => {
 
     step(deps, { message: '已删除钱四。', actions: [], done: true });
     const approved = value(await app.resolveAssistantPending(true));
-    expect(approved.items.find((i) => i.role === 'results')).toMatchObject({ results: [{ tool: 'delete_entity', ok: true, detail: expect.stringContaining('作者确认后执行') }] });
+    expect(approved.items.find((i) => i.role === 'results')).toMatchObject({
+      results: [
+        { tool: 'delete_entity', ok: true, detail: expect.stringContaining('作者确认后执行') },
+        { tool: 'create_chapter', ok: true },
+      ],
+    });
     expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['路人']);
+    expect(value(await app.reloadWork()).chapters.map((c) => c.title)).toEqual(['第二章']);
 
-    step(deps, { message: '要删掉路人。', actions: [{ tool: 'delete_entity', entity: '路人' }], done: false });
+    step(deps, {
+      message: '要删掉路人。',
+      actions: [
+        { tool: 'delete_entity', entity: '路人' },
+        { tool: 'create_chapter', title: '第三章', volume: null, after: null },
+      ],
+      done: false,
+    });
     value(await app.sendToAssistant('路人也删了'));
     step(deps, { message: '好的，不删。', actions: [], done: true });
     const rejected = value(await app.resolveAssistantPending(false));
-    expect(rejected.items.at(-2)).toMatchObject({ role: 'results', results: [{ tool: 'delete_entity', ok: false, detail: expect.stringContaining('作者没有同意') }] });
+    expect(rejected.items.at(-2)).toMatchObject({
+      role: 'results',
+      results: [
+        { tool: 'delete_entity', ok: false, detail: expect.stringContaining('作者没有同意') },
+        { tool: 'create_chapter', ok: false, detail: expect.stringContaining('没有执行') },
+      ],
+    });
+    // 模型下一步看得到排在后面的动作没有执行。
+    expect(body(deps, deps.llmRequests.length - 1)).toContain('create_chapter：没有执行。排在作者没有同意的动作后面');
     expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['路人']);
+    expect(value(await app.reloadWork()).chapters.map((c) => c.title)).toEqual(['第二章']);
     expect(await app.resolveAssistantPending(true)).toMatchObject({ ok: false });
   });
 
@@ -286,9 +315,14 @@ describe('AI 助手（B69）', () => {
     ]);
     expect(all[0]?.detail).toContain(`《第一章 夜叩》2 条：\n- [${first!.id}] 一般：开头的动作描写太长（建议：压缩成一句）；原文：“雨水顺着衣角往下滴”`);
     expect(all[1]?.detail).toContain('忽略');
+    expect(all[2]?.detail).toContain('build_chapter_memory');
     expect(value(await app.openChapter(chapterId)).saved.map((p) => p.text)).toEqual(['林舟推门进来，带进一身雨气。']);
     expect(effects).toContainEqual({ kind: 'show_review', chapterId });
     expect(value(await app.reviewIssues(chapterId))).toEqual([]);
+    // 已经不在待处理里的问题再处理，说清楚没有改，不报成功。
+    step(deps, { message: '', actions: [{ tool: 'resolve_review_issue', issue: second!.id, status: 'fixed' }], done: true });
+    step(deps, { message: '那条已经处理过了。', actions: [], done: true });
+    expect(lastResults(value(await app.sendToAssistant('那条标为已改好')).items)).toMatchObject({ results: [{ ok: false, detail: expect.stringContaining('不在待处理里') }] });
   });
 
   it('长篇记忆、伏笔账本与写作技能：读记忆与账本，改伏笔的状态与章节，停用与启用技能', async () => {
@@ -323,6 +357,12 @@ describe('AI 助手（B69）', () => {
     expect(results[6]?.detail).toBe('“不用副词”本来就是启用的。');
     expect(value(await app.planningView()).foreshadows).toMatchObject([{ title: '玉佩', plantChapterId: one, payoffChapterId: two, status: 'planted' }]);
     expect(value(await app.listWritingSkills()).skills.find((s) => s.skill.name === '雪花写作法')?.skill.enabled).toBe(false);
+
+    // 正文改过以后，按现在的正文重新整理长篇记忆。
+    step(deps, { message: '', actions: [{ tool: 'build_chapter_memory', chapter: '夜叩' }], done: true });
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉，掌柜收下。', cast: [], foreshadows: [], openThreads: [] })));
+    expect(lastResults(value(await app.sendToAssistant('重新整理第一章的记忆')).items)).toMatchObject({ results: [{ tool: 'build_chapter_memory', ok: true }] });
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === one)?.memory).toMatchObject({ summary: '林舟当玉，掌柜收下。' });
   });
 
   it('停下后台任务：交给后台去停，结果原样告诉模型', async () => {
@@ -400,12 +440,14 @@ describe('AI 助手（B69）', () => {
     const lin = value(await app.createEntity('character', '林舟')).created;
     value(await app.savePlan(chapterId, { goal: '林舟当玉', castIds: [lin.id], beats: ['叩门', '压价'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
     step(deps, { message: '让写手写。', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: true });
-    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'));
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'), reply(JSON.stringify({ summary: '林舟叩门当玉，钱四压价。', cast: [{ name: '林舟', state: '缺钱' }], foreshadows: [], openThreads: [] })));
     const notes: (string | null)[] = [];
     const effects: AssistantEffect[] = [];
     const written = value(await app.sendToAssistant('写第一章', { onProgress: (n) => notes.push(n), onEffect: (e) => effects.push(e) }));
-    expect(lastResults(written.items)).toMatchObject({ results: [{ tool: 'write_chapter', ok: true }] });
-    expect(notes).toEqual(['写手正在写《第一章 夜叩》', '写手正在写《第一章 夜叩》：已写 1/2 段', '写手正在写《第一章 夜叩》：已写 2/2 段', null]);
+    expect(lastResults(written.items)).toMatchObject({ results: [{ tool: 'write_chapter', ok: true, detail: expect.stringContaining('长篇记忆已整理') }] });
+    expect(notes).toEqual(['写手正在写《第一章 夜叩》', '写手正在写《第一章 夜叩》：已写 1/2 段', '写手正在写《第一章 夜叩》：已写 2/2 段', '正在整理《第一章 夜叩》的长篇记忆', null]);
+    // 写完一章就有长篇记忆，问“前面写了什么”时用得上。
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === chapterId)?.memory).toMatchObject({ summary: '林舟叩门当玉，钱四压价。' });
     expect(effects.filter((e) => e.kind === 'chapter_changed')).toHaveLength(2);
     expect(value(await app.openChapter(chapterId)).saved.map((p) => p.text)).toEqual(['门在他身后合上了。', '林舟又叩响了门。', '钱四压低了价。']);
 

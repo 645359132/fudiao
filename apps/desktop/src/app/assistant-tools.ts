@@ -117,6 +117,7 @@ export type AssistantHost = {
   applyPlanDraft(draft: PlanDraftData): Promise<Result<AppliedDraft, AppError>>;
   writeChapter(chapterId: string, events?: WriterEvents): Promise<Result<WriterOutcome, AppError>>;
   rollbackWriter(chapterId: string): Promise<Result<unknown, AppError>>;
+  buildMemory(chapterId: string, options?: CallOptions): Promise<Result<unknown, AppError>>;
   reviewChapter(chapterId: string, options?: CallOptions): Promise<Result<ReviewOutcome, AppError>>;
   addForeshadow(fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
   updateForeshadow(foreshadow: Foreshadow, fields: ForeshadowFields): Promise<Result<unknown, AppError>>;
@@ -375,6 +376,18 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       return done(
         `《${c.value.title}》（${PLAN_STATUS_LABEL[plan.status]}）\n目标：${plan.goal}\n情节点：${plan.beats.join('；')}\n出场人物：${plan.castIds.map((id) => name.get(id) ?? id).join('、') || '无'}\n字数：${plan.targetWords ?? '未定'}`,
       );
+    },
+  },
+  build_chapter_memory: {
+    label: '整理长篇记忆',
+    async run(action, env) {
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      env.events.onProgress?.(`正在整理《${c.value.title}》的长篇记忆`);
+      const built = await env.host.buildMemory(c.value.id, env.call());
+      if (!built.ok) return failWith(built.error);
+      env.changed();
+      return done(`已按现在的正文重新整理《${c.value.title}》的长篇记忆；用 get_chapter_memory 查看。`);
     },
   },
   get_chapter_memory: {
@@ -969,7 +982,13 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (!written.ok) return failWith(written.error);
       env.changed();
       const o = written.value;
-      if (o.status === 'written') return done(`写手已写完《${c.value.title}》（写入前的正文在“版本快照”里，可以一键回退）。`);
+      if (o.status === 'written') {
+        // 和成书进度一样，写完就整理长篇记忆：后面的章节靠它接上前文，问“前面写了什么”也靠它。
+        env.events.onProgress?.(`正在整理《${c.value.title}》的长篇记忆`);
+        const memory = await env.host.buildMemory(c.value.id, env.call());
+        const note = memory.ok ? '，长篇记忆已整理' : `；长篇记忆没有整理成（${describeForModel(memory.error)}），可以在计划页重新生成`;
+        return done(`写手已写完《${c.value.title}》${note}（写入前的正文在“版本快照”里，可以一键回退）。`);
+      }
       return failed(`写手${o.status === 'cancelled' ? '被取消' : '中途停下'}：${o.reason ?? ''}（已写 ${o.segmentsDone}/${o.segmentsTotal} 段，可以接着写）`);
     },
   },
@@ -1105,7 +1124,9 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       env.events.onEffect?.({ kind: 'chapter_changed', chapterId });
       env.events.onEffect?.({ kind: 'show_review', chapterId });
       env.changed();
-      return done(`写手已修订这一段（修订前的正文存为了快照，可以恢复）；这一章还有 ${revised.value.issues.length} 条待处理。`);
+      return done(
+        `写手已修订这一段（修订前的正文存为了快照，可以恢复）；这一章还有 ${revised.value.issues.length} 条待处理（修订后程序检查会重新标出，标识可能变了，处理前先用 list_review_issues 看）。这一章的长篇记忆因此过时，后面的章节要接着写时用 build_chapter_memory 重新整理。`,
+      );
     },
   },
   review_chapter: {

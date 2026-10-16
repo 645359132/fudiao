@@ -26,7 +26,7 @@ export type AssistantItem =
   | { readonly id: string; readonly role: 'user'; readonly text: string }
   | { readonly id: string; readonly role: 'assistant'; readonly output: AssistantTurnOutput }
   | { readonly id: string; readonly role: 'results'; readonly results: readonly AssistantResult[] }
-  | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string };
+  | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string; readonly rest: readonly AssistantAction[] };
 
 /** 一轮对话的回调：动作执行要用的（见 ToolEvents），加上对话的更新、逐字显示与作者在看什么。 */
 export type AssistantEvents = ToolEvents & {
@@ -70,6 +70,12 @@ const SELECTION_LIMIT = 2_000;
 export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
 
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
+
+/** 这一轮从哪一条开始，以及开始时打开的作品：作品在这一轮里换了时，这一轮的对话随之存进新的作品。 */
+type TurnState = { readonly turnStart: number; workBefore: SqlPort | null };
+
+/** 没有执行的动作也要告诉模型，免得它以为做过了。 */
+const skipped = (actions: readonly AssistantAction[], detail: string): AssistantResult[] => actions.map((a) => ({ tool: a.tool, ok: false, detail }));
 
 export function assistantUseCases({
   deps,
@@ -196,11 +202,45 @@ export function assistantUseCases({
     return converted.slice(start);
   };
 
+  const turnState = (items: readonly AssistantItem[]): TurnState => ({ turnStart: items.map((i) => i.role).lastIndexOf('user'), workBefore: project() });
+
+  /**
+   * 依次执行动作，结果记进 results。遇到须作者确认的就停下：排在它后面的动作随等待确认的那一条保存，
+   * 作者确认后接着执行（不然它们会悄悄丢掉，模型还以为做过了）。返回是否停在等待确认。
+   */
+  async function runActions(actions: readonly AssistantAction[], results: AssistantResult[], items: AssistantItem[], events: AssistantEvents, turn: TurnState): Promise<boolean> {
+    for (const [at, action] of actions.entries()) {
+      if (aborted(events)) {
+        results.push(...skipped(actions.slice(at), '作者停止了，这个动作没有执行。'));
+        return false;
+      }
+      const env = toolEnv(host, project, events);
+      const summary = await confirmationFor(action.tool, action, env);
+      if (summary !== null) {
+        const added: AssistantItem[] = [];
+        if (results.length > 0) added.push({ id: deps.ids.next(), role: 'results', results: [...results] });
+        added.push({ id: deps.ids.next(), role: 'pending', action, summary, rest: actions.slice(at + 1) });
+        await append(items, added, events);
+        return true;
+      }
+      const outcome = await runTool(action.tool, action, env);
+      events.onProgress?.(null);
+      results.push({ tool: action.tool, ok: outcome.ok, detail: outcome.detail });
+      // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
+      const now = project();
+      if (now !== turn.workBefore && now !== null) {
+        await appendAssistantMessages(now, items.slice(Math.max(0, turn.turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
+        items.splice(0, Math.max(0, turn.turnStart));
+        memory = [];
+        turn.workBefore = now;
+      }
+    }
+    return false;
+  }
+
   /** 从当前的对话往下走，直到办完、需要作者确认、出错或走满步数。 */
   async function proceed(items: AssistantItem[], events: AssistantEvents): Promise<Result<AssistantOutcome, AppError>> {
-    // 这一轮从最后一句作者的话开始；作品在这一轮里换了时，这一轮的对话随之存进新的作品。
-    const turnStart = items.map((i) => i.role).lastIndexOf('user');
-    let workBefore = project();
+    const turn = turnState(items);
     for (let step = 0; step < MAX_ASSISTANT_STEPS; step++) {
       if (aborted(events)) break;
       const prompt = renderAssistantTurn({ history: history(items), state: await state(events) });
@@ -236,29 +276,7 @@ export function assistantUseCases({
       events.onDraft?.(null);
       if (output.actions.length === 0) return ok({ items, pending: false });
       const results: AssistantResult[] = [];
-      for (const action of output.actions) {
-        if (aborted(events)) break;
-        const env = toolEnv(host, project, events);
-        const summary = await confirmationFor(action.tool, action, env);
-        if (summary !== null) {
-          const added: AssistantItem[] = [];
-          if (results.length > 0) added.push({ id: deps.ids.next(), role: 'results', results: [...results] });
-          added.push({ id: deps.ids.next(), role: 'pending', action, summary });
-          await append(items, added, events);
-          return ok({ items, pending: true });
-        }
-        const outcome = await runTool(action.tool, action, env);
-        events.onProgress?.(null);
-        results.push({ tool: action.tool, ok: outcome.ok, detail: outcome.detail });
-        // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
-        const now = project();
-        if (now !== workBefore && now !== null) {
-          await appendAssistantMessages(now, items.slice(Math.max(0, turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
-          items.splice(0, Math.max(0, turnStart));
-          memory = [];
-          workBefore = now;
-        }
-      }
+      if (await runActions(output.actions, results, items, events, turn)) return ok({ items, pending: true });
       await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
       // 说办完了而动作都成功，就停下；有动作失败时再走一步，让助手说明或换个办法。
       if (output.done && results.every((r) => r.ok)) return ok({ items, pending: false });
@@ -287,7 +305,11 @@ export function assistantUseCases({
         const items = loaded.value;
         const last = items.at(-1);
         if (last?.role === 'pending') {
-          await append(items, [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: false, detail: '作者没有确认，接着说了别的，这个动作没有执行。' }] }], events);
+          await append(
+            items,
+            [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: false, detail: '作者没有确认，接着说了别的，这个动作没有执行。' }, ...skipped(last.rest, '排在等待确认的动作后面，也没有执行；需要的话重新给出。')] }],
+            events,
+          );
         }
         await append(items, [{ id: deps.ids.next(), role: 'user', text: text.trim() }], events);
         return await proceed(items, events);
@@ -306,9 +328,15 @@ export function assistantUseCases({
         const items = loaded.value;
         const last = items.at(-1);
         if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
+        const turn = turnState(items);
         const outcome = approve ? await runTool(last.action.tool, last.action, toolEnv(host, project, events)) : { ok: false, detail: '作者没有同意，这个动作没有执行。' };
         events.onProgress?.(null);
-        await append(items, [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: outcome.ok, detail: approve ? `作者确认后执行：${outcome.detail}` : outcome.detail }] }], events);
+        const results: AssistantResult[] = [{ tool: last.action.tool, ok: outcome.ok, detail: approve ? `作者确认后执行：${outcome.detail}` : outcome.detail }];
+        // 同一步里排在它后面的动作：确认了就接着执行（可能又停在下一个须确认的动作上），没同意就都不执行。
+        if (approve) {
+          if (await runActions(last.rest, results, items, events, turn)) return ok({ items, pending: true });
+        } else results.push(...skipped(last.rest, '排在作者没有同意的动作后面，也没有执行；需要的话重新给出。'));
+        await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
         return await proceed(items, events);
       } finally {
         running = false;
@@ -337,7 +365,7 @@ function toStored(item: AssistantItem): Record<string, unknown> {
     case 'results':
       return { results: item.results };
     case 'pending':
-      return { action: item.action, summary: item.summary };
+      return { action: item.action, summary: item.summary, rest: item.rest };
   }
 }
 
@@ -358,7 +386,9 @@ function fromStored(id: string, role: string, payload: Readonly<Record<string, u
   }
   if (role === 'pending') {
     const action = AssistantTurnOutput.shape.actions.element.safeParse(payload['action']);
-    return action.success && typeof payload['summary'] === 'string' ? [{ id, role, action: action.data, summary: payload['summary'] }] : [];
+    // 较早保存的没有 rest。
+    const rest = AssistantTurnOutput.shape.actions.safeParse(payload['rest'] ?? []);
+    return action.success && rest.success && typeof payload['summary'] === 'string' ? [{ id, role, action: action.data, summary: payload['summary'], rest: rest.data }] : [];
   }
   return [];
 }

@@ -15,6 +15,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm depcheck && pnpm test",
     "m0": "tsx apps/m0-cli/src/main.ts",
     "m3:eval": "tsx tools/m3-eval/main.ts",
+    "assistant:eval": "tsx tools/assistant-eval/main.ts",
     "prompts:build": "tsx tools/prompts/build-templates.ts",
     "bench": "tsx tools/bench/main.ts"
   },

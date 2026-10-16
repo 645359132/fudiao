@@ -39,6 +39,16 @@ describe('本章的伏笔', () => {
   it('揭晓内容为空的伏笔没有需要守住的内容', () => {
     expect(foreshadowsForChapter(plan('c1'), [{ ...jade, reveal: '  ' }], order).mustNotReveal).toEqual([]);
   });
+
+  it('账本里写明在本章埋设或回收、而计划里没有列出的伏笔，同样算本章要埋、要收；已埋的不再埋，已回收与放弃的不算', () => {
+    // 计划先做好，伏笔后来才记进账本（例如作者让 AI 助手记一条伏笔）。
+    const later: ForeshadowItem = { id: 'f4', title: '当票', reveal: '当票是父亲留下的', plantChapterId: 'c1', payoffChapterId: 'c3', status: 'planned' };
+    expect(foreshadowsForChapter(plan('c1'), [jade, later, done], order).toPlant.map((f) => f.id)).toEqual(['f4']);
+    expect(foreshadowsForChapter(plan('c3'), [jade, later, done], order).toPayoff.map((f) => f.id)).toEqual(['f1', 'f4']);
+    // 计划里列了的不重复。
+    expect(foreshadowsForChapter(plan('c1', { foreshadowPlant: ['f4'] }), [later], order).toPlant.map((f) => f.id)).toEqual(['f4']);
+    expect(foreshadowsForChapter(plan('c2'), [{ ...later, plantChapterId: 'c2', status: 'dropped' }], order).toPlant).toEqual([]);
+  });
 });
 
 describe('计划检查', () => {
