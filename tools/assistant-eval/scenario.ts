@@ -50,6 +50,7 @@ export type Hooks = { readonly log: (line: string) => void; readonly now: () => 
 export function backgroundFor(app: AppService, log: (line: string) => void) {
   let writing: { abort: AbortController; current: string; done: number; total: number; queued: string[] } | null = null;
   let reviewing: { abort: AbortController; current: string; done: number; total: number } | null = null;
+  let simulating: { abort: AbortController; runId: string } | null = null;
   const pending: Promise<void>[] = [];
   const title = async (id: string) => {
     const w = await app.reloadWork();
@@ -106,17 +107,36 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       );
       return null;
     },
+    simulating: () => simulating !== null,
+    simulate(runId) {
+      if (simulating !== null) return '已经有一次推演在推进，等它推完或停下以后再推';
+      const abort = new AbortController();
+      simulating = { abort, runId };
+      pending.push(
+        (async () => {
+          log(`  [后台] 推演 ${runId}`);
+          const view = await app.continueSimRun(runId, { signal: abort.signal });
+          log(`  [后台] 推演停下：${view.ok ? `${view.value.phase}，第 ${view.value.round} 回合，$${view.value.spentUsd.toFixed(4)}` : JSON.stringify(view.error)}`);
+          simulating = null;
+        })(),
+      );
+      return null;
+    },
     stop(what) {
       const stopped: string[] = [];
-      if (what !== 'review' && writing !== null) {
+      if ((what === 'writing' || what === 'all') && writing !== null) {
         writing.abort.abort();
         stopped.push(`写手停下（已写完的段落保留），后面排着的 ${writing.queued.length} 章不再写`);
       }
-      if (what !== 'writing' && reviewing !== null) {
+      if ((what === 'review' || what === 'all') && reviewing !== null) {
         reviewing.abort.abort();
         stopped.push('依次审核停下');
       }
-      return stopped.length > 0 ? `已停下：${stopped.join('；')}。` : '后台没有在进行的写作或审核。';
+      if ((what === 'simulation' || what === 'all') && simulating !== null) {
+        simulating.abort.abort();
+        stopped.push('推演停在当前这一步之后（可以继续）');
+      }
+      return stopped.length > 0 ? `已停下：${stopped.join('；')}。` : '后台没有在进行的写作、审核或推演。';
     },
   };
 
@@ -126,9 +146,11 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       // 先取下当前的批次：取章名要等，这期间批次可能结束、变成 null。
       const w = writing;
       const r = reviewing;
+      const sim = simulating;
       const out: string[] = [];
       if (w !== null) out.push(`写手正在写《${await title(w.current)}》（这一批第 ${w.done + 1} / ${w.total} 章${w.queued.length > 0 ? `，后面还有 ${w.queued.length} 章` : ''}）`);
       if (r !== null) out.push(`正在依次审核：第 ${r.done + 1} / ${r.total} 章《${await title(r.current)}》`);
+      if (sim !== null) out.push(`角色推演正在推进（推演 [${sim.runId}]）`);
       return out;
     },
     /** 等后台全部做完。 */

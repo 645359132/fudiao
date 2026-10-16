@@ -22,11 +22,19 @@ import {
   type ProjectPatch,
   type RelationshipFields,
   type SearchResult,
+  type SimRun,
+  type SimScene,
+  type SimSceneFields,
   type SqlPort,
+  type StoredEvent,
   type Volume,
 } from '@fudiao/store';
+import type { RunEvent } from '@fudiao/engine';
 import type { AppError } from './errors';
-import { ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SKILL_STAGE_LABEL } from './labels';
+import { ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SIM_END_LABEL, SIM_PAUSE_LABEL, SIM_RUN_STATUS_LABEL, SKILL_STAGE_LABEL } from './labels';
+import type { BeatSheetRequest, BeatSheetView } from './narration';
+import { ACTION_LABELS, INJURY_LABELS } from './sim-describe';
+import type { SceneDraft, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
 import type { AppliedDraft, PlanningView } from './planning';
 import type { RelationsView } from './relations';
 import type { SkillsView } from './writing-skills';
@@ -42,7 +50,8 @@ export type AssistantEffect =
   | { readonly kind: 'chapter_changed'; readonly chapterId: string }
   | { readonly kind: 'open_page'; readonly page: Extract<AssistantAction, { tool: 'open_page' }>['page'] }
   | { readonly kind: 'work_opened' }
-  | { readonly kind: 'changed' };
+  | { readonly kind: 'changed' }
+  | { readonly kind: 'simulation_changed' };
 
 /** 作者发话时在正文里选中的文字（edit_selection 的对象）。 */
 export type AssistantSelection = { readonly chapterId: string; readonly range: EditorSelection; readonly text: string };
@@ -54,8 +63,12 @@ export type AssistantSelection = { readonly chapterId: string; readonly range: E
 export type BackgroundJobs = {
   writeChapters(chapterIds: readonly string[], review: boolean): string | null;
   reviewChapters(chapterIds: readonly string[]): string | null;
-  /** 停下后台的写作或依次审核；返回说明（停下了什么，或没有在进行的）。 */
-  stop(what: 'writing' | 'review' | 'all'): string;
+  /** 是否已有一次推演在后台推进（同一时间只推进一次）。 */
+  simulating(): boolean;
+  /** 在后台连续推进这次推演，直到结束、等待作者、暂停或被停下。返回 null 表示已经开始推进，否则是原因。 */
+  simulate(runId: string, sceneId: string): string | null;
+  /** 停下后台的写作、依次审核或推演；返回说明（停下了什么，或没有在进行的）。 */
+  stop(what: 'writing' | 'review' | 'simulation' | 'all'): string;
 };
 
 /** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展、作者选中的文字与后台任务。 */
@@ -129,12 +142,31 @@ export type AssistantHost = {
     request: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: SelectionOperation; readonly instruction: string; readonly overrides: ContextOverrides },
     options?: CallOptions,
   ): Promise<Result<{ readonly candidate: { readonly id: string } | null }, AppError>>;
+  listSimScenes(): Promise<Result<SimScene[], AppError>>;
+  listSimRuns(sceneId: string): Promise<Result<SimRun[], AppError>>;
+  draftSimScene(description: string, options?: CallOptions): Promise<Result<SceneDraft, AppError>>;
+  saveSimScene(id: string | null, fields: SimSceneFields): Promise<Result<SimScene, AppError>>;
+  startSimRun(sceneId: string, options: SimRunOptions): Promise<Result<SimRunView, AppError>>;
+  simRunStatus(runId: string): Promise<Result<SimRunView, AppError>>;
+  simRunDetail(runId: string): Promise<Result<SimRunDetail, AppError>>;
+  simRunEvents(runId: string): Promise<Result<readonly StoredEvent[], AppError>>;
+  draftBeatSheet(runId: string, request: BeatSheetRequest, options?: CallOptions): Promise<Result<BeatSheetView, AppError>>;
+  narrateBeatSheet(id: string, chapterId: string, options?: CallOptions): Promise<Result<{ readonly id: string }, AppError>>;
 };
 
 /** 一个动作的结果：成功与否，以及告诉模型（也显示给作者）的说明。 */
 export type Outcome = { readonly ok: boolean; readonly detail: string };
 const done = (detail: string): Outcome => ({ ok: true, detail });
 const failed = (detail: string): Outcome => ({ ok: false, detail });
+
+/** 推演的全局概要最多给出的字数：太长时略去前面的回合。 */
+const SIM_SUMMARY_LIMIT = 6_000;
+/** list_simulations 最多列出的场景数，与每个场景最多列出的推演次数。 */
+const LISTED_SCENES = 20;
+const LISTED_RUNS = 5;
+/** 生成的场景没有给回合上限时用的回合数（与推演页一致）。 */
+const DEFAULT_SIM_ROUNDS = 8;
+const PROTOCOL_LABEL = { simultaneous: '同时行动', turn_based: '轮流对话' } as const;
 
 /** 读一章时最多给出的字数：太长时给开头与结尾。 */
 const READ_LIMIT = 6_000;
@@ -281,6 +313,91 @@ async function chapterRange(
   const t = await resolve(to, current.to);
   if (!t.ok) return t;
   return ok({ from: f.value, to: t.value });
+}
+
+/** 场景配置里的角色（键与名字）；配置不合格时尽量读出能读的。 */
+function sceneActors(config: Readonly<Record<string, unknown>>): { readonly id: string; readonly name: string }[] {
+  const actors = config['actors'];
+  if (!Array.isArray(actors)) return [];
+  return actors.flatMap((a: unknown) => {
+    if (a === null || typeof a !== 'object') return [];
+    const x = a as Record<string, unknown>;
+    return typeof x['id'] === 'string' ? [{ id: x['id'], name: typeof x['name'] === 'string' ? x['name'] : x['id'] }] : [];
+  });
+}
+
+const actorList = (actors: readonly { readonly id: string; readonly name: string }[]) => actors.map((a) => `${a.name}（${a.id}）`).join('、');
+
+/** 推演的状态读成一句话。 */
+function runState(view: SimRunView): string {
+  const { run } = view;
+  const reason =
+    run.status === 'ended'
+      ? `（${SIM_END_LABEL[view.endReason ?? run.endReason ?? ''] ?? view.endReason ?? ''}）`
+      : run.status === 'paused'
+        ? `（${SIM_PAUSE_LABEL[view.pause?.reason ?? run.pauseReason ?? ''] ?? ''}${view.pause?.detail === undefined ? '' : `：${view.pause.detail}`}）`
+        : '';
+  return `${SIM_RUN_STATUS_LABEL[run.status]}${reason}，第 ${view.round} 回合`;
+}
+
+/** 按标识找推演；给的是场景（标识或场景名）时取这个场景最近的一次。 */
+async function findRun(env: ToolEnv, ref: string): Promise<Result<SimRunView, string>> {
+  const key = ref.trim();
+  const direct = await env.host.simRunStatus(key);
+  if (direct.ok) return ok(direct.value);
+  if (direct.error.code !== 'not_found') return err(describeForModel(direct.error));
+  const scenes = await env.host.listSimScenes();
+  if (!scenes.ok) return err(describeForModel(scenes.error));
+  const scene = pick(scenes.value, key, (x) => [x.title], '推演或推演场景');
+  if (!scene.ok) return err(`${scene.error}（推演的标识见 list_simulations）`);
+  const runs = await env.host.listSimRuns(scene.value.id);
+  if (!runs.ok) return err(describeForModel(runs.error));
+  const latest = runs.value[0];
+  if (latest === undefined) return err(`场景“${scene.value.title}”还没有推演过；用 start_simulation 开始`);
+  const view = await env.host.simRunStatus(latest.id);
+  return view.ok ? ok(view.value) : err(describeForModel(view.error));
+}
+
+/** 已经结束的最后一个回合（写成正文只能写已经结束的回合）。 */
+const lastEndedRound = (events: readonly StoredEvent[]): number =>
+  events.reduce((n, e) => {
+    const p = e.payload as RunEvent;
+    return p.type === 'RoundEnded' ? Math.max(n, p.round) : n;
+  }, 0);
+
+/**
+ * 一次推演的全局概要：每回合发生的事（谁做了什么、说了什么、看上去与听上去怎样）与此刻的局面。
+ * 这是作者视角的全貌，只交给助手向作者汇报；写成正文另走 narrate_simulation（只用视角角色当时的认知，硬性规则 3）。
+ */
+function simSummary(detail: SimRunDetail): string {
+  const rounds = detail.data?.rounds ?? [];
+  const blocks = rounds.map((r) => {
+    const lines = r.occurrences.map((o) => {
+      const head = [o.actor ?? '', ACTION_LABELS[o.kind] ?? o.kind, o.item ?? '', o.target === null ? '' : `→ ${o.target}`].filter((x) => x !== '').join(' ');
+      const where = o.zones.length === 0 ? '' : `（${o.zones.join(' → ')}）`;
+      const speech = o.sentences.length === 0 ? '' : `：“${o.sentences.join('')}”`;
+      const look = [o.visual ?? '', o.sound === null ? '' : `声音：${o.sound}`].filter((x) => x !== '').join('；');
+      return `- ${head}${where}${speech}${look === '' ? '' : `；${look}`}`;
+    });
+    return `第 ${r.round} 回合：\n${lines.length === 0 ? '- 没有发生看得见的事' : lines.join('\n')}`;
+  });
+  let shown = blocks;
+  let omitted = 0;
+  while (shown.length > 1 && shown.join('\n').length > SIM_SUMMARY_LIMIT) {
+    shown = shown.slice(1);
+    omitted++;
+  }
+  const last = rounds.at(-1);
+  const world =
+    last === undefined
+      ? ''
+      : [
+          `此刻的局面：${last.world.actors.map((a) => `${a.name}在${a.zone}${a.injury === '' || a.injury === 'none' ? '' : `，${INJURY_LABELS[a.injury] ?? a.injury}`}`).join('；')}`,
+          last.world.items.length === 0 ? '' : `物品：${last.world.items.map((i) => `${i.name}在${i.where === '' ? '不明处' : i.where}`).join('；')}`,
+        ]
+          .filter((x) => x !== '')
+          .join('\n');
+  return [omitted > 0 ? `（前 ${omitted} 个回合略去）` : '', ...shown, world].filter((x) => x !== '').join('\n');
 }
 
 type ActionOf<K extends AssistantTool> = Extract<AssistantAction, { readonly tool: K }>;
@@ -1244,6 +1361,167 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const saved = await env.host.createSnapshot(c.value.id);
       if (!saved.ok) return failWith(saved.error);
       return done(`已给《${c.value.title}》存了一个版本快照，在章节的“版本快照”里。`);
+    },
+  },
+  list_simulations: {
+    label: '查看推演',
+    async run(action, env) {
+      const scenes = await env.host.listSimScenes();
+      if (!scenes.ok) return failWith(scenes.error);
+      let list = scenes.value;
+      if (action.scene !== null) {
+        const s = pick(list, action.scene, (x) => [x.title], '推演场景');
+        if (!s.ok) return failed(s.error);
+        list = [s.value];
+      }
+      if (list.length === 0) return done('还没有推演场景；用 create_sim_scene 由一段局面描述建一个。');
+      const lines: string[] = [];
+      for (const scene of list.slice(0, LISTED_SCENES)) {
+        lines.push(`[${scene.id}] ${scene.title}（${PROTOCOL_LABEL[scene.protocol]}，最多 ${scene.maxRounds} 回合；角色：${actorList(sceneActors(scene.config)) || '无'}）`);
+        const runs = await env.host.listSimRuns(scene.id);
+        if (!runs.ok) return failWith(runs.error);
+        if (runs.value.length === 0) lines.push('  - 还没有推演过');
+        for (const r of runs.value.slice(0, LISTED_RUNS)) {
+          const reason =
+            r.status === 'ended' && r.endReason !== null
+              ? `（${SIM_END_LABEL[r.endReason] ?? r.endReason}）`
+              : r.status === 'paused' && r.pauseReason !== null
+                ? `（${SIM_PAUSE_LABEL[r.pauseReason] ?? r.pauseReason}）`
+                : '';
+          lines.push(`  - 推演 [${r.id}]：${SIM_RUN_STATUS_LABEL[r.status]}${reason}，第 ${r.round} 回合${r.parentRunId === null ? '' : '（分支）'}`);
+        }
+        if (runs.value.length > LISTED_RUNS) lines.push(`  - ……还有 ${runs.value.length - LISTED_RUNS} 次更早的推演`);
+      }
+      if (list.length > LISTED_SCENES) lines.push(`……还有 ${list.length - LISTED_SCENES} 个场景，指明场景名再看`);
+      return done(lines.join('\n'));
+    },
+  },
+  create_sim_scene: {
+    label: '建推演场景',
+    async run(action, env) {
+      let chapterId: string | null = null;
+      if (action.chapter !== null) {
+        const c = await env.findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        chapterId = c.value.id;
+      }
+      env.events.onProgress?.('正在生成推演场景');
+      const draft = await env.host.draftSimScene(action.description, env.call());
+      if (!draft.ok) return failWith(draft.error);
+      const { config, problems } = draft.value;
+      if (problems.length > 0) {
+        return failed(
+          `生成的场景还有 ${problems.length} 处不合规则，没有保存：${problems.slice(0, 6).join('；')}${problems.length > 6 ? '……' : ''}。可以把描述写得更具体再试一次，或请作者在推演页“生成场景配置草稿”后逐项修改`,
+        );
+      }
+      const title = action.title?.trim() || config.meta?.title?.trim() || '新场景';
+      const protocol = config.actors.length === 2 ? 'turn_based' : 'simultaneous';
+      const maxRounds = action.maxRounds ?? DEFAULT_SIM_ROUNDS;
+      const saved = await env.host.saveSimScene(null, { chapterId, title, config, protocol, maxRounds, firstSpeaker: null });
+      if (!saved.ok) return failWith(saved.error);
+      env.events.onEffect?.({ kind: 'simulation_changed' });
+      return done(
+        `已保存推演场景“${title}”[${saved.value.id}]：${config.zones.length} 个区域，角色 ${actorList(config.actors)}，${PROTOCOL_LABEL[protocol]}，最多 ${maxRounds} 回合。作者可以在推演页修改；要推演时用 start_simulation。`,
+      );
+    },
+  },
+  start_simulation: {
+    label: '开始推演',
+    async run(action, env) {
+      const jobs = env.events.background;
+      if (jobs === undefined) return failed('这里不能在后台推演；请作者在推演页开始');
+      if (jobs.simulating()) return failed('已经有一次推演在后台推进，等它推完或停下以后再开始');
+      const scenes = await env.host.listSimScenes();
+      if (!scenes.ok) return failWith(scenes.error);
+      const scene = pick(scenes.value, action.scene, (x) => [x.title], '推演场景');
+      if (!scene.ok) return failed(scene.error);
+      const started = await env.host.startSimRun(scene.value.id, { mode: 'auto', ...(action.budgetUsd !== null && { budgetUsd: action.budgetUsd }) });
+      if (!started.ok) return failWith(started.error);
+      const runId = started.value.run.id;
+      const refused = jobs.simulate(runId, scene.value.id);
+      env.events.onEffect?.({ kind: 'simulation_changed' });
+      if (refused !== null) return failed(`推演已登记 [${runId}]，但没有开始推进：${refused}；之后可以用 continue_simulation 接着推`);
+      return done(
+        `已开始推演 [${runId}]（场景“${scene.value.title}”，最多 ${scene.value.maxRounds} 回合${action.budgetUsd === null ? '' : `，费用上限 $${action.budgetUsd}`}），在后台连续推进到结束；裁决自动接受，采纳进作品前作者要逐项复核。这一轮不用等，进度在“正在进行的任务”与推演页；推完用 get_simulation 看概要。`,
+      );
+    },
+  },
+  continue_simulation: {
+    label: '继续推演',
+    async run(action, env) {
+      const jobs = env.events.background;
+      if (jobs === undefined) return failed('这里不能在后台推演；请作者在推演页继续');
+      const found = await findRun(env, action.run);
+      if (!found.ok) return failed(found.error);
+      const view = found.value;
+      if (view.phase === 'Ended') return failed(`这次推演已经结束了（${runState(view)}）；可以用 start_simulation 再推一次`);
+      if (view.awaitingRulings > 0 || view.awaitingDirector) {
+        const waiting = [view.awaitingRulings > 0 ? `${view.awaitingRulings} 条待核实的裁决` : '', view.awaitingDirector ? '一条导演提议' : ''].filter((x) => x !== '').join('与');
+        return failed(`这次推演在等作者处理${waiting}，请作者在推演页处理后再继续`);
+      }
+      if (jobs.simulating()) return failed('已经有一次推演在后台推进，等它推完或停下以后再继续');
+      const refused = jobs.simulate(view.run.id, view.run.sceneId);
+      if (refused !== null) return failed(refused);
+      return done(`推演 [${view.run.id}] 从第 ${view.round} 回合接着在后台推进；进度在“正在进行的任务”与推演页，推完用 get_simulation 看概要。`);
+    },
+  },
+  get_simulation: {
+    label: '查看推演概要',
+    async run(action, env) {
+      const found = await findRun(env, action.run);
+      if (!found.ok) return failed(found.error);
+      const detail = await env.host.simRunDetail(found.value.run.id);
+      if (!detail.ok) return failWith(detail.error);
+      const d = detail.value;
+      const v = d.view;
+      const review = (d.data?.rounds ?? []).reduce((n, r) => n + r.rulings.filter((x) => x.needsReview).length, 0);
+      const waiting = [
+        ...d.pendingRulings.map((r) => `- 待核实的裁决：${r.rationale}${r.effects.length === 0 ? '' : `（${r.effects.join('；')}）`}`),
+        ...(d.pendingDirector === null ? [] : [`- 导演提议：${d.pendingDirector.rationale}`]),
+      ];
+      return done(
+        [
+          `推演 [${v.run.id}]：${runState(v)}；已用 $${v.spentUsd.toFixed(4)}${v.unknownCostCalls > 0 ? `（另有 ${v.unknownCostCalls} 次调用费用未知）` : ''}${v.run.budgetUsd === null ? '' : `，费用上限 $${v.run.budgetUsd}`}`,
+          `角色：${actorList(d.cast.actors)}`,
+          review === 0 ? '' : `自动接受的裁决 ${review} 条，采纳进作品前要作者逐项复核`,
+          waiting.length === 0 ? '' : `等作者在推演页处理：\n${waiting.join('\n')}`,
+          simSummary(d),
+        ]
+          .filter((x) => x !== '')
+          .join('\n'),
+      );
+    },
+  },
+  narrate_simulation: {
+    label: '推演写成正文',
+    async run(action, env) {
+      const found = await findRun(env, action.run);
+      if (!found.ok) return failed(found.error);
+      const runId = found.value.run.id;
+      const detail = await env.host.simRunDetail(runId);
+      if (!detail.ok) return failWith(detail.error);
+      const pov = pick(detail.value.cast.actors, action.pov, (a) => [a.name], '视角角色');
+      if (!pov.ok) return failed(pov.error);
+      const c = await env.findChapter(action.chapter);
+      if (!c.ok) return failed(c.error);
+      const events = await env.host.simRunEvents(runId);
+      if (!events.ok) return failWith(events.error);
+      const ended = lastEndedRound(events.value);
+      if (ended === 0) return failed('这次推演还没有结束的回合，没有可以写的内容');
+      const fromRound = action.fromRound ?? 1;
+      const toRound = Math.min(action.toRound ?? ended, ended);
+      if (fromRound > toRound) return failed(`回合范围不对：已经结束的回合是第 1 到第 ${ended} 回合`);
+      // 不带作者说明与文风：助手看过全局概要，它写的说明可能带进视角角色不知道的事（硬性规则 3）。
+      env.events.onProgress?.(`正在按${pov.value.name}的视角整理第 ${fromRound}–${toRound} 回合的节拍`);
+      const sheet = await env.host.draftBeatSheet(runId, { pov: pov.value.id, fromRound, toRound, notes: '' }, env.call());
+      if (!sheet.ok) return failWith(sheet.error);
+      env.events.onProgress?.(`正在把${pov.value.name}的经历写进《${c.value.title}》`);
+      const candidate = await env.host.narrateBeatSheet(sheet.value.sheet.id, c.value.id, env.call());
+      if (!candidate.ok) return failWith(candidate.error);
+      env.events.onEffect?.({ kind: 'show_candidates', chapterId: c.value.id });
+      return done(
+        `已按${pov.value.name}的视角把第 ${fromRound}–${toRound} 回合写成候选稿（${sheet.value.beats.length} 个节拍），放在《${c.value.title}》旁的“AI 写作”里；作者要用“采纳…”选定写进作品的事件与认知，不能直接接受。`,
+      );
     },
   },
   export_book: {

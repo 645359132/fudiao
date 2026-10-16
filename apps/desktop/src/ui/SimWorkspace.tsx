@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ViewerData, ViewerKnowledge, ViewerRound } from '@fudiao/engine';
-import type { SimRun } from '@fudiao/store';
+import { SIM_END_LABEL, SIM_PAUSE_LABEL, SIM_RUN_STATUS_LABEL } from '../app/labels';
 import { describeObservation } from '../app/sim-describe';
 import type { SimRunDetail } from '../app/simulation';
 import { EvaluationPanel } from './EvaluationPanel';
@@ -42,19 +42,6 @@ const PHASE: Readonly<Record<SimRunDetail['view']['phase'], string>> = {
   Paused: '已暂停',
   Ended: '已结束',
 };
-const END: Readonly<Record<string, string>> = { max_rounds: '到达回合上限', actors_left: '角色都已离场', budget: '预算用完', author_stop: '作者停止', stalemate: '僵局' };
-const PAUSE: Readonly<Record<string, string>> = {
-  author: '作者暂停',
-  proposal_invalid: '角色的行动多次不合规则',
-  llm_error: '模型调用失败',
-  refused: '模型拒绝了请求',
-  truncated: '模型的输出被截断',
-  invalid_output: '模型的输出格式不对',
-  ruling_invalid: '裁决不合规则',
-  stalemate: '僵局',
-};
-const RUN_STATUS: Readonly<Record<SimRun['status'], string>> = { created: '还没有开始', running: '进行中', awaiting_author: '等待作者', paused: '已暂停', ended: '已结束' };
-
 const label = (map: Readonly<Record<string, string>>, key: string) => map[key] ?? key;
 const usd = (v: number) => `$${v.toFixed(4)}`;
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`;
@@ -263,9 +250,9 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
   const ended = view.phase === 'Ended';
   const waiting = view.phase === 'AwaitingAuthor';
   const state = ended
-    ? `已结束：${label(END, view.endReason ?? '')}`
+    ? `已结束：${label(SIM_END_LABEL, view.endReason ?? '')}`
     : view.phase === 'Paused'
-      ? `已暂停：${label(PAUSE, view.pause?.reason ?? '')}${view.pause?.detail === undefined ? '' : `（${view.pause.detail}）`}`
+      ? `已暂停：${label(SIM_PAUSE_LABEL, view.pause?.reason ?? '')}${view.pause?.detail === undefined ? '' : `（${view.pause.detail}）`}`
       : `${advancing ? '正在推进' : '可以继续'} · ${PHASE[view.phase]}`;
   const budget = view.run.budgetUsd;
   return (
@@ -394,7 +381,7 @@ export function SimWorkspace() {
         <nav aria-label="这个场景的推演" className="skill-actions">
           {runs.map((r, i) => (
             <button key={r.id} type="button" aria-current={r.id === selected} disabled={advancing && r.id !== selected} onClick={() => void select(r.id)}>
-              第 {runs.length - i} 次 · {RUN_STATUS[r.status]}
+              第 {runs.length - i} 次 · {SIM_RUN_STATUS_LABEL[r.status]}
               {r.status === 'ended' ? '' : ` · 第 ${r.round} 回合`}
               {r.parentRunId === null ? '' : ' · 分支'}
             </button>

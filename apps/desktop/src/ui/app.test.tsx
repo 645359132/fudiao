@@ -1550,10 +1550,20 @@ describe('区域图的编辑（B41）', () => {
 });
 
 /** 打开作品、配好默认模型（之后由测试模型应答）、存好废仓库场景，进入这个场景的“推演”。 */
+/** 推演与写成正文的任务由测试模型应答；AI 助手等其余调用照常按排好的回复。 */
+const SIMULATED: ReadonlySet<string> = new Set(['character_action', 'semantic_ruling', 'belief_update', 'judgement', 'beat_sheet', 'candidate_text', 'director']);
+
 async function simReady(maxRounds = 3) {
   const base = fsDeps();
   let model: LlmPort | null = null;
-  const deps: TestDeps = { ...base, llm: { forProvider: (provider) => model ?? base.llm.forProvider(provider) } };
+  const deps: TestDeps = {
+    ...base,
+    llm: {
+      forProvider: (provider) => ({
+        complete: (request, options) => (model !== null && SIMULATED.has(request.task) ? model : base.llm.forProvider(provider)).complete(request, options),
+      }),
+    },
+  };
   all.push(deps);
   const service = createAppService(deps);
   const store = createAppStore(service);
@@ -1804,6 +1814,28 @@ describe('推演写成正文的界面（B29、B45）', () => {
     await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]));
     expect(store.getState().candidates).toEqual([]);
     expect(store.getState().facts.map((f) => [f.kind, f.status, f.content, f.eventIds.length])).toEqual([['world', 'confirmed', '裁决结果（仓库中央）：弩箭擦过主角肩头', 1]]);
+  });
+});
+
+describe('AI 助手操作推演的界面（M5-19）', () => {
+  it('助手开始推演后在后台推进到结束：推演页列出新的运行，现状里写着正在推进；推完后可以看概要', async () => {
+    const { user, store, deps, runs } = await simReady();
+    deps.llmResponses.push(reply(JSON.stringify({ message: '已开始推演。', actions: [{ tool: 'start_simulation', scene: '废仓库', budgetUsd: null }], done: true })));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '推演一下仓库这场戏{Enter}');
+    expect(await screen.findByText('已开始推演。')).toBeTruthy();
+    expect(await within(runs).findByRole('button', { name: /第 1 次/ })).toBeTruthy();
+    await waitFor(() => expect(simStatus()).toContain('已结束：到达回合上限'), { timeout: 10_000 });
+    await waitFor(() => expect(store.getState().simAdvancing).toBe(false));
+    expect(store.getState().backgroundWork()).toEqual([]);
+
+    deps.llmResponses.push(
+      reply(JSON.stringify({ message: '', actions: [{ tool: 'get_simulation', run: '废仓库' }], done: false })),
+      reply(JSON.stringify({ message: '推完了：三个回合。', actions: [], done: true })),
+    );
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '推得怎么样{Enter}');
+    expect(await screen.findByText('推完了：三个回合。')).toBeTruthy();
+    const results = store.getState().assistantItems.filter((i) => i.role === 'results').at(-1);
+    expect(results).toMatchObject({ results: [{ tool: 'get_simulation', ok: true, detail: expect.stringContaining('已结束（到达回合上限），第 3 回合') }] });
   });
 });
 

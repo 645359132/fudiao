@@ -371,6 +371,8 @@ describe('AI 助手（B69）', () => {
     const background = {
       reviewChapters: () => null,
       writeChapters: () => null,
+      simulating: () => false,
+      simulate: () => null,
       stop: (what: string) => {
         asked.push(what);
         return '已停下：写手停在这一段之后。';
@@ -399,6 +401,8 @@ describe('AI 助手（B69）', () => {
         written.push([ids, review]);
         return null;
       },
+      simulating: () => false,
+      simulate: () => null,
       stop: () => '后台没有在进行的写作或审核。',
     };
     step(deps, {
@@ -418,7 +422,7 @@ describe('AI 助手（B69）', () => {
     ]);
 
     // 后台已有一批时说明原因；指名的章节里没有正文的不排。
-    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, stop: () => '' };
+    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, simulating: () => false, simulate: () => null, stop: () => '' };
     // 动作失败时助手会再走一步说明：每次排两步。
     const failing = (actions: AssistantTurnOutput['actions']) => {
       step(deps, { message: '', actions, done: true });

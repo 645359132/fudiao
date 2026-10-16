@@ -49,12 +49,19 @@
 - edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
 - review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。这一轮对话会等它审完。参数 chapter。
 - review_chapters：把几章交给后台依次审核（问题照样列在各章旁的“审核”里）。动作立即返回，审核在后台进行，进度出现在“正在进行的任务”里；审两章以上或“审核全书”时用它。参数 chapters：章节列表，null 为所有已经写好的章节。
-- stop_background：停下后台的写作或依次审核（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写）。只在作者要求停下时用。参数 what：writing 写作、review 审核、all 全部。
+- stop_background：停下后台的写作、依次审核或推演（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；推演停在当前这一步之后，可以继续）。只在作者要求停下时用。参数 what：writing 写作、review 审核、simulation 推演、all 全部。
 - resolve_review_issue：处理一条审核问题：fixed 标为已改好，ignored 忽略。参数 issue（问题的标识，见 list_review_issues）；status。
 - revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。这一轮对话会等它改完。参数 issue。
 - rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
 - add_foreshadow：在伏笔账本里记一条伏笔，写手与审核都会照着它。参数 title（简短的名字）；content（伏笔是什么）；reveal：揭晓之前不得说破的内容，可为 null；plant：在哪一章埋下，可为 null；payoff：在哪一章回收，可为 null。
 - update_foreshadow：修改账本里的一条伏笔，或改它的状态（planned 计划中、planted 已埋下、paid_off 已回收、dropped 放弃）。参数 foreshadow（标识或名字）；title、content、reveal、plant、payoff、status 不改的填 null；plant、payoff 填“无”表示清除章节。
+角色推演（每个角色只按自己知道的信息行动，程序裁决结果；用来试一个局面会怎样发展，再挑一个角色的视角写成正文）：
+- list_simulations：列出推演场景（标识、场景名、角色）与每个场景的推演（标识、状态、回合、费用）。参数 scene：只列这个场景的（标识或场景名），null 为全部。
+- create_sim_scene：由一段局面描述生成推演场景并保存（保存前按规则校验，不合格时不保存、返回问题）。描述写清：在哪里（几个区域、彼此能否看见听见）、有谁、各自想要什么、谁知道什么秘密、有哪些关键物品；可以先看章节计划与人物设定再写。参数 description；title：场景名，可为 null；chapter：关联的章节，可为 null；maxRounds：回合上限，null 为 8。
+- start_simulation：用一个场景开始一次推演，在后台连续推进到结束（会按回合调用模型；裁决自动接受，采纳进作品前由作者复核）。动作立即返回，进度出现在“正在进行的任务”里。参数 scene；budgetUsd：费用上限（美元），null 为不设（模型没有配置价格时不能设）。
+- continue_simulation：让暂停或停下的推演在后台接着推进。等待作者确认裁决或决定导演提议时不能继续，请作者到推演页处理。参数 run（推演的标识）。
+- get_simulation：看一次推演的状态与全局概要（每回合谁做了什么、说了什么，结束原因、费用，等作者处理的事）。这是作者视角的全貌，只用来向作者汇报与做计划。参数 run。
+- narrate_simulation：按一个角色的视角，把一次推演中已经结束的回合写成正文，作为候选稿放在这一章末尾；只用这个角色当时知道的信息。候选稿要作者在章节旁的“AI 写作”里用“采纳…”写进作品，不能直接接受。参数 run；pov：视角角色（名字或键）；chapter：写进哪一章；fromRound、toRound：回合范围，null 为从第 1 回合到最后一个结束的回合。
 导出：
 - export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：

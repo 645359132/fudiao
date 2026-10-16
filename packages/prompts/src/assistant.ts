@@ -94,7 +94,7 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
   z.object({ tool: z.literal('review_chapter'), chapter: text }),
   z.object({ tool: z.literal('review_chapters'), chapters: list }),
-  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'all']) }),
+  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'simulation', 'all']) }),
   z.object({ tool: z.literal('resolve_review_issue'), issue: text, status: z.enum(['fixed', 'ignored']) }),
   z.object({ tool: z.literal('revise_review_issue'), issue: text }),
   z.object({ tool: z.literal('rollback_writer'), chapter: text }),
@@ -109,6 +109,13 @@ export const AssistantAction = z.discriminatedUnion('tool', [
     payoff: opt,
     status: z.enum(FORESHADOW_STATUSES_FOR_ASSISTANT).nullable(),
   }),
+  // 角色推演：建场景、在后台推演、看全局概要、按视角写成候选稿；待核实的裁决与采纳由作者在界面上做
+  z.object({ tool: z.literal('list_simulations'), scene: opt }),
+  z.object({ tool: z.literal('create_sim_scene'), description: text, title: opt, chapter: opt, maxRounds: z.number().int().positive().nullable() }),
+  z.object({ tool: z.literal('start_simulation'), scene: text, budgetUsd: z.number().positive().nullable() }),
+  z.object({ tool: z.literal('continue_simulation'), run: text }),
+  z.object({ tool: z.literal('get_simulation'), run: text }),
+  z.object({ tool: z.literal('narrate_simulation'), run: text, pov: text, chapter: text, fromRound: z.number().int().positive().nullable(), toRound: z.number().int().positive().nullable() }),
   // 导出
   z.object({ tool: z.literal('export_book'), format: z.enum(['txt', 'markdown']), chapter: opt }),
   // 界面

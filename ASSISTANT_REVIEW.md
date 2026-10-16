@@ -14,14 +14,14 @@
 
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
-| 输出结构 | `packages/prompts/src/assistant.ts` | 每一步输出 `message`、`actions`（以 `tool` 区分的可辨识联合，共 51 个动作）、`done`；结构化输出管线校验 |
-| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 9）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
+| 输出结构 | `packages/prompts/src/assistant.ts` | 每一步输出 `message`、`actions`（以 `tool` 区分的可辨识联合，共 57 个动作）、`done`；结构化输出管线校验 |
+| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 11）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
 | 对话循环 | `apps/desktop/src/app/assistant.ts` | 一轮最多 12 步；须确认的动作停下，排在后面的动作随它保存（`rest`），确认后接着执行；走满步数或停止时说明；之前几轮的动作结果截到 600 字，对话超过 60 条或 4 万字时从最早的一轮截断；对话按作品存进 `assistant_message` |
-| 动作的命令表 | `apps/desktop/src/app/assistant-tools.ts` | 每个动作：界面名称、是否须确认、执行（只调用现有用例，锁定设定、快照、版本守卫、回收站照常生效）；`BackgroundJobs` 由状态层实现（写手队列、依次审核、停下） |
+| 动作的命令表 | `apps/desktop/src/app/assistant-tools.ts` | 每个动作：界面名称、是否须确认、执行（只调用现有用例，锁定设定、快照、版本守卫、回收站照常生效）；`BackgroundJobs` 由状态层实现（写手队列、依次审核、推演、停下） |
 | 界面 | `apps/desktop/src/ui/AssistantPanel.tsx`，状态层 `src/state/store.ts` 的 `assistantTurn` | 逐字显示、进展、选区条、确认卡片、模型与思考深度选择、上下文用量；每一轮登记为任务 |
 | 试用脚本 | `tools/assistant-eval/`（`pnpm assistant:eval`） | 14 句作者会说的话，真实模型，报告写在 `m3/runs/`（不入库） |
 
-### 动作一览（51 个）
+### 动作一览（57 个）
 
 - 读取：`list_chapters`、`read_chapter`、`search_text`、`get_entity`、`list_facts`、`get_chapter_plan`、`build_chapter_memory`、`get_chapter_memory`、`list_foreshadows`、`list_review_issues`、`list_skills`
 - 作品与卷：`create_work`、`open_work`、`update_work`（替换已有大纲须确认）、`create_volume`、`update_volume`、`move_volume`、`delete_volume`（须确认）
@@ -30,6 +30,7 @@
 - 人物关系：`add_relationship`、`update_relationship`、`delete_relationship`（须确认）
 - 偏好与技能：`remember_preference`、`add_avoid_phrases`、`set_skill`
 - 计划与写作：`save_chapter_plan`、`plan_chapters`（已有计划时须确认）、`write_chapter`（同步，写完整理长篇记忆）、`write_chapters`（后台）、`continue_chapter`（候选稿）、`edit_selection`（候选稿）、`review_chapter`（同步）、`review_chapters`（后台）、`stop_background`、`resolve_review_issue`、`revise_review_issue`（写入前快照）、`rollback_writer`（须确认）、`add_foreshadow`、`update_foreshadow`
+- 角色推演（M5-19）：`list_simulations`、`create_sim_scene`、`start_simulation`（后台）、`continue_simulation`（后台）、`get_simulation`（全局概要，只用于汇报）、`narrate_simulation`（按视角写成候选稿，作者经“采纳…”写进作品）
 - 其他：`export_book`、`open_page`
 
 ### 自动测试
@@ -71,7 +72,7 @@ pnpm assistant:eval --base-url https://example.com/v1
 按建议的处理先后排列。
 
 1. **第 3 至 6 项修正没有经过真实模型验证。** 先跑一次 `pnpm assistant:eval`，读报告确认：第 2 句的计划与偏好是否在确认后落地；第 6 句是否先列问题再处理；第 7 句是否在记忆过时时重新整理；第 4 句是否不再自称伏笔已埋。
-2. **助手不能操作推演。** 推演场景的建立、开始、单步与继续、待核实裁决的确认、写成正文与采纳都只能在“推演”页手动做。这是产品的核心创新，助手却完全碰不到。建议先做读取与发起（列出场景、从章节计划草拟场景、开始一次推演交给后台、汇报进度与结果），确认与采纳仍由作者在界面上做。动作结果只能给全局局面的概要，不能把角色视图之外的内容交给写正文的环节（硬性规则 1 至 3）。
+2. **助手不能操作推演。** 已处理（M5-19）：建场景、后台推演、全局概要、按视角写成候选稿；确认裁决、导演提议与采纳仍由作者在界面上做。没有经过真实模型验证。原来的描述： 推演场景的建立、开始、单步与继续、待核实裁决的确认、写成正文与采纳都只能在“推演”页手动做。这是产品的核心创新，助手却完全碰不到。建议先做读取与发起（列出场景、从章节计划草拟场景、开始一次推演交给后台、汇报进度与结果），确认与采纳仍由作者在界面上做。动作结果只能给全局局面的概要，不能把角色视图之外的内容交给写正文的环节（硬性规则 1 至 3）。
 3. **改动没有统一的撤销。** 正文有快照，但设定、关系、计划、伏笔、作品信息被助手改了以后不能一键回到改之前。建议给助手的每一轮记下改动前的值（或在一轮开始前给相关表做轻量快照），提供“撤销助手刚才的改动”。
 4. **单章审核与修订挡住对话。** `review_chapter`、`revise_review_issue`、`write_chapter` 在对话里同步等待，期间作者不能再说话。可以考虑统一走后台，对话里只汇报“已排上”，完成时在下一句话的现状里看到结果。
 5. **模型偶尔编造细节。** 第二次试用第 13 句说这本书“约 30 章”，大纲里没有。已处理（M5-17）：现状给出全书字数与有计划的章数，`assistant_turn` 版本 10 要求数字与事实只用现状与动作结果里有的。没有经过真实模型验证。

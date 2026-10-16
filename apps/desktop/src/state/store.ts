@@ -525,9 +525,38 @@ export function createAppStore(service: AppService): AppStore {
     let simAbort: AbortController | null = null;
     /** 正在进行的连续推进；暂停、停止与关闭作品时先等它停下。 */
     let simLoop: Promise<void> | null = null;
+    /** 正在连续推进的运行（AI 助手的现状与停下用）。 */
+    let simLoopRun: string | null = null;
+
+    /**
+     * 连续推进一次运行，每一步之后刷新时间线（是选中的运行时）；停在等待作者、暂停、结束，或作者叫停。
+     * 推演页的“继续”与 AI 助手的后台推演都经这里，同一时间只推进一次（simAdvancing 同步占位）。
+     */
+    async function advanceSim(runId: string): Promise<void> {
+      const abort = new AbortController();
+      simAbort = abort;
+      simLoopRun = runId;
+      set({ simAdvancing: true, message: null });
+      simLoop = (async () => {
+        let view = await service.simRunStatus(runId);
+        if (view.ok && view.value.phase === 'Paused') view = await service.resumeSimRun(runId);
+        while (view.ok && !SIM_STOPPED.has(view.value.phase) && !abort.signal.aborted) {
+          view = await service.stepSimRun(runId, { signal: abort.signal });
+          await refreshRun(runId);
+        }
+        if (!view.ok) set({ message: describeError(view.error) });
+        await refreshRun(runId);
+      })();
+      await simLoop;
+      simLoop = null;
+      simLoopRun = null;
+      if (simAbort === abort) simAbort = null;
+      set({ simAdvancing: false });
+    }
 
     /** 读出一次运行的状态与时间线；选中的运行已经换了时不覆盖。 */
     async function refreshRun(runId: string): Promise<void> {
+      if (get().simRunId !== runId) return;
       const detail = await service.simRunDetail(runId);
       if (get().simRunId !== runId) return;
       if (!detail.ok) {
@@ -851,6 +880,15 @@ export function createAppStore(service: AppService): AppStore {
         case 'changed':
           await refreshWork();
           return;
+        case 'simulation_changed': {
+          // 推演页开着时重新列出场景；正在推进时不换选中的运行。
+          if (get().panel !== 'simulation') return;
+          const scenes = await service.listSimScenes();
+          if (scenes.ok) set({ simScenes: scenes.value });
+          const sceneId = get().simSceneId;
+          if (sceneId !== null && sceneId !== 'new' && !get().simAdvancing) await loadRuns(sceneId, get().simRunId);
+          return;
+        }
       }
     }
     /** 助手的一轮：逐步显示进展，界面跟着助手打开章节与页面；结束后重新载入正文。 */
@@ -893,6 +931,14 @@ export function createAppStore(service: AppService): AppStore {
             void get().reviewChapters(chapterIds);
             return null;
           },
+          simulating: () => get().simAdvancing,
+          simulate(runId, sceneId) {
+            if (get().simAdvancing) return '已经有一次推演在推进，等它推完或停下以后再推';
+            void advanceSim(runId);
+            // 推演页正开着这个场景时，列出新的运行并选中它。
+            if (get().panel === 'simulation' && get().simSceneId === sceneId) void loadRuns(sceneId, runId);
+            return null;
+          },
           stop(what) {
             const stopped: string[] = [];
             const job = get().writerJob;
@@ -906,8 +952,13 @@ export function createAppStore(service: AppService): AppStore {
               reviewQueueAbort.abort();
               stopped.push(`依次审核${queue === null ? '' : `停在《${chapter(queue.chapterId)?.title ?? ''}》，后面的 ${queue.queued.length} 章不再审`}`);
             }
+            if ((what === 'simulation' || what === 'all') && get().simAdvancing) {
+              simAbort?.abort();
+              stopped.push(`推演${simLoopRun === null ? '' : ` [${simLoopRun}]`}停在当前这一步之后（可以继续）`);
+            }
             if (stopped.length > 0) return `已停下：${stopped.join('；')}。`;
-            return what === 'writing' ? '后台没有在写作。' : what === 'review' ? '后台没有在依次审核。' : '后台没有在进行的写作或审核。';
+            const idle = { writing: '后台没有在写作。', review: '后台没有在依次审核。', simulation: '后台没有在推演。', all: '后台没有在进行的写作、审核或推演。' } as const;
+            return idle[what];
           },
         },
         onUsage: (usage) => set({ assistantContext: usage }),
@@ -1460,7 +1511,7 @@ export function createAppStore(service: AppService): AppStore {
           if (queue !== null && t.chapterId === queue.chapterId && t.kind === 'review') continue;
           out.push(t.title);
         }
-        if (s.simAdvancing) out.push('角色推演正在推进');
+        if (s.simAdvancing) out.push(`角色推演正在推进${simLoopRun === null ? '' : `（推演 [${simLoopRun}]）`}`);
         return out;
       },
       async requestCloseWork() {
@@ -1591,24 +1642,7 @@ export function createAppStore(service: AppService): AppStore {
       async continueSimRun() {
         const id = get().simRunId;
         if (id === null || get().simAdvancing) return;
-        const abort = new AbortController();
-        simAbort = abort;
-        set({ simAdvancing: true, message: null });
-        // 一步一步推进，每一步之后刷新时间线；停在等待作者、暂停、结束，或作者叫停。
-        simLoop = (async () => {
-          let view = await service.simRunStatus(id);
-          if (view.ok && view.value.phase === 'Paused') view = await service.resumeSimRun(id);
-          while (view.ok && !SIM_STOPPED.has(view.value.phase) && !abort.signal.aborted) {
-            view = await service.stepSimRun(id, { signal: abort.signal });
-            await refreshRun(id);
-          }
-          if (!view.ok) set({ message: describeError(view.error) });
-          await refreshRun(id);
-        })();
-        await simLoop;
-        simLoop = null;
-        if (simAbort === abort) simAbort = null;
-        set({ simAdvancing: false });
+        await advanceSim(id);
       },
       async pauseSimRun() {
         const id = get().simRunId;

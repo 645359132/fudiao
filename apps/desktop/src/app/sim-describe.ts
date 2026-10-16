@@ -27,7 +27,7 @@ export const ACTION_LABELS: Readonly<Record<string, string>> = {
   external: '外部事件',
 };
 
-const INJURY: Readonly<Record<string, string>> = { none: '没有受伤', light: '轻伤', severe: '重伤', incapacitated: '失去行动能力' };
+export const INJURY_LABELS: Readonly<Record<string, string>> = { none: '没有受伤', light: '轻伤', severe: '重伤', incapacitated: '失去行动能力' };
 
 export function describeEffect(effect: Effect, name: Name): string {
   switch (effect.type) {
@@ -38,7 +38,7 @@ export function describeEffect(effect: Effect, name: Name): string {
     case 'adjustCounter':
       return `${name(effect.item)}的${effect.counter}${effect.delta >= 0 ? '增加' : '减少'} ${Math.abs(effect.delta)}`;
     case 'setInjury':
-      return `${name(effect.actor)}的伤势变为“${INJURY[effect.level] ?? effect.level}”`;
+      return `${name(effect.actor)}的伤势变为“${INJURY_LABELS[effect.level] ?? effect.level}”`;
     case 'setActorStatus':
       return `${name(effect.actor)}${effect.status === 'present' ? '回到现场' : '离开现场'}`;
     case 'disarmMechanism':

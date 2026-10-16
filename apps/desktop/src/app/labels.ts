@@ -1,6 +1,6 @@
-// 界面与 AI 助手共用的中文名称：设定种类与章节计划的状态。类型约束键名，存储层增加取值时这里漏不掉。
+// 界面与 AI 助手共用的中文名称：设定种类、章节计划与推演的状态等。类型约束键名，存储层增加取值时这里漏不掉。
 import type { SkillStage } from '@fudiao/shared';
-import type { EntityKind, ForeshadowStatus, PlanStatus, RelationCategory } from '@fudiao/store';
+import type { EntityKind, ForeshadowStatus, PlanStatus, RelationCategory, SimRun } from '@fudiao/store';
 
 export const ENTITY_KIND_LABEL: Readonly<Record<EntityKind, string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
 
@@ -23,4 +23,18 @@ export const RELATION_CATEGORY_LABEL: Readonly<Record<RelationCategory, string>>
   enemy: '敌对',
   affiliation: '从属',
   other: '其他',
+};
+
+/** 推演的状态、结束与暂停的原因（B28）。结束与暂停的原因来自引擎的事件，没有收录的原样显示。 */
+export const SIM_RUN_STATUS_LABEL: Readonly<Record<SimRun['status'], string>> = { created: '还没有开始', running: '进行中', awaiting_author: '等待作者', paused: '已暂停', ended: '已结束' };
+export const SIM_END_LABEL: Readonly<Record<string, string>> = { max_rounds: '到达回合上限', actors_left: '角色都已离场', budget: '预算用完', author_stop: '作者停止', stalemate: '僵局' };
+export const SIM_PAUSE_LABEL: Readonly<Record<string, string>> = {
+  author: '作者暂停',
+  proposal_invalid: '角色的行动多次不合规则',
+  llm_error: '模型调用失败',
+  refused: '模型拒绝了请求',
+  truncated: '模型的输出被截断',
+  invalid_output: '模型的输出格式不对',
+  ruling_invalid: '裁决不合规则',
+  stalemate: '僵局',
 };
