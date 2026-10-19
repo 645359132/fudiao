@@ -87,6 +87,7 @@ import { assistantUseCases, type AssistantUsage } from './assistant';
 import { narrationUseCases } from './narration';
 import { quickBookUseCases } from './quick-book';
 import { workflowUseCases } from './workflows';
+import { bookAuditUseCases } from './book-audit';
 import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
 import { reviewUseCases } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
@@ -796,7 +797,7 @@ export function createAppService(deps: AppDeps) {
   const workflows = workflowUseCases({
     deps,
     project: () => session?.port ?? null,
-    host: { ...app, ...quickBook },
+    host: { ...app, ...quickBook, ...bookAuditUseCases(deps, () => session?.port ?? null, runner) },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {
       capture: () => captureWork(app, session?.port ?? null),
@@ -810,6 +811,17 @@ export function createAppService(deps: AppDeps) {
       return { model: model.displayName, prices: model.prices ?? undefined };
     },
     hooks: {
+      async reviewChapters(chapterIds, options) {
+        const done: string[] = [];
+        for (const id of chapterIds) {
+          const reviewed = await app.reviewChapter(id, options);
+          if (!reviewed.ok || !reviewed.value.modelReviewed) {
+            return { ok: false, summary: `${done.length > 0 ? `已审完 ${done.length} 章；` : ''}审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}` };
+          }
+          done.push(id);
+        }
+        return { ok: true, summary: `审完了 ${done.length} 章` };
+      },
       async writeChapters(chapterIds, review, options) {
         const done: string[] = [];
         for (const id of chapterIds) {

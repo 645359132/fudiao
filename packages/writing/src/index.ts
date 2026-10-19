@@ -16,3 +16,5 @@ export { maskDialogue, MAX_HITS_PER_RULE, proseChecks, visibleLength } from './p
 export { normalizePunctuation } from './punctuation';
 export type { NextAction, RunState, StepChange, StepEvent, StepState } from './workflow';
 export { applyStepChanges, nextAction, runState, transition } from './workflow';
+export type { ForeshadowAuditInput, ForeshadowFinding } from './audit';
+export { foreshadowAudit } from './audit';

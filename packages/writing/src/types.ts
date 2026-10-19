@@ -38,7 +38,8 @@ export type IssueAnchor = {
   readonly quote: string;
 };
 
-export type IssueEvidence = { readonly type: 'entity' | 'fact' | 'foreshadow' | 'paragraph' | 'plan'; readonly id: string };
+/** 依据；另一章的段落（跨章连贯检查）带上所在的章节与当时的版本，那一段改过后问题过期。 */
+export type IssueEvidence = { readonly type: 'entity' | 'fact' | 'foreshadow' | 'paragraph' | 'plan'; readonly id: string; readonly chapterId?: string; readonly version?: number };
 
 /** 程序检查出的审核问题（source 为 program），由应用服务层写入审核问题表。 */
 export type ProgramIssue = {

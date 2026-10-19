@@ -12,11 +12,12 @@ import {
   SceneDraftOutput,
   ChapterMemoryOutput,
   ChapterReviewOutput,
+  BookAuditOutput,
   PlanDraftOutput,
   SemanticRulingOutput,
 } from './schemas';
 
-const all = { StalemateJudgementOutput, DirectorProposalOutput, BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput, PlanDraftOutput, ChapterMemoryOutput, ChapterReviewOutput };
+const all = { StalemateJudgementOutput, DirectorProposalOutput, BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput, PlanDraftOutput, ChapterMemoryOutput, ChapterReviewOutput, BookAuditOutput };
 
 function walk(node: unknown, visit: (n: Readonly<Record<string, unknown>>) => void): void {
   if (Array.isArray(node)) node.forEach((n) => walk(n, visit));

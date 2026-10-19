@@ -2042,6 +2042,49 @@ describe('写作工作流的界面（B78）', () => {
   });
 });
 
+describe('全书体检的界面（B80）', () => {
+  it('选范围开始体检：补齐记忆、依次审核，停在跨章疑点；删去疑点后确认，报告列出有问题的章节', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '旧作');
+    await addChapter(user, '第一章');
+    await addChapter(user, '第二章');
+    for (const [title, text] of [
+      ['第一章', '官差把钱四押进了大牢。'],
+      ['第二章', '钱四在柜台后拨着算盘。'],
+    ] as const) {
+      const id = store.getState().work!.chapters.find((c) => c.title === title)!.id;
+      const opened = await service.openChapter(id);
+      if (!opened.ok) throw new Error('打不开');
+      await service.saveChapter(id, opened.value.saved, [{ id: `p-${title}`, text, source: 'handwritten' }], { splits: [], merges: [] });
+    }
+    await addTestedModel(service, deps);
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的全书体检' }));
+    const form = within(page).getByRole('form', { name: '开始全书体检' });
+    expect(within(form).getByRole('combobox', { name: '从' })).toBeTruthy();
+    const memory = (summary: string) => reply(JSON.stringify({ summary, cast: [], foreshadows: [], openThreads: [] }));
+    deps.llmResponses.push(
+      memory('钱四被押进大牢。'),
+      memory('钱四在当铺。'),
+      reply(JSON.stringify({ issues: [] })),
+      reply(JSON.stringify({ issues: [{ paragraph: 'P1', quote: '拨着算盘', kind: 'pacing', severity: 'low', evidence: [], description: '节奏慢', suggestion: '删去' }] })),
+      reply(JSON.stringify({ suspects: [{ earlier: 'C1', later: 'C2', kind: 'character', about: '钱四进了大牢又在当铺', severity: 'high' }] })),
+    );
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const suspects = await within(page).findByRole('group', { name: '跨章疑点' }, { timeout: 10_000 });
+    expect(suspects.textContent).toContain('《第一章》 → 《第二章》：钱四进了大牢又在当铺');
+    await user.click(within(suspects).getByRole('button', { name: '删去疑点 1' }));
+    await waitFor(() => expect(within(page).getByRole('group', { name: '跨章疑点' }).textContent).not.toContain('钱四进了大牢'));
+    await user.click(within(page).getByRole('button', { name: '确认，逐条核对' }));
+    await user.click(await within(page).findByRole('button', { name: '继续' }));
+    const report = await within(page).findByRole('list', { name: '体检报告' }, { timeout: 10_000 });
+    expect(report.textContent).toContain('《第二章》：1 条待处理');
+    expect(deps.llmResponses).toHaveLength(0);
+  });
+});
+
 describe('分卷的界面（B68）', () => {
   it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
     const { user, store } = start();

@@ -149,7 +149,7 @@ fudiao/
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key（SKILL.md 的 name）、name（界面上的名称，SKILL.md 的 metadata.title）、description（适用说明，SKILL.md 的 description；只存自定义或导入的技能的，内置技能的在模板里；迁移 0009）、instruction、enabled、builtin_version（内置技能的模板版本）、stages（用在哪些阶段：planning、writing 或 "planning writing"；内置技能的随模板同步；迁移 0014）、version；内置技能是 `packages/prompts/templates/skills/` 下的 SKILL.md 文件，作品中只存启用状态与作者的改动；迁移 0005 | B61、B75 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、open_threads（章尾留给后面的事，JSON 数组；迁移 0013）、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
-| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序或模型）、llm_call_id；迁移 0005 | B64 |
+| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落；另一章的段落带 chapterId 与 version，迁移 0020 起）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序、模型，或跨章连贯检查 continuity，迁移 0020）、llm_call_id；迁移 0005 | B64、B80 |
 | `relationship` | id、from_id 与 to_id（两项不同的设定，删除设定时级联删除）、category（亲属、情感、师承、友盟、竞争、敌对、从属、其他）、label（读作“from 是 to 的 label”）、mutual（双方相同）、description、secret（读者还不知道）、适用章节范围（valid_from/to_chapter_id，章节删除时置空）、version；迁移 0012 | B73 |
 | `relation_position` | entity_id（删除设定时级联删除）、x、y（关系图逻辑坐标 1000×640 中作者拖定的位置，只影响显示）；迁移 0012 | B73 |
 | `workflow_run` | id、workflow（工作流的键，例如 quick_book）、title、params（开始时的参数 JSON）、mode（step 每步停下、auto 一路做完）、budget_usd（费用上限，可空）、status（进行中 active、已放弃 abandoned；做没做完由各步推出，不另存）、version；迁移 0019，随作品包导出 | B78 |
@@ -868,11 +868,11 @@ M5-03 的设计：
 | --- | --- | --- |
 | M6-01 | 工作流框架：迁移 0019 与仓储、往返测试；`packages/writing` 的步骤状态机（纯函数，先写测试）；应用层的工作流命令表与执行器（步骤键、预算、恢复、采用与撤回）；第一个工作流“一键成书”（步骤沿用快速成书的用例）；状态层在后台推进；“工作流”页；AI 助手的 `list_workflows`、`start_workflow`、`get_workflow`、`continue_workflow`，`stop_background` 增加 workflow（`assistant_turn` 版本 16） | B78、B67，验收“写作工作流” |
 | M6-02 | 成书页并入工作流页：新作品打开到工作流页并展开“一键成书”；原成书页的状态与 `QuickBookPanel` 退役，骨架与计划草稿的编辑只在步骤里；B67 的验收由工作流覆盖 | B67、B78，验收“快速成书” |
-| M6-03 | 全书体检：长篇记忆补齐、依次审核、伏笔核对、跨章疑点（`book_audit`）与定位（`continuity_check`）、体检报告；审核问题的依据增加“另一章的段落” | B80，验收“全书体检” |
+| M6-03 | 全书体检：长篇记忆补齐、依次审核、伏笔核对、跨章疑点（`book_audit`）与定位（`continuity_check`）、体检报告；审核问题的依据增加“另一章的段落”，来源增加跨章连贯检查（迁移 0020） | B80，验收“全书体检” |
 | M6-04 | 续写一卷：卷纲（`volume_outline`）与采用、`plan_draft` 版本 4 只给新的一卷拆章、写完并审核、本卷体检 | B82，验收“续写一卷” |
 | M6-05 | 开篇打磨：开篇的客观数字（纯函数）、`opening_review`（问题结构同 `chapter_review`）、作者处理与写手修订、复诊与对比 | B81，验收“开篇打磨” |
 | M6-06 | 人物小传与关系网补全：找出没有卡片或说明为空的人物（纯函数）、`cast_completion`、逐项勾选采用 | B83，验收“人物补全” |
-| M6-07 | 扫榜拆书：导入榜单与样章（迁移 0020 `benchmark_sample`，不导出、用完即删）、逐本拆解（`benchmark_book`）、复述检查（纯函数 `overlapCheck`）、对标分析（`benchmark_compare`）、存为规划技能或带进一键成书；样章的金丝雀测试 | B79，验收“扫榜拆书” |
+| M6-07 | 扫榜拆书：导入榜单与样章（迁移 0021 `benchmark_sample`，不导出、用完即删）、逐本拆解（`benchmark_book`）、复述检查（纯函数 `overlapCheck`）、对标分析（`benchmark_compare`）、存为规划技能或带进一键成书；样章的金丝雀测试 | B79，验收“扫榜拆书” |
 
 M6-01 的设计（写作工作流框架）：
 
@@ -886,6 +886,14 @@ M6-01 的设计（写作工作流框架）：
 - 界面：“工作流”页（`ui/WorkflowPanel.tsx`；M6-01 时在导航“成书”下面，M6-02 起就是成书页，见下）：上方是工作流卡片（名称、说明、步骤、开始表单与预计费用、模式与预算），下方是这部作品的运行；运行视图左侧竖排步骤（状态与一句话），右侧是选中步骤的结果——骨架与计划草稿用成书页同样的编辑器，改过后采用；按钮有继续、停下、采用、重做这一步、跳过、保留（可能过时时）、撤回这次采用、放弃这次运行。
 - M6-02（成书页并入工作流页）：导航“成书”打开工作流页，页首是默认模型能不能用（不能用时说明并可打开“模型服务”）与作品现状（大纲、人物、章节与计划、已写章数、待处理的审核问题），下面是工作流卡片与开始表单（想法可以“随机生成”）；新作品还没有运行时展开一键成书的开始表单，模型不能用时不能开始。“写完并审核”一步里放成书进度看板，作者也可以在那里自己排定章节。原成书页（`QuickBookPanel`）与状态层的骨架草稿退役，骨架的编辑只在步骤里（`BookSeedFields` 共用）。没写想法而作品已有大纲时，“大纲与人物”一步直接跳过并写明沿用已有的大纲（步骤的 `skipIf`）。AI 助手的页面只留 book（成书，即工作流页），`assistant_turn` 版本 17。
 - AI 助手（`assistant_turn` 版本 16，共 63 个动作）：`list_workflows`（可用的工作流与这部作品的运行）、`start_workflow`（工作流、模式、预算与参数；排进后台就返回“已排上”，与 `write_chapters` 同一规则）、`get_workflow`（各步的状态与结果的概要）、`continue_workflow`（继续推进；adopt 为真时按原样采用正在等作者的草稿）；`stop_background` 增加 workflow（停推演或工作流时不连带停下写手队列与依次审核）；结束或停下时怎样结束的一句话经 `backgroundReport` 进入之后一轮的现状。这几个动作的撤销方式为 kept，工作流自己的改动用“撤回这次采用”。
+
+M6-03 的设计（全书体检）：
+
+- 步骤：补齐长篇记忆（act：范围内没有记忆或记忆待复核的章节逐章 `buildMemory`）→ 依次审核（act：经状态层的依次审核，与成书进度、助手的后台审核同一时间只有一批；已审核的章节默认跳过，开始时可选“已审过的也重新审核”）→ 伏笔核对（check：`packages/writing` 的 `foreshadowAudit`——回收的章节已写好仍未回收、埋设的章节已写好账本仍是计划且长篇记忆没有提到、没有定章节）→ 跨章疑点（draft：`book_audit` 模板读设定、人物关系、已确认的世界事实与各章的长篇记忆，输出“前一章—后一章—哪里对不上”，最多 20 条；章节标签对不上或前后颠倒的丢弃；作者可以删去疑点后确认，一条也没有时直接完成）→ 读原文定位（act：每处疑点一次 `continuity_check`，读两章正文——每章最多 12,000 字，超出时给开头与结尾——问题锚在后一章的段落上，依据须有前一章的段落；每处疑点一个步骤键，中断后接着做时核对过的不再请求）→ 体检报告（check：范围内各章待处理的问题数、跨章连贯的条数、伏笔要留意的条数，点一章打开它的审核）。
+- 数据：跨章连贯检查的问题来源记为 `continuity`（迁移 0020 重建 `review_issue` 放宽取值），同一章重新体检时换掉仍待处理的旧连贯问题，单章审核只换模型与程序的问题；作者处理过的同一处问题不再提出。依据里另一章的段落带上章节与版本，`reviewStaleIssues` 在那一段改过或删掉时把问题标为过期；审核抽屉里依据读作“《第一章》的段落：……”。
+- 估算：按作品里有正文的章数与全书字数，记忆与审核按每章各一次（已有的会跳过），疑点按章数的一半、最多 20 处。
+- 界面：成书页的“全书体检”卡片，开始表单选范围（从、到）与是否重新审核；疑点一步列出“《前一章》→《后一章》：哪里对不上”，可以删去；报告列出有待处理问题的章节与“看审核”。
+- AI 助手：`start_workflow` 的 workflow 增加 `book_audit`，参数增加 `from`、`to`（章节名或标识）与 `rereview`（`assistant_turn` 版本 18）。
 
 ## 九 测试策略
 

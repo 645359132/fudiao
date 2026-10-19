@@ -806,6 +806,60 @@ export function createAppStore(service: AppService): AppStore {
       }
     }
 
+    /**
+     * 依次审核这些章（成书进度、AI 助手的后台审核与写作工作流都经这里），同一时间只有一批；已有一批时返回 null。
+     * listen：写作工作流交来的一批，它停下时这一批也停下，用量一并报给它。返回怎样结束的一句话与是否全部审完。
+     */
+    async function reviewQueueRun(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean } | null> {
+      if (reviewQueueAbort !== null || chapterIds.length === 0) return null;
+      const abort = new AbortController();
+      reviewQueueAbort = abort;
+      if (listen?.signal?.aborted === true) abort.abort();
+      listen?.signal?.addEventListener('abort', () => abort.abort(), { once: true });
+      const tee = (o: CallOptions): CallOptions =>
+        listen?.onEvent === undefined
+          ? o
+          : {
+              ...o,
+              onEvent: (e) => {
+                o.onEvent?.(e);
+                listen.onEvent?.(e);
+              },
+            };
+      const reviewed: string[] = [];
+      let stop: string | null = null;
+      try {
+        for (const [i, chapterId] of chapterIds.entries()) {
+          if (abort.signal.aborted) {
+            stop = '中途停下了';
+            break;
+          }
+          const queued = chapterIds.slice(i + 1);
+          set({ reviewQueue: { chapterId, done: i, total: chapterIds.length, queued } });
+          const result = await reviewTask(chapterId, abort, tee);
+          const planning = get().planning === null ? null : await service.planningView();
+          if (planning?.ok === true) set({ planning: planning.value });
+          const title = chapter(chapterId)?.title ?? '';
+          if (abort.signal.aborted) {
+            stop = `在《${title}》停下了`;
+            break;
+          }
+          if (result.ok && result.value.modelReviewed) {
+            reviewed.push(`《${title}》${result.value.issues.length} 个问题`);
+            continue;
+          }
+          const reason = result.ok ? (result.value.reason ?? '') : describeError(result.error);
+          stop = `“${title}”的审核没有完成：${reason}${queued.length > 0 ? `；后面的 ${queued.length} 章没有接着审，可以在成书进度里单独审核` : ''}`;
+          set({ message: stop });
+          break;
+        }
+      } finally {
+        if (reviewQueueAbort === abort) reviewQueueAbort = null;
+        set({ reviewQueue: null });
+      }
+      return { summary: `依次审核 ${chapterIds.length} 章：${reviewed.length === 0 ? '一章也没有审完' : `审完了${reviewed.join('、')}`}${stop === null ? '' : `；${stop}`}`, complete: stop === null };
+    }
+
     async function reviewTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o) {
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
       const t = startTask('review', `审核 · ${title}`, chapterId, abort);
@@ -1747,7 +1801,13 @@ export function createAppStore(service: AppService): AppStore {
           try {
             const result = await service.advanceWorkflow(runId, {
               signal: abort.signal,
-              hooks: { writeChapters: workflowWrite },
+              hooks: {
+                writeChapters: workflowWrite,
+                async reviewChapters(chapterIds, listen) {
+                  const done = await reviewQueueRun(chapterIds, listen);
+                  return done === null ? { ok: false, summary: '已经有一批在依次审核（成书进度或 AI 助手排的）：等它审完，再继续这个工作流' } : { ok: done.complete, summary: done.summary };
+                },
+              },
               onStep: (view) => {
                 putWorkflow(view);
                 // 采用了草稿：作品信息、目录、设定与计划随之变化。
@@ -2032,38 +2092,7 @@ export function createAppStore(service: AppService): AppStore {
         }
       },
       async reviewChapters(chapterIds) {
-        if (reviewQueueAbort !== null || chapterIds.length === 0) return null;
-        const abort = new AbortController();
-        reviewQueueAbort = abort;
-        const reviewed: string[] = [];
-        let stop: string | null = null;
-        try {
-          for (const [i, chapterId] of chapterIds.entries()) {
-            if (abort.signal.aborted) break;
-            const queued = chapterIds.slice(i + 1);
-            set({ reviewQueue: { chapterId, done: i, total: chapterIds.length, queued } });
-            const result = await reviewTask(chapterId, abort);
-            const planning = get().planning === null ? null : await service.planningView();
-            if (planning?.ok === true) set({ planning: planning.value });
-            const title = chapter(chapterId)?.title ?? '';
-            if (abort.signal.aborted) {
-              stop = `在《${title}》停下了`;
-              break;
-            }
-            if (result.ok && result.value.modelReviewed) {
-              reviewed.push(`《${title}》${result.value.issues.length} 个问题`);
-              continue;
-            }
-            const reason = result.ok ? (result.value.reason ?? '') : describeError(result.error);
-            stop = `“${title}”的审核没有完成：${reason}${queued.length > 0 ? `；后面的 ${queued.length} 章没有接着审，可以在成书进度里单独审核` : ''}`;
-            set({ message: stop });
-            break;
-          }
-        } finally {
-          if (reviewQueueAbort === abort) reviewQueueAbort = null;
-          set({ reviewQueue: null });
-        }
-        return `依次审核 ${chapterIds.length} 章：${reviewed.length === 0 ? '一章也没有审完' : `审完了${reviewed.join('、')}`}${stop === null ? '' : `；${stop}`}`;
+        return (await reviewQueueRun(chapterIds))?.summary ?? null;
       },
       cancelReviewQueue: () => reviewQueueAbort?.abort(),
       cancelWriting: () => writerAbort?.abort(),

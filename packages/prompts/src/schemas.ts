@@ -268,6 +268,20 @@ export const ChapterReviewOutput = z.object({
 });
 export type ChapterReviewOutput = z.infer<typeof ChapterReviewOutput>;
 
+/** 全书体检（B80）：从各章要点里找出的跨章疑点。章节用提示词中的标签（C1、C2……）指代，之后逐条读两章原文确认。 */
+export const BookAuditOutput = z.object({
+  suspects: z.array(
+    z.object({
+      earlier: z.string(),
+      later: z.string(),
+      kind: z.enum(['character', 'timeline', 'setting_conflict']),
+      about: z.string(),
+      severity: z.enum(['high', 'medium', 'low']),
+    }),
+  ),
+});
+export type BookAuditOutput = z.infer<typeof BookAuditOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

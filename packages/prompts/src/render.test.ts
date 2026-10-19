@@ -37,6 +37,8 @@ import {
   renderEvidenceJudgement,
   renderChapterMemory,
   renderChapterReview,
+  renderBookAudit,
+  renderContinuityCheck,
   renderPlanDraft,
   renderBookSeed,
   renderRunSynopsis,
@@ -675,5 +677,49 @@ describe('写手修订（B64）', () => {
       unwrap(renderWriterRevise({ title: 't', chapterTitle: 'c', avoidPhrases: [], evidence: [], mustNotReveal: [], before: '', paragraph: '一段。', after: '', issues: [{ quote: '', description: '问题', suggestion: '' }] })),
     );
     for (const absent of ['不要使用这些说法', '依据：', '不得说破', '前一段：', '后一段：']) expect(bare).not.toContain(absent);
+  });
+});
+
+
+describe('全书体检的模板（B80）', () => {
+  it('book_audit：设定、关系、事实是不变的部分，各章要点按标签列出，输出疑点', () => {
+    const prompt = unwrap(
+      renderBookAudit({
+        title: '当铺夜谈',
+        entities: [{ name: '钱四', kind: '人物', locked: true, description: '当铺掌柜' }],
+        relations: ['钱四是林舟的债主'],
+        facts: ['玉佩是林舟父亲的遗物'],
+        chapters: [
+          { label: 'C1', title: '第一章 夜叩', summary: '林舟当玉。', cast: [{ name: '钱四', state: '被官差带走' }], threads: ['玉佩的来历'] },
+          { label: 'C2', title: '第二章 夜雨', summary: '', cast: [], threads: [] },
+        ],
+      }),
+    );
+    expect(prompt.output?.name).toBe('BookAuditOutput');
+    expect(prompt.task).toBe('review');
+    expect(prompt.system.some((b) => b.cache === true && b.text.includes('- 钱四（人物，锁定）：当铺掌柜') && b.text.includes('- 钱四是林舟的债主') && b.text.includes('- 玉佩是林舟父亲的遗物'))).toBe(true);
+    const text = fullText(prompt);
+    for (const part of ['最多 20 条', '[C1] 第一章 夜叩\n梗概：林舟当玉。\n人物在章末：钱四：被官差带走；\n章尾留下：玉佩的来历；', '[C2] 第二章 夜雨\n梗概：（没有梗概）']) expect(text).toContain(part);
+  });
+
+  it('continuity_check：只核对一处疑点，前一章的段落用 A 标签、后一章用 P 标签，较长的注明只给了开头与结尾', () => {
+    const prompt = unwrap(
+      renderContinuityCheck({
+        title: '当铺夜谈',
+        about: 'C1 钱四被带走，C2 他却在柜台后',
+        entities: [{ label: 'E1', name: '钱四', kind: '人物', locked: false, description: '' }],
+        earlierTitle: '第一章 夜叩',
+        earlier: [{ label: 'A1', text: '官差把钱四押走了。' }],
+        earlierClipped: true,
+        laterTitle: '第二章 夜雨',
+        later: [{ label: 'P1', text: '钱四在柜台后拨着算盘。' }],
+        laterClipped: false,
+      }),
+    );
+    expect(prompt.output?.name).toBe('ChapterReviewOutput');
+    const text = fullText(prompt);
+    for (const part of ['只核对这一处疑点：C1 钱四被带走，C2 他却在柜台后', '- [E1] 钱四（人物）', '前一章：第一章 夜叩（较长，只给出开头与结尾）\n[A1] 官差把钱四押走了。', '后一章：第二章 夜雨\n[P1] 钱四在柜台后拨着算盘。']) {
+      expect(text).toContain(part);
+    }
   });
 });

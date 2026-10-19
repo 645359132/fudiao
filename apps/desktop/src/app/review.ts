@@ -134,8 +134,12 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
     });
   }
 
-  /** 依据写成文字；已经删掉的条目略去。 */
-  function evidenceText(evidence: readonly IssueEvidence[], m: Pick<Materials, 'entities' | 'facts' | 'foreshadows' | 'paragraphs'>): string[] {
+  /** 依据写成文字；已经删掉的条目略去。elsewhere 是依据里另一章的段落（跨章连贯检查）。 */
+  function evidenceText(
+    evidence: readonly IssueEvidence[],
+    m: Pick<Materials, 'entities' | 'facts' | 'foreshadows' | 'paragraphs'> & { readonly chapters?: readonly Chapter[] },
+    elsewhere: ReadonlyMap<string, SavedParagraph> = new Map(),
+  ): string[] {
     return evidence.flatMap((e) => {
       switch (e.type) {
         case 'entity': {
@@ -151,8 +155,14 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
           return f === undefined ? [] : [`伏笔 ${f.title}：${f.content}${f.reveal.trim() === '' ? '' : `（揭晓的内容：${f.reveal.trim()}）`}`];
         }
         case 'paragraph': {
+          const clip = (text: string) => (text.length > 40 ? `${text.slice(0, 40)}…` : text);
+          if (e.chapterId !== undefined) {
+            const other = elsewhere.get(e.id);
+            const title = m.chapters?.find((c) => c.id === e.chapterId)?.title ?? '前文';
+            return other === undefined ? [] : [`《${title}》的段落：${clip(other.text)}`];
+          }
           const p = m.paragraphs.find((x) => x.id === e.id);
-          return p === undefined ? [] : [`本章段落：${p.text.length > 40 ? `${p.text.slice(0, 40)}…` : p.text}`];
+          return p === undefined ? [] : [`本章段落：${clip(p.text)}`];
         }
         case 'plan':
           return ['章节计划'];
@@ -160,11 +170,24 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
     });
   }
 
-  async function pendingView(port: SqlPort, chapterId: string, m: Pick<Materials, 'entities' | 'facts' | 'foreshadows' | 'paragraphs'>): Promise<Result<ReviewIssueView[], AppError>> {
+  async function pendingView(
+    port: SqlPort,
+    chapterId: string,
+    m: Pick<Materials, 'entities' | 'facts' | 'foreshadows' | 'paragraphs'> & { readonly chapters?: readonly Chapter[] },
+  ): Promise<Result<ReviewIssueView[], AppError>> {
     const stale = await reviewStaleIssues(port, chapterId, ctx());
     if (!stale.ok) return err(repo(stale.error));
     const pending = await listIssues(port, chapterId);
-    return pending.ok ? ok(pending.value.map((i) => ({ ...i, evidenceText: evidenceText(i.evidence, m) }))) : err(repo(pending.error));
+    if (!pending.ok) return err(repo(pending.error));
+    // 依据里另一章的段落：按章读出文字。
+    const elsewhere = new Map<string, SavedParagraph>();
+    const others = [...new Set(pending.value.flatMap((i) => i.evidence.flatMap((e) => (e.chapterId !== undefined && e.chapterId !== chapterId ? [e.chapterId] : []))))];
+    for (const other of others) {
+      const paragraphs = await listParagraphs(port, other);
+      if (!paragraphs.ok) return err(repo(paragraphs.error));
+      for (const p of paragraphs.value) elsewhere.set(p.id, p);
+    }
+    return ok(pending.value.map((i) => ({ ...i, evidenceText: evidenceText(i.evidence, m, elsewhere) })));
   }
 
   /** 程序检查（不调用模型），去掉作者处理过的问题后，换掉这一章仍待处理的程序问题。返回这一次的问题。 */

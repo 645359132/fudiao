@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "17",
-    "sha256": "dca5229a27bbe29fb3200e1c7ce506c074da0c894408c87bd2724b8d2bb16221"
+    "version": "18",
+    "sha256": "ec10776ebf40635144a040da720fc1d6e57699a4a03e97c712de5640f39503c9"
   },
   "baseline_scene": {
     "version": "2",
@@ -18,6 +18,10 @@
   "belief_update": {
     "version": "7",
     "sha256": "31dbf4b01127e8821f526fef2e2d4fb527fd245f085cd8dd387d5b13da70d454"
+  },
+  "book_audit": {
+    "version": "1",
+    "sha256": "c91df9851e4dc0b613638b84113b2c7a0dff5f819dc0aedd8e33ff2867584b1b"
   },
   "book_seed": {
     "version": "3",
@@ -42,6 +46,10 @@
   "connection_test": {
     "version": "1",
     "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
+  },
+  "continuity_check": {
+    "version": "1",
+    "sha256": "cb6f8d9e5e997bc46af68244478b0726c971b404f5d81011659c4c723d9a8238"
   },
   "director_proposal": {
     "version": "4",

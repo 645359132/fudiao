@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
-import { planDraftOf, seedDraftOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { FORESHADOW_FINDING_LABEL, findingsOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
@@ -17,11 +17,15 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const [genre, setGenre] = useState('');
   const [chapters, setChapters] = useState(20);
   const [words, setWords] = useState(3000);
+  const [from, setFrom] = useState<string>('');
+  const [to, setTo] = useState<string>('');
+  const [rereview, setRereview] = useState(false);
   const [mode, setMode] = useState<'step' | 'auto'>('step');
   const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<WorkflowQuote | null>(null);
+  const bookChapters = useApp((s) => s.work?.chapters ?? []);
   const key: WorkflowKey = info.key;
-  const params = { idea, genre, chapters, wordsPerChapter: words };
+  const params = key === 'book_audit' ? { from: from === '' ? null : from, to: to === '' ? null : to, rereview } : { idea, genre, chapters, wordsPerChapter: words };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   return (
@@ -33,66 +37,102 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      <div className="book-idea-head">
-        <label htmlFor="workflow-idea">一句话的想法</label>
-        <button
-          type="button"
-          className="link"
-          title="从人物、处境与转折中随机拼一句，可以接着改；填了类型时按类型挑"
-          onClick={() => {
-            // 随机只用来给作者一个起点，不进入推演，不需要可复现。
-            const next = randomIdea(genre, Math.random);
-            setIdea(next.idea);
-            setGenre(next.genre);
+      {key === 'book_audit' ? (
+        <>
+          <div className="form-row">
+            <label>
+              从
+              <select value={from} onChange={(e) => setFrom(e.currentTarget.value)}>
+                <option value="">第一章</option>
+                {bookChapters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              到
+              <select value={to} onChange={(e) => setTo(e.currentTarget.value)}>
+                <option value="">最后一章</option>
+                {bookChapters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={rereview} onChange={(e) => setRereview(e.currentTarget.checked)} />
+            已审过的章节也重新审核
+          </label>
+          <p className="muted">只体检已经有正文的章节。跨章的疑点先由各章的长篇记忆找出，再逐条读两章的原文确认，问题列在后一章的“审核”里。</p>
+        </>
+      ) : (
+        <>
+        <div className="book-idea-head">
+          <label htmlFor="workflow-idea">一句话的想法</label>
+          <button
+            type="button"
+            className="link"
+            title="从人物、处境与转折中随机拼一句，可以接着改；填了类型时按类型挑"
+            onClick={() => {
+              // 随机只用来给作者一个起点，不进入推演，不需要可复现。
+              const next = randomIdea(genre, Math.random);
+              setIdea(next.idea);
+              setGenre(next.genre);
+              touched();
+            }}
+          >
+            随机生成
+          </button>
+        </div>
+        <textarea
+          id="workflow-idea"
+          rows={2}
+          placeholder="没有想法？随机生成一个"
+          value={idea}
+          onChange={(e) => {
+            setIdea(e.currentTarget.value);
             touched();
           }}
-        >
-          随机生成
-        </button>
-      </div>
-      <textarea
-        id="workflow-idea"
-        rows={2}
-        placeholder="没有想法？随机生成一个"
-        value={idea}
-        onChange={(e) => {
-          setIdea(e.currentTarget.value);
-          touched();
-        }}
-      />
-      <p className="muted">已有大纲时可以不写，开始后跳过“大纲与人物”这一步。</p>
-      <div className="form-row">
-        <label>
-          类型（可不填）
-          <input value={genre} onChange={(e) => setGenre(e.currentTarget.value)} />
-        </label>
-        <label>
-          章数
-          <input
-            type="number"
-            min={1}
-            max={300}
-            value={chapters}
-            onChange={(e) => {
-              setChapters(Number(e.currentTarget.value));
-              touched();
-            }}
-          />
-        </label>
-        <label>
-          每章字数
-          <input
-            type="number"
-            min={500}
-            step={500}
-            value={words}
-            onChange={(e) => {
-              setWords(Number(e.currentTarget.value));
-              touched();
-            }}
-          />
-        </label>
-      </div>
+        />
+        <p className="muted">已有大纲时可以不写，开始后跳过“大纲与人物”这一步。</p>
+        <div className="form-row">
+          <label>
+            类型（可不填）
+            <input value={genre} onChange={(e) => setGenre(e.currentTarget.value)} />
+          </label>
+          <label>
+            章数
+            <input
+              type="number"
+              min={1}
+              max={300}
+              value={chapters}
+              onChange={(e) => {
+                setChapters(Number(e.currentTarget.value));
+                touched();
+              }}
+            />
+          </label>
+          <label>
+            每章字数
+            <input
+              type="number"
+              min={500}
+              step={500}
+              value={words}
+              onChange={(e) => {
+                setWords(Number(e.currentTarget.value));
+                touched();
+              }}
+            />
+          </label>
+        </div>
+        </>
+      )}
       <fieldset>
         <legend>做法</legend>
         <label className="check">
@@ -101,7 +141,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         </label>
         <label className="check">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          一路做完（会替换大纲或覆盖计划时仍停下）
+          {key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
         </label>
       </fieldset>
       <label>
@@ -153,6 +193,66 @@ function SeedStep({ view, step }: { readonly view: WorkflowView; readonly step: 
   );
 }
 
+/** 等作者确认的跨章疑点：用不着核对的可以删去，确认后逐条读两章的原文。 */
+function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
+  const draft = suspectsOf(step);
+  const edit = useApp((s) => s.editWorkflowStep);
+  const act = useApp((s) => s.workflowStepAction);
+  const busy = useApp((s) => s.busy);
+  const titleOf = useApp((s) => s.work?.chapters ?? []);
+  if (draft === null) return null;
+  const title = (id: string) => `《${titleOf.find((c) => c.id === id)?.title ?? ''}》`;
+  const waiting = step.status === 'awaiting_author';
+  return (
+    <div role="group" aria-label="跨章疑点">
+      <ol className="workflow-suspects">
+        {draft.suspects.map((x, i) => (
+          <li key={`${x.earlierId}-${x.laterId}-${i}`}>
+            <span>
+              {title(x.earlierId)} → {title(x.laterId)}：{x.about}
+            </span>
+            {waiting ? (
+              <button type="button" className="ghost" disabled={busy} aria-label={`删去疑点 ${i + 1}`} onClick={() => void edit(view.run.id, step.idx, { ...draft, suspects: draft.suspects.filter((_, j) => j !== i) })}>
+                删去
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+      {waiting ? (
+        <div className="form-actions">
+          <button type="button" className="primary" disabled={busy} onClick={() => void act(view.run.id, step.idx, 'adopt')}>
+            确认，逐条核对
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 体检报告：有待处理问题的章节，点开它的审核。 */
+function AuditReportView({ step }: { readonly step: WorkflowStepView }) {
+  const report = reportOf(step);
+  const openReview = useApp((s) => s.openChapterReview);
+  if (report === null) return null;
+  const rows = report.chapters.filter((c) => c.pending > 0);
+  if (rows.length === 0) return <p>范围内的章节没有待处理的审核问题。</p>;
+  return (
+    <ul className="workflow-report" aria-label="体检报告">
+      {rows.map((r) => (
+        <li key={r.chapterId}>
+          <span>
+            《{r.title}》：{r.pending} 条待处理
+          </span>
+          <button type="button" className="link" onClick={() => void openReview(r.chapterId)}>
+            看审核
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** 一步的结果与操作。 */
 function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const act = useApp((s) => s.workflowStepAction);
@@ -162,6 +262,8 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
   const closed = view.run.abandoned || advancing;
   const waiting = step.status === 'awaiting_author';
   const plan = step.key === 'plan' ? planDraftOf(step) : null;
+  const findings = step.key === 'foreshadow' ? findingsOf(step) : null;
+  const chapters = useApp((s) => s.work?.chapters ?? []);
   const button = (label: string, action: 'adopt' | 'skip' | 'redo' | 'keep' | 'withdraw', primary = false) => (
     <button type="button" className={primary ? 'primary' : undefined} disabled={busy || closed} onClick={() => void act(view.run.id, step.idx, action)}>
       {label}
@@ -183,6 +285,18 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       )}
       {waiting && step.key === 'seed' && !closed ? <SeedStep key={`${step.version}`} view={view} step={step} /> : null}
       {plan === null ? null : <PlanDraftChapters draft={plan} withBeats={false} />}
+      {step.key === 'suspects' ? <SuspectsStep view={view} step={step} /> : null}
+      {findings === null || findings.length === 0 ? null : (
+        <ul aria-label="伏笔核对">
+          {findings.map((f) => (
+            <li key={f.foreshadowId}>
+              {f.title}：{FORESHADOW_FINDING_LABEL[f.problem]}
+              {f.chapterId === null ? '' : `（《${chapters.find((c) => c.id === f.chapterId)?.title ?? ''}》）`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {step.key === 'report' ? <AuditReportView step={step} /> : null}
       {step.key === 'write' ? (
         <>
           <p className="muted">
@@ -195,7 +309,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </>
       ) : null}
       <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' ? button('采用', 'adopt', true) : null}
+        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}

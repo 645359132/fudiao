@@ -27,6 +27,7 @@ import {
   BaselineOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
+  BookAuditOutput,
   BookSeedOutput,
   DirectorProposalOutput,
   EvidenceJudgementOutput,
@@ -66,6 +67,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   ChapterMemoryOutput,
   PlanDraftOutput,
   BookSeedOutput,
+  BookAuditOutput,
   AssistantTurnOutput,
 };
 
@@ -672,6 +674,75 @@ export function renderChapterReview(input: ChapterReviewInput): Result<RenderedP
     foreshadows: input.foreshadows.map((f) => ({ label: f.label, title: f.title, role: f.role, content: f.content, reveal: f.reveal.trim() })),
     hasForeshadows: input.foreshadows.length > 0,
     paragraphs: input.paragraphs.map((p) => ({ label: p.label, text: p.text })),
+  });
+}
+
+/** 全书体检一次最多报的疑点数。 */
+export const BOOK_AUDIT_LIMIT = 20;
+
+export type BookAuditInput = {
+  readonly title: string;
+  readonly entities: readonly { readonly name: string; readonly kind: string; readonly locked: boolean; readonly description: string }[];
+  /** 人物关系，已读成一句话（例如“钱四是林舟的债主（第二章起）”）。 */
+  readonly relations: readonly string[];
+  readonly facts: readonly string[];
+  /** 各章要点，按书中顺序；label 是 C1、C2……。 */
+  readonly chapters: readonly {
+    readonly label: string;
+    readonly title: string;
+    readonly summary: string;
+    readonly cast: readonly { readonly name: string; readonly state: string }[];
+    readonly threads: readonly string[];
+  }[];
+};
+
+export function renderBookAudit(input: BookAuditInput): Result<RenderedPrompt, string> {
+  return renderTemplate('book_audit', {
+    title: input.title,
+    limit: BOOK_AUDIT_LIMIT,
+    entities: input.entities.map((e) => ({ name: e.name, kind: e.kind, locked: e.locked, description: e.description.trim() })),
+    hasEntities: input.entities.length > 0,
+    relations: [...input.relations],
+    hasRelations: input.relations.length > 0,
+    facts: [...input.facts],
+    hasFacts: input.facts.length > 0,
+    chapters: input.chapters.map((c) => ({
+      label: c.label,
+      title: c.title,
+      summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(),
+      cast: c.cast.map((x) => ({ name: x.name, state: x.state })),
+      hasCast: c.cast.length > 0,
+      threads: [...c.threads],
+      hasThreads: c.threads.length > 0,
+    })),
+  });
+}
+
+export type ContinuityCheckInput = {
+  readonly title: string;
+  /** 这一处疑点（book_audit 的 about）。 */
+  readonly about: string;
+  readonly entities: readonly { readonly label: string; readonly name: string; readonly kind: string; readonly locked: boolean; readonly description: string }[];
+  readonly earlierTitle: string;
+  readonly earlier: readonly { readonly label: string; readonly text: string }[];
+  readonly earlierClipped: boolean;
+  readonly laterTitle: string;
+  readonly later: readonly { readonly label: string; readonly text: string }[];
+  readonly laterClipped: boolean;
+};
+
+export function renderContinuityCheck(input: ContinuityCheckInput): Result<RenderedPrompt, string> {
+  return renderTemplate('continuity_check', {
+    title: input.title,
+    about: input.about.trim(),
+    entities: input.entities.map((e) => ({ label: e.label, name: e.name, kind: e.kind, locked: e.locked, description: e.description.trim() })),
+    hasEntities: input.entities.length > 0,
+    earlierTitle: input.earlierTitle,
+    earlier: input.earlier.map((p) => ({ label: p.label, text: p.text })),
+    earlierClipped: input.earlierClipped,
+    laterTitle: input.laterTitle,
+    later: input.later.map((p) => ({ label: p.label, text: p.text })),
+    laterClipped: input.laterClipped,
   });
 }
 

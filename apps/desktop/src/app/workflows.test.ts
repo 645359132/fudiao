@@ -63,6 +63,7 @@ function fakeWriter(result = { ok: true, summary: '写完了 2 章并审核' }) 
       calls.push({ ids, review });
       return Promise.resolve(result);
     },
+    reviewChapters: () => Promise.resolve({ ok: true, summary: '' }),
   };
   return { calls, hooks };
 }
@@ -256,5 +257,96 @@ describe('写作工作流（B78）', () => {
     value(await app.advanceWorkflow(run.run.id));
     const calls = value(await app.usage()).recent;
     expect(calls.map((c) => c.stepKey)).toContain(`workflow:${run.run.id}:seed:1`);
+  });
+});
+
+describe('全书体检（B80）', () => {
+  async function twoChapters(app: Awaited<ReturnType<typeof setup>>['app']) {
+    const write = async (title: string, text: string) => {
+      const id = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!.id;
+      const opened = value(await app.openChapter(id));
+      value(await app.saveChapter(id, opened.saved, [{ id: `p-${title}`, text, source: 'handwritten' }], { splits: [], merges: [] }));
+      return id;
+    };
+    const first = await write('第一章', '官差把钱四押进了大牢。');
+    const second = await write('第二章', '钱四在柜台后拨着算盘，招呼客人。');
+    return { first, second };
+  }
+  const memory = (summary: string) => reply(JSON.stringify({ summary, cast: [], foreshadows: [], openThreads: [] }));
+  const noIssues = () => reply(JSON.stringify({ issues: [] }));
+
+  it('补齐记忆、依次审核、找疑点（作者确认）、读原文定位：问题记在后一章，依据是前一章的段落；前一章那段改过后问题过期', async () => {
+    const { deps, app } = await setup();
+    const { first, second } = await twoChapters(app);
+    const run = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: null, to: null, rereview: false }, mode: 'step', budgetUsd: null }));
+    expect(run.steps.map((s) => s.key)).toEqual(['memory', 'review', 'foreshadow', 'suspects', 'locate', 'report']);
+    deps.llmResponses.push(
+      memory('钱四被押进大牢。'),
+      memory('钱四在当铺招呼客人。'),
+      noIssues(),
+      noIssues(),
+      reply(
+        JSON.stringify({
+          suspects: [
+            { earlier: 'C1', later: 'C2', kind: 'character', about: 'C1 钱四进了大牢，C2 他却在当铺', severity: 'high' },
+            // 前后颠倒的丢弃。
+            { earlier: 'C2', later: 'C1', kind: 'timeline', about: '颠倒', severity: 'low' },
+          ],
+        }),
+      ),
+    );
+    const first1 = value(await app.advanceWorkflow(run.run.id));
+    expect(first1.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'awaiting_author', 'pending', 'pending']);
+    expect(first1.view.steps[0]?.note).toBe('整理了 2 章的长篇记忆');
+    expect(first1.view.steps[1]?.note).toContain('审完了 2 章');
+    expect(first1.view.steps[3]?.output).toMatchObject({ suspects: [{ earlierId: first, laterId: second, kind: 'character' }], dropped: 1 });
+
+    value(await app.adoptWorkflowStep(run.run.id, 3));
+    deps.llmResponses.push(
+      reply(
+        JSON.stringify({
+          issues: [
+            { paragraph: 'P1', quote: '钱四在柜台后拨着算盘', kind: 'character', severity: 'high', evidence: ['A1'], description: '第一章钱四已被押进大牢', suggestion: '交代他怎么出来的' },
+            // 没有前一章的段落作依据的丢弃。
+            { paragraph: 'P1', quote: '招呼客人', kind: 'pacing', severity: 'low', evidence: [], description: '无关', suggestion: '' },
+          ],
+        }),
+      ),
+    );
+    const done = value(await app.advanceWorkflow(run.run.id));
+    expect(done.view.state).toBe('done');
+    expect(done.view.steps[4]?.output).toEqual({ issues: 1, unconfirmed: 0, dropped: 1, failed: 0 });
+    expect(done.view.steps[5]?.note).toContain('跨章连贯 1 条');
+    const issues = value(await app.reviewIssues(second));
+    const continuity = issues.filter((i) => i.source === 'continuity');
+    expect(continuity).toHaveLength(1);
+    expect(continuity[0]?.evidenceText).toEqual(['《第一章》的段落：官差把钱四押进了大牢。']);
+
+    // 单章重新审核不冲掉体检的问题（来源不同）。
+    deps.llmResponses.push(noIssues());
+    value(await app.reviewChapter(second));
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toHaveLength(1);
+
+    // 前一章那一段改过：问题过期。
+    const opened = value(await app.openChapter(first));
+    value(await app.saveChapter(first, opened.saved, [{ id: opened.saved[0]!.id, text: '官差把钱四押进了大牢，第二天又放了。', source: 'handwritten' }], { splits: [], merges: [] }));
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toEqual([]);
+  });
+
+  it('只有一章时不找疑点；伏笔核对列出到期未回收的；再体检时记忆是最新的不再整理', async () => {
+    const { deps, app } = await setup();
+    const { first } = await twoChapters(app);
+    value(await app.addForeshadow({ title: '玉佩', content: '钱四多看了一眼', reveal: '', plantChapterId: null, plantAnchor: null, payoffChapterId: first, payoffAnchor: null, status: 'planted' }));
+    const run = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: first, to: first, rereview: false }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(memory('钱四被押进大牢。'), noIssues());
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.state).toBe('done');
+    expect(out.view.steps[2]).toMatchObject({ note: '到期未回收 1 条', output: { findings: [{ title: '玉佩', problem: 'overdue', chapterId: first }] } });
+    expect(out.view.steps[3]?.note).toBe('没有找到跨章的疑点');
+    expect(out.view.steps[4]?.note).toBe('没有要核对的疑点');
+    const again = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: first, to: first, rereview: false }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(noIssues());
+    const second = value(await app.advanceWorkflow(again.run.id));
+    expect(second.view.steps[0]?.note).toBe('范围内 1 章的长篇记忆都是最新的');
   });
 });

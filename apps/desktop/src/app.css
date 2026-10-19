@@ -3384,6 +3384,15 @@ body.resizing .assistant {
   color: var(--accent-contrast);
 }
 
+.workflow-suspects li,
+.workflow-report li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .workflow-detail h3 {
   margin-top: 0;
 }

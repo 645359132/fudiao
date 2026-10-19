@@ -16,7 +16,7 @@ export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as con
 export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
 
 /** 助手可以发起的写作工作流（与应用层工作流命令表的键相同，由类型检查核对）。 */
-export const ASSISTANT_WORKFLOWS = ['quick_book'] as const;
+export const ASSISTANT_WORKFLOWS = ['quick_book', 'book_audit'] as const;
 
 /** 人物关系的类别（与存储层的取值相同）。 */
 export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;
@@ -131,6 +131,9 @@ export const AssistantAction = z.discriminatedUnion('tool', [
     genre: opt,
     chapters: z.number().int().positive().nullable(),
     wordsPerChapter: z.number().int().positive().nullable(),
+    from: opt,
+    to: opt,
+    rereview: z.boolean().nullable(),
   }),
   z.object({ tool: z.literal('get_workflow'), run: opt }),
   z.object({ tool: z.literal('continue_workflow'), run: text, adopt: z.boolean() }),

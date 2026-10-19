@@ -25,11 +25,14 @@ export { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from './labels';
 import { z } from 'zod';
 import { describeError, type AppError } from './errors';
 import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView } from './planning';
+import { AuditSuspect, type LocatedSuspect } from './book-audit';
+import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
+import { chapterLengths, type Chapter } from '@fudiao/store';
 import type { AppDeps } from './ports';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'book_audit'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
 
 /**
@@ -45,6 +48,8 @@ export type WorkflowHooks = {
    * ok 为是否全部写完；summary 是怎样结束的一句话。
    */
   writeChapters(chapterIds: readonly string[], review: boolean, options: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }>;
+  /** 依次审核这些章（状态层经依次审核做，与成书进度、助手的后台审核同一时间只有一批）。ok 为是否全部审完。 */
+  reviewChapters(chapterIds: readonly string[], options: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }>;
 };
 
 /** 推进时的环境：取消信号、用量回调由执行器包好交给步骤。 */
@@ -68,7 +73,8 @@ type StepContext<P> = {
   readonly output: (key: string) => unknown;
 };
 
-type StepResult<O> = { readonly output: O; readonly note: string };
+/** 一步的结果。settled：草稿没有要作者看的东西（例如一处疑点也没找到），直接完成、不停下。 */
+type StepResult<O> = { readonly output: O; readonly note: string; readonly settled?: boolean };
 
 /** 命令表里的一步。O 是结果的结构；存进作品库前后都按 output 校验。 */
 type StepSpec<P, O> = {
@@ -120,6 +126,9 @@ function step<P, O>(spec: StepSpec<P, O>): Step<P> {
   };
 }
 
+/** 估算用的作品规模：章数（回收站以外）、有正文的章数与全书字数。 */
+export type BookSize = { readonly chapters: number; readonly written: number; readonly words: number };
+
 /** 预计用量：调用次数与 Token（思考计入输出）。 */
 export type WorkflowEstimate = { readonly calls: number; readonly inputTokens: number; readonly outputTokens: number };
 
@@ -129,7 +138,7 @@ type WorkflowDef<P> = {
   readonly description: string;
   readonly params: z.ZodType<P>;
   readonly runTitle: (params: P) => string;
-  readonly estimate: (params: P) => WorkflowEstimate;
+  readonly estimate: (params: P, book: BookSize) => WorkflowEstimate;
   readonly steps: readonly Step<P>[];
 };
 
@@ -139,7 +148,7 @@ type AnyWorkflow = {
   readonly description: string;
   readonly parseParams: (value: unknown) => Result<unknown, string>;
   readonly runTitle: (params: unknown) => string;
-  readonly estimate: (params: unknown) => WorkflowEstimate;
+  readonly estimate: (params: unknown, book: BookSize) => WorkflowEstimate;
   readonly steps: readonly Step<unknown>[];
 };
 
@@ -164,7 +173,7 @@ function erase<P>(def: WorkflowDef<P>): AnyWorkflow {
     description: def.description,
     parseParams,
     runTitle: (v) => typed(v, def.runTitle, def.title),
-    estimate: (v) => typed(v, def.estimate, { calls: 0, inputTokens: 0, outputTokens: 0 }),
+    estimate: (v, book) => typed(v, (p) => def.estimate(p, book), { calls: 0, inputTokens: 0, outputTokens: 0 }),
     steps: def.steps.map((s): Step<unknown> => {
       const { adopt, confirm, skipIf } = s;
       return {
@@ -208,7 +217,15 @@ export const QuickBookParams = z.object({
 });
 export type QuickBookParams = z.infer<typeof QuickBookParams>;
 
-type ParamsOf = { readonly quick_book: QuickBookParams };
+/** 全书体检的参数：范围（章节标识，null 为从头、到尾）与要不要重新审核已经审过的章节。 */
+export const BookAuditParams = z.object({
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  rereview: z.boolean(),
+});
+export type BookAuditParams = z.infer<typeof BookAuditParams>;
+
+type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams };
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
 export type WorkflowHost = {
@@ -220,6 +237,11 @@ export type WorkflowHost = {
   draftPlans(request: PlanDraftRequest, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
   applyPlanDraft(draft: PlanDraft): Promise<Result<AppliedDraft, AppError>>;
   planningView(): Promise<Result<PlanningView, AppError>>;
+  buildMemory(chapterId: string, options?: CallOptions): Promise<Result<unknown, AppError>>;
+  auditChapters(from: string | null, to: string | null): Promise<Result<readonly Chapter[], AppError>>;
+  draftSuspects(chapterIds: readonly string[], stepKey: string, options?: CallOptions): Promise<Result<{ readonly suspects: AuditSuspect[]; readonly dropped: number }, AppError>>;
+  locateSuspect(suspect: AuditSuspect, stepKey: string, options?: CallOptions): Promise<Result<LocatedSuspect, AppError>>;
+  saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[]): Promise<Result<number, AppError>>;
 };
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
@@ -350,6 +372,204 @@ export function planDraftOf(step: Pick<WorkflowStepView, 'output'>): PlanDraft |
   return parsed.success ? parsed.data : null;
 }
 
+/** 一章约多少字（体检估算没有字数时用）。 */
+const AUDIT_WORDS_PER_CHAPTER = 3_000;
+
+/** 全书体检各步的结果。 */
+const ChapterCount = z.object({ chapters: z.array(z.string()), note: z.string() });
+const ForeshadowReport = z.object({ findings: z.array(z.object({ foreshadowId: z.string(), title: z.string(), problem: z.enum(['overdue', 'not_planted', 'unscheduled']), chapterId: z.string().nullable() })) });
+const SuspectDraft = z.object({ suspects: z.array(AuditSuspect), dropped: z.number().int() });
+const LocateReport = z.object({ issues: z.number().int(), unconfirmed: z.number().int(), dropped: z.number().int(), failed: z.number().int() });
+const AuditReport = z.object({
+  chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), pending: z.number().int() })),
+  foreshadows: z.number().int(),
+  continuity: z.number().int(),
+});
+export type AuditReport = z.infer<typeof AuditReport>;
+
+const FINDING_LABEL: Readonly<Record<ForeshadowFinding['problem'], string>> = { overdue: '到期未回收', not_planted: '计划埋下，没有迹象', unscheduled: '没有定章节' };
+
+function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
+  const range = async (p: BookAuditParams) => host.auditChapters(p.from, p.to);
+  return {
+    title: '全书体检',
+    description: '补齐长篇记忆 → 依次审核 → 伏笔核对 → 跨章疑点 → 读原文定位 → 体检报告',
+    params: BookAuditParams,
+    runTitle: (p) => (p.from === null && p.to === null ? '全书体检：全书' : '全书体检：部分章节'),
+    estimate(_p, book) {
+      const n = Math.max(book.written, 1);
+      const chapterTokens = (book.words > 0 ? book.words / Math.max(book.written, 1) : AUDIT_WORDS_PER_CHAPTER) * TOKENS_PER_CHAR;
+      const suspects = Math.min(20, Math.ceil(n / 2));
+      return {
+        // 每章记忆与审核各一次（已有的会跳过，按最多算），疑点一次，每处疑点一次。
+        calls: n * 2 + 1 + suspects,
+        inputTokens: Math.round(n * (chapterTokens + 2_000) + n * (chapterTokens + 8_000) + n * 600 + 4_000 + suspects * (chapterTokens * 2 + 2_000)),
+        outputTokens: Math.round(n * 1_500 + n * 3_000 + 3_000 + suspects * 1_500),
+      };
+    },
+    steps: [
+      step<BookAuditParams, z.infer<typeof ChapterCount>>({
+        key: 'memory',
+        label: '补齐长篇记忆',
+        kind: 'act',
+        output: ChapterCount,
+        async run({ params, options, onProgress }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          if (chapters.value.length === 0) return err(invalid('范围里还没有写好正文的章节'));
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const ids = new Set(chapters.value.map((c) => c.id));
+          const todo = view.value.chapters.filter((c) => ids.has(c.chapter.id) && (c.memory === null || c.memory.status === 'stale'));
+          const done: string[] = [];
+          for (const [i, c] of todo.entries()) {
+            onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
+            const built = await host.buildMemory(c.chapter.id, options);
+            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，重做时接着整理）` : ''}`));
+            done.push(c.chapter.id);
+          }
+          return ok({ output: { chapters: done, note: '' }, note: done.length === 0 ? `范围内 ${chapters.value.length} 章的长篇记忆都是最新的` : `整理了 ${done.length} 章的长篇记忆` });
+        },
+      }),
+      step<BookAuditParams, z.infer<typeof ChapterCount>>({
+        key: 'review',
+        label: '依次审核',
+        kind: 'act',
+        output: ChapterCount,
+        async run({ params, hooks, options, onProgress }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const reviewed = new Set(view.value.chapters.filter((c) => c.plan?.status === 'reviewed').map((c) => c.chapter.id));
+          const targets = chapters.value.filter((c) => params.rereview || !reviewed.has(c.id)).map((c) => c.id);
+          if (targets.length === 0) return ok({ output: { chapters: [], note: '' }, note: '范围内的章节都审核过了（要重新审核，开始时勾选“已审过的也重新审核”）' });
+          onProgress(`依次审核 ${targets.length} 章`);
+          const done = await hooks.reviewChapters(targets, options);
+          if (!done.ok) return err(invalid(done.summary));
+          return ok({ output: { chapters: targets, note: done.summary }, note: done.summary });
+        },
+      }),
+      step<BookAuditParams, z.infer<typeof ForeshadowReport>>({
+        key: 'foreshadow',
+        label: '伏笔核对',
+        kind: 'check',
+        output: ForeshadowReport,
+        async run({ params }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const findings = foreshadowAudit({
+            foreshadows: view.value.foreshadows,
+            order: new Map(view.value.chapters.map((c, i) => [c.chapter.id, i])),
+            written: new Set(view.value.chapters.filter((c) => c.hasText).map((c) => c.chapter.id)),
+            range: new Set(chapters.value.map((c) => c.id)),
+            progress: new Map(view.value.chapters.flatMap((c) => (c.memory === null ? [] : [[c.chapter.id, c.memory.foreshadowProgress] as const]))),
+          });
+          const counts = (['overdue', 'not_planted', 'unscheduled'] as const).flatMap((k) => {
+            const n = findings.filter((f) => f.problem === k).length;
+            return n === 0 ? [] : [`${FINDING_LABEL[k]} ${n} 条`];
+          });
+          return ok({ output: { findings }, note: counts.length === 0 ? '伏笔账本没有发现问题' : counts.join('，') });
+        },
+      }),
+      step<BookAuditParams, z.infer<typeof SuspectDraft>>({
+        key: 'suspects',
+        label: '跨章疑点',
+        kind: 'draft',
+        output: SuspectDraft,
+        async run({ params, stepKey, options, onProgress }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          onProgress(`由 ${chapters.value.length} 章的长篇记忆找跨章的疑点`);
+          const drafted = await host.draftSuspects(
+            chapters.value.map((c) => c.id),
+            stepKey,
+            options,
+          );
+          if (!drafted.ok) return drafted;
+          const n = drafted.value.suspects.length;
+          return ok({ output: drafted.value, note: n === 0 ? '没有找到跨章的疑点' : `${n} 处疑点，下一步逐条读两章的原文确认；用不着核对的可以先删去`, settled: n === 0 });
+        },
+        // 采用即确认要核对这些疑点，不改动作品。
+        adopt: (_c, draft) => Promise.resolve(ok(`确认核对 ${draft.suspects.length} 处疑点`)),
+      }),
+      step<BookAuditParams, z.infer<typeof LocateReport>>({
+        key: 'locate',
+        label: '读原文定位',
+        kind: 'act',
+        output: LocateReport,
+        async run({ params, stepKey, options, onProgress, output }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          const draft = SuspectDraft.safeParse(output('suspects'));
+          const suspects = draft.success ? draft.data.suspects : [];
+          const located: LocatedSuspect[] = [];
+          let failed = 0;
+          for (const [i, s] of suspects.entries()) {
+            onProgress(`核对第 ${i + 1} / ${suspects.length} 处疑点`);
+            // 每处疑点一个步骤键：中断后接着做时，已经核对过的不再请求。
+            const one = await host.locateSuspect(s, `${stepKey}:${i}`, options);
+            if (!one.ok) {
+              if (options.signal?.aborted === true) return one;
+              failed += 1;
+              continue;
+            }
+            located.push(one.value);
+          }
+          const saved = await host.saveContinuityIssues(
+            chapters.value.map((c) => c.id),
+            located,
+          );
+          if (!saved.ok) return saved;
+          const unconfirmed = located.filter((l) => l.issues.length === 0).length;
+          const dropped = located.reduce((n, l) => n + l.dropped, 0);
+          return ok({
+            output: { issues: saved.value, unconfirmed, dropped, failed },
+            note: `${suspects.length === 0 ? '没有要核对的疑点' : `核对了 ${suspects.length - failed} 处疑点，定位出 ${saved.value} 个问题`}${unconfirmed > 0 ? `；${unconfirmed} 处读了原文没有发现矛盾` : ''}${failed > 0 ? `；${failed} 处没有核对成（调用失败），重做这一步时再试` : ''}`,
+          });
+        },
+      }),
+      step<BookAuditParams, AuditReport>({
+        key: 'report',
+        label: '体检报告',
+        kind: 'check',
+        output: AuditReport,
+        async run({ params, output }) {
+          const chapters = await range(params);
+          if (!chapters.ok) return chapters;
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const ids = new Set(chapters.value.map((c) => c.id));
+          const rows = view.value.chapters.filter((c) => ids.has(c.chapter.id)).map((c) => ({ chapterId: c.chapter.id, title: c.chapter.title, pending: c.pendingIssues }));
+          const fs = ForeshadowReport.safeParse(output('foreshadow'));
+          const loc = LocateReport.safeParse(output('locate'));
+          const report: AuditReport = { chapters: rows, foreshadows: fs.success ? fs.data.findings.length : 0, continuity: loc.success ? loc.data.issues : 0 };
+          const total = rows.reduce((n, r) => n + r.pending, 0);
+          const worst = rows.filter((r) => r.pending > 0).length;
+          return ok({ output: report, note: `范围内 ${rows.length} 章，${worst} 章有待处理的问题，共 ${total} 条（跨章连贯 ${report.continuity} 条）；伏笔要留意的 ${report.foreshadows} 条` });
+        },
+      }),
+    ],
+  };
+}
+
+/** 体检各步的结果（界面显示用）；不是这一步或不合格时为 null。 */
+export const suspectsOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = SuspectDraft.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const findingsOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = ForeshadowReport.safeParse(step.output);
+  return parsed.success ? parsed.data.findings : null;
+};
+export const reportOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = AuditReport.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const FORESHADOW_FINDING_LABEL = FINDING_LABEL;
+
 /** 卡片与助手用的工作流说明。 */
 export type WorkflowInfo = {
   readonly key: WorkflowKey;
@@ -415,8 +635,9 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
   const ctx = () => ({ now: deps.clock.now() });
   const WORKFLOWS: { readonly [K in WorkflowKey]: WorkflowDef<ParamsOf[K]> } = {
     quick_book: quickBook(host, project),
+    book_audit: bookAudit(host),
   };
-  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book) };
+  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit) };
   const isKey = (key: string): key is WorkflowKey => (WORKFLOW_KEYS as readonly string[]).includes(key);
   const defOf = (key: string): AnyWorkflow | null => (isKey(key) ? ERASED[key] : null);
 
@@ -524,7 +745,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     }
     const output = result.value.output;
     if (spec.kind === 'manual') return apply(port, current.value, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, note: result.value.note } });
-    if (spec.kind !== 'draft') return apply(port, current.value, { type: 'produced', idx, waitForAuthor: false }, { [idx]: { ...finished, output, note: result.value.note } });
+    if (spec.kind !== 'draft' || result.value.settled === true) return apply(port, current.value, { type: 'produced', idx, waitForAuthor: false }, { [idx]: { ...finished, output, note: result.value.note } });
     const confirmNote = spec.confirm === undefined ? null : await spec.confirm(c, output);
     const produced = await apply(port, current.value, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, edited: false, changes: null, note: confirmNote ?? result.value.note } });
     if (!produced.ok || current.value.run.mode !== 'auto' || confirmNote !== null) return produced;
@@ -569,7 +790,12 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       const def = ERASED[workflow];
       const p = def.parseParams(params);
       if (!p.ok) return err(invalid(p.error));
-      const estimate = def.estimate(p.value);
+      const view = await host.planningView();
+      const port = project();
+      const lengths = port === null ? null : await chapterLengths(port);
+      const words = lengths?.ok === true ? lengths.value.reduce((n, c) => n + c.length, 0) : 0;
+      const book: BookSize = view.ok ? { chapters: view.value.chapters.length, written: view.value.chapters.filter((c) => c.hasText).length, words } : { chapters: 0, written: 0, words: 0 };
+      const estimate = def.estimate(p.value, book);
       const price = await pricing();
       const cost = costOf({ inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }, price?.prices);
       return ok({ ...estimate, costUsd: cost, model: price?.model ?? null });

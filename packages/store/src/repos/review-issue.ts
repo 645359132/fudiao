@@ -10,9 +10,20 @@ export type IssueKind = (typeof ISSUE_KINDS)[number];
 export const ISSUE_STATUSES = ['pending', 'ignored', 'fixed', 'sent_to_writer', 'stale'] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 export type IssueSeverity = 'high' | 'medium' | 'low';
+/** 问题的来源：程序检查、模型审核（单章）、跨章连贯检查（全书体检，迁移 0020）。 */
+export const ISSUE_SOURCES = ['program', 'model', 'continuity'] as const;
+export type IssueSource = (typeof ISSUE_SOURCES)[number];
 
-/** 问题的依据：设定、事实、伏笔或前文段落。 */
-export const IssueEvidence = z.object({ type: z.enum(['entity', 'fact', 'foreshadow', 'paragraph', 'plan']), id: z.string() });
+/**
+ * 问题的依据：设定、事实、伏笔或段落。另一章的段落（全书体检的跨章连贯检查，B80）带上所在的章节与当时的版本，
+ * 那一段改过之后问题标为过期。
+ */
+export const IssueEvidence = z.object({
+  type: z.enum(['entity', 'fact', 'foreshadow', 'paragraph', 'plan']),
+  id: z.string(),
+  chapterId: z.string().optional(),
+  version: z.number().int().optional(),
+});
 export type IssueEvidence = z.infer<typeof IssueEvidence>;
 
 const IssueRow = z
@@ -26,7 +37,7 @@ const IssueRow = z
     description: z.string(),
     suggestion: z.string(),
     status: z.enum(ISSUE_STATUSES),
-    source: z.enum(['program', 'model']),
+    source: z.enum(ISSUE_SOURCES),
     llm_call_id: z.string().nullable(),
     version: z.number().int(),
     created_at: z.string(),
@@ -61,9 +72,9 @@ export type IssueInput = {
   readonly evidence: readonly IssueEvidence[];
   readonly description: string;
   readonly suggestion: string;
-  /** 模型审核的问题带调用记录；程序检查的问题为 null。 */
+  /** 模型审核与连贯检查的问题带调用记录；程序检查的问题为 null。 */
   readonly llmCallId: string | null;
-  readonly source: 'program' | 'model';
+  readonly source: IssueSource;
 };
 
 const insert = (i: IssueInput, ctx: WriteContext): Statement => ({
@@ -134,14 +145,24 @@ export function setIssueStatus(port: SqlPort, current: ReviewIssue, status: Excl
   });
 }
 
-/** 锚点所在段落改过或删掉的待处理问题标为过期。返回过期的问题标识。 */
+/**
+ * 锚点所在段落改过或删掉的待处理问题标为过期；依据是另一章的段落（带版本）时，那一段改过或删掉同样过期。
+ * 返回过期的问题标识。
+ */
 export async function reviewStaleIssues(port: SqlPort, chapterId: string, ctx: WriteContext): Promise<Result<string[], RepoError>> {
   const pending = await listIssues(port, chapterId);
   if (!pending.ok) return pending;
   const rows = await port.query('SELECT id, version FROM paragraph WHERE chapter_id = ?', [chapterId]);
   if (!rows.ok) return err({ code: 'sql', error: rows.error });
   const current = new Map(rows.value.map((r) => [String(r['id']), Number(r['version'])]));
-  const stale = pending.value.filter((i) => current.get(i.anchor.paragraphId) !== i.anchor.paragraphVersion).map((i) => i.id);
+  const elsewhere = [...new Set(pending.value.flatMap((i) => i.evidence.flatMap((e) => (e.type === 'paragraph' && e.version !== undefined ? [e.id] : []))))];
+  if (elsewhere.length > 0) {
+    const others = await port.query(`SELECT id, version FROM paragraph WHERE id IN (${elsewhere.map(() => '?').join(', ')})`, elsewhere);
+    if (!others.ok) return err({ code: 'sql', error: others.error });
+    for (const r of others.value) current.set(String(r['id']), Number(r['version']));
+  }
+  const moved = (i: ReviewIssue) => i.evidence.some((e) => e.type === 'paragraph' && e.version !== undefined && current.get(e.id) !== e.version);
+  const stale = pending.value.filter((i) => current.get(i.anchor.paragraphId) !== i.anchor.paragraphVersion || moved(i)).map((i) => i.id);
   if (stale.length === 0) return ok([]);
   const result = await port.transaction(
     stale.map((id) => ({ sql: "UPDATE review_issue SET status = 'stale', version = version + 1, updated_at = ? WHERE id = ? AND status = 'pending'", params: [ctx.now, id] })),

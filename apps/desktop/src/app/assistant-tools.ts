@@ -1726,7 +1726,21 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const flows = env.host.workflows;
       const jobs = env.events.background;
       if (flows === undefined || jobs === undefined) return failed('这里不能在后台推进写作工作流');
-      const params = { idea: action.idea ?? '', genre: action.genre ?? '', chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000 };
+      let params: Readonly<Record<string, unknown>>;
+      if (action.workflow === 'book_audit') {
+        const ref = async (r: string | null): Promise<Result<string | null, string>> => {
+          if (r === null || r.trim() === '') return ok(null);
+          const c = await env.findChapter(r);
+          return c.ok ? ok(c.value.id) : c;
+        };
+        const from = await ref(action.from);
+        if (!from.ok) return failed(from.error);
+        const to = await ref(action.to);
+        if (!to.ok) return failed(to.error);
+        params = { from: from.value, to: to.value, rereview: action.rereview ?? false };
+      } else {
+        params = { idea: action.idea ?? '', genre: action.genre ?? '', chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000 };
+      }
       const quote = await flows.quoteWorkflow(action.workflow, params);
       if (!quote.ok) return failWith(quote.error);
       const started = await flows.startWorkflow({ workflow: action.workflow, params, mode: action.mode, budgetUsd: action.budgetUsd });
