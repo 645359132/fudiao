@@ -30,7 +30,7 @@ export { createEntity, deleteEntity, ENTITY_KINDS, getEntity, listEntities, setE
 export type { Fact, FactBasis, FactInput, FactKind, FactModality, FactStatus } from './fact';
 export { createFact, deleteFact, factInsertStatement, getFact, listFacts, reviewStaleFacts, setFactStatus, updateFact } from './fact';
 export type { LlmCallRow, LlmCallStatus, LlmCallUsage, RunCall, UsageSummary, UsageTotals } from './llm-call';
-export { appendLlmCall, findCallByRequestHash, findCompletedCall, latestCallWithUsage, listLlmCalls, listRunCalls, usageSummary } from './llm-call';
+export { appendLlmCall, findCallByRequestHash, findCompletedCall, latestCallWithUsage, listLlmCalls, listRunCalls, mayBeBilled, usageSummary } from './llm-call';
 export type { RangeInsert, RangePlan, TextPosition, TextRange } from './paragraph-range';
 export { applyRangeReplace, planRangeReplace, rangeReplaceStatements, textInRange } from './paragraph-range';
 export type { AdoptedEvent, AdoptedFact, AdoptionInput } from './adoption';

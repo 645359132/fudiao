@@ -1,5 +1,5 @@
 import { err, ok, type Result } from '@fudiao/shared';
-import { costOf } from './budget';
+import { chargeOf } from './budget';
 import { requestHash } from './request-hash';
 import type { CallOptions, Effort, LlmError, LlmOutcome, LlmPort, LlmRequest, LlmResult, TaskKind } from './types';
 
@@ -20,6 +20,11 @@ export type LlmCallRecord = {
   readonly result?: LlmResult;
   readonly error?: LlmError;
   readonly cost: number | null;
+  /**
+   * 费用未知、这次又可能已经计费时（服务没有返回用量，或已经开始回复后出错）按请求的最坏估计（输入估计加输出上限）
+   * 记下的费用，预算与界面按它计入并注明是估计。价格未配置或不可能计费时为 null；较早的记录没有这一项。
+   */
+  readonly costEstimate?: number | null;
   readonly startedAt: string;
   readonly finishedAt: string;
 };
@@ -52,6 +57,7 @@ export function withCallLog(port: LlmPort, log: CallLog, now: () => string): Llm
 
       const startedAt = now();
       const result = await port.complete(request, options);
+      const charge = chargeOf(request, result);
       await log.append({
         stepKey,
         requestHash: hash,
@@ -67,7 +73,8 @@ export function withCallLog(port: LlmPort, log: CallLog, now: () => string): Llm
         ...(request.repairOf !== undefined && { repairIssues: request.repairOf }),
         status: result.ok ? result.value.outcome : 'error',
         ...(result.ok ? { result: result.value } : { error: result.error }),
-        cost: result.ok ? costOf(result.value.usage, request.model.prices) : null,
+        cost: charge !== null && !charge.estimated ? charge.usd : null,
+        costEstimate: charge !== null && charge.estimated ? charge.usd : null,
         startedAt,
         finishedAt: now(),
       });

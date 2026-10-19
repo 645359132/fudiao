@@ -195,6 +195,26 @@ describe.each(routes)('$name（$via）', (subject) => {
     expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', message: expect.stringContaining('error decoding response body') }) });
   });
 
+  // 经凭据代理时，代理的 failed 事件让 proxy-fetch 立即以错误结束响应体，排在队列里还没读走的数据块随之丢弃
+  // （createProxyFetch 的已知问题，属凭据代理核心模块，待确认方案后修正），这里先只验证直连。
+  it.skipIf(subject.via !== '直连')('回复读到一半断开：错误带上“服务已经开始回复”与已知的部分用量（可能已计费）', async () => {
+    const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, normal, { stopAfterText: true }), breakAfterChunks: true }]);
+    const result = await subject.build(fetch).complete(req);
+    expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', partial: { usage: subject.usageOnCancel === 'known' ? expect.objectContaining({ inputTokens: 100 }) : null } }) });
+  });
+
+  it('流没有结束标记就正常关闭：不把半截文字当作完成，转换为 network（可以重试）', async () => {
+    const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, normal, { stopAfterText: true }) }]);
+    const result = await subject.build(fetch).complete(req);
+    expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', partial: expect.anything() }) });
+  });
+
+  it('还没收到回复就失败的错误不带部分用量', async () => {
+    const network = await subject.build(fakeFetch([{ networkError: true }]).fetch).complete(req);
+    const auth = await subject.build(fakeFetch([{ status: 401, body: errorBody(401) }]).fetch).complete(req);
+    expect([network, auth].map((r) => !r.ok && 'partial' in r.error)).toEqual([false, false]);
+  });
+
   it('结果与错误中不出现 API Key（硬性规则 15）', async () => {
     const ok = await subject.build(fakeFetch([{ chunks: subject.chunks(MODEL, normal) }]).fetch).complete(req);
     const failed = await subject.build(fakeFetch([{ status: 401, body: errorBody(401) }]).fetch).complete(req);

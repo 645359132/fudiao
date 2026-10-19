@@ -64,7 +64,7 @@ const sample: Statement[] = [
     ...T,
   ),
   s(
-    "INSERT INTO llm_call (id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at) VALUES ('01L2', NULL, 'selection_edit', 'p1', 'm1', NULL, '{}', 'selection_edit', '1', 'h2', 'error', NULL, NULL, NULL, NULL, NULL, NULL, '{\"code\":\"network\"}', ?, ?)",
+    "INSERT INTO llm_call (id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at, cost_estimate) VALUES ('01L2', NULL, 'selection_edit', 'p1', 'm1', NULL, '{}', 'selection_edit', '1', 'h2', 'error', NULL, NULL, NULL, NULL, NULL, NULL, '{\"code\":\"network\",\"partial\":{\"usage\":null}}', ?, ?, 0.0213)",
     ...T,
   ),
   s(
@@ -450,6 +450,16 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 17 导出的数据（调用记录没有 cost_estimate 列）经转换后导入，估计值为空', async () => {
+    const data = await exported(await seeded());
+    const calls = (data.tables['llm_call'] ?? []).map(({ cost_estimate: _dropped, ...row }) => row);
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 17, tables: { ...data.tables, llm_call: calls } })).toMatchObject({ ok: true });
+    const after = (await exported(target)).tables['llm_call'] ?? [];
+    expect(after.map((row) => row['cost_estimate'])).toEqual(calls.map(() => null));
+    expect(after.map(({ cost_estimate: _x, ...row }) => row)).toEqual(calls);
   });
 
   it('结构版本 16 导出的数据（没有删除过的段落的版本）导入后为空', async () => {

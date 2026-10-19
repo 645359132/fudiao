@@ -142,7 +142,7 @@ fudiao/
 | `sim_run` | id、scene_id、scene_config 与 scene_config_version（开始时的场景配置：场景之后再改，这次运行仍按当时的配置继续与回放）、mode（交互、自动）、batch_id、parent_run_id、branch_from_seq、budget_usd（费用上限，可空）；status、end_reason、pause_reason、round、last_seq 是由事件得出的缓存，以事件为准；迁移 0006 | B28、B48 |
 | `sim_event` | run_id、seq、batch_first / batch_index / batch_size（同一次追加为一批，与 M0 的 JSONL 记录一一对应）、type 与 actor（取自事件内容，便于查询）、payload、created_at；主键 (run_id, seq)；只追加，表上的触发器拒绝修改与删除。回合与阶段由回放得到，不另存列；迁移 0006 | B28、B30 |
 | `sim_snapshot` | run_id、seq、state（JSON）、state_hash、created_at；在等待作者、暂停与结束处记下，用来校验回放；迁移 0006 | B30 |
-| `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error、started_at、finished_at；迁移 0003，随作品导出 | B19、B36 |
+| `llm_call` | id、step_key（一次性调用为空）、task_kind、provider、model、served_model、params、template_id、template_version、request_hash、status、input_tokens、output_tokens、cache_read_tokens、cache_write_tokens、cost（未知为空）、response、error（回复到一半出错时带 `partial` 与已知的部分用量）、started_at、finished_at、cost_estimate（费用未知又可能已计费时按请求的最坏估计，迁移 0018）；迁移 0003，随作品导出 | B19、B36 |
 | `candidate` | id、chapter_id、operation（续写、改写、扩写、缩写、润色；迁移 0007 增加“推演写成正文”）、beat_sheet_id（推演写成的正文依据的节拍表，迁移 0007）、target（起止段落标识与段内下标）、base_text 与 base_versions（生成时的原文与相关段落版本）、generated（生成原文）、content（作者可修改）、status（待处理、已接受、已放弃、过期）、status_reason、llm_call_id；迁移 0004，随作品导出 | B17 |
 | `beat_sheet` | id、run_id、pov_actor（视角角色的键）、from_round 与 to_round、up_to_seq（视角角色的认知取到这个事件序号为止，即 to_round 结束时）、beats（JSON：指向认知条目的 ref、处理方式、说明、暂不揭示）、style、llm_call_id、version；迁移 0007 | B45 |
 | `chapter_plan` | chapter_id、goal、cast_ids（出场人物的设定标识）、beats（要写的情节点）、foreshadow_plant / foreshadow_payoff（伏笔标识）、treatment（详略说明）、target_words、status（待写、写作中、已写、已审核）、progress（写手的进度 JSON：这次写作的标识、情节点的分段与每段字数、已写入的段数、写入前快照的标识；没让写手写过时为空）、version；迁移 0005 | B65、B59 |
@@ -366,7 +366,7 @@ stateDiagram-v2
 
 回放与中断恢复（M4-06，B30）：时间线本身就是回放——它只由事件得到，不调用模型。中断后的恢复不需要专门的步骤：事件按批写入作品库，模型调用按步骤键查重，重新打开作品后“继续”即从停下的那一步接着做，已完成的调用不重复、不重复计费。运行记录上的状态与回合是缓存，应用在写完事件、还没写回缓存时退出会让它落后，所以列出一个场景的运行时把还没有结束的运行按事件重算一遍。工作区的“校验回放”只读事件重算每个快照处的状态，与当时记下的哈希比较，不一致时指出是哪个快照。
 
-预算（B28）：预算上限记在 `sim_run.budget_usd`，需要默认模型配置了价格。每次引擎操作时从调用记录算出这次运行已用的费用（`listRunCalls`，按步骤键的前缀取），交给预算守卫；预计将超出时不再发起新的调用，运行以“预算用完”结束。
+预算（B28）：预算上限记在 `sim_run.budget_usd`，需要默认模型配置了价格。每次引擎操作时从调用记录算出这次运行已用的费用（`listRunCalls`，按步骤键的前缀取），交给预算守卫；预计将超出时不再发起新的调用，运行以“预算用完”结束。预算是硬上限：预算守卫在调用前按最坏估计（输入估计加输出上限）给每次进行中的调用预留，同时发出的提案、裁决与判断各占一份，结束时把预留换成实际花费（还没收到回复就失败的释放）；服务没有返回用量、或回复到一半断开（可能已计费）的调用按最坏估计计入，调用记录的 `cost_estimate` 记下这个估计，恢复运行时接着算，界面注明是估计。
 
 等待时间（验收“推演等待”）：工作区列出每回合等了多久（回合开始到回合结束的事件时间之差）与其中模型响应的合计（这一回合各次调用的起止时间之差），两者分开记录；同一回合的行动提案同时请求，所以后者可以大于前者。
 
@@ -486,11 +486,11 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 - 转发时去掉界面带来的认证头（SDK 中的占位 Key）、Cookie 与逐跳头，再按服务的写法注入凭据（Anthropic 用 `x-api-key`，其余用 `Authorization: Bearer`）；响应去掉 `Set-Cookie`。TLS 用系统的 schannel（reqwest 的 native-tls），并遵循系统代理设置。
 - 事件格式：`head`（状态码与响应头）、若干 `chunk`（字节）、`end`（是否被取消）或 `failed`（原因，不含 URL）。代理在发出前拒绝时 `net_fetch` 返回错误码（`unknown_provider`、`host_not_allowed`、`insecure_scheme`、`invalid_request`、`duplicate_id`），适配器归为网络错误并带上原因。请求标识由界面生成，取消在请求开始前到达同样生效。
 - 实现：`src-tauri/src/net.rs`（凭据来源为 `Credentials` 接口，M2-02 由系统凭据管理器实现）；TypeScript 侧 `packages/llm/src/proxy-fetch.ts` 把事件还原成标准 Response，Tauri 传输层在 `apps/desktop/src/adapters/tauri-net.ts`。适配器契约测试的每个场景都直连与经代理各跑一遍。
-- 重试：还没收到回复的请求由 SDK 重试（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。回复读到一半连接断了（凭据代理报“error decoding response body”等）SDK 不会重试，由桌面端调用器外层的 `withRetry`（`packages/llm/src/retry.ts`）把网络故障整次重新请求，最多两次（等 3 秒、10 秒，可取消）；每次尝试各写一条调用记录，失败的不算完成记录，带步骤键的调用照样不重复计费；重新请求前发出 `retry` 事件，界面丢掉中断前收到的半截文字。凭据代理拒绝的请求（目标地址不对、没有凭据）归为 `bad_request`，不重试。
+- 重试：还没收到回复的请求由 SDK 重试（网络错误、429、5xx，遵守 Retry-After），代理不重试，避免重复请求。回复读到一半连接断了（凭据代理报“error decoding response body”等）SDK 不会重试，由桌面端调用器外层的 `withRetry`（`packages/llm/src/retry.ts`）把网络故障整次重新请求，最多两次（等 3 秒、10 秒，可取消）；每次尝试各写一条调用记录，失败的不算完成记录，带步骤键的调用照样不重复计费；重新请求前发出 `retry` 事件，界面丢掉中断前收到的半截文字。流没有结束标记（Chat Completions 的 finish_reason、Responses 的 completed 或 incomplete、Anthropic 的 message_stop）就关闭的同样按网络故障处理，不把半截文字当作完成。服务已经开始回复后出的错带上 `partial`（已知的部分用量），这次可能已计费。凭据代理拒绝的请求（目标地址不对、没有凭据）归为 `bad_request`，不重试。
 - 并发：代理按主机设置并发上限，批量推演在同一信号量下排队。
 - 日志：普通日志不记录凭据与请求正文；完整的请求与响应只保存在作品库的 `llm_call` 表中。
 - 用量与费用：读取服务返回的用量，包括缓存读写与思考产生的输出；价格表未配置时费用记为未知（B19）。
-- 桌面端的调用（M2-03，`apps/desktop/src/app/model-runner.ts`）：用默认模型，经凭据代理发出；打开作品时每次调用都写入该作品的 `llm_call`（`withCallLog` 对没有步骤键的调用同样记录，只有带步骤键的调用才复用完成记录）。必须输出结构化数据的任务只能用通过能力自检的模型；结构化输出经管线校验，最多修正 2 次（修正提示来自 `structured_repair` 模板），仍失败则暂停并说明原因（B35）。连接测试与能力自检属于应用设置，不写入作品的调用记录。“作品 → 用量与费用”显示合计、按任务与按模型的汇总和最近的调用，费用未知的调用单独计数。
+- 桌面端的调用（M2-03，`apps/desktop/src/app/model-runner.ts`）：用默认模型，经凭据代理发出；打开作品时每次调用都写入该作品的 `llm_call`（`withCallLog` 对没有步骤键的调用同样记录，只有带步骤键的调用才复用完成记录）。必须输出结构化数据的任务只能用通过能力自检的模型；结构化输出经管线校验，最多修正 2 次（修正提示来自 `structured_repair` 模板），仍失败则暂停并说明原因（B35）。连接测试与能力自检属于应用设置，不写入作品的调用记录。“作品 → 用量与费用”显示合计、按任务与按模型的汇总和最近的调用，费用未知的调用单独计数：没有用量的按估计的上限计入并注明，回复到一半断开的失败调用也算（可能已计费），还没收到回复就失败的不算。
 - 连接测试（B15）：发送一个最小请求（`connection_test` 模板，任务种类 `connection_test`，输出上限 64），显示延迟、实际提供服务的模型与错误原因；达到输出上限也算连接可用（`packages/llm/src/connection.ts`）。
 
 ### Anthropic 接入要点

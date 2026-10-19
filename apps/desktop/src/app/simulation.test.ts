@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { canarySpec, staticForbidden, warehouseSpec } from '@fudiao/domain/testing';
 import { parseScene } from '@fudiao/domain';
 import { createEngine, type RunConfig } from '@fudiao/engine';
-import { contextOf, fakeModel, waitProposal, type Policy } from '@fudiao/engine/testing';
+import { contextOf, fakeModel, waitProposal, type FakeOptions, type Policy } from '@fudiao/engine/testing';
 import { inspectRequests, memoryCallLog, type LlmPort } from '@fudiao/llm';
 import { memoryEventStore } from '@fudiao/store';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -54,11 +54,11 @@ async function setup(root?: string) {
   };
 }
 
-async function ready(use: Policy = policy) {
+async function ready(use: Policy = policy, options: FakeOptions = {}) {
   const ctx = await setup();
   value(await ctx.app.createWork('推演'));
   await addTestedModel(ctx.app, ctx.deps);
-  const fake = fakeModel(use);
+  const fake = fakeModel(use, options);
   ctx.useModel(fake.port);
   const scene = value(await ctx.app.saveSimScene(null, sceneFields()));
   return { ...ctx, fake, scene };
@@ -372,8 +372,8 @@ describe('推演工作区的数据（B28）', () => {
 
 describe('预算（B28）', () => {
   /** 给默认模型配上价格：每百万 Token 输入与输出各 1 美元。 */
-  async function priced() {
-    const ctx = await ready();
+  async function priced(options: FakeOptions = {}) {
+    const ctx = await ready(policy, options);
     const services = value(await ctx.app.loadModelServices());
     const model = services.models[0]!;
     value(await ctx.app.updateModel(model, { displayName: model.displayName, capabilities: model.capabilities, prices: { input: 1, output: 1 } }));
@@ -392,7 +392,7 @@ describe('预算（B28）', () => {
     const { app, scene, fake } = await priced();
     const runId = value(await app.startSimRun(scene.id, { mode: 'auto', seed: 7, budgetUsd: 5 })).run.id;
     const ended = value(await app.continueSimRun(runId));
-    expect(ended).toMatchObject({ phase: 'Ended', endReason: 'max_rounds', unknownCostCalls: 0, run: { budgetUsd: 5 } });
+    expect(ended).toMatchObject({ phase: 'Ended', endReason: 'max_rounds', unknownCostCalls: 0, estimatedCalls: 0, run: { budgetUsd: 5 } });
     // 测试模型每次调用 1,000 输入、200 输出 Token。
     expect(ended.spentUsd).toBeCloseTo((fake.calls.length * 1200) / 1_000_000, 9);
   });
@@ -412,6 +412,22 @@ describe('预算（B28）', () => {
     const freeId = value(await free.app.startSimRun(free.scene.id, { mode: 'auto', seed: 7 })).run.id;
     value(await free.app.continueSimRun(freeId));
     expect(fake.calls.length).toBeLessThan(free.fake.calls.length);
+  });
+});
+
+describe('预算：服务没有返回用量（B19、B28）', () => {
+  it('按请求的最坏估计计入已用的费用并注明是估计，预算照样起作用；换了引擎实例接着算', async () => {
+    const ctx = await ready(policy, { usage: () => null });
+    const services = value(await ctx.app.loadModelServices());
+    const model = services.models[0]!;
+    value(await ctx.app.updateModel(model, { displayName: model.displayName, capabilities: model.capabilities, prices: { input: 1, output: 1 } }));
+    const runId = value(await ctx.app.startSimRun(ctx.scene.id, { mode: 'auto', seed: 7, budgetUsd: 0.05 })).run.id;
+    let view = value(await ctx.app.stepSimRun(runId));
+    for (let i = 0; i < 200 && view.phase !== 'Ended'; i++) view = value(await ctx.app.stepSimRun(runId));
+    expect(view).toMatchObject({ phase: 'Ended', endReason: 'budget', unknownCostCalls: 0 });
+    expect(view.estimatedCalls).toBe(ctx.fake.calls.length);
+    expect(view.spentUsd).toBeGreaterThan(0);
+    expect(view.spentUsd).toBeLessThanOrEqual(0.05);
   });
 });
 

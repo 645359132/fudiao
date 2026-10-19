@@ -140,6 +140,8 @@ export const TABLES: readonly TableSpec[] = [
       'error',
       'started_at',
       'finished_at',
+      // 迁移 0018：费用未知、可能已计费时的估计。
+      'cost_estimate',
     ],
     primaryKey: ['id'],
     json: ['params', 'response', 'error'],

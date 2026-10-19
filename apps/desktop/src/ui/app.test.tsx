@@ -728,6 +728,35 @@ describe('用量与费用', () => {
     const recent = screen.getByRole('table', { name: '最近的调用' });
     expect(within(recent).getAllByRole('row')[1]?.textContent).toMatch(/连接测试mconnection_test v1完成10 \/ 2未知$/);
   });
+
+  it('服务没有返回用量时按估计的上限计入并注明；回复到一半断开的也算（可能已计费）', async () => {
+    const { deps, service, user } = start();
+    await createWork(user, '雨夜');
+    const saved = await service.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk' });
+    if (!saved.ok) throw new Error('服务');
+    await service.addModel(saved.value.providers[0]?.id ?? '', 'm');
+    const services = await service.loadModelServices();
+    if (!services.ok) throw new Error('模型');
+    const model = services.value.models[0]!;
+    await service.updateModel(model, { displayName: model.displayName, capabilities: model.capabilities, prices: { input: 1, output: 1 } });
+    deps.llmResponses.push(
+      { chunks: openaiChunks('m', { text: ['好'], end: 'stop' }, { omitUsage: true }) },
+      // 没有结束标记就关闭：按网络故障失败（测试里不重试）。
+      { chunks: openaiChunks('m', { text: ['半'], end: 'stop' }, { stopAfterText: true }) },
+    );
+    const prompt = renderConnectionTest();
+    if (!prompt.ok) throw new Error('模板');
+    await service.runner.text({ prompt: prompt.value, maxOutputTokens: 64 });
+    await service.runner.text({ prompt: prompt.value, maxOutputTokens: 64 });
+
+    await user.click(screen.getByText('更多'));
+    await user.click(screen.getByRole('menuitem', { name: '用量与费用' }));
+    const totals = await screen.findByRole('table', { name: '用量合计' });
+    expect(within(totals).getByRole('row', { name: /本作品/ }).textContent).toMatch(/约 \$0\.\d{4}（含 2 次按估计计入）$/);
+    const rows = within(screen.getByRole('table', { name: '最近的调用' })).getAllByRole('row').slice(1);
+    expect(rows.map((r) => /失败|完成/.exec(r.textContent ?? '')?.[0])).toEqual(['失败', '完成']);
+    expect(rows.every((r) => /估计不超过 \$0\.\d{4}$/.test(r.textContent ?? ''))).toBe(true);
+  });
 });
 
 describe('AI 上下文', () => {

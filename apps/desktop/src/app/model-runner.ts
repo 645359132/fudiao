@@ -60,12 +60,14 @@ export function projectCallLog(port: SqlPort, newId: () => string): CallLog {
         status: row.value.status,
         result: result.data,
         cost: row.value.cost,
+        costEstimate: row.value.costEstimate,
         startedAt: row.value.startedAt,
         finishedAt: row.value.finishedAt,
       } satisfies LlmCallRecord;
     },
     async append(record) {
-      const usage = record.result?.usage ?? null;
+      // 回复到一半出错时记下已知的部分用量（这次可能已计费）。
+      const usage = record.result?.usage ?? record.error?.partial?.usage ?? null;
       const row: LlmCallRow = {
         id: newId(),
         stepKey: record.stepKey,
@@ -80,6 +82,7 @@ export function projectCallLog(port: SqlPort, newId: () => string): CallLog {
         status: record.status,
         usage: usage === null ? null : { input: usage.inputTokens, output: usage.outputTokens, cacheRead: usage.cacheReadTokens, cacheWrite: usage.cacheWriteTokens },
         cost: record.cost,
+        costEstimate: record.costEstimate ?? null,
         response: record.result ?? null,
         error: record.error ?? null,
         startedAt: record.startedAt,

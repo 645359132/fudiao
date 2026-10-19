@@ -203,7 +203,8 @@ describe('OpenAIAdapter（Responses API）请求参数', () => {
     const failed = `event: response.failed\ndata: ${JSON.stringify({ type: 'response.failed', response: { id: 'r', status: 'failed', error: { code: 'server_error', message: '服务出错' } } })}\n\n`;
     const { fetch: failing } = fakeFetch([{ chunks: [failed] }]);
     const bad = await new OpenAIAdapter({ apiKey: 'k', fetch: failing, maxRetries: 0 }).complete(request(full));
-    expect(bad).toEqual({ ok: false, error: { code: 'server', message: '服务出错' } });
+    // 服务已经开始回复，失败的这次可能已计费。
+    expect(bad).toEqual({ ok: false, error: { code: 'server', message: '服务出错', partial: { usage: null } } });
   });
 });
 

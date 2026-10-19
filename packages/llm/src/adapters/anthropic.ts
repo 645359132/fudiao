@@ -4,7 +4,7 @@ import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
-import { mapSdkError } from './errors';
+import { mapSdkError, streamError } from './errors';
 
 export type AnthropicAdapterOptions = {
   readonly apiKey: string;
@@ -83,12 +83,16 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
       stopReason: null,
       fallbackUsed: false,
     });
+    // 收到第一个事件后服务就开始回复了，之后出错可能已经计费（LlmError.partial）。
+    let started = false;
+    let stopped = false;
 
     try {
       const stream = this.client.beta.messages.stream(buildParams(request), {
         ...(options.signal !== undefined && { signal: options.signal }),
       });
       for await (const event of stream) {
+        started = true;
         switch (event.type) {
           case 'message_start':
             servedModel = event.message.model;
@@ -112,14 +116,17 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
             }
             break;
           }
+          case 'message_stop':
+            stopped = true;
+            break;
           case 'content_block_start':
           case 'content_block_stop':
-          case 'message_stop':
             break;
         }
       }
 
       if (options.signal?.aborted === true) return ok(cancelled());
+      if (!stopped) return err(streamError(known.usage));
       const message = await stream.finalMessage();
       const stopReason = message.stop_reason;
       const fallbackUsed =
@@ -144,7 +151,8 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
       if (options.signal?.aborted === true || error instanceof Anthropic.APIUserAbortError) {
         return ok(cancelled());
       }
-      return err(mapSdkError(error));
+      const mapped = mapSdkError(error);
+      return err(started ? { ...mapped, partial: { usage: known.usage } } : mapped);
     }
   }
 }

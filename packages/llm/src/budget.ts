@@ -27,57 +27,111 @@ export function estimateInputTokens(request: LlmRequest): number {
   return chars;
 }
 
+const tokensOf = (u: LlmUsage) => u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+
+/**
+ * 一次请求的最坏估计：输入按估计（已知部分用量时取实际的输入），输出按上限。
+ * 调用前的预算预留，以及用量缺失、可能已经计费的调用都按它计。价格未配置时费用为 null。
+ */
+export function worstCase(request: LlmRequest, known: LlmUsage | null = null): { readonly tokens: number; readonly usd: number | null } {
+  const usage: LlmUsage =
+    known === null
+      ? { inputTokens: estimateInputTokens(request), outputTokens: request.maxOutputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }
+      : { ...known, outputTokens: Math.max(known.outputTokens, request.maxOutputTokens) };
+  return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices) };
+}
+
+/**
+ * 一次调用的花费（B19）。有用量时按实际；服务没有返回用量、或已经开始回复后出错（可能已计费）时按最坏估计，
+ * estimated 为真；还没开始回复就失败的不计。usd 为 null 表示价格未配置、费用未知。
+ */
+export type Charge = { readonly tokens: number; readonly usd: number | null; readonly estimated: boolean };
+
+export function chargeOf(request: LlmRequest, result: Result<LlmResult, LlmError>): Charge | null {
+  if (result.ok) {
+    const { usage } = result.value;
+    if (usage !== null) return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices), estimated: false };
+    return { ...worstCase(request), estimated: true };
+  }
+  const partial = result.error.partial;
+  return partial === undefined ? null : { ...worstCase(request, partial.usage), estimated: true };
+}
+
 export type Budget = {
   readonly limitUsd?: number;
   /** 价格未知时按 Token 数设上限。 */
   readonly limitTokens?: number;
 };
 
-/** 一个任务的预算。调用前按最坏情况估算，调用后按实际用量累计。 */
+/** 一次调用开始时的预留，结束时交回 settle。 */
+export type Reservation = { readonly tokens: number; readonly usd: number };
+
+/**
+ * 一个任务的预算。调用前按最坏情况估算并预留（同时进行的调用各占一份），调用结束后把预留换成实际花费，
+ * 预算因此是硬上限。
+ */
 export class BudgetGuard {
+  /** 已花的费用，含按估计计入的部分（estimatedCalls）。 */
   spentUsd = 0;
   spentTokens = 0;
-  /** 费用未知的调用次数（价格未配置或用量缺失）。 */
+  /** 进行中的调用预留的费用与 Token。 */
+  reservedUsd = 0;
+  reservedTokens = 0;
+  /** 价格未配置、费用未知的调用次数。 */
   unknownCostCalls = 0;
+  /** 服务没有返回用量、按请求的最坏估计计入的调用次数。 */
+  estimatedCalls = 0;
 
   constructor(readonly budget: Budget) {}
 
-  /** 预计将超出预算时返回错误。 */
-  check(request: LlmRequest): LlmError | undefined {
-    const input = estimateInputTokens(request);
-    const tokens = input + request.maxOutputTokens;
+  /** 预计将超出预算时返回错误；否则预留这次的最坏估计，调用结束后必须交给 settle。 */
+  reserve(request: LlmRequest): Result<Reservation, LlmError> {
+    const { tokens, usd } = worstCase(request);
     const { limitTokens, limitUsd } = this.budget;
-    if (limitTokens !== undefined && this.spentTokens + tokens > limitTokens) {
-      return { code: 'budget_exceeded', message: `预计用量将超过 ${limitTokens} Token 的预算` };
+    if (limitTokens !== undefined && this.spentTokens + this.reservedTokens + tokens > limitTokens) {
+      return err({ code: 'budget_exceeded', message: `预计用量将超过 ${limitTokens} Token 的预算` });
     }
-    const estimate = costOf(
-      { inputTokens: input, outputTokens: request.maxOutputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      request.model.prices,
-    );
-    if (limitUsd !== undefined && estimate !== null && this.spentUsd + estimate > limitUsd) {
-      return { code: 'budget_exceeded', message: `预计费用将超过 ${limitUsd} 美元的预算` };
+    if (limitUsd !== undefined && usd !== null && this.spentUsd + this.reservedUsd + usd > limitUsd) {
+      return err({ code: 'budget_exceeded', message: `预计费用将超过 ${limitUsd} 美元的预算` });
     }
-    return undefined;
+    const reservation = { tokens, usd: usd ?? 0 };
+    this.reservedTokens += reservation.tokens;
+    this.reservedUsd += reservation.usd;
+    return { ok: true, value: reservation };
   }
 
-  record(request: LlmRequest, result: LlmResult): void {
-    const u = result.usage;
-    if (u !== null) this.spentTokens += u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
-    const cost = costOf(u, request.model.prices);
-    if (cost === null) this.unknownCostCalls++;
-    else this.spentUsd += cost;
+  /** 释放预留，计入这次的实际花费（用量缺失时按估计；还没开始回复就失败的不计）。 */
+  settle(reservation: Reservation, request: LlmRequest, result: Result<LlmResult, LlmError>): void {
+    this.reservedTokens -= reservation.tokens;
+    this.reservedUsd -= reservation.usd;
+    // 浮点相减可能留下极小的负数或残差；没有进行中的调用时归零。
+    if (this.reservedTokens <= 0) this.reservedTokens = 0;
+    if (this.reservedUsd <= 1e-12) this.reservedUsd = 0;
+    const charge = chargeOf(request, result);
+    if (charge === null) return;
+    this.spentTokens += charge.tokens;
+    if (charge.usd === null) this.unknownCostCalls++;
+    else {
+      this.spentUsd += charge.usd;
+      if (charge.estimated) this.estimatedCalls++;
+    }
   }
 }
 
-/** 预算守卫：累计值将超过预算时不再发起新调用，已完成的结果保留在调用方。 */
+/** 预算守卫：累计值加上进行中调用的预留将超过预算时不再发起新调用，已完成的结果保留在调用方。 */
 export function withBudget(port: LlmPort, guard: BudgetGuard): LlmPort {
   return {
     async complete(request: LlmRequest, options?: CallOptions): Promise<Result<LlmResult, LlmError>> {
-      const blocked = guard.check(request);
-      if (blocked !== undefined) return err(blocked);
-      const result = await port.complete(request, options);
-      if (result.ok) guard.record(request, result.value);
-      return result;
+      const reserved = guard.reserve(request);
+      if (!reserved.ok) return reserved;
+      let result: Result<LlmResult, LlmError> | undefined;
+      try {
+        result = await port.complete(request, options);
+        return result;
+      } finally {
+        // 抛出异常（程序错误）时也释放预留，按没有计费处理。
+        guard.settle(reserved.value, request, result ?? err({ code: 'unknown', message: '调用抛出异常' }));
+      }
     },
   };
 }

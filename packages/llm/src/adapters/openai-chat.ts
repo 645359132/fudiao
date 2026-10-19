@@ -4,7 +4,7 @@ import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/
 import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
-import { mapSdkError } from './errors';
+import { mapSdkError, streamError } from './errors';
 import { ThinkFilter } from './think-filter';
 import { OPENAI_DIALECT, type ChatDialect } from './dialect';
 
@@ -67,6 +67,8 @@ export class OpenAIChatAdapter implements LlmPort, ModelLister {
     let servedModel = request.model.model;
     let usage: LlmUsage | null = null;
     let finish: string | null = null;
+    // 收到第一块后服务就开始回复了，之后出错可能已经计费（LlmError.partial）。
+    let started = false;
     const think = this.dialect.stripThinkTags ? new ThinkFilter() : null;
     const emit = (delta: string) => {
       if (delta === '') return;
@@ -79,6 +81,7 @@ export class OpenAIChatAdapter implements LlmPort, ModelLister {
         ...(options.signal !== undefined && { signal: options.signal }),
       });
       for await (const chunk of stream) {
+        started = true;
         if (chunk.model) servedModel = chunk.model;
         const choice = chunk.choices[0];
         const delta = choice?.delta;
@@ -101,13 +104,16 @@ export class OpenAIChatAdapter implements LlmPort, ModelLister {
       if (options.signal?.aborted === true || error instanceof OpenAI.APIUserAbortError) {
         return ok({ ...base, outcome: 'cancelled', text, usage, servedModel, stopReason: null });
       }
-      return err(mapSdkError(error));
+      const mapped = mapSdkError(error);
+      return err(started ? { ...mapped, partial: { usage } } : mapped);
     }
 
     // SDK 的流在取消时直接结束而不抛出异常。
     if (options.signal?.aborted === true) {
       return ok({ ...base, outcome: 'cancelled', text, usage, servedModel, stopReason: null });
     }
+    // 每个选项都以 finish_reason 结束；没有它就关闭的流是半截。
+    if (finish === null) return err(streamError(usage));
 
     // 各服务的拒答表示不同：专门的拒答字段、内容过滤结束原因，统一转换为拒答结果。
     const refused = refusalText !== '' || finish === 'content_filter';
