@@ -148,6 +148,38 @@ describe('保存时推导来源', () => {
     expect(r.get('n')).toMatchObject({ source: 'ai_generated', aiOriginText: AI.slice(7) });
   });
 
+  // 编辑器的结构变化记录在整次编辑会话里只增不减，保存时交来的记录里有早已保存过的拆分与合并。
+  it('拆分已保存过：之后删改其中一段超过 10% 为 AI 生成后修改', () => {
+    const left = AI.slice(0, 7);
+    const right = AI.slice(7);
+    const r = deriveProvenance([ai('a', left), ai('n', right)], [cur('a', left), cur('n', right.slice(0, 5))], { splits: [{ id: 'n', from: 'a' }], merges: [] });
+    expect(r.get('n')).toMatchObject({ source: 'ai_modified', aiOriginText: right });
+    expect(r.get('a')).toMatchObject({ source: 'ai_generated', aiOriginText: left });
+  });
+
+  it('合并已保存过：之后删改合并后的段落超过 10% 为 AI 生成后修改', () => {
+    const joined = '雨很大。他没有回头。';
+    const r = deriveProvenance([ai('a', joined)], [cur('a', '雨很大。')], { splits: [], merges: [{ removed: 'b', into: 'a' }] });
+    expect(r.get('a')).toMatchObject({ source: 'ai_modified', aiOriginText: joined });
+  });
+
+  it('保存过的拆分被撤销（记为合并）：两段的文字回到一段，仍为 AI 生成', () => {
+    const r = deriveProvenance([ai('a', AI.slice(0, 7)), ai('n', AI.slice(7))], [cur('a', AI)], {
+      splits: [{ id: 'n', from: 'a' }],
+      merges: [{ removed: 'n', into: 'a' }],
+    });
+    expect(r.get('a')).toMatchObject({ source: 'ai_generated', aiOriginText: AI });
+  });
+
+  it('保存过的合并被撤销（被合并的段落带原标识回来）：两段仍为 AI 生成', () => {
+    const r = deriveProvenance([ai('a', '雨很大。他没有回头。')], [cur('a', '雨很大。'), cur('b', '他没有回头。', 'ai_generated')], {
+      splits: [],
+      merges: [{ removed: 'b', into: 'a' }],
+    });
+    expect(r.get('a')).toMatchObject({ source: 'ai_generated', aiOriginText: '雨很大。' });
+    expect(r.get('b')).toMatchObject({ source: 'ai_generated', aiOriginText: '他没有回头。' });
+  });
+
   it('没有来历的新段落采用编辑器标记（接受候选稿、粘贴）', () => {
     const r = deriveProvenance([], [cur('x', '雨很大。', 'ai_generated'), cur('y', '他走了。'), cur('z', '', 'ai_generated')], none);
     expect(r.get('x')).toEqual({ source: 'ai_generated', spans: [{ start: 0, end: 4 }], aiOriginText: '雨很大。' });

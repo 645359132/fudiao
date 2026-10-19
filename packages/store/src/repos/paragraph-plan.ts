@@ -19,7 +19,10 @@ export type SavedParagraph = {
 /** 编辑器中的段落。source 只对没有来历的新段落生效，已有段落的来源由保存时推导。 */
 export type CurrentParagraph = { readonly id: string; readonly text: string; readonly source: SourceKind };
 
-/** 编辑器记录的结构变化（自上次保存以来）：拆分出的新段落及其来源段落、被合并的段落及并入的段落。 */
+/**
+ * 编辑器记录的结构变化：拆分出的新段落及其来源段落、被合并的段落及并入的段落。
+ * 记录在整次编辑会话里只增不减，含已经保存过的变化；来源推导与事件关联的复制都只认上次保存以来的。
+ */
 export type StructuralEdits = {
   readonly splits: readonly { readonly id: string; readonly from: string }[];
   readonly merges: readonly { readonly removed: string; readonly into: string }[];

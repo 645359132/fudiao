@@ -136,6 +136,83 @@ describe('段落保存计划', () => {
     expect(() => planParagraphSave(saved('甲'), [cur('p0', '甲'), cur('p0', '乙')], NONE)).toThrow();
   });
 
+  it('拆分保存过后，之后的保存不再复制事件关联', () => {
+    const [a] = saved('雨很大。他没有回头。');
+    if (a === undefined) throw new Error('样本');
+    const edits = { splits: [{ id: 'n1', from: 'p0' }], merges: [] };
+    const first = planParagraphSave([a], [cur('p0', '雨很大。'), cur('n1', '他没有回头。')], edits);
+    expect(first.linkCopies).toEqual([{ from: 'p0', to: 'n1' }]);
+    const again = planParagraphSave(apply([a], first), [cur('p0', '雨很大。'), cur('n1', '他走了。')], edits);
+    expect(again.linkCopies).toEqual([]);
+  });
+
+  // 编辑器的结构变化记录在整次编辑会话里只增不减（packages/editor 的 paragraph-identity.ts），
+  // 已经保存过的拆分与合并不能再影响之后的保存：与每次保存后清空记录得到的来源相同。
+  it('分几次保存时，交来整次会话的结构变化记录与只交上次保存以来的记录，来源相同', () => {
+    const op = fc.oneof(
+      fc.record({ kind: fc.constant('split' as const), at: fc.nat(), cut: fc.nat() }),
+      fc.record({ kind: fc.constant('merge' as const), at: fc.nat() }),
+      fc.record({ kind: fc.constant('delete' as const), at: fc.nat(), from: fc.nat(), length: fc.integer({ min: 1, max: 12 }) }),
+      fc.record({ kind: fc.constant('type' as const), at: fc.nat(), from: fc.nat(), text: fc.string({ minLength: 1, maxLength: 6 }) }),
+      fc.constant({ kind: 'save' as const }),
+    );
+    const paragraph = fc.record({ text: fc.string({ minLength: 2, maxLength: 24 }), ai: fc.boolean() });
+    fc.assert(
+      fc.property(fc.array(paragraph, { minLength: 1, maxLength: 4 }), fc.array(op, { maxLength: 24 }), (start, ops) => {
+        const keys = keysBetween(null, null, start.length);
+        const initial: SavedParagraph[] = start.map((p, i) => ({
+          id: `p${i}`,
+          orderKey: keys[i] ?? '',
+          text: p.text,
+          version: 1,
+          source: p.ai ? 'ai_generated' : 'handwritten',
+          aiOriginText: p.ai ? p.text : null,
+          spans: p.ai ? [{ start: 0, end: p.text.length }] : [],
+        }));
+        const run = (cumulative: boolean) => {
+          let rows = initial;
+          let doc: CurrentParagraph[] = initial.map((p) => ({ id: p.id, text: p.text, source: p.source }));
+          let log: { splits: { id: string; from: string }[]; merges: { removed: string; into: string }[] } = { splits: [], merges: [] };
+          let next = 0;
+          const save = () => {
+            rows = apply(rows, planParagraphSave(rows, doc, log));
+            if (!cumulative) log = { splits: [], merges: [] };
+          };
+          for (const o of ops) {
+            if (o.kind === 'save') {
+              save();
+              continue;
+            }
+            if (doc.length === 0) continue;
+            const i = o.at % doc.length;
+            const p = doc[i];
+            if (p === undefined) continue;
+            if (o.kind === 'split') {
+              const at = o.cut % (p.text.length + 1);
+              const id = `n${next++}`;
+              doc = [...doc.slice(0, i), { ...p, text: p.text.slice(0, at) }, { id, text: p.text.slice(at), source: p.source }, ...doc.slice(i + 1)];
+              log.splits.push({ id, from: p.id });
+            } else if (o.kind === 'merge') {
+              const q = doc[i + 1];
+              if (q === undefined) continue;
+              doc = [...doc.slice(0, i), { ...p, text: p.text + q.text }, ...doc.slice(i + 2)];
+              log.merges.push({ removed: q.id, into: p.id });
+            } else if (o.kind === 'delete') {
+              const from = o.from % (p.text.length + 1);
+              doc = doc.map((d, k) => (k === i ? { ...d, text: d.text.slice(0, from) + d.text.slice(from + o.length) } : d));
+            } else {
+              const from = o.from % (p.text.length + 1);
+              doc = doc.map((d, k) => (k === i ? { ...d, text: d.text.slice(0, from) + o.text + d.text.slice(from) } : d));
+            }
+          }
+          save();
+          return rows.map((r) => ({ id: r.id, text: r.text, source: r.source, spans: r.spans, aiOriginText: r.aiOriginText }));
+        };
+        expect(run(true)).toEqual(run(false));
+      }),
+    );
+  });
+
   it('任意编辑后，应用计划得到的段落与编辑器一致；未改动的段落不写入', () => {
     const op = fc.oneof(
       fc.record({ kind: fc.constant('insert' as const), at: fc.nat(), text: fc.string({ maxLength: 4 }) }),

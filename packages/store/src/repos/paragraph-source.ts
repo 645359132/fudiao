@@ -177,6 +177,7 @@ type Edits = {
  * 推导本次保存后每个段落的来源。已有段落的来源只由保存的区间与文字变化推导，不采信编辑器里的标记，
  * 以免作者的改写被旧标记掩盖；没有来历的新段落（接受的候选稿、粘贴）才采用编辑器标记。
  * 拆分与合并按“来历组”处理：由拆分与合并关系连在一起的段落，把组内旧文字与新文字分别按顺序拼接后比较，再按新段落切开。
+ * edits 可以是整次编辑会话的记录，其中已经保存过的拆分与合并按上次保存的段落与当前段落识别出来，不再并组。
  */
 export function deriveProvenance(saved: readonly SavedProvenance[], current: readonly CurrentSource[], edits: Edits): Map<string, DerivedProvenance> {
   const parent = new Map<string, string>();
@@ -191,8 +192,14 @@ export function deriveProvenance(saved: readonly SavedProvenance[], current: rea
     const rb = find(b);
     if (ra !== rb) parent.set(ra, rb);
   };
-  for (const s of edits.splits) union(s.id, s.from);
-  for (const m of edits.merges) union(m.removed, m.into);
+  // 编辑器的记录在整次编辑会话里只增不减，已经保存过的拆分与合并不再并组：否则作者之后的删改一直按“刚拆开”比较，10% 的规则失效。
+  // 拆分出的段落在上次保存里：这次拆分已保存过。
+  // 被合并的段落在上次保存里、已不在文档中：合并发生在上次保存之后；不在上次保存里、又回到文档中：保存过的合并被撤销了。
+  // 两边都在：合并在保存前就撤销了，或撤销已保存过；两边都不在：合并已保存过（也可能是新出现又并掉的段落，分不清时不并组）。
+  const savedIds = new Set(saved.map((p) => p.id));
+  const currentIds = new Set(current.map((p) => p.id));
+  for (const s of edits.splits) if (!savedIds.has(s.id)) union(s.id, s.from);
+  for (const m of edits.merges) if (savedIds.has(m.removed) !== currentIds.has(m.removed)) union(m.removed, m.into);
 
   const groups = new Map<string, { old: SavedProvenance[]; now: CurrentSource[] }>();
   const group = (id: string) => {
