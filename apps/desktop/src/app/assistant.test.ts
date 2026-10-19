@@ -82,6 +82,24 @@ describe('AI 助手（B69）', () => {
     expect(body(deps, 1)).toContain('打开的作品：《江湖狂想》（武侠）');
   });
 
+  it('作品建好之前的调用补记进新作品：用量与费用不漏算（M5-22）', async () => {
+    const { deps, app } = await setup(null);
+    deps.llmResponses.push(reply(JSON.stringify({ message: '想好书名了吗？', actions: [], done: true } satisfies AssistantTurnOutput), { input: 1_111, output: 11, cacheRead: 0 }));
+    value(await app.sendToAssistant('我想写一本武侠小说'));
+    step(deps, { message: '先建书。', actions: [{ tool: 'create_work', title: '江湖狂想', genre: '武侠', synopsis: '', outline: null }], done: false });
+    step(deps, { message: '书已建好。', actions: [], done: true });
+    value(await app.sendToAssistant('就叫江湖狂想'));
+
+    const usage = value(await app.usage());
+    // 三次调用：第一轮一次、第二轮建书之前一次（都在没有作品时），建书之后一次。
+    expect(usage.recent.filter((c) => c.taskKind === 'assistant')).toHaveLength(3);
+    expect(usage.recent.some((c) => c.usage?.input === 1_111)).toBe(true);
+    // 补记过的不再重复记。
+    step(deps, { message: '好的。', actions: [], done: true });
+    value(await app.sendToAssistant('谢谢'));
+    expect(value(await app.usage()).recent.filter((c) => c.taskKind === 'assistant')).toHaveLength(4);
+  });
+
   it('思考深度与上下文用量：按作者选的深度发请求；每一步结束后报告发给模型的 Token 数与模型的上下文上限', async () => {
     const { deps, app } = await setup();
     const model = value(await app.loadModelServices()).models[0]!;

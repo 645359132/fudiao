@@ -127,7 +127,28 @@ export type RunnerDeps = {
 
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
+/** 没有打开作品时最多暂存多少条调用记录（超出时丢掉最早的）。 */
+const UNSAVED_CALLS_LIMIT = 500;
+
 export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
+  /**
+   * 没有打开作品时（例如 AI 助手新建作品之前的几步）的调用记录先暂存在这里，下一次在某部作品里调用时补记进那部作品，
+   * 用量与费用因此不漏算。这些调用没有步骤键，不需要查重。
+   */
+  let unsaved: LlmCallRecord[] = [];
+  const unsavedLog: CallLog = {
+    findCompleted: () => Promise.resolve(undefined),
+    append(record) {
+      unsaved = [...unsaved, record].slice(-UNSAVED_CALLS_LIMIT);
+      return Promise.resolve();
+    },
+  };
+  async function flushUnsaved(log: CallLog): Promise<void> {
+    const records = unsaved;
+    unsaved = [];
+    for (const record of records) await log.append(record);
+  }
+
   async function prepare(request: RunRequest, needsStructured: boolean): Promise<Result<{ port: LlmPort; llmRequest: LlmRequest; name: string; contextWindow: number }, AppError>> {
     const choice = await defaultModel();
     if (!choice.ok) return choice;
@@ -152,8 +173,10 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     };
     const adapter = deps.llm.forProvider(provider);
     const db = project();
+    const log = db === null ? unsavedLog : projectCallLog(db, () => deps.ids.next());
+    if (db !== null && unsaved.length > 0) await flushUnsaved(log);
     // 网络中断或服务端错误时整次重新请求（withRetry 在调用记录外面：每次尝试各记一条，失败的不计入完成记录）。
-    const port = withRetry(db === null ? adapter : withCallLog(adapter, projectCallLog(db, () => deps.ids.next()), () => deps.clock.now()), deps.retry);
+    const port = withRetry(withCallLog(adapter, log, () => deps.clock.now()), deps.retry);
     return ok({ port, llmRequest, name, contextWindow: model.capabilities.contextWindow });
   }
 
