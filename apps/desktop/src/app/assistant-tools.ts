@@ -1738,6 +1738,8 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         const to = await ref(action.to);
         if (!to.ok) return failed(to.error);
         params = { from: from.value, to: to.value, rereview: action.rereview ?? false };
+      } else if (action.workflow === 'opening_polish') {
+        params = { chapters: action.chapters ?? 3 };
       } else if (action.workflow === 'next_volume') {
         params = { chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000, instruction: action.instruction ?? '' };
       } else {

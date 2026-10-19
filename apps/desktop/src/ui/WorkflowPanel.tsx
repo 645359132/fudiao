@@ -3,7 +3,7 @@ import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import type { VolumeOutline } from '../app/planning';
-import { FORESHADOW_FINDING_LABEL, findingsOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
@@ -16,7 +16,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const advancing = useApp((s) => s.workflowAdvancing);
   const [idea, setIdea] = useState('');
   const [genre, setGenre] = useState('');
-  const [chapters, setChapters] = useState(20);
+  const [chapters, setChapters] = useState(info.key === 'opening_polish' ? 3 : 20);
   const [words, setWords] = useState(3000);
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
@@ -32,7 +32,9 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
       ? { from: from === '' ? null : from, to: to === '' ? null : to, rereview }
       : key === 'next_volume'
         ? { chapters, wordsPerChapter: words, instruction }
-        : { idea, genre, chapters, wordsPerChapter: words };
+        : key === 'opening_polish'
+          ? { chapters }
+          : { idea, genre, chapters, wordsPerChapter: words };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   return (
@@ -44,7 +46,15 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      {key === 'next_volume' ? (
+      {key === 'opening_polish' ? (
+        <>
+          <label>
+            诊断最前面的几章
+            <input type="number" min={1} max={10} value={chapters} onChange={(e) => setChapters(Number(e.currentTarget.value))} />
+          </label>
+          <p className="muted">先算出几个客观数字（主角第几字出场、对白占多少、前一千字里提到多少设定名），再按开篇的要求逐章诊断；问题列在各章的“审核”里，你处理完再复诊、对比前后。</p>
+        </>
+      ) : key === 'next_volume' ? (
         <>
           <div className="form-row">
             <label>
@@ -166,7 +176,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         </label>
         <label className="check">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          {key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
+          {key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
         </label>
       </fieldset>
       <label>
@@ -332,6 +342,68 @@ function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly st
   );
 }
 
+/** 开篇诊断：各章的问题数与“看审核”。 */
+function DiagnosisView({ step }: { readonly step: WorkflowStepView }) {
+  const diagnosis = diagnosisOf(step);
+  const openReview = useApp((s) => s.openChapterReview);
+  if (diagnosis === null) return null;
+  return (
+    <ul className="workflow-report" aria-label="开篇诊断">
+      {diagnosis.chapters.map((c) => (
+        <li key={c.chapterId}>
+          <span>
+            《{c.title}》：{c.issues} 个问题
+          </span>
+          {c.issues > 0 ? (
+            <button type="button" className="link" onClick={() => void openReview(c.chapterId)}>
+              看审核
+            </button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 开篇打磨前后的对比：问题数与几个数字。 */
+function OpeningCompareView({ step }: { readonly step: WorkflowStepView }) {
+  const compare = openingCompareOf(step);
+  if (compare === null) return null;
+  const at = (n: number | null) => (n === null ? '没出场' : `第 ${n} 字`);
+  return (
+    <table className="workflow-compare" aria-label="前后对比">
+      <thead>
+        <tr>
+          <th>章节</th>
+          <th>问题</th>
+          <th>主角出场</th>
+          <th>对白</th>
+          <th>前一千字的设定名</th>
+        </tr>
+      </thead>
+      <tbody>
+        {compare.rows.map((r) => (
+          <tr key={r.chapterId}>
+            <td>{r.title}</td>
+            <td>
+              {r.before.issues} → {r.after.issues}
+            </td>
+            <td>
+              {at(r.before.metrics.protagonistAt)} → {at(r.after.metrics.protagonistAt)}
+            </td>
+            <td>
+              {Math.round(r.before.metrics.dialogueRatio * 100)}% → {Math.round(r.after.metrics.dialogueRatio * 100)}%
+            </td>
+            <td>
+              {r.before.metrics.namesInOpening} → {r.after.metrics.namesInOpening}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 /** 体检报告：有待处理问题的章节，点开它的审核。 */
 function AuditReportView({ step }: { readonly step: WorkflowStepView }) {
   const report = reportOf(step);
@@ -400,6 +472,9 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </ul>
       )}
       {step.key === 'report' ? <AuditReportView step={step} /> : null}
+      {step.key === 'diagnose' || step.key === 'recheck' ? <DiagnosisView step={step} /> : null}
+      {step.key === 'handle' ? <DiagnosisView step={view.steps.find((x) => x.key === 'diagnose') ?? step} /> : null}
+      {step.key === 'compare' ? <OpeningCompareView step={step} /> : null}
       {step.key === 'write' ? (
         <>
           <p className="muted">
@@ -413,7 +488,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       ) : null}
       <div className="form-actions">
         {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' ? button('采用', 'adopt', true) : null}
-        {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : '做这一步', 'adopt', true) : null}
+        {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}
         {['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null}

@@ -68,6 +68,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   19: (tables) => tables,
   // 0020：审核问题的来源增加跨章连贯检查（continuity），表重建只放宽了取值，旧数据原样有效。
   20: (tables) => tables,
+  // 0021：审核问题的来源增加开篇诊断（opening），表重建只放宽了取值，旧数据原样有效。
+  21: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

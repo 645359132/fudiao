@@ -2129,6 +2129,36 @@ describe('续写一卷的界面（B82）', () => {
   });
 });
 
+describe('开篇打磨的界面（B81）', () => {
+  it('诊断后停在处理问题，列出各章的问题与“看审核”；处理完了复诊，对比前后', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '旧作');
+    await addChapter(user, '第一章');
+    const id = store.getState().work!.chapters[0]!.id;
+    const opened = await service.openChapter(id);
+    if (!opened.ok) throw new Error('打不开');
+    await service.saveChapter(id, opened.value.saved, [{ id: 'p1', text: '雨下了一夜。林舟推开门。', source: 'handwritten' }], { splits: [], merges: [] });
+    await service.createEntity('character', '林舟');
+    await addTestedModel(service, deps);
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的开篇打磨' }));
+    const form = within(page).getByRole('form', { name: '开始开篇打磨' });
+    expect(within(form).getByRole<HTMLInputElement>('spinbutton', { name: '诊断最前面的几章' }).value).toBe('3');
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [{ paragraph: 'P1', quote: '雨下了一夜', kind: 'pacing', severity: 'high', evidence: [], description: '从天气写起', suggestion: '从推门写起' }] })));
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const handle = await within(page).findByRole('region', { name: '第 3 步：处理问题' }, { timeout: 10_000 });
+    expect(within(handle).getByRole('list', { name: '开篇诊断' }).textContent).toContain('《第一章》：1 个问题');
+    expect(within(handle).getByRole('button', { name: '看审核' })).toBeTruthy();
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [] })));
+    await user.click(within(handle).getByRole('button', { name: '处理完了，复诊' }));
+    await user.click(await within(page).findByRole('button', { name: '继续' }));
+    const table = await within(page).findByRole('table', { name: '前后对比' }, { timeout: 10_000 });
+    expect(table.textContent).toContain('1 → 0');
+  });
+});
+
 describe('分卷的界面（B68）', () => {
   it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
     const { user, store } = start();

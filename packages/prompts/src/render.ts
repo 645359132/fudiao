@@ -748,6 +748,45 @@ export function renderContinuityCheck(input: ContinuityCheckInput): Result<Rende
   });
 }
 
+export type OpeningReviewInput = {
+  readonly title: string;
+  readonly genre: string;
+  readonly synopsis: string;
+  /** 推断出的主角名字；没有时为空。 */
+  readonly protagonist: string;
+  /** 诊断前几章，这是其中第几章（从 1 起）。 */
+  readonly openingCount: number;
+  readonly index: number;
+  readonly chapterTitle: string;
+  readonly goal: string;
+  readonly earlier: readonly { readonly title: string; readonly summary: string }[];
+  readonly metrics: { readonly words: number; readonly protagonistAt: number | null; readonly dialogueRatio: number; readonly namesInOpening: number; readonly longestParagraph: number };
+  readonly paragraphs: readonly { readonly label: string; readonly text: string }[];
+};
+
+/** 开篇诊断（B81）：作者侧的审稿，材料是这一章的正文、前面几章的梗概与程序算出的数字。 */
+export function renderOpeningReview(input: OpeningReviewInput): Result<RenderedPrompt, string> {
+  return renderTemplate('opening_review', {
+    title: input.title,
+    genre: input.genre,
+    synopsis: input.synopsis.trim(),
+    protagonist: input.protagonist.trim(),
+    openingCount: input.openingCount,
+    index: input.index,
+    chapterTitle: input.chapterTitle,
+    goal: input.goal.trim(),
+    earlier: input.earlier.map((m) => ({ title: m.title, summary: m.summary })),
+    hasEarlier: input.earlier.length > 0,
+    words: input.metrics.words.toLocaleString('en-US'),
+    hasProtagonistAt: input.metrics.protagonistAt !== null,
+    protagonistAt: (input.metrics.protagonistAt ?? 0).toLocaleString('en-US'),
+    dialoguePercent: Math.round(input.metrics.dialogueRatio * 100),
+    namesInOpening: input.metrics.namesInOpening,
+    longestParagraph: input.metrics.longestParagraph,
+    paragraphs: input.paragraphs.map((p) => ({ label: p.label, text: p.text })),
+  });
+}
+
 export type WriterReviseInput = {
   readonly title: string;
   readonly chapterTitle: string;

@@ -10,8 +10,8 @@ export type IssueKind = (typeof ISSUE_KINDS)[number];
 export const ISSUE_STATUSES = ['pending', 'ignored', 'fixed', 'sent_to_writer', 'stale'] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 export type IssueSeverity = 'high' | 'medium' | 'low';
-/** 问题的来源：程序检查、模型审核（单章）、跨章连贯检查（全书体检，迁移 0020）。 */
-export const ISSUE_SOURCES = ['program', 'model', 'continuity'] as const;
+/** 问题的来源：程序检查、模型审核（单章）、跨章连贯检查（全书体检，迁移 0020）、开篇诊断（开篇打磨，迁移 0021）。 */
+export const ISSUE_SOURCES = ['program', 'model', 'continuity', 'opening'] as const;
 export type IssueSource = (typeof ISSUE_SOURCES)[number];
 
 /**

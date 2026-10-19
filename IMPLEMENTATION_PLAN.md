@@ -149,7 +149,7 @@ fudiao/
 | `foreshadow` | id、title、content（伏笔是什么）、reveal（揭晓的内容，揭晓前不得说破）、plant_chapter_id 与 plant_anchor、payoff_chapter_id 与 payoff_anchor、status（计划、已埋、已回收、废弃）、version；迁移 0005 | B63 |
 | `writing_skill` | id、key（SKILL.md 的 name）、name（界面上的名称，SKILL.md 的 metadata.title）、description（适用说明，SKILL.md 的 description；只存自定义或导入的技能的，内置技能的在模板里；迁移 0009）、instruction、enabled、builtin_version（内置技能的模板版本）、stages（用在哪些阶段：planning、writing 或 "planning writing"；内置技能的随模板同步；迁移 0014）、version；内置技能是 `packages/prompts/templates/skills/` 下的 SKILL.md 文件，作品中只存启用状态与作者的改动；迁移 0005 | B61、B75 |
 | `chapter_memory` | chapter_id、summary、cast_state（人物状态 JSON）、foreshadow_progress、open_threads（章尾留给后面的事，JSON 数组；迁移 0013）、based_on（段落标识与版本）、status（有效、待复核）、llm_call_id；迁移 0005 | B66 |
-| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落；另一章的段落带 chapterId 与 version，迁移 0020 起）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序、模型，或跨章连贯检查 continuity，迁移 0020）、llm_call_id；迁移 0005 | B64、B80 |
+| `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落；另一章的段落带 chapterId 与 version，迁移 0020 起）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序、模型、跨章连贯检查 continuity（迁移 0020）或开篇诊断 opening（迁移 0021））、llm_call_id；迁移 0005 | B64、B80 |
 | `relationship` | id、from_id 与 to_id（两项不同的设定，删除设定时级联删除）、category（亲属、情感、师承、友盟、竞争、敌对、从属、其他）、label（读作“from 是 to 的 label”）、mutual（双方相同）、description、secret（读者还不知道）、适用章节范围（valid_from/to_chapter_id，章节删除时置空）、version；迁移 0012 | B73 |
 | `relation_position` | entity_id（删除设定时级联删除）、x、y（关系图逻辑坐标 1000×640 中作者拖定的位置，只影响显示）；迁移 0012 | B73 |
 | `workflow_run` | id、workflow（工作流的键，例如 quick_book）、title、params（开始时的参数 JSON）、mode（step 每步停下、auto 一路做完）、budget_usd（费用上限，可空）、status（进行中 active、已放弃 abandoned；做没做完由各步推出，不另存）、version；迁移 0019，随作品包导出 | B78 |
@@ -870,9 +870,9 @@ M5-03 的设计：
 | M6-02 | 成书页并入工作流页：新作品打开到工作流页并展开“一键成书”；原成书页的状态与 `QuickBookPanel` 退役，骨架与计划草稿的编辑只在步骤里；B67 的验收由工作流覆盖 | B67、B78，验收“快速成书” |
 | M6-03 | 全书体检：长篇记忆补齐、依次审核、伏笔核对、跨章疑点（`book_audit`）与定位（`continuity_check`）、体检报告；审核问题的依据增加“另一章的段落”，来源增加跨章连贯检查（迁移 0020） | B80，验收“全书体检” |
 | M6-04 | 续写一卷：卷纲（`volume_outline`）与采用、`plan_draft` 版本 4 只给新的一卷拆章、写完并审核、本卷体检 | B82，验收“续写一卷” |
-| M6-05 | 开篇打磨：开篇的客观数字（纯函数）、`opening_review`（问题结构同 `chapter_review`）、作者处理与写手修订、复诊与对比 | B81，验收“开篇打磨” |
+| M6-05 | 开篇打磨：开篇的客观数字（纯函数）、`opening_review`（问题结构同 `chapter_review`）、作者处理与写手修订、复诊与对比；审核问题的来源增加开篇诊断（迁移 0021） | B81，验收“开篇打磨” |
 | M6-06 | 人物小传与关系网补全：找出没有卡片或说明为空的人物（纯函数）、`cast_completion`、逐项勾选采用 | B83，验收“人物补全” |
-| M6-07 | 扫榜拆书：导入榜单与样章（迁移 0021 `benchmark_sample`，不导出、用完即删）、逐本拆解（`benchmark_book`）、复述检查（纯函数 `overlapCheck`）、对标分析（`benchmark_compare`）、存为规划技能或带进一键成书；样章的金丝雀测试 | B79，验收“扫榜拆书” |
+| M6-07 | 扫榜拆书：导入榜单与样章（迁移 0022 `benchmark_sample`，不导出、用完即删）、逐本拆解（`benchmark_book`）、复述检查（纯函数 `overlapCheck`）、对标分析（`benchmark_compare`）、存为规划技能或带进一键成书；样章的金丝雀测试 | B79，验收“扫榜拆书” |
 
 M6-01 的设计（写作工作流框架）：
 
@@ -902,6 +902,12 @@ M6-04 的设计（续写一卷）：
 - 写手写新卷第一章时照旧带上上一章长篇记忆里“章尾留给后面的事”与本卷简介（`writer_chapter` 不变）。
 - 界面：成书页的“续写一卷”卡片（这一卷的章数、每章字数与要求）；卷纲一步可以改卷名、梗概、主线与卷末转折，删去新人物与新伏笔，改过后采用。
 - AI 助手：`start_workflow` 的 workflow 增加 `next_volume`，参数增加 `instruction`（`assistant_turn` 版本 19）。
+
+M6-05 的设计（开篇打磨）：
+
+- 步骤：开篇的数字（check：书中最前面 N 章（默认 3）里已有正文的章节；`packages/writing` 的 `openingMetrics` 算出字数、主角的名字或别名第一次出现前有多少字、对白（引号里的字）占比、前一千字里设定名出现的次数与最长的一段；主角由 `guessProtagonist` 按这几章里出现的次数推断）→ 逐章诊断（act：每章一次 `opening_review`，带上作品简介、主角、本章计划的目标、前面几章的梗概与这些数字；检查主角出场与处境、核心冲突与看点、设定是否集中倾泻、节奏与信息量、章末钩子；问题经 `resolveModelIssues` 定位后写进这一章的审核，来源 `opening`；每章一个步骤键）→ 处理问题（manual：作者在各章的审核里忽略、自己改或交给写手修订，处理完点“处理完了，复诊”，“一路做完”也在这里停下）→ 复诊（act：重新算数字再诊断，换掉仍待处理的旧开篇问题）→ 对比前后（check：各章问题数与数字的前后）。
+- 数据：开篇诊断的问题来源记为 `opening`（迁移 0021 再次重建 `review_issue` 放宽取值），单章审核与全书体检都只换各自来源的问题。
+- AI 助手：`start_workflow` 的 workflow 增加 `opening_polish`，chapters 为诊断前几章（`assistant_turn` 版本 20）。
 
 ## 九 测试策略
 

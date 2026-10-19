@@ -39,6 +39,7 @@ import {
   renderChapterReview,
   renderBookAudit,
   renderContinuityCheck,
+  renderOpeningReview,
   renderPlanDraft,
   renderBookSeed,
   renderRunSynopsis,
@@ -721,5 +722,32 @@ describe('全书体检的模板（B80）', () => {
     for (const part of ['只核对这一处疑点：C1 钱四被带走，C2 他却在柜台后', '- [E1] 钱四（人物）', '前一章：第一章 夜叩（较长，只给出开头与结尾）\n[A1] 官差把钱四押走了。', '后一章：第二章 夜雨\n[P1] 钱四在柜台后拨着算盘。']) {
       expect(text).toContain(part);
     }
+  });
+});
+
+describe('开篇诊断的模板（B81）', () => {
+  it('opening_review：写明诊断第几章、主角与程序算出的数字，正文带段落标签；主角没出现时照实写', () => {
+    const base = {
+      title: '当铺夜谈',
+      genre: '古风悬疑',
+      synopsis: '落魄书生当玉。',
+      protagonist: '林舟',
+      openingCount: 3,
+      index: 1,
+      chapterTitle: '第一章 夜叩',
+      goal: '林舟当玉',
+      earlier: [],
+      metrics: { words: 3200, protagonistAt: 1800, dialogueRatio: 0.123, namesInOpening: 14, longestParagraph: 420 },
+      paragraphs: [{ label: 'P1', text: '雨下了一夜。' }],
+    };
+    const prompt = unwrap(renderOpeningReview(base));
+    expect(prompt.output?.name).toBe('ChapterReviewOutput');
+    const text = fullText(prompt);
+    for (const part of ['前 3 章', '现在诊断第 1 章', '主角（按前几章里出现的次数推断）：林舟', '本章计划的目标：林舟当玉', '本章 3,200 字；主角第一次出现在第 1,800 字之后；对白约占 12%；前一千字里出现设定名 14 次；最长的一段 420 字。', '[P1] 雨下了一夜。']) {
+      expect(text).toContain(part);
+    }
+    const absent = fullText(unwrap(renderOpeningReview({ ...base, protagonist: '', metrics: { ...base.metrics, protagonistAt: null } })));
+    expect(absent).toContain('主角在本章没有出现');
+    expect(absent).not.toContain('主角（按前几章');
   });
 });

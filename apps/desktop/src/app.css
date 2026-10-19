@@ -3393,6 +3393,18 @@ body.resizing .assistant {
   margin-bottom: 4px;
 }
 
+.workflow-compare {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.workflow-compare th,
+.workflow-compare td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
 .workflow-detail h3 {
   margin-top: 0;
 }

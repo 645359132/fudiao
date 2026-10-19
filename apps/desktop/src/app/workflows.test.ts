@@ -419,3 +419,52 @@ describe('续写一卷（B82）', () => {
     expect(deps.llmRequests.filter((r) => JSON.stringify(r.body).includes('volume_outline'))).toHaveLength(0);
   });
 });
+
+describe('开篇打磨（B81）', () => {
+  it('算出数字、逐章诊断（问题记为开篇诊断）、停下等作者处理、复诊、对比前后；单章审核不冲掉开篇的问题', async () => {
+    const { deps, app } = await setup();
+    value(await app.createEntity('character', '林舟'));
+    const write = async (title: string, text: string) => {
+      const id = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!.id;
+      const opened = value(await app.openChapter(id));
+      value(await app.saveChapter(id, opened.saved, [{ id: `p-${title}`, text, source: 'handwritten' }], { splits: [], merges: [] }));
+      return id;
+    };
+    const first = await write('第一章', '雨下了一夜，街上没有人。林舟推开当铺的门。');
+    await write('第二章', '林舟把玉放在柜台上。');
+    const run = value(await app.startWorkflow({ workflow: 'opening_polish', params: { chapters: 2 }, mode: 'auto', budgetUsd: null }));
+    const issue = { paragraph: 'P1', quote: '雨下了一夜，街上没有人', kind: 'pacing', severity: 'high', evidence: [], description: '从天气写起，主角在第 10 字之后才出场', suggestion: '从推门写起' };
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [issue] })), reply(JSON.stringify({ issues: [] })));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    // 处理问题须作者动手：一路做完也停在这里。
+    expect(out.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'awaiting_author', 'pending', 'pending']);
+    expect(out.view.steps[0]?.note).toBe('主角：林舟；《第一章》主角在第 10 字之后出场');
+    expect(out.view.steps[1]?.note).toContain('前 2 章诊断出 1 个问题');
+    const body = JSON.stringify(deps.llmRequests.at(-2)?.body ?? {});
+    for (const part of ['现在诊断第 1 章', '主角第一次出现在第 10 字之后']) expect(body).toContain(part);
+    expect(value(await app.reviewIssues(first)).filter((i) => i.source === 'opening')).toHaveLength(1);
+    // 单章审核换的是模型与程序的问题。
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [] })));
+    value(await app.reviewChapter(first));
+    expect(value(await app.reviewIssues(first)).filter((i) => i.source === 'opening')).toHaveLength(1);
+
+    // 作者把开头改了，处理完了：复诊。
+    const opened = value(await app.openChapter(first));
+    value(await app.saveChapter(first, opened.saved, [{ id: opened.saved[0]!.id, text: '林舟推开当铺的门，雨水顺着衣角往下滴。', source: 'handwritten' }], { splits: [], merges: [] }));
+    value(await app.adoptWorkflowStep(run.run.id, 2));
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [] })), reply(JSON.stringify({ issues: [] })));
+    const done = value(await app.advanceWorkflow(run.run.id));
+    expect(done.view.state).toBe('done');
+    expect(done.view.steps[4]?.note).toBe('开篇问题从 1 个变为 0 个');
+    expect(done.view.steps[4]?.output).toMatchObject({ rows: [{ title: '第一章', before: { issues: 1, metrics: { protagonistAt: 10 } }, after: { issues: 0, metrics: { protagonistAt: 0 } } }, { title: '第二章' }] });
+    expect(value(await app.reviewIssues(first)).filter((i) => i.source === 'opening')).toEqual([]);
+  });
+
+  it('最前面的几章还没有正文时第一步说明原因', async () => {
+    const { app } = await setup();
+    value(await app.createChapter('第一章'));
+    const run = value(await app.startWorkflow({ workflow: 'opening_polish', params: { chapters: 3 }, mode: 'step', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('还没有正文') });
+  });
+});

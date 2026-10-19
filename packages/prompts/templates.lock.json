@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "19",
-    "sha256": "ac35830dbc91424339f719e9c514d58dda6c3dc78d9735b26a61547d18a3ad13"
+    "version": "20",
+    "sha256": "5ec5cd88493c024b8e5539c79b8af16d04562aa6b69a314464d0ac0501ba3697"
   },
   "baseline_scene": {
     "version": "2",
@@ -58,6 +58,10 @@
   "evidence_judgement": {
     "version": "5",
     "sha256": "e869374a4697f13251dca189d5104ddcc5a31c4858bd8067f234523256a908d7"
+  },
+  "opening_review": {
+    "version": "1",
+    "sha256": "663fa5774bc0d54b2da1cb0622b60e36a109bde690702dc7d6948d6911e29086"
   },
   "plan_draft": {
     "version": "4",

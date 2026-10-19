@@ -26,13 +26,14 @@ import { z } from 'zod';
 import { describeError, type AppError } from './errors';
 import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOutline, VolumeOutlineRequest } from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
+import type { OpeningSurvey } from './opening';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
 import { chapterLengths, type Chapter } from '@fudiao/store';
 import type { AppDeps } from './ports';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
 
 /**
@@ -233,7 +234,11 @@ export const NextVolumeParams = z.object({
 });
 export type NextVolumeParams = z.infer<typeof NextVolumeParams>;
 
-type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams; readonly next_volume: NextVolumeParams };
+/** 开篇打磨的参数：诊断最前面的几章。 */
+export const OpeningParams = z.object({ chapters: z.number().int().min(1).max(10) });
+export type OpeningParams = z.infer<typeof OpeningParams>;
+
+type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams; readonly next_volume: NextVolumeParams; readonly opening_polish: OpeningParams };
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
 export type WorkflowHost = {
@@ -254,6 +259,8 @@ export type WorkflowHost = {
   applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: { readonly id: string; readonly title: string }; readonly characters: number; readonly foreshadows: number }, AppError>>;
   draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
   applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
+  openingSurvey(count: number): Promise<Result<OpeningSurvey, AppError>>;
+  diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly issues: number; readonly dropped: number }, AppError>>;
 };
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
@@ -726,6 +733,133 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
   };
 }
 
+const Metrics = z.object({ words: z.number(), protagonistAt: z.number().nullable(), dialogueRatio: z.number(), namesInOpening: z.number(), longestParagraph: z.number() });
+const Survey = z.object({
+  protagonist: z.object({ id: z.string(), name: z.string() }).nullable(),
+  chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), metrics: Metrics })),
+});
+const Diagnosis = z.object({ chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), issues: z.number().int() })), dropped: z.number().int() });
+const OpeningCompare = z.object({
+  rows: z.array(
+    z.object({
+      chapterId: z.string(),
+      title: z.string(),
+      before: z.object({ issues: z.number().int(), metrics: Metrics }),
+      after: z.object({ issues: z.number().int(), metrics: Metrics }),
+    }),
+  ),
+});
+export type OpeningCompare = z.infer<typeof OpeningCompare>;
+
+function openingPolish(host: WorkflowHost): WorkflowDef<OpeningParams> {
+  /** 逐章诊断，每章一个步骤键：中断后接着做时，诊断过的不再请求。 */
+  const diagnose = async (survey: OpeningSurvey, stepKey: string, options: CallOptions, onProgress: (note: string) => void): Promise<Result<StepResult<z.infer<typeof Diagnosis>>, AppError>> => {
+    const rows: { chapterId: string; title: string; issues: number }[] = [];
+    let dropped = 0;
+    for (const [i, c] of survey.chapters.entries()) {
+      onProgress(`按开篇的要求诊断第 ${i + 1} / ${survey.chapters.length} 章《${c.title}》`);
+      const done = await host.diagnoseOpening(survey, i, `${stepKey}:${i}`, options);
+      if (!done.ok) return done;
+      rows.push({ chapterId: c.chapterId, title: c.title, issues: done.value.issues });
+      dropped += done.value.dropped;
+    }
+    const total = rows.reduce((n, r) => n + r.issues, 0);
+    return ok({ output: { chapters: rows, dropped }, note: `前 ${rows.length} 章诊断出 ${total} 个问题，列在各章的“审核”里${dropped > 0 ? `（${dropped} 条定位不到原文，已丢弃）` : ''}` });
+  };
+  const describe = (s: OpeningSurvey) => {
+    const first = s.chapters[0];
+    const at = first?.metrics.protagonistAt;
+    return `${s.protagonist === null ? '没有推断出主角（还没有人物卡片，或人物没有在正文里出现）' : `主角：${s.protagonist.name}`}${first === undefined || s.protagonist === null ? '' : at === null ? `；《${first.title}》里主角没有出现` : `；《${first.title}》主角在第 ${at} 字之后出场`}`;
+  };
+  return {
+    title: '开篇打磨',
+    description: '算出开篇的数字 → 按开篇的要求逐章诊断 → 你处理问题（可交给写手修订）→ 复诊 → 对比前后',
+    params: OpeningParams,
+    runTitle: (p) => `开篇打磨：前 ${p.chapters} 章`,
+    estimate(p, book) {
+      const n = Math.min(p.chapters, Math.max(book.written, 1));
+      const chapterTokens = (book.words > 0 ? book.words / Math.max(book.written, 1) : AUDIT_WORDS_PER_CHAPTER) * TOKENS_PER_CHAR;
+      return { calls: n * 2, inputTokens: Math.round(n * 2 * (chapterTokens + 3_000)), outputTokens: n * 2 * 2_500 };
+    },
+    steps: [
+      step<OpeningParams, OpeningSurvey>({
+        key: 'metrics',
+        label: '开篇的数字',
+        kind: 'check',
+        output: Survey,
+        async run({ params }) {
+          const survey = await host.openingSurvey(params.chapters);
+          if (!survey.ok) return survey;
+          return ok({ output: survey.value, note: describe(survey.value) });
+        },
+      }),
+      step<OpeningParams, z.infer<typeof Diagnosis>>({
+        key: 'diagnose',
+        label: '逐章诊断',
+        kind: 'act',
+        output: Diagnosis,
+        async run({ stepKey, options, onProgress, output }) {
+          const survey = Survey.safeParse(output('metrics'));
+          if (!survey.success) return err(invalid('先算出开篇的数字'));
+          return diagnose(survey.data, stepKey, options, onProgress);
+        },
+      }),
+      step<OpeningParams, { readonly done: boolean }>({
+        key: 'handle',
+        label: '处理问题',
+        kind: 'manual',
+        output: z.object({ done: z.boolean() }),
+        run: () => Promise.resolve(ok({ output: { done: false }, note: '在各章的“审核”里逐条处理：忽略、自己改，或交给写手修订；处理完点“处理完了，复诊”' })),
+        adopt: () => Promise.resolve(ok('处理完了，接着复诊')),
+      }),
+      step<OpeningParams, z.infer<typeof Diagnosis>>({
+        key: 'recheck',
+        label: '复诊',
+        kind: 'act',
+        output: Diagnosis,
+        async run({ params, stepKey, options, onProgress }) {
+          // 正文改过，重新算数字再诊断。
+          const survey = await host.openingSurvey(params.chapters);
+          if (!survey.ok) return survey;
+          return diagnose(survey.value, stepKey, options, onProgress);
+        },
+      }),
+      step<OpeningParams, OpeningCompare>({
+        key: 'compare',
+        label: '对比前后',
+        kind: 'check',
+        output: OpeningCompare,
+        async run({ params, output }) {
+          const before = Survey.safeParse(output('metrics'));
+          const first = Diagnosis.safeParse(output('diagnose'));
+          const second = Diagnosis.safeParse(output('recheck'));
+          const now = await host.openingSurvey(params.chapters);
+          if (!now.ok) return now;
+          const rows = now.value.chapters.flatMap((c) => {
+            const was = before.success ? before.data.chapters.find((x) => x.chapterId === c.chapterId) : undefined;
+            if (was === undefined) return [];
+            const issuesBefore = first.success ? (first.data.chapters.find((x) => x.chapterId === c.chapterId)?.issues ?? 0) : 0;
+            const issuesAfter = second.success ? (second.data.chapters.find((x) => x.chapterId === c.chapterId)?.issues ?? 0) : 0;
+            return [{ chapterId: c.chapterId, title: c.title, before: { issues: issuesBefore, metrics: was.metrics }, after: { issues: issuesAfter, metrics: c.metrics } }];
+          });
+          const b = rows.reduce((n, r) => n + r.before.issues, 0);
+          const a = rows.reduce((n, r) => n + r.after.issues, 0);
+          return ok({ output: { rows }, note: `开篇问题从 ${b} 个变为 ${a} 个` });
+        },
+      }),
+    ],
+  };
+}
+
+export const openingCompareOf = (step: Pick<WorkflowStepView, 'output'>): OpeningCompare | null => {
+  const parsed = OpeningCompare.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const diagnosisOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = Diagnosis.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+
 export const volumeOutlineOf = (step: Pick<WorkflowStepView, 'output'>): VolumeOutline | null => {
   const parsed = VolumeOutlineOutput.safeParse(step.output);
   return parsed.success ? parsed.data : null;
@@ -813,8 +947,9 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     quick_book: quickBook(host, project),
     book_audit: bookAudit(host),
     next_volume: nextVolume(host),
+    opening_polish: openingPolish(host),
   };
-  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume) };
+  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume), opening_polish: erase(WORKFLOWS.opening_polish) };
   const isKey = (key: string): key is WorkflowKey => (WORKFLOW_KEYS as readonly string[]).includes(key);
   const defOf = (key: string): AnyWorkflow | null => (isKey(key) ? ERASED[key] : null);
 

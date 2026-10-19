@@ -390,6 +390,8 @@ describe('跨章连贯检查的审核问题（迁移 0020）', () => {
     expect((await db.transaction([s(`${issue} ('x1', '01C1', 'character', 'high', '{}', '前后不一', 'continuity', '01L1', ?, ?)`, ...T)])).ok).toBe(true);
     await rejects(db, `${issue} ('x2', '01C1', 'character', 'high', '{}', 'd', 'program', '01L1', ?, ?)`, ...T);
     await rejects(db, `${issue} ('x3', '01C1', 'character', 'high', '{}', 'd', 'reader', NULL, ?, ?)`, ...T);
+    // 迁移 0021：开篇诊断的问题。
+    expect((await db.transaction([s(`${issue} ('x4', '01C1', 'pacing', 'medium', '{}', '主角出场太晚', 'opening', '01L1', ?, ?)`, ...T)])).ok).toBe(true);
     const kept = await db.query("SELECT id FROM review_issue WHERE id IN ('01I1', '01I2') ORDER BY id");
     expect(kept.ok && kept.value.map((r) => r['id'])).toEqual(['01I1', '01I2']);
     const index = await db.query("SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'review_issue_by_chapter'");

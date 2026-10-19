@@ -18,3 +18,5 @@ export type { NextAction, RunState, StepChange, StepEvent, StepState } from './w
 export { applyStepChanges, nextAction, runState, transition } from './workflow';
 export type { ForeshadowAuditInput, ForeshadowFinding } from './audit';
 export { foreshadowAudit } from './audit';
+export type { OpeningMetrics } from './opening';
+export { guessProtagonist, OPENING_WORDS, openingMetrics } from './opening';
