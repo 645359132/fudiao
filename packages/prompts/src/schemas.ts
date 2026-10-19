@@ -294,6 +294,37 @@ export const VolumeOutlineOutput = z.object({
 });
 export type VolumeOutlineOutput = z.infer<typeof VolumeOutlineOutput>;
 
+/** 人物小传与关系网补全（B83）：要补的人物（小传）与关系。章节用提示词中的标签（C1……）指代，由应用层换回标识。 */
+export const CastCompletionOutput = z.object({
+  characters: z.array(
+    z.object({
+      name: z.string(),
+      isNew: z.boolean(),
+      identity: z.string(),
+      look: z.string(),
+      personality: z.string(),
+      motive: z.string(),
+      voice: z.string(),
+      firstChapter: z.string(),
+      basis: z.array(z.string()),
+    }),
+  ),
+  relationships: z.array(
+    z.object({
+      from: z.string(),
+      to: z.string(),
+      category: z.enum(['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other']),
+      label: z.string(),
+      mutual: z.boolean(),
+      description: z.string(),
+      secret: z.boolean(),
+      fromChapter: z.string(),
+      basis: z.array(z.string()),
+    }),
+  ),
+});
+export type CastCompletionOutput = z.infer<typeof CastCompletionOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

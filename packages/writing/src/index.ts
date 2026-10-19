@@ -20,3 +20,5 @@ export type { ForeshadowAuditInput, ForeshadowFinding } from './audit';
 export { foreshadowAudit } from './audit';
 export type { OpeningMetrics } from './opening';
 export { guessProtagonist, OPENING_WORDS, openingMetrics } from './opening';
+export type { CastGap, CastGapInput } from './cast';
+export { castGaps } from './cast';

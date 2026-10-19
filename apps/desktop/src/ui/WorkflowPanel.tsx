@@ -3,7 +3,7 @@ import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import type { VolumeOutline } from '../app/planning';
-import { diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
@@ -34,7 +34,9 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         ? { chapters, wordsPerChapter: words, instruction }
         : key === 'opening_polish'
           ? { chapters }
-          : { idea, genre, chapters, wordsPerChapter: words };
+          : key === 'cast_completion'
+            ? {}
+            : { idea, genre, chapters, wordsPerChapter: words };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   return (
@@ -46,7 +48,9 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      {key === 'opening_polish' ? (
+      {key === 'cast_completion' ? (
+        <p className="muted">从各章的长篇记忆里找：说明为空的人物、出场却没有关系的人物，以及正文里有、还没建卡的人物；写成小传与关系的草稿，你勾选后再加进设定与人物关系网。只增不改：锁定的人物不动，已有的说明只在后面补充。</p>
+      ) : key === 'opening_polish' ? (
         <>
           <label>
             诊断最前面的几章
@@ -176,7 +180,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         </label>
         <label className="check">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          {key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
+          {key === 'cast_completion' ? '一路做完（草稿全部采用）' : key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
         </label>
       </fieldset>
       <label>
@@ -342,6 +346,67 @@ function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly st
   );
 }
 
+/** 人物补全的草稿：逐项勾选，采用勾选的。 */
+function CastStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
+  const draft = castDraftOf(step);
+  const edit = useApp((s) => s.editWorkflowStep);
+  const act = useApp((s) => s.workflowStepAction);
+  const busy = useApp((s) => s.busy);
+  const chapters = useApp((s) => s.work?.chapters ?? []);
+  if (draft === null) return null;
+  const waiting = step.status === 'awaiting_author';
+  const title = (id: string | null) => (id === null ? '' : `《${chapters.find((c) => c.id === id)?.title ?? ''}》`);
+  const toggle = (what: 'characters' | 'relationships', i: number, selected: boolean) =>
+    void edit(view.run.id, step.idx, what === 'characters' ? { ...draft, characters: draft.characters.map((c, j) => (j === i ? { ...c, selected } : c)) } : { ...draft, relationships: draft.relationships.map((r, j) => (j === i ? { ...r, selected } : r)) });
+  return (
+    <div role="group" aria-label="人物补全草稿">
+      {draft.characters.length === 0 ? null : (
+        <fieldset>
+          <legend>人物</legend>
+          {draft.characters.map((c, i) => (
+            <label key={c.name} className="check">
+              <input type="checkbox" disabled={!waiting || busy} checked={c.selected} onChange={(e) => toggle('characters', i, e.currentTarget.checked)} />
+              <span>
+                {c.name}
+                {c.entityId === null ? '（新人物）' : '（补小传）'}
+                <span className="muted">
+                  ：{[c.identity, c.personality, c.motive].filter((x) => x.trim() !== '' && !x.includes('正文未交代')).join('；')}
+                  {c.firstChapterId === null ? '' : `；首次出场${title(c.firstChapterId)}`}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {draft.relationships.length === 0 ? null : (
+        <fieldset>
+          <legend>关系</legend>
+          {draft.relationships.map((r, i) => (
+            <label key={`${r.from}-${r.to}-${r.label}`} className="check">
+              <input type="checkbox" disabled={!waiting || busy} checked={r.selected} onChange={(e) => toggle('relationships', i, e.currentTarget.checked)} />
+              <span>
+                {r.mutual ? `${r.from}与${r.to}：${r.label}` : `${r.from}是${r.to}的${r.label}`}
+                {r.secret ? '（隐秘）' : ''}
+                <span className="muted">
+                  {r.fromChapterId === null ? '' : `（${title(r.fromChapterId)}起）`}
+                  {r.description === '' ? '' : ` · ${r.description}`}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {waiting ? (
+        <div className="form-actions">
+          <button type="button" className="primary" disabled={busy} onClick={() => void act(view.run.id, step.idx, 'adopt')}>
+            采用勾选的
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** 开篇诊断：各章的问题数与“看审核”。 */
 function DiagnosisView({ step }: { readonly step: WorkflowStepView }) {
   const diagnosis = diagnosisOf(step);
@@ -475,6 +540,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {step.key === 'diagnose' || step.key === 'recheck' ? <DiagnosisView step={step} /> : null}
       {step.key === 'handle' ? <DiagnosisView step={view.steps.find((x) => x.key === 'diagnose') ?? step} /> : null}
       {step.key === 'compare' ? <OpeningCompareView step={step} /> : null}
+      {view.run.workflow === 'cast_completion' && step.key === 'draft' ? <CastStep view={view} step={step} /> : null}
       {step.key === 'write' ? (
         <>
           <p className="muted">
@@ -487,7 +553,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </>
       ) : null}
       <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' ? button('采用', 'adopt', true) : null}
+        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}

@@ -38,6 +38,7 @@ import {
   renderChapterMemory,
   renderChapterReview,
   renderBookAudit,
+  renderCastCompletion,
   renderContinuityCheck,
   renderOpeningReview,
   renderPlanDraft,
@@ -749,5 +750,23 @@ describe('开篇诊断的模板（B81）', () => {
     const absent = fullText(unwrap(renderOpeningReview({ ...base, protagonist: '', metrics: { ...base.metrics, protagonistAt: null } })));
     expect(absent).toContain('主角在本章没有出现');
     expect(absent).not.toContain('主角（按前几章');
+  });
+});
+
+describe('人物补全的模板（B83）', () => {
+  it('cast_completion：人物带别名、说明与缺口，已有关系与各章梗概带标签与出场人物', () => {
+    const prompt = unwrap(
+      renderCastCompletion({
+        title: '当铺夜谈',
+        genre: '',
+        characters: [{ name: '钱四', aliases: ['四爷'], description: '', gap: '说明为空' }],
+        relations: ['钱四是林舟的债主'],
+        chapters: [{ label: 'C1', title: '第一章', summary: '林舟当玉。', cast: ['钱四'] }],
+      }),
+    );
+    expect(prompt.output?.name).toBe('CastCompletionOutput');
+    const text = fullText(prompt);
+    for (const part of ['最多列 20 个人物', '- 钱四（又名四爷）〔缺口：说明为空〕', '- 钱四是林舟的债主', '[C1] 第一章：林舟当玉。（出场：钱四）']) expect(text).toContain(part);
+    expect(fullText(unwrap(renderCastCompletion({ title: 't', genre: '', characters: [], relations: [], chapters: [] })))).toContain('人物：还没有人物卡片');
   });
 });

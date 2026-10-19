@@ -468,3 +468,72 @@ describe('开篇打磨（B81）', () => {
     expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('还没有正文') });
   });
 });
+
+describe('人物小传与关系网补全（B83）', () => {
+  it('找出缺口、生成草稿（标签与名字对不上的、锁定的丢弃）；取消勾选的不采用；已有说明的补充、空的写上；撤回后改回', async () => {
+    const { deps, app } = await setup();
+    const lin = value(await app.createEntity('character', '林舟')).created;
+    value(await app.updateEntity(lin, { description: '落魄书生' }));
+    value(await app.createEntity('character', '钱四'));
+    const wang = value(await app.createEntity('character', '王掌柜')).created;
+    value(await app.setEntityLocked(wang, true));
+    const write = async (title: string, text: string) => {
+      const id = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!.id;
+      const opened = value(await app.openChapter(id));
+      value(await app.saveChapter(id, opened.saved, [{ id: `p-${title}`, text, source: 'handwritten' }], { splits: [], merges: [] }));
+      return id;
+    };
+    const c1 = await write('第一章', '林舟把玉押给钱四。');
+    await write('第二章', '同乡阿青来找林舟。');
+    const memory = (summary: string, cast: { name: string; state: string }[]) => reply(JSON.stringify({ summary, cast, foreshadows: [], openThreads: [] }));
+    deps.llmResponses.push(
+      memory('林舟把玉押给钱四。', [
+        { name: '林舟', state: '欠了钱' },
+        { name: '钱四', state: '收下玉' },
+      ]),
+      memory('阿青来找林舟。', [{ name: '林舟', state: '见到同乡' }]),
+      reply(
+        JSON.stringify({
+          characters: [
+            { name: '钱四', isNew: false, identity: '当铺掌柜', look: '正文未交代', personality: '精明', motive: '想弄清玉的来历', voice: '说话慢', firstChapter: 'C1', basis: ['C1'] },
+            { name: '阿青', isNew: true, identity: '林舟的同乡', look: '', personality: '直爽', motive: '', voice: '', firstChapter: 'C2', basis: ['C2'] },
+            { name: '王掌柜', isNew: false, identity: '改不得', look: '', personality: '', motive: '', voice: '', firstChapter: '', basis: ['C1'] },
+            { name: '林舟', isNew: false, identity: '书生', look: '', personality: '', motive: '', voice: '', firstChapter: 'C1', basis: ['C9'] },
+          ],
+          relationships: [
+            { from: '钱四', to: '林舟', category: 'other', label: '债主', mutual: false, description: '林舟押玉欠了钱', secret: false, fromChapter: 'C1', basis: ['C1'] },
+            { from: '阿青', to: '林舟', category: 'ally', label: '同乡', mutual: true, description: '', secret: false, fromChapter: '', basis: ['C2'] },
+            { from: '李五', to: '林舟', category: 'enemy', label: '仇人', mutual: false, description: '', secret: false, fromChapter: '', basis: ['C2'] },
+          ],
+        }),
+      ),
+    );
+    const run = value(await app.startWorkflow({ workflow: 'cast_completion', params: {}, mode: 'step', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'awaiting_author']);
+    expect(out.view.steps[1]?.note).toBe('说明为空的人物 2 个，出场却没有关系的 2 个');
+    const draft = out.view.steps[2]?.output as { characters: { name: string; entityId: string | null; selected: boolean }[]; relationships: { from: string }[]; dropped: number };
+    expect(draft.characters.map((c) => [c.name, c.entityId === null])).toEqual([
+      ['钱四', false],
+      ['阿青', true],
+    ]);
+    expect(draft.relationships.map((r) => r.from)).toEqual(['钱四', '阿青']);
+    expect(draft.dropped).toBe(3);
+
+    // 不要阿青：她的关系也建不了，写明原因。
+    value(await app.editWorkflowStep(run.run.id, 2, { ...draft, characters: draft.characters.map((c) => ({ ...c, selected: c.name !== '阿青' })) }));
+    const adopted = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(adopted.steps[2]?.note).toContain('补充说明 1 个，新建关系 1 条');
+    expect(adopted.steps[2]?.note).toContain('阿青与林舟的关系');
+    const qian = value(await app.listEntities()).find((e) => e.name === '钱四')!;
+    expect(qian.description).toBe('身份：当铺掌柜；性格：精明；动机与目标：想弄清玉的来历；说话方式：说话慢；首次出场：《第一章》');
+    expect(value(await app.listEntities()).map((e) => e.name).sort()).toEqual(['林舟', '王掌柜', '钱四'].sort());
+    const relations = value(await app.relationsView()).relationships;
+    expect(relations.map((r) => [r.label, r.validFromChapterId])).toEqual([['债主', c1]]);
+
+    const withdrawn = value(await app.withdrawWorkflowStep(run.run.id, 2));
+    expect(withdrawn.view.steps[2]?.status).toBe('awaiting_author');
+    expect(value(await app.listEntities()).find((e) => e.name === '钱四')?.description).toBe('');
+    expect(value(await app.relationsView()).relationships).toEqual([]);
+  });
+});

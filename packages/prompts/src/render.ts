@@ -29,6 +29,7 @@ import {
   BeliefUpdateOutput,
   BookAuditOutput,
   BookSeedOutput,
+  CastCompletionOutput,
   DirectorProposalOutput,
   VolumeOutlineOutput,
   EvidenceJudgementOutput,
@@ -70,6 +71,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   BookSeedOutput,
   BookAuditOutput,
   VolumeOutlineOutput,
+  CastCompletionOutput,
   AssistantTurnOutput,
 };
 
@@ -784,6 +786,33 @@ export function renderOpeningReview(input: OpeningReviewInput): Result<RenderedP
     namesInOpening: input.metrics.namesInOpening,
     longestParagraph: input.metrics.longestParagraph,
     paragraphs: input.paragraphs.map((p) => ({ label: p.label, text: p.text })),
+  });
+}
+
+/** 人物补全一次最多列的人物与关系数。 */
+export const CAST_COMPLETION_LIMIT = 20;
+
+export type CastCompletionInput = {
+  readonly title: string;
+  readonly genre: string;
+  /** 人物卡片；gap 写明缺什么（说明为空、没有关系），没有缺口时为空。 */
+  readonly characters: readonly { readonly name: string; readonly aliases: readonly string[]; readonly description: string; readonly gap: string }[];
+  readonly relations: readonly string[];
+  /** 各章梗概，按书中顺序；label 是 C1、C2……；cast 是长篇记忆里的出场人物。 */
+  readonly chapters: readonly { readonly label: string; readonly title: string; readonly summary: string; readonly cast: readonly string[] }[];
+};
+
+/** 人物小传与关系网补全（B83）：作者侧的整理，材料是人物卡片、已有的关系与各章的长篇记忆。 */
+export function renderCastCompletion(input: CastCompletionInput): Result<RenderedPrompt, string> {
+  return renderTemplate('cast_completion', {
+    title: input.title,
+    genre: input.genre,
+    limit: CAST_COMPLETION_LIMIT,
+    characters: input.characters.map((c) => ({ name: c.name, aliases: c.aliases.join('、'), description: c.description.trim(), gap: c.gap })),
+    hasCharacters: input.characters.length > 0,
+    relations: [...input.relations],
+    hasRelations: input.relations.length > 0,
+    chapters: input.chapters.map((c) => ({ label: c.label, title: c.title, summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(), cast: c.cast.join('、') })),
   });
 }
 

@@ -27,13 +27,15 @@ import { describeError, type AppError } from './errors';
 import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOutline, VolumeOutlineRequest } from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
 import type { OpeningSurvey } from './opening';
+import { CastDraft } from './cast-completion';
+import type { CastGap } from '@fudiao/writing';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
 import { chapterLengths, type Chapter } from '@fudiao/store';
 import type { AppDeps } from './ports';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
 
 /**
@@ -238,7 +240,17 @@ export type NextVolumeParams = z.infer<typeof NextVolumeParams>;
 export const OpeningParams = z.object({ chapters: z.number().int().min(1).max(10) });
 export type OpeningParams = z.infer<typeof OpeningParams>;
 
-type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams; readonly next_volume: NextVolumeParams; readonly opening_polish: OpeningParams };
+/** 人物补全没有参数。 */
+export const CastParams = z.object({});
+export type CastParams = z.infer<typeof CastParams>;
+
+type ParamsOf = {
+  readonly quick_book: QuickBookParams;
+  readonly book_audit: BookAuditParams;
+  readonly next_volume: NextVolumeParams;
+  readonly opening_polish: OpeningParams;
+  readonly cast_completion: CastParams;
+};
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
 export type WorkflowHost = {
@@ -261,6 +273,9 @@ export type WorkflowHost = {
   applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
   openingSurvey(count: number): Promise<Result<OpeningSurvey, AppError>>;
   diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly issues: number; readonly dropped: number }, AppError>>;
+  castSurvey(): Promise<Result<readonly CastGap[], AppError>>;
+  draftCastCompletion(gaps: readonly CastGap[], stepKey: string, options?: CallOptions): Promise<Result<CastDraft, AppError>>;
+  applyCastCompletion(draft: CastDraft): Promise<Result<{ readonly created: number; readonly updated: number; readonly relations: number; readonly skipped: readonly string[] }, AppError>>;
 };
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
@@ -851,6 +866,90 @@ function openingPolish(host: WorkflowHost): WorkflowDef<OpeningParams> {
   };
 }
 
+const Gaps = z.object({
+  gaps: z.array(z.object({ id: z.string(), name: z.string(), noDescription: z.boolean(), noRelation: z.boolean(), firstChapterId: z.string().nullable(), chapters: z.number().int() })),
+});
+
+function castCompletion(host: WorkflowHost): WorkflowDef<CastParams> {
+  return {
+    title: '人物补全',
+    description: '补齐长篇记忆 → 找出缺口 → 人物小传与关系的草稿 → 你逐项勾选后采用（只增不改）',
+    params: CastParams,
+    runTitle: () => '人物补全',
+    estimate(_p, book) {
+      const n = Math.max(book.written, 1);
+      const chapterTokens = (book.words > 0 ? book.words / n : AUDIT_WORDS_PER_CHAPTER) * TOKENS_PER_CHAR;
+      return { calls: n + 1, inputTokens: Math.round(n * (chapterTokens + 2_000) + Math.min(n * 300, 45_000) + 4_000), outputTokens: n * 1_500 + 6_000 };
+    },
+    steps: [
+      step<CastParams, { readonly chapters: readonly string[] }>({
+        key: 'memory',
+        label: '补齐长篇记忆',
+        kind: 'act',
+        output: z.object({ chapters: z.array(z.string()) }),
+        async run({ options, onProgress }) {
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const written = view.value.chapters.filter((c) => c.hasText);
+          if (written.length === 0) return err(invalid('还没有写好的章节：人物补全要从正文的长篇记忆里找'));
+          const todo = written.filter((c) => c.memory === null || c.memory.status === 'stale');
+          const done: string[] = [];
+          for (const [i, c] of todo.entries()) {
+            onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
+            const built = await host.buildMemory(c.chapter.id, options);
+            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，重做时接着整理）` : ''}`));
+            done.push(c.chapter.id);
+          }
+          return ok({ output: { chapters: done }, note: done.length === 0 ? `${written.length} 章的长篇记忆都是最新的` : `整理了 ${done.length} 章的长篇记忆` });
+        },
+      }),
+      step<CastParams, z.infer<typeof Gaps>>({
+        key: 'gaps',
+        label: '找出缺口',
+        kind: 'check',
+        output: Gaps,
+        async run() {
+          const gaps = await host.castSurvey();
+          if (!gaps.ok) return gaps;
+          const noDescription = gaps.value.filter((g) => g.noDescription).length;
+          const noRelation = gaps.value.filter((g) => g.noRelation).length;
+          return ok({ output: { gaps: [...gaps.value] }, note: gaps.value.length === 0 ? '已有的人物卡片都有说明，出场的人物都有关系；下一步看正文里有没有还没建卡的人物' : `说明为空的人物 ${noDescription} 个，出场却没有关系的 ${noRelation} 个` });
+        },
+      }),
+      step<CastParams, CastDraft>({
+        key: 'draft',
+        label: '小传与关系',
+        kind: 'draft',
+        output: CastDraft,
+        async run({ stepKey, options, onProgress, output }) {
+          const gaps = Gaps.safeParse(output('gaps'));
+          onProgress('正在读各章的长篇记忆，写人物小传与关系');
+          const draft = await host.draftCastCompletion(gaps.success ? gaps.data.gaps : [], stepKey, options);
+          if (!draft.ok) return draft;
+          const fresh = draft.value.characters.filter((c) => c.entityId === null).length;
+          const n = draft.value.characters.length + draft.value.relationships.length;
+          return ok({
+            output: draft.value,
+            note: n === 0 ? '没有要补的人物与关系' : `新人物 ${fresh} 个、补小传 ${draft.value.characters.length - fresh} 个、关系 ${draft.value.relationships.length} 条；不要的取消勾选再采用`,
+            settled: n === 0,
+          });
+        },
+        async adopt(_c, draft) {
+          const applied = await host.applyCastCompletion(draft);
+          if (!applied.ok) return applied;
+          const { created, updated, relations, skipped } = applied.value;
+          return ok(`新建人物 ${created} 个，补充说明 ${updated} 个，新建关系 ${relations} 条${skipped.length > 0 ? `；没有采用：${skipped.slice(0, 4).join('；')}` : ''}`);
+        },
+      }),
+    ],
+  };
+}
+
+export const castDraftOf = (step: Pick<WorkflowStepView, 'output'>): CastDraft | null => {
+  const parsed = CastDraft.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+
 export const openingCompareOf = (step: Pick<WorkflowStepView, 'output'>): OpeningCompare | null => {
   const parsed = OpeningCompare.safeParse(step.output);
   return parsed.success ? parsed.data : null;
@@ -948,8 +1047,11 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     book_audit: bookAudit(host),
     next_volume: nextVolume(host),
     opening_polish: openingPolish(host),
+    cast_completion: castCompletion(host),
   };
-  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume), opening_polish: erase(WORKFLOWS.opening_polish) };
+  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume), opening_polish: erase(WORKFLOWS.opening_polish),
+    cast_completion: erase(WORKFLOWS.cast_completion),
+  };
   const isKey = (key: string): key is WorkflowKey => (WORKFLOW_KEYS as readonly string[]).includes(key);
   const defOf = (key: string): AnyWorkflow | null => (isKey(key) ? ERASED[key] : null);
 

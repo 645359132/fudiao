@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "20",
-    "sha256": "5ec5cd88493c024b8e5539c79b8af16d04562aa6b69a314464d0ac0501ba3697"
+    "version": "21",
+    "sha256": "5d8cb7ff56988c85fafab49a1c1bbee8e40370a487f754ca09517de2ab480cf8"
   },
   "baseline_scene": {
     "version": "2",
@@ -30,6 +30,10 @@
   "candidate_text": {
     "version": "3",
     "sha256": "3f89bc243ddc830115dcdb720ddeee4c8ce8e42c81bef7a91c72e9402f73d3ff"
+  },
+  "cast_completion": {
+    "version": "1",
+    "sha256": "86b4d3bfd762f3cd6b60bc4dde0e4737809d8f50ae8aede7f3f1507ae07a2678"
   },
   "chapter_memory": {
     "version": "2",

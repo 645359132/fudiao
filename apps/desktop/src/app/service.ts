@@ -89,6 +89,7 @@ import { quickBookUseCases } from './quick-book';
 import { workflowUseCases } from './workflows';
 import { bookAuditUseCases } from './book-audit';
 import { openingUseCases } from './opening';
+import { castCompletionUseCases } from './cast-completion';
 import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
 import { reviewUseCases } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
@@ -798,7 +799,9 @@ export function createAppService(deps: AppDeps) {
   const workflows = workflowUseCases({
     deps,
     project: () => session?.port ?? null,
-    host: { ...app, ...quickBook, ...bookAuditUseCases(deps, () => session?.port ?? null, runner), ...openingUseCases(deps, () => session?.port ?? null, runner) },
+    host: { ...app, ...quickBook, ...bookAuditUseCases(deps, () => session?.port ?? null, runner), ...openingUseCases(deps, () => session?.port ?? null, runner),
+      ...castCompletionUseCases(deps, () => session?.port ?? null, runner),
+    },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {
       capture: () => captureWork(app, session?.port ?? null),
