@@ -64,6 +64,12 @@ pub fn migrate(
     let io = |e: rusqlite::Error| OpenError::IoError {
         detail: e.to_string(),
     };
+    // 迁移前备份的文件名含 now。
+    if !super::backup::valid_now(now) {
+        return Err(OpenError::IoError {
+            detail: "时间的格式无效".into(),
+        });
+    }
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)",
     )

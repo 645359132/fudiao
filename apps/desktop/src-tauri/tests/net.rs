@@ -93,6 +93,34 @@ async fn serve(server: Arc<Server>) -> String {
                             .unwrap();
                         stream.write_all(b"ok").await.unwrap();
                     }
+                    "/echo-key" => {
+                        // 中转站把收到的请求头写进错误说明，密钥分在两块里发出。
+                        let key = request
+                            .lines()
+                            .find_map(|l| {
+                                l.strip_prefix("x-api-key: ")
+                                    .or_else(|| l.strip_prefix("authorization: Bearer "))
+                            })
+                            .unwrap_or("")
+                            .to_string();
+                        let (a, b) = key.split_at(key.len() / 2);
+                        stream
+                            .write_all(
+                                head("401 Unauthorized", &format!("x-echo: {key}\r\n")).as_bytes(),
+                            )
+                            .await
+                            .unwrap();
+                        stream
+                            .write_all(format!("{{\"error\":\"bad key {a}").as_bytes())
+                            .await
+                            .unwrap();
+                        stream.flush().await.unwrap();
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        stream
+                            .write_all(format!("{b}\"}}").as_bytes())
+                            .await
+                            .unwrap();
+                    }
                     "/redirect" => {
                         stream
                             .write_all(
@@ -446,4 +474,80 @@ async fn configured_limits_override_the_default() {
         t.await.unwrap();
     }
     assert_eq!(server.max_active.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_that_arrives_before_fetch_still_wins() {
+    let server = Arc::new(Server::default());
+    let base = serve(server.clone()).await;
+    let proxy = proxy_for(&base, api_key(KeyHeader::XApiKey), 4);
+    // 界面的取消与 net_fetch 是两次调用，取消可能先到：这时代理还不认识这个标识。
+    assert!(!proxy.cancel("r1"));
+    let events = collect(&proxy, request("r1", format!("{base}/x"))).await;
+    assert_eq!(events, vec![NetEvent::End { cancelled: true }]);
+    // 记录只用一次：同一标识再来一次照常发出。
+    let events = collect(&proxy, request("r1", format!("{base}/x"))).await;
+    assert_eq!(events.last(), Some(&NetEvent::End { cancelled: false }));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn error_responses_do_not_echo_the_key() {
+    let server = Arc::new(Server::default());
+    let base = serve(server.clone()).await;
+    for header in [KeyHeader::XApiKey, KeyHeader::Bearer] {
+        let proxy = proxy_for(&base, api_key(header), 4);
+        let req = request("r1", format!("{base}/echo-key"));
+        let events = collect(&proxy, req).await;
+        let text = format!("{events:?}");
+        assert!(!text.contains(SECRET), "{text}");
+        assert!(matches!(
+            events.first(),
+            Some(NetEvent::Head { status: 401, .. })
+        ));
+        assert_eq!(events.last(), Some(&NetEvent::End { cancelled: false }));
+        assert_eq!(body_text(&events), "{\"error\":\"bad key ***\"}");
+        assert!(text.contains("(\"x-echo\", \"***\")"), "{text}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn services_sharing_an_origin_share_one_limit() {
+    let server = Arc::new(Server::default());
+    let base = serve(server.clone()).await;
+    let credentials = Arc::new(MemoryCredentials::default());
+    credentials.set(
+        "p1",
+        Binding::new(&base, api_key(KeyHeader::XApiKey), 1).unwrap(),
+    );
+    credentials.set(
+        "p2",
+        Binding::new(&base, api_key(KeyHeader::XApiKey), 3).unwrap(),
+    );
+    let proxy = Arc::new(Proxy::new(credentials));
+    let tasks: Vec<_> = (0..8)
+        .map(|i| {
+            let mut req = request(&format!("r{i}"), format!("{base}/hold"));
+            req.provider_id = if i % 2 == 0 { "p1" } else { "p2" }.into();
+            let prepared = proxy.prepare(req).unwrap();
+            let runner = proxy.clone();
+            tokio::spawn(async move { runner.run(prepared, |_| {}).await })
+        })
+        .collect();
+    for t in tasks {
+        t.await.unwrap();
+    }
+    assert_eq!(server.requests.lock().unwrap().len(), 8);
+    assert!(server.max_active.load(Ordering::SeqCst) <= 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn oversized_limits_are_capped() {
+    let server = Arc::new(Server::default());
+    let base = serve(server.clone()).await;
+    let proxy = proxy_for(&base, api_key(KeyHeader::XApiKey), usize::MAX);
+    proxy.set_limits(&[("p1".into(), usize::MAX)]);
+    let events = collect(&proxy, request("r1", format!("{base}/x"))).await;
+    assert_eq!(events.last(), Some(&NetEvent::End { cancelled: false }));
 }

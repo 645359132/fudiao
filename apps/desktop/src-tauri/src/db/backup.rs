@@ -27,6 +27,20 @@ pub struct BackupInfo {
     pub size_bytes: u64,
 }
 
+/// `now` 由界面传入并拼进备份文件名，只接受 `2026-10-08T01:02:03.000Z` 这一种写法，防止借它写到备份目录以外。
+pub fn valid_now(now: &str) -> bool {
+    let b = now.as_bytes();
+    b.len() == TIME_LEN
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'T',
+            13 | 16 => *c == b':',
+            19 => *c == b'.',
+            23 => *c == b'Z',
+            _ => c.is_ascii_digit(),
+        })
+}
+
 pub fn backup_name(kind: &str, now: &str) -> String {
     format!("{kind}-{}.sqlite", now.replace(':', "-"))
 }
@@ -101,6 +115,12 @@ pub fn resolve(project_dir: &Path, name: &str) -> Option<PathBuf> {
 }
 
 pub fn create(db: &Database, kind: &str, now: &str) -> Result<BackupInfo, SqlError> {
+    if !valid_now(now) {
+        return Err(SqlError::SqlError {
+            index: 0,
+            detail: "备份时间的格式无效".into(),
+        });
+    }
     let dir = db.dir().join(BACKUP_DIR);
     fs::create_dir_all(&dir).map_err(|e| SqlError::SqlError {
         index: 0,

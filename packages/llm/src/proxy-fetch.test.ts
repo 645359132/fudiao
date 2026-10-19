@@ -94,6 +94,27 @@ describe('经凭据代理的 fetch', () => {
     expect(cancelled).toHaveLength(1);
   });
 
+  it('代理还没受理请求时取消：照样把同一标识的取消发给代理（由代理记下，开始时不发出）', async () => {
+    const sent: NetRequest[] = [];
+    const cancelled: string[] = [];
+    const transport: NetTransport = {
+      send: (request) => {
+        sent.push(request);
+        return new Promise(() => undefined);
+      },
+      cancel: (id) => {
+        cancelled.push(id);
+        return Promise.resolve();
+      },
+    };
+    const abort = new AbortController();
+    const pending = createProxyFetch(transport, 'p', newId)('https://a.test/x', { signal: abort.signal });
+    await tick();
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancelled).toEqual([sent[0]?.id]);
+  });
+
   it('已经取消的信号不发出请求', async () => {
     const { transport, sent } = manual();
     const abort = new AbortController();
