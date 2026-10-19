@@ -38,6 +38,7 @@ import {
   Users,
   Waypoints,
   WandSparkles,
+  Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -82,6 +83,7 @@ const ICONS = {
   chevronDown: ChevronDown,
   brain: Brain,
   model: Cpu,
+  workflow: Workflow,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

@@ -41,6 +41,7 @@ function backgroundJobs() {
   const background: BackgroundJobs = {
     writeChapters: () => null,
     reviewChapters: () => null,
+    workflow: () => null,
     simulating: () => false,
     writing: () => jobs.filter((j) => !done.has(j) && j.kind !== 'review').map((j) => j.chapterId),
     simulate: () => null,

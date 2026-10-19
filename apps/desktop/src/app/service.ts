@@ -3,6 +3,7 @@
 import { relationUseCases } from './relations';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
+  interruptRunningSteps,
   latestCallWithUsage,
   getCover,
   getCoverThumbnail,
@@ -85,6 +86,8 @@ import { memoryUseCases } from './memory';
 import { assistantUseCases, type AssistantUsage } from './assistant';
 import { narrationUseCases } from './narration';
 import { quickBookUseCases } from './quick-book';
+import { workflowUseCases } from './workflows';
+import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
 import { reviewUseCases } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
@@ -210,6 +213,8 @@ export function createAppService(deps: AppDeps) {
       return saved;
     }
     session = { entry, port };
+    // 写作工作流（B78）：上次没做完就关掉（或崩溃）的步骤标为中断，作者继续时从这一步重做。读不了也不妨碍打开作品。
+    await interruptRunningSteps(port, ctx());
     return view();
   }
 
@@ -776,13 +781,63 @@ export function createAppService(deps: AppDeps) {
     restoreChapter: (chapter: Chapter) => withPort((port) => restoreChapter(port, chapter.id, chapter.version, ctx())),
   };
 
-  // AI 助手（B69）：工具调用上面的用例，规则与守卫照常生效。
-  const assistant = assistantUseCases({ deps, host: app, project: () => session?.port ?? null, workKey: () => session?.entry.path ?? null, runner });
 
   // 快速成书（B67）：骨架与各步状态；计划、写作与审核沿用上面的用例。
+  const quickBook = quickBookUseCases({
+    deps,
+    project: () => session?.port ?? null,
+    runner,
+    planningView: () => app.planningView(),
+    defaultModel: () => services.defaultModel(),
+    updateWorkInfo: (patch) => app.updateWorkInfo(patch),
+  });
+
+  // 写作工作流（B78）：步骤调用上面的用例；写章节默认就地依次写，桌面端由状态层经写手队列做。
+  const workflows = workflowUseCases({
+    deps,
+    project: () => session?.port ?? null,
+    host: { ...app, ...quickBook },
+    // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
+    changes: {
+      capture: () => captureWork(app, session?.port ?? null),
+      diff: (before, after) => diffWork(before, after),
+      undo: (entries) => undoChanges(app, () => session?.port ?? null, [asChangeEntries(entries)]),
+    },
+    async pricing() {
+      const choice = await services.defaultModel();
+      if (!choice.ok || choice.value === null) return null;
+      const { model } = choice.value;
+      return { model: model.displayName, prices: model.prices ?? undefined };
+    },
+    hooks: {
+      async writeChapters(chapterIds, review, options) {
+        const done: string[] = [];
+        for (const id of chapterIds) {
+          const written = await app.writeChapter(id, options);
+          if (!written.ok) return { ok: false, summary: `${done.length > 0 ? `已写完 ${done.length} 章；` : ''}停在这一章：${describeError(written.error)}` };
+          if (written.value.status !== 'written') return { ok: false, summary: `${done.length > 0 ? `已写完 ${done.length} 章；` : ''}写手停下：${written.value.reason ?? ''}` };
+          const memory = await app.buildMemory(id, options);
+          if (!memory.ok) return { ok: false, summary: `已写完 ${done.length + 1} 章，长篇记忆没有整理成：${describeError(memory.error)}` };
+          if (review) {
+            const reviewed = await app.reviewChapter(id, options);
+            if (!reviewed.ok || !reviewed.value.modelReviewed) {
+              return { ok: false, summary: `已写完 ${done.length + 1} 章，审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}` };
+            }
+          }
+          done.push(id);
+        }
+        return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}` };
+      },
+    },
+  });
+
+  // AI 助手（B69）：工具调用上面的用例，规则与守卫照常生效。
+  const assistant = assistantUseCases({ deps, host: { ...app, workflows }, project: () => session?.port ?? null, workKey: () => session?.entry.path ?? null, runner });
+
   return {
     ...app,
     ...assistant,
+    ...workflows,
 
     /**
      * 这部作品里 AI 助手最近一步的上下文用量（取自调用记录）：重新打开作品或重启之后，对话还在时照样显示。
@@ -799,14 +854,7 @@ export function createAppService(deps: AppDeps) {
       const model = view.value.models.find((m) => m.providerId === call.value?.provider && m.modelId === call.value.model);
       return ok(model === undefined ? null : { promptTokens: usage.input + usage.cacheRead + usage.cacheWrite, contextWindow: model.capabilities.contextWindow });
     },
-    ...quickBookUseCases({
-      deps,
-      project: () => session?.port ?? null,
-      runner,
-      planningView: () => app.planningView(),
-      defaultModel: () => services.defaultModel(),
-      updateWorkInfo: (patch) => app.updateWorkInfo(patch),
-    }),
+    ...quickBook,
   };
 }
 

@@ -61,7 +61,7 @@ export type { AssistantHistoryItem, AssistantResult, AssistantState, EvidenceSec
 export type { ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput, WriterRelation } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';
-export { ASSISTANT_PAGES, ASSISTANT_TOOLS, AssistantAction, AssistantTurnOutput, ENTITY_KINDS_FOR_ASSISTANT, RELATION_KINDS_FOR_ASSISTANT } from './assistant';
+export { ASSISTANT_PAGES, ASSISTANT_TOOLS, ASSISTANT_WORKFLOWS, AssistantAction, AssistantTurnOutput, ENTITY_KINDS_FOR_ASSISTANT, RELATION_KINDS_FOR_ASSISTANT } from './assistant';
 export type { AssistantTool } from './assistant';
 export type { SkillDocument } from './skill-md';
 export { formatSkillMd, parseSkillMd } from './skill-md';

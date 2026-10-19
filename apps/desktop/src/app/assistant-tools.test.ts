@@ -28,7 +28,7 @@ function envWithPlans(hasPlans: boolean): ToolEnv {
 }
 
 /** 每个动作的一个合法示例：每个字段取几个候选值中第一个能通过校验的。 */
-const CANDIDATES: readonly unknown[] = [null, 'x', 3, [], false, 'character', 'world', 'polish', 'txt', 'book', 'family', 'all', 'fixed'];
+const CANDIDATES: readonly unknown[] = [null, 'x', 3, [], false, 'character', 'world', 'polish', 'txt', 'book', 'family', 'all', 'fixed', 'quick_book', 'step'];
 function sample(tool: AssistantTool): AssistantAction {
   const shape = AssistantAction.options.find((o) => o.shape.tool.value === tool)!.shape as Record<string, { safeParse: (v: unknown) => { success: boolean } }>;
   const values = Object.fromEntries(Object.entries(shape).map(([key, schema]) => [key, key === 'tool' ? tool : CANDIDATES.find((v) => schema.safeParse(v).success)]));

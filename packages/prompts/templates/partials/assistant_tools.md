@@ -50,7 +50,7 @@
 - edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
 - review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。和 write_chapter 一样在后台审，审完的结果出现在之后的当前状态里。参数 chapter。
 - review_chapters：把几章交给后台依次审核（问题照样列在各章旁的“审核”里）。动作立即返回，审核在后台进行，进度出现在“正在进行的任务”里，审完或停下时的结果出现在“后台刚做完的”里；审两章以上或“审核全书”时用它。参数 chapters：章节列表，null 为所有已经写好的章节。
-- stop_background：停下后台的写作、依次审核或推演（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；推演停在当前这一步之后，可以继续）。只在作者要求停下时用。参数 what：writing 写作、review 审核、simulation 推演、all 全部。
+- stop_background：停下后台的写作、依次审核、推演或写作工作流（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；推演停在当前这一步之后，可以继续；工作流停在当前这一步，继续时从这一步做起）。只在作者要求停下时用。参数 what：writing 写作、review 审核、simulation 推演、workflow 工作流、all 全部。
 - resolve_review_issue：处理一条审核问题：fixed 标为已改好，ignored 忽略。参数 issue（问题的标识，见 list_review_issues）；status。
 - revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。和 write_chapter 一样在后台改，改完的结果出现在之后的当前状态里。参数 issue。
 - rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
@@ -63,9 +63,14 @@
 - continue_simulation：让暂停或停下的推演在后台接着推进。等待作者确认裁决或决定导演提议时不能继续，请作者到推演页处理。参数 run（推演的标识）。
 - get_simulation：看一次推演的状态与全局概要（每回合谁做了什么、说了什么，结束原因、费用，等作者处理的事）。这是作者视角的全貌，只用来向作者汇报与做计划。参数 run。
 - narrate_simulation：按一个角色的视角，把一次推演中已经结束的回合写成正文，作为候选稿放在这一章末尾；只用这个角色当时知道的信息。候选稿要作者在章节旁的“AI 写作”里用“采纳…”写进作品，不能直接接受。参数 run；pov：视角角色（名字或键）；chapter：写进哪一章；fromRound、toRound：回合范围，null 为从第 1 回合到最后一个结束的回合。
+写作工作流（按固定的步骤依次做完一件大事，每步的结果存在作品里，作者可以看、改、采用，可以停下、接着做、重做或跳过一步）：
+- list_workflows：列出可用的工作流（名称、说明、步骤）与这部作品的运行（标识、状态、停在哪一步）。没有参数。
+- start_workflow：开始一个工作流，在后台推进。quick_book 一键成书：检查模型 → 由想法生成大纲与人物 → 拆章节计划 → 写手写完并审核 → 导出（导出须作者自己点）。mode：step 每步停下给作者看（草稿要作者在工作流页采用），auto 一路做完（草稿直接采用；会替换已有大纲或覆盖已有计划时仍停下等作者）。动作立即返回，进度出现在“正在进行的任务”里，停下时停在哪里出现在“后台刚做完的”里。会按步骤调用模型，开始前在 message 里说一句。参数 workflow；mode；budgetUsd：费用上限（美元），null 为不设；idea：一句话的想法（已有大纲、不需要生成时可为 null）；genre：类型，可为 null；chapters：章数，null 为 20；wordsPerChapter：每章字数，null 为 3000。
+- get_workflow：看一次运行的各步状态与结果的概要。参数 run：运行的标识，null 为最近的一次。
+- continue_workflow：让停下、中断或等作者的运行在后台接着推进。adopt 为 true 时先按原样采用正在等作者的那一步（作者说“就这样”“采用”时）；须作者确认的覆盖，作者在对话里明确同意了才用 adopt。出错或可能过时的步骤要作者在工作流页决定重做、跳过或保留。参数 run；adopt。
 撤销：
 - undo_last_turn：撤销上一轮（作者上一句话）里你对作品做的改动：新建的设定、关系、卷、章节、计划、伏笔与候选事实删掉，改过的改回去，删掉的设定、关系与卷重建，写手写的章回退到写入之前，写手的修订恢复到修订之前。之后又被改过的不动；候选稿、审核结果、推演记录、新建的作品不在撤销范围。只在作者要求撤销时用；再用一次撤销更早的一轮。没有参数。
 导出：
 - export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：
-- open_page：打开一个页面。参数 page：book 成书、planning 计划、settings 设定、relations 人物关系、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。
+- open_page：打开一个页面。参数 page：book 成书、workflows 写作工作流、planning 计划、settings 设定、relations 人物关系、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。

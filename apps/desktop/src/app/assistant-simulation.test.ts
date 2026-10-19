@@ -58,6 +58,7 @@ function backgroundFor(app: Awaited<ReturnType<typeof setup>>['app']) {
   const jobs: BackgroundJobs = {
     writeChapters: () => null,
     reviewChapters: () => null,
+    workflow: () => null,
     simulating: () => false,
     run: () => Promise.resolve(null),
     writing: () => [],
@@ -153,7 +154,7 @@ describe('AI 助手操作角色推演（M5-19）', () => {
     expect(background.started).toEqual([]);
 
     failing([{ tool: 'start_simulation', scene: scene.id, budgetUsd: null }]);
-    outcome = value(await app.sendToAssistant('再推一次', { background: { ...background.jobs, simulating: () => true } }));
+    outcome = value(await app.sendToAssistant('再推一次', { background: { ...background.jobs, workflow: () => null, simulating: () => true } }));
     expect(lastResults(outcome.items)?.results[0]).toMatchObject({ ok: false, detail: expect.stringContaining('已经有一次推演') });
     expect(value(await app.listSimRuns(scene.id))).toHaveLength(1);
 

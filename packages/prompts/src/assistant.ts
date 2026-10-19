@@ -13,7 +13,10 @@ export const ENTITY_KINDS_FOR_ASSISTANT = ['character', 'location', 'organizatio
 export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as const;
 
 /** 助手可以打开的页面。 */
-export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
+export const ASSISTANT_PAGES = ['book', 'workflows', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
+
+/** 助手可以发起的写作工作流（与应用层工作流命令表的键相同，由类型检查核对）。 */
+export const ASSISTANT_WORKFLOWS = ['quick_book'] as const;
 
 /** 人物关系的类别（与存储层的取值相同）。 */
 export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;
@@ -95,7 +98,7 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
   z.object({ tool: z.literal('review_chapter'), chapter: text }),
   z.object({ tool: z.literal('review_chapters'), chapters: list }),
-  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'simulation', 'all']) }),
+  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'simulation', 'workflow', 'all']) }),
   z.object({ tool: z.literal('resolve_review_issue'), issue: text, status: z.enum(['fixed', 'ignored']) }),
   z.object({ tool: z.literal('revise_review_issue'), issue: text }),
   z.object({ tool: z.literal('rollback_writer'), chapter: text }),
@@ -117,6 +120,20 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('continue_simulation'), run: text }),
   z.object({ tool: z.literal('get_simulation'), run: text }),
   z.object({ tool: z.literal('narrate_simulation'), run: text, pov: text, chapter: text, fromRound: z.number().int().positive().nullable(), toRound: z.number().int().positive().nullable() }),
+  // 写作工作流：按固定的步骤依次做，在后台推进，每步的结果作者可以看、改、采用
+  z.object({ tool: z.literal('list_workflows') }),
+  z.object({
+    tool: z.literal('start_workflow'),
+    workflow: z.enum(ASSISTANT_WORKFLOWS),
+    mode: z.enum(['step', 'auto']),
+    budgetUsd: z.number().positive().nullable(),
+    idea: opt,
+    genre: opt,
+    chapters: z.number().int().positive().nullable(),
+    wordsPerChapter: z.number().int().positive().nullable(),
+  }),
+  z.object({ tool: z.literal('get_workflow'), run: opt }),
+  z.object({ tool: z.literal('continue_workflow'), run: text, adopt: z.boolean() }),
   // 撤销
   z.object({ tool: z.literal('undo_last_turn') }),
   // 导出

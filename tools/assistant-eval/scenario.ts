@@ -53,6 +53,8 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
   let writing: { abort: AbortController; current: string; done: number; total: number; queued: string[] } | null = null;
   let reviewing: { abort: AbortController; current: string; done: number; total: number } | null = null;
   let simulating: { abort: AbortController; runId: string } | null = null;
+  /** 写作工作流（M6-01）：同一时间只推进一个。 */
+  let flowing: { abort: AbortController; runId: string } | null = null;
   /** 单章的写作、审核与修订（M5-23）。 */
   const single = new Set<{ readonly kind: 'writing' | 'review' | 'revise'; readonly chapterId: string; readonly title: string; readonly abort: AbortController }>();
   const pending: Promise<void>[] = [];
@@ -150,14 +152,35 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       );
       return null;
     },
+    workflow(runId, onEnd) {
+      if (flowing !== null) return '已经有一个写作工作流在推进，等它停下以后再继续';
+      const abort = new AbortController();
+      const job = { abort, runId };
+      flowing = job;
+      pending.push(
+        (async () => {
+          log(`  [后台] 写作工作流 ${runId}`);
+          const out = await app.advanceWorkflow(runId, { signal: abort.signal });
+          const summary = out.ok ? out.value.summary : describe(out.error);
+          log(`  [后台] 写作工作流停下：${summary}`);
+          if (flowing === job) flowing = null;
+          onEnd?.(summary);
+        })(),
+      );
+      return null;
+    },
     stop(what) {
       const stopped: string[] = [];
+      if ((what === 'workflow' || what === 'all') && flowing !== null) {
+        flowing.abort.abort();
+        stopped.push('写作工作流停在当前这一步');
+      }
       if ((what === 'writing' || what === 'all') && writing !== null) {
         writing.abort.abort();
         stopped.push(`写手停下（已写完的段落保留），后面排着的 ${writing.queued.length} 章不再写`);
       }
       for (const j of single) {
-        if (what === 'simulation' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
+        if (what === 'simulation' || what === 'workflow' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
         j.abort.abort();
         stopped.push(`${j.title}停下`);
       }
@@ -169,7 +192,7 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
         simulating.abort.abort();
         stopped.push('推演停在当前这一步之后（可以继续）');
       }
-      return stopped.length > 0 ? `已停下：${stopped.join('；')}。` : '后台没有在进行的写作、审核或推演。';
+      return stopped.length > 0 ? `已停下：${stopped.join('；')}。` : '后台没有在进行的写作、审核、推演或工作流。';
     },
   };
 
@@ -184,6 +207,7 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       if (w !== null) out.push(`写手正在写《${await title(w.current)}》（这一批第 ${w.done + 1} / ${w.total} 章${w.queued.length > 0 ? `，后面还有 ${w.queued.length} 章` : ''}）`);
       if (r !== null) out.push(`正在依次审核：第 ${r.done + 1} / ${r.total} 章《${await title(r.current)}》`);
       if (sim !== null) out.push(`角色推演正在推进（推演 [${sim.runId}]）`);
+      if (flowing !== null) out.push(`写作工作流 [${flowing.runId}] 正在推进`);
       for (const j of single) out.push(j.title);
       return out;
     },

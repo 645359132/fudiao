@@ -11,6 +11,7 @@ import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } fr
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from '../app/quick-book';
+import type { StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -107,7 +108,7 @@ export type AppState = {
   /** 作品封面（B76）：undefined 为还没读取，null 为没有封面（显示按书名排出的文字封面）。 */
   readonly cover: Cover | null | undefined;
   readonly selectedChapterId: string | null;
-  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'relations' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book';
+  readonly panel: 'chapter' | 'info' | 'trash' | 'history' | 'backups' | 'settings' | 'facts' | 'relations' | 'sources' | 'search' | 'usage' | 'tasks' | 'skills' | 'planning' | 'simulation' | 'book' | 'workflows';
   readonly busy: boolean;
   /** 最近一次失败的说明，作者关闭后清除。 */
   readonly message: string | null;
@@ -142,6 +143,16 @@ export type AppState = {
   readonly planDraft: PlanDraft | null;
   /** 快速成书（B67）：各步状态（打开成书页时读取）、正在编辑的作品骨架与是否正在生成。 */
   readonly quickBook: QuickBookStatus | null;
+  /**
+   * 写作工作流（B78）：这部作品的运行（打开工作流页时读取，推进时随之更新）、选中的运行、
+   * 正在后台推进的运行与它此刻的进展。
+   */
+  readonly workflows: readonly WorkflowView[] | null;
+  /** 可用的工作流（卡片）。 */
+  readonly workflowCatalog: readonly WorkflowInfo[];
+  readonly workflowId: string | null;
+  readonly workflowAdvancing: string | null;
+  readonly workflowProgress: string | null;
   /** AI 助手（B69）：右侧对话框是否打开、当前作品（或作品列表页）的对话、是否正在处理。 */
   readonly assistantOpen: boolean;
   readonly assistantItems: readonly AssistantItem[];
@@ -289,6 +300,21 @@ export type AppState = {
   readonly openPlanning: () => Promise<void>;
   /** 保存正文后打开成书页，并读取各步状态与计划。 */
   readonly openQuickBook: () => Promise<void>;
+  /** 保存正文后打开工作流页，读取这部作品的运行。 */
+  readonly openWorkflows: () => Promise<void>;
+  readonly selectWorkflow: (runId: string | null) => void;
+  /** 开始前的预计用量与费用；参数不完整时显示原因并返回 null。 */
+  readonly quoteWorkflow: (workflow: WorkflowKey, params: unknown) => Promise<WorkflowQuote | null>;
+  /** 开始一个工作流并在后台推进；返回新运行的标识，没开始时为 null。 */
+  readonly startWorkflow: (request: StartWorkflowRequest) => Promise<string | null>;
+  /** 在后台接着推进（到需要作者、出错、预算用完或做完为止）；已有一个在推进时返回原因，否则为 null。onEnd 给出停在哪里的一句话。 */
+  readonly continueWorkflow: (runId: string, onEnd?: (summary: string) => void) => string | null;
+  readonly stopWorkflow: () => void;
+  /** 修改等作者处理的草稿。 */
+  readonly editWorkflowStep: (runId: string, idx: number, output: unknown) => Promise<boolean>;
+  /** 作者对一步的操作：采用、跳过、重做、保留（可能过时时）、撤回这次采用。 */
+  readonly workflowStepAction: (runId: string, idx: number, action: 'adopt' | 'skip' | 'redo' | 'keep' | 'withdraw') => Promise<boolean>;
+  readonly abandonWorkflow: (runId: string) => Promise<boolean>;
   readonly toggleAssistant: () => void;
   /** 读取当前作品（或作品列表页）的对话。 */
   readonly loadAssistant: () => Promise<void>;
@@ -527,6 +553,9 @@ export function createAppStore(service: AppService): AppStore {
     /** 写手队列已占位（writerJob 在第一章开始前才设上）。 */
     let writerRunning = false;
     let reviewQueueAbort: AbortController | null = null;
+    /** 正在后台推进的写作工作流（同一时间只推进一个）；关闭作品时停下并等它结束。 */
+    let workflowAbort: AbortController | null = null;
+    let workflowLoop: Promise<void> | null = null;
     /** 关闭窗口（桌面端注册）。 */
     let exitApp: (() => void) | null = null;
     let sceneSerial = 0;
@@ -681,9 +710,12 @@ export function createAppStore(service: AppService): AppStore {
      * 写手依次写这些章（成书进度的按钮与 AI 助手的后台写作都经这里）。调用方保证同一时间只有一批。
      * 返回这一批怎样结束的一句话（AI 助手据此在之后的现状里告诉模型）。
      */
-    async function writeQueue(chapterIds: readonly string[], options: { readonly review?: boolean }): Promise<string> {
+    async function writeQueue(
+      chapterIds: readonly string[],
+      options: { readonly review?: boolean; readonly listen?: CallOptions },
+    ): Promise<{ readonly summary: string; readonly complete: boolean }> {
       // 先保存编辑器里的内容：写手不会覆盖未保存的修改。
-      if (!(await get().leaveChapter())) return '本章正文没有保存成功，写手没有开始';
+      if (!(await get().leaveChapter())) return { summary: '本章正文没有保存成功，写手没有开始', complete: false };
       const written: string[] = [];
       /** 停在哪里、为什么（显示给作者的那句话）；写完全部时为 null。 */
       let stop: string | null = null;
@@ -693,6 +725,20 @@ export function createAppStore(service: AppService): AppStore {
       };
       const abort = new AbortController();
       writerAbort = abort;
+      // 写作工作流交来的一批：它停下时写手也停下，用量一并报给它（预算按它算）。
+      const listen = options.listen;
+      if (listen?.signal?.aborted === true) abort.abort();
+      listen?.signal?.addEventListener('abort', () => abort.abort(), { once: true });
+      const tee = (o: CallOptions): CallOptions =>
+        listen?.onEvent === undefined
+          ? o
+          : {
+              ...o,
+              onEvent: (e) => {
+                o.onEvent?.(e);
+                listen.onEvent?.(e);
+              },
+            };
       const refresh = async (chapterId: string) => {
         const planning = get().planning === null ? null : await service.planningView();
         if (planning?.ok === true) set({ planning: planning.value });
@@ -707,7 +753,7 @@ export function createAppStore(service: AppService): AppStore {
         const queued = chapterIds.slice(i + 1);
         set({ writerJob: { chapterId, stage: 'writing', done: 0, total: 0, queued }, message: null });
         const result = await service.writeChapter(chapterId, {
-          ...t.options(),
+          ...tee(t.options()),
           onSegment: (done, total) => {
             set({ writerJob: { chapterId, stage: 'writing', done, total, queued } });
             void refresh(chapterId);
@@ -726,14 +772,14 @@ export function createAppStore(service: AppService): AppStore {
           // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
           set({ writerJob: { chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal, queued } });
           written.push(title);
-          if (!(await memoryTask(chapterId, abort))) {
+          if (!(await memoryTask(chapterId, abort, tee))) {
             halt(`“${title}”已写完，但长篇记忆没有生成：${get().message ?? ''}${rest}`);
             break;
           }
           if (options.review !== true) continue;
           // 审核提出的问题留给作者处理，不挡住后面的章节；模型审核没有完成时停下。
           set({ writerJob: { chapterId, stage: 'review', done: segmentsTotal, total: segmentsTotal, queued } });
-          const reviewed = await reviewTask(chapterId, abort);
+          const reviewed = await reviewTask(chapterId, abort, tee);
           await refresh(chapterId);
           if (reviewed.ok && reviewed.value.modelReviewed) continue;
           // 网络中断已经自动重试过；仍没完成时停下，这一章可以在成书进度里单独审核。
@@ -748,13 +794,31 @@ export function createAppStore(service: AppService): AppStore {
       if (writerAbort === abort) writerAbort = null;
       set({ writerJob: null });
       const done = written.length === 0 ? '一章也没有写完' : `写完了${written.map((t) => `《${t}》`).join('')}`;
-      return `写手依次写 ${chapterIds.length} 章：${done}${stop === null ? '' : `；停在这里：${stop as string}`}`;
+      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${stop === null ? '' : `；停在这里：${stop as string}`}`, complete: stop === null };
     }
 
-    async function reviewTask(chapterId: string, abort: AbortController) {
+    /** 写作工作流的一次运行有了新的样子：换进列表（新的放在最前）。 */
+    function putWorkflow(view: WorkflowView) {
+      const list = get().workflows ?? [];
+      set({ workflows: list.some((v) => v.run.id === view.run.id) ? list.map((v) => (v.run.id === view.run.id ? view : v)) : [view, ...list] });
+    }
+
+    /** 写作工作流的写章节步骤：经写手队列写（与成书进度、AI 助手的后台写作同一时间只有一批）。 */
+    async function workflowWrite(chapterIds: readonly string[], review: boolean, listen: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }> {
+      if (writerRunning || get().writerJob !== null) return { ok: false, summary: '写手正在写别的章节（成书进度或 AI 助手排的一批）：等它写完，再继续这个工作流' };
+      writerRunning = true;
+      try {
+        const done = await writeQueue(chapterIds, { review, listen });
+        return { ok: done.complete, summary: done.summary };
+      } finally {
+        writerRunning = false;
+      }
+    }
+
+    async function reviewTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o) {
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
       const t = startTask('review', `审核 · ${title}`, chapterId, abort);
-      const result = await service.reviewChapter(chapterId, t.options());
+      const result = await service.reviewChapter(chapterId, tee(t.options()));
       if (!result.ok) t.fail(describeError(result.error));
       else if (result.value.modelReviewed) t.finish('done');
       else t.fail(result.value.reason ?? '模型审核没有完成');
@@ -762,11 +826,11 @@ export function createAppStore(service: AppService): AppStore {
     }
 
     /** 生成一章的长篇记忆，登记为任务；失败时显示原因。返回是否成功。 */
-    async function memoryTask(chapterId: string, abort: AbortController): Promise<boolean> {
+    async function memoryTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o): Promise<boolean> {
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
       const t = startTask('memory', `长篇记忆 · ${title}`, chapterId, abort);
       set({ memoryBuilding: chapterId });
-      const result = await service.buildMemory(chapterId, t.options());
+      const result = await service.buildMemory(chapterId, tee(t.options()));
       if (result.ok) t.finish('done');
       else t.fail(describeError(result.error));
       const planning = get().planning === null ? null : await service.planningView();
@@ -822,6 +886,7 @@ export function createAppStore(service: AppService): AppStore {
     let assistantAbort: AbortController | null = null;
     const PAGE_LABEL: Readonly<Record<string, string>> = {
       book: '成书页',
+      workflows: '写作工作流页',
       planning: '计划页',
       settings: '设定页',
       facts: '事实页',
@@ -852,7 +917,7 @@ export function createAppStore(service: AppService): AppStore {
       set({ work: work.value });
       await loadEntities();
       await reloadFacts();
-      if (get().panel === 'planning' || get().panel === 'book') {
+      if (get().panel === 'planning' || get().panel === 'book' || get().panel === 'workflows') {
         const planning = await service.planningView();
         if (planning.ok) set({ planning: planning.value });
       }
@@ -891,6 +956,7 @@ export function createAppStore(service: AppService): AppStore {
           const page = effect.page;
           const actions = {
             book: get().openQuickBook,
+            workflows: get().openWorkflows,
             planning: get().openPlanning,
             settings: get().openSettings,
             facts: get().openFacts,
@@ -1016,6 +1082,7 @@ export function createAppStore(service: AppService): AppStore {
             })();
             return null;
           },
+          workflow: (runId, onEnd) => get().continueWorkflow(runId, onEnd),
           simulate(runId, sceneId) {
             if (get().simAdvancing) return '已经有一次推演在推进，等它推完或停下以后再推';
             void advanceSim(runId);
@@ -1026,28 +1093,33 @@ export function createAppStore(service: AppService): AppStore {
           stop(what) {
             const stopped: string[] = [];
             for (const [id, j] of assistantJobAborts) {
-              if (what === 'simulation' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
+              if (what === 'simulation' || what === 'workflow' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
               j.abort.abort();
               const title = chapter(get().assistantJobs.find((x) => x.id === id)?.chapterId ?? '')?.title ?? '';
               stopped.push(`${j.kind === 'writing' ? '写手写' : j.kind === 'review' ? '审核' : '写手修订'}《${title}》${j.kind === 'review' ? '' : '（已写入的部分保留）'}`);
             }
             const job = get().writerJob;
-            if (what !== 'review' && (writerRunning || job !== null)) {
+            // 只停作者要停的那一种：停推演或工作流时不动写手队列与依次审核。
+            if ((what === 'writing' || what === 'all') && (writerRunning || job !== null)) {
               writerAbort?.abort();
               const later = job?.queued.length ?? 0;
               stopped.push(`写手${job === null ? '' : `在《${chapter(job.chapterId)?.title ?? ''}》停下（已写完的段落保留，可以接着写）`}${later > 0 ? `，后面排着的 ${later} 章不再写` : ''}`);
             }
             const queue = get().reviewQueue;
-            if (what !== 'writing' && reviewQueueAbort !== null) {
+            if ((what === 'review' || what === 'all') && reviewQueueAbort !== null) {
               reviewQueueAbort.abort();
               stopped.push(`依次审核${queue === null ? '' : `停在《${chapter(queue.chapterId)?.title ?? ''}》，后面的 ${queue.queued.length} 章不再审`}`);
+            }
+            if ((what === 'workflow' || what === 'all') && workflowAbort !== null) {
+              workflowAbort.abort();
+              stopped.push('写作工作流停在当前这一步（继续时从这一步做起）');
             }
             if ((what === 'simulation' || what === 'all') && get().simAdvancing) {
               simAbort?.abort();
               stopped.push(`推演${simLoopRun === null ? '' : ` [${simLoopRun}]`}停在当前这一步之后（可以继续）`);
             }
             if (stopped.length > 0) return `已停下：${stopped.join('；')}。`;
-            const idle = { writing: '后台没有在写作。', review: '后台没有在依次审核。', simulation: '后台没有在推演。', all: '后台没有在进行的写作、审核或推演。' } as const;
+            const idle = { writing: '后台没有在写作。', review: '后台没有在依次审核。', simulation: '后台没有在推演。', workflow: '后台没有在推进的写作工作流。', all: '后台没有在进行的写作、审核、推演或工作流。' } as const;
             return idle[what];
           },
         },
@@ -1119,6 +1191,11 @@ export function createAppStore(service: AppService): AppStore {
       cover: undefined,
       planning: null,
       quickBook: null,
+      workflows: null,
+      workflowCatalog: service.workflowCatalog(),
+      workflowId: null,
+      workflowAdvancing: null,
+      workflowProgress: null,
       assistantOpen: true,
       assistantItems: [],
       assistantRunning: false,
@@ -1204,11 +1281,14 @@ export function createAppStore(service: AppService): AppStore {
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
         reviewQueueAbort?.abort();
+        // 写作工作流停在当前这一步（下次打开为中断，可以继续）。
+        workflowAbort?.abort();
+        await workflowLoop;
         // 推演同样停在当前这一步之后；事件都在作品库里，下次打开可以继续。
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, bookSeed: null, seedDrafting: false, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1491,6 +1571,7 @@ export function createAppStore(service: AppService): AppStore {
           skills: null,
           planning: null,
           quickBook: null,
+          workflows: null,
           sourceStats: null,
           usage: null,
           searchResult: null,
@@ -1608,6 +1689,11 @@ export function createAppStore(service: AppService): AppStore {
           out.push(t.title);
         }
         if (s.simAdvancing) out.push(`角色推演正在推进${simLoopRun === null ? '' : `（推演 [${simLoopRun}]）`}`);
+        if (s.workflowAdvancing !== null) {
+          const view = s.workflows?.find((v) => v.run.id === s.workflowAdvancing);
+          const step = view?.steps.find((x) => x.status === 'running');
+          out.push(`写作工作流“${view?.run.title ?? ''}”[${s.workflowAdvancing}]正在推进${step === undefined ? '' : `：第 ${step.idx + 1} 步“${step.label}”`}${s.workflowProgress === null ? '' : `（${s.workflowProgress}）`}`);
+        }
         return out;
       },
       async requestCloseWork() {
@@ -1639,6 +1725,129 @@ export function createAppStore(service: AppService): AppStore {
         // 不进入忙碌状态：对话框下方的小部件，读取失败时只是不显示模型名。
         const loaded = await service.loadModelServices();
         if (loaded.ok) set({ modelServices: loaded.value });
+      },
+      async openWorkflows() {
+        if (!(await get().leaveChapter())) return;
+        await run(service.listWorkflows(), (workflows) => ({
+          workflows,
+          panel: 'workflows',
+          chapterContent: null,
+          drawer: null,
+          workflowId: workflows.some((v) => v.run.id === get().workflowId) ? get().workflowId : (workflows[0]?.run.id ?? null),
+        }));
+        const planning = await service.planningView();
+        if (planning.ok) set({ planning: planning.value });
+      },
+      selectWorkflow: (runId) => set({ workflowId: runId }),
+      async quoteWorkflow(workflow, params) {
+        const quote = await service.quoteWorkflow(workflow, params);
+        if (quote.ok) return quote.value;
+        set({ message: describeError(quote.error) });
+        return null;
+      },
+      async startWorkflow(request) {
+        const started = await service.startWorkflow(request);
+        if (!started.ok) {
+          set({ message: describeError(started.error) });
+          return null;
+        }
+        putWorkflow(started.value);
+        set({ workflowId: started.value.run.id, message: null });
+        const refused = get().continueWorkflow(started.value.run.id);
+        if (refused !== null) set({ message: refused });
+        return started.value.run.id;
+      },
+      continueWorkflow(runId, onEnd) {
+        if (workflowAbort !== null) return '已经有一个写作工作流在推进：等它停下，或在“任务”里停下以后再继续';
+        if (get().work === null) return '还没有打开作品';
+        const abort = new AbortController();
+        workflowAbort = abort;
+        set({ workflowAdvancing: runId, workflowProgress: null });
+        const title = get().workflows?.find((v) => v.run.id === runId)?.run.title ?? '写作工作流';
+        workflowLoop = (async () => {
+          const t = startTask('workflow', `工作流 · ${title}`, null, abort);
+          let summary = '';
+          try {
+            const result = await service.advanceWorkflow(runId, {
+              signal: abort.signal,
+              hooks: { writeChapters: workflowWrite },
+              onStep: (view) => {
+                putWorkflow(view);
+                // 采用了草稿：作品信息、目录、设定与计划随之变化。
+                void refreshWork();
+              },
+              onProgress: (note) => set({ workflowProgress: note }),
+            });
+            if (result.ok) {
+              summary = result.value.summary;
+              putWorkflow(result.value.view);
+              t.finish(abort.signal.aborted ? 'cancelled' : 'done', { text: summary });
+            } else {
+              summary = describeError(result.error);
+              t.fail(summary);
+              set({ message: summary });
+            }
+          } catch (e) {
+            summary = e instanceof Error ? e.message : String(e);
+            t.fail(summary);
+          } finally {
+            if (workflowAbort === abort) workflowAbort = null;
+            set({ workflowAdvancing: null, workflowProgress: null });
+            await refreshWork();
+            onEnd?.(summary);
+          }
+        })();
+        return null;
+      },
+      stopWorkflow: () => workflowAbort?.abort(),
+      async editWorkflowStep(runId, idx, output) {
+        const edited = await service.editWorkflowStep(runId, idx, output);
+        if (!edited.ok) {
+          set({ message: describeError(edited.error) });
+          return false;
+        }
+        putWorkflow(edited.value);
+        return true;
+      },
+      async workflowStepAction(runId, idx, action) {
+        if (get().workflowAdvancing === runId) {
+          set({ message: '这个工作流正在推进：先停下再处理' });
+          return false;
+        }
+        set({ busy: true });
+        const result =
+          action === 'adopt'
+            ? await service.adoptWorkflowStep(runId, idx)
+            : action === 'skip'
+              ? await service.skipWorkflowStep(runId, idx)
+              : action === 'redo'
+                ? await service.redoWorkflowStep(runId, idx)
+                : action === 'keep'
+                  ? await service.keepWorkflowStep(runId, idx)
+                  : await service.withdrawWorkflowStep(runId, idx);
+        set({ busy: false });
+        if (!result.ok) {
+          set({ message: describeError(result.error) });
+          return false;
+        }
+        const view = 'view' in result.value ? result.value.view : result.value;
+        putWorkflow(view);
+        set({ message: 'note' in result.value ? result.value.note : null });
+        if (action === 'adopt' || action === 'withdraw') await refreshWork();
+        return true;
+      },
+      async abandonWorkflow(runId) {
+        if (get().workflowAdvancing === runId) {
+          set({ message: '这个工作流正在推进：先停下再放弃' });
+          return false;
+        }
+        const abandoned = await service.abandonWorkflow(runId);
+        if (!abandoned.ok) {
+          set({ message: describeError(abandoned.error) });
+          return false;
+        }
+        putWorkflow(abandoned.value);
+        return true;
       },
       async openQuickBook() {
         if (!(await get().leaveChapter())) return;
@@ -1860,7 +2069,7 @@ export function createAppStore(service: AppService): AppStore {
         if (writerRunning || get().writerJob !== null || chapterIds.length === 0) return null;
         writerRunning = true;
         try {
-          return await writeQueue(chapterIds, options);
+          return (await writeQueue(chapterIds, options)).summary;
         } finally {
           writerRunning = false;
         }

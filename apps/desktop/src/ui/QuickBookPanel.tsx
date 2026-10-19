@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import type { BookSeed } from '../app/quick-book';
+import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
@@ -23,63 +24,10 @@ function SeedEditor({ seed }: { readonly seed: BookSeed }) {
   const apply = useApp((s) => s.applyBookSeed);
   const discard = useApp((s) => s.discardBookSeed);
   const busy = useApp((s) => s.busy);
-  const patch = (p: Partial<BookSeed>) => edit({ ...seed, ...p });
-  const setCharacter = (i: number, p: Partial<BookSeed['characters'][number]>) => patch({ characters: seed.characters.map((c, j) => (j === i ? { ...c, ...p } : c)) });
   return (
     <div className="panel-form" role="form" aria-label="作品骨架">
       <p className="muted">这是根据你的想法生成的骨架，改到满意再采用。采用后写入作品信息，人物加进“设定”，关系加进“人物关系”。</p>
-      <label>
-        作品名
-        <input value={seed.title} onChange={(e) => patch({ title: e.currentTarget.value })} />
-      </label>
-      <label>
-        类型
-        <input value={seed.genre} onChange={(e) => patch({ genre: e.currentTarget.value })} />
-      </label>
-      <label>
-        简介
-        <textarea rows={2} value={seed.synopsis} onChange={(e) => patch({ synopsis: e.currentTarget.value })} />
-      </label>
-      <label>
-        大纲
-        <textarea rows={10} value={seed.outline} onChange={(e) => patch({ outline: e.currentTarget.value })} />
-      </label>
-      <fieldset>
-        <legend>主要人物</legend>
-        {seed.characters.map((c, i) => (
-          <div key={i} className="book-character">
-            <input aria-label={`人物 ${i + 1} 的名字`} value={c.name} onChange={(e) => setCharacter(i, { name: e.currentTarget.value })} />
-            <input aria-label={`人物 ${i + 1} 的说明`} value={c.description} onChange={(e) => setCharacter(i, { description: e.currentTarget.value })} />
-            <button type="button" aria-label={`删去人物 ${c.name}`} onClick={() => patch({ characters: seed.characters.filter((_, j) => j !== i) })}>
-              删去
-            </button>
-          </div>
-        ))}
-        <button type="button" onClick={() => patch({ characters: [...seed.characters, { name: '', description: '' }] })}>
-          添加人物
-        </button>
-      </fieldset>
-      {(seed.relationships ?? []).length === 0 ? null : (
-        <fieldset>
-          <legend>人物关系</legend>
-          <p className="muted">采用后建进“人物关系”，之后可以在关系图上修改。</p>
-          <ul className="relation-list" aria-label="骨架里的人物关系">
-            {(seed.relationships ?? []).map((r, i) => (
-              <li key={i} className={`book-relation rel-${r.category}`}>
-                <span className="rel-dot" aria-hidden="true" />
-                <span>
-                  {r.mutual ? `${r.from}与${r.to}：${r.label}` : `${r.from}是${r.to}的${r.label}`}
-                  {r.secret ? '（隐秘）' : ''}
-                  {r.description.trim() === '' ? null : <span className="muted"> · {r.description}</span>}
-                </span>
-                <button type="button" className="ghost" aria-label={`删去关系 ${r.from}与${r.to}`} onClick={() => patch({ relationships: (seed.relationships ?? []).filter((_, j) => j !== i) })}>
-                  删去
-                </button>
-              </li>
-            ))}
-          </ul>
-        </fieldset>
-      )}
+      <BookSeedFields seed={seed} onChange={edit} />
       <div className="form-actions">
         <button type="button" disabled={busy || seed.outline.trim() === ''} onClick={() => void apply()}>
           采用骨架

@@ -14,3 +14,5 @@ export type { RelationLike } from './relations';
 export { relationApplies, relationsForCast } from './relations';
 export { maskDialogue, MAX_HITS_PER_RULE, proseChecks, visibleLength } from './prose';
 export { normalizePunctuation } from './punctuation';
+export type { NextAction, RunState, StepChange, StepEvent, StepState } from './workflow';
+export { applyStepChanges, nextAction, runState, transition } from './workflow';

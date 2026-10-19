@@ -17,6 +17,8 @@ export type BookSeedRequest = {
   readonly genre: string;
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
+  /** 写作工作流里调用时的步骤键：中断后再做同一次时复用已完成的调用，不重复计费。 */
+  readonly stepKey?: string;
 };
 
 export type BookSeed = BookSeedData;
@@ -130,7 +132,11 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
         wordsPerChapter: request.wordsPerChapter,
       });
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: seedOutputTokens(request.chapterCount), effort: 'medium' }, BookSeedOutput, options);
+      const result = await runner.structured(
+        { prompt: prompt.value, maxOutputTokens: seedOutputTokens(request.chapterCount), effort: 'medium', ...(request.stepKey !== undefined && { stepKey: request.stepKey }) },
+        BookSeedOutput,
+        options,
+      );
       return result.ok ? ok(result.value.value) : result;
     },
 

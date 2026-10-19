@@ -272,6 +272,19 @@ export const TABLES: readonly TableSpec[] = [
     primaryKey: ['entity_id'],
     json: [],
   },
+  {
+    // 写作工作流（迁移 0019）：步骤引用运行，排在它之后。
+    name: 'workflow_run',
+    columns: ['id', 'workflow', 'title', 'params', 'mode', 'budget_usd', 'status', ...VERSIONED],
+    primaryKey: ['id'],
+    json: ['params'],
+  },
+  {
+    name: 'workflow_step',
+    columns: ['run_id', 'idx', 'key', 'status', 'output', 'edited', 'attempt', 'note', 'changes', 'usage', 'based_on', 'started_at', 'finished_at', ...VERSIONED],
+    primaryKey: ['run_id', 'idx'],
+    json: ['output', 'changes', 'usage', 'based_on'],
+  },
 ];
 
 /**

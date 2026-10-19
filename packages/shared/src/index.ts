@@ -10,3 +10,5 @@ export { textDiff } from './text-diff';
 export type { DiffPart } from './text-diff';
 export { formatSkillStages, parseSkillStages, SKILL_STAGES } from './skill-stage';
 export type { SkillStage } from './skill-stage';
+export { WORKFLOW_MODES, WORKFLOW_STEP_STATUSES } from './workflow';
+export type { WorkflowMode, WorkflowStepStatus } from './workflow';

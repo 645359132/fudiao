@@ -1986,6 +1986,60 @@ describe('快速成书的界面（B67）', () => {
 
 });
 
+describe('写作工作流的界面（B78）', () => {
+  it('开始一键成书：估算费用，每步停下；改过骨架再采用，采用计划，跳过写章节，导出须作者点', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '新作品');
+    await addTestedModel(service, deps);
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '工作流' }));
+    const page = await screen.findByRole('region', { name: '写作工作流' });
+    await user.click(within(page).getByRole('button', { name: '新的一键成书' }));
+    const form = within(page).getByRole('form', { name: '开始一键成书' });
+    await user.type(within(form).getByRole('textbox', { name: /一句话的想法/ }), '落魄书生当铺夜遇旧主');
+    const count = within(form).getByRole('spinbutton', { name: '章数' });
+    await user.clear(count);
+    await user.type(count, '2');
+    await user.click(within(form).getByRole('button', { name: '估算费用' }));
+    await waitFor(() => expect(form.textContent).toContain('预计约'));
+
+    const seed = { title: '当铺夜谈', genre: '古风悬疑', synopsis: '深夜当玉。', outline: '开端：林舟当玉。结局：林舟得知身世。', characters: [{ name: '林舟', description: '落魄书生' }] };
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const seedStep = await within(page).findByRole('region', { name: '第 2 步：大纲与人物' });
+    const skeleton = await within(seedStep).findByRole('form', { name: '作品骨架草稿' });
+    // 采用之前作品不变。
+    expect(store.getState().work?.project.outline).toBe('');
+    const title = within(skeleton).getByRole('textbox', { name: '作品名' });
+    await user.clear(title);
+    await user.type(title, '夜当');
+    await user.click(within(skeleton).getByRole('button', { name: '采用骨架' }));
+    await waitFor(() => expect(store.getState().work?.project).toMatchObject({ title: '夜当', outline: seed.outline }));
+
+    const plan = {
+      chapters: [
+        { title: '夜叩', goal: '林舟当玉', cast: ['林舟'], beats: ['叩门'], plant: [], payoff: [], treatment: '', targetWords: 2000 },
+        { title: '身世', goal: '真相揭开', cast: ['林舟'], beats: ['旧主现身'], plant: [], payoff: [], treatment: '', targetWords: 2000 },
+      ],
+      foreshadows: [],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(plan)));
+    await user.click(within(page).getByRole('button', { name: '继续' }));
+    const planStep = await within(page).findByRole('region', { name: '第 3 步：章节计划' });
+    await within(planStep).findByText('夜叩');
+    await user.click(within(planStep).getByRole('button', { name: '采用' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['夜叩', '身世']));
+
+    // 写章节这一步跳过（写手另测），导出须作者点。
+    await user.click(within(page).getByRole('button', { name: /^4写完并审核/ }));
+    await user.click(within(await within(page).findByRole('region', { name: '第 4 步：写完并审核' })).getByRole('button', { name: '跳过' }));
+    await user.click(within(page).getByRole('button', { name: '继续' }));
+    const exportStep = await within(page).findByRole('region', { name: '第 5 步：导出' });
+    await user.click(await within(exportStep).findByRole('button', { name: '导出' }));
+    await waitFor(() => expect(deps.exported.map((e) => e.name)).toEqual(['夜当.txt']));
+    await waitFor(() => expect(within(page).getByRole('region', { name: /^运行：/ }).textContent).toContain('已完成'));
+  });
+});
+
 describe('分卷的界面（B68）', () => {
   it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
     const { user, store } = start();

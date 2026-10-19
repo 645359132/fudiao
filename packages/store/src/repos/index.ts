@@ -10,6 +10,8 @@ export type { Cover, CoverImage } from './cover';
 export { getCover, getCoverThumbnail, MAX_COVER_CHARS, MAX_THUMBNAIL_CHARS, removeCover, saveCover } from './cover';
 export type { RelationCategory, RelationPosition, Relationship, RelationshipFields } from './relationship';
 export { createRelationship, deleteRelationship, listRelationPositions, listRelationships, RELATION_CATEGORIES, setRelationPosition, updateRelationship } from './relationship';
+export type { NewWorkflowRun, StepPatch, WorkflowRun, WorkflowRunWithSteps, WorkflowStepRow } from './workflow';
+export { abandonWorkflowRun, createWorkflowRun, getWorkflowRun, interruptRunningSteps, listWorkflowRuns, StepUsage, updateWorkflowStep, updateWorkflowSteps } from './workflow';
 export type { Project, ProjectPatch } from './project';
 export { createProject, DEFAULT_GOALS, getProject, updateProject, WorkGoals } from './project';
 export type { CurrentParagraph, ParagraphSavePlan, SavedParagraph, SourceKind, StructuralEdits } from './paragraph-plan';

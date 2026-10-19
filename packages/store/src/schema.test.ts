@@ -137,6 +137,19 @@ const sample: Statement[] = [
   s(
     "INSERT INTO candidate (id, chapter_id, operation, target, base_text, base_versions, generated, content, beat_sheet_id, created_at, updated_at) VALUES ('01K2', '01C1', 'narrate', '{\"from\":{\"paragraphId\":\"01G2\",\"offset\":6},\"to\":{\"paragraphId\":\"01G2\",\"offset\":6}}', '', '{\"01G2\":3}', '林舟推开了门。', '林舟推开了门。', '01B1', ?, ?)",
     ...T,
+  ),  s(
+    "INSERT INTO workflow_run (id, workflow, title, params, mode, budget_usd, created_at, updated_at) VALUES ('01W1', 'quick_book', '一键成书', '{\"idea\":\"落魄书生当铺夜遇旧主\",\"chapters\":6}', 'step', 0.5, ?, ?)",
+    ...T,
+  ),
+  s(
+    "INSERT INTO workflow_step (run_id, idx, key, status, output, edited, attempt, note, changes, usage, based_on, started_at, finished_at, created_at, updated_at) VALUES ('01W1', 0, 'model', 'done', '{\"model\":\"演示模型\"}', 0, 1, '模型可用', NULL, NULL, NULL, ?, ?, ?, ?)",
+    NOW,
+    NOW,
+    ...T,
+  ),
+  s(
+    "INSERT INTO workflow_step (run_id, idx, key, status, output, edited, attempt, note, changes, usage, based_on, created_at, updated_at) VALUES ('01W1', 1, 'seed', 'awaiting_author', '{\"title\":\"夜当\"}', 1, 1, '', '[{\"kind\":\"project\",\"id\":\"project\",\"before\":null,\"after\":null}]', '{\"input\":1200,\"output\":800,\"cost\":0.002,\"unknown\":0}', '{\"01G1\":2}', ?, ?)",
+    ...T,
   ),
 ];
 
@@ -370,6 +383,25 @@ describe('推演评价（迁移 0008）', () => {
   });
 });
 
+describe('写作工作流（迁移 0019）', () => {
+  it('模式、状态与步骤的状态只能取规定的值；参数须是对象；同一运行里步骤的键不重复；删除运行时步骤一并删除', async () => {
+    const db = await seeded();
+    const run = 'INSERT INTO workflow_run (id, workflow, title, params, mode, created_at, updated_at) VALUES';
+    await rejects(db, `${run} ('x', 'quick_book', '', '[]', 'step', ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', 'quick_book', '', '{}', 'fast', ?, ?)`, ...T);
+    await rejects(db, `${run} ('x', '', '', '{}', 'step', ?, ?)`, ...T);
+    await rejects(db, "INSERT INTO workflow_run (id, workflow, title, params, mode, budget_usd, created_at, updated_at) VALUES ('x', 'q', '', '{}', 'auto', 0, ?, ?)", ...T);
+    const step = 'INSERT INTO workflow_step (run_id, idx, key, status, created_at, updated_at) VALUES';
+    await rejects(db, `${step} ('01W1', 2, 'write', 'paused', ?, ?)`, ...T);
+    await rejects(db, `${step} ('01W1', 2, 'seed', 'pending', ?, ?)`, ...T);
+    await rejects(db, `${step} ('none', 0, 'seed', 'pending', ?, ?)`, ...T);
+    await rejects(db, "INSERT INTO workflow_step (run_id, idx, key, changes, created_at, updated_at) VALUES ('01W1', 2, 'write', '{}', ?, ?)", ...T);
+    expect((await db.transaction([s("DELETE FROM workflow_run WHERE id = '01W1'")])).ok).toBe(true);
+    const left = await db.query('SELECT count(*) AS n FROM workflow_step');
+    expect(left.ok && left.value[0]).toEqual({ n: 0 });
+  });
+});
+
 describe('表结构清单', () => {
   it('与迁移后的实际结构一致，库中没有清单以外的表', async () => {
     const db = fresh();
@@ -486,6 +518,14 @@ describe('数据层导出导入（硬性规则 20）', () => {
     const after = (await exported(target)).tables['writing_skill'] ?? [];
     expect(after.map((row) => [row['key'], row['stages']])).toEqual(skills.map((row) => [row['key'], row['key'] === 'author-preferences' ? 'planning writing' : 'writing']));
     expect(after.map(({ stages: _x, ...row }) => row)).toEqual(skills);
+  });
+
+  it('结构版本 18 导出的数据（没有写作工作流）导入后运行与步骤为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'workflow_run' && name !== 'workflow_step'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 18, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, workflow_run: [], workflow_step: [] });
   });
 
   it('结构版本 12 导出的数据（长篇记忆没有 open_threads 列）经转换后导入，章尾留下的事为空', async () => {

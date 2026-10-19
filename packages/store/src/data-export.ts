@@ -64,6 +64,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   17: (tables) => tables,
   // 0018：调用记录增加费用估计 cost_estimate（旧数据为空，费用未知的仍按未知显示）。
   18: (tables) => ({ ...tables, llm_call: (tables['llm_call'] ?? []).map((row) => ({ cost_estimate: null, ...row })) }),
+  // 0019：新增写作工作流的运行与步骤，旧版本导出的数据中没有，导入为空。
+  19: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

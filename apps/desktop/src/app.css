@@ -3263,3 +3263,133 @@ body.resizing .assistant {
 .book-relation > span:nth-child(2) {
   flex: 1;
 }
+
+/* 写作工作流（B78）：卡片、开始表单、运行的步骤列表与选中一步的结果 */
+.workflow-page {
+  max-width: 960px;
+}
+
+.workflow-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.workflow-card button {
+  align-self: flex-start;
+}
+
+.workflow-page .form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+}
+
+.workflow-page label.check {
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+}
+
+.workflow-page .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 8px;
+}
+
+.workflow-run-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-run-head h3 {
+  margin: 0;
+}
+
+.workflow-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.workflow-chip.status-awaiting_author,
+.workflow-chip.status-stale,
+.workflow-chip.state-waiting {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workflow-chip.status-failed,
+.workflow-chip.state-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.workflow-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.workflow-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 4px;
+  text-align: left;
+}
+
+.workflow-step[aria-current='step'] {
+  border-color: var(--accent);
+}
+
+.workflow-step[data-status='done'] .book-step-n {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.workflow-detail h3 {
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .workflow-body {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,5 +1,6 @@
 // 界面与 AI 助手共用的中文名称：设定种类、章节计划与推演的状态等。类型约束键名，存储层增加取值时这里漏不掉。
-import type { SkillStage } from '@fudiao/shared';
+import type { SkillStage, WorkflowStepStatus } from '@fudiao/shared';
+import type { RunState } from '@fudiao/writing';
 import type { EntityKind, ForeshadowStatus, PlanStatus, RelationCategory, SimRun } from '@fudiao/store';
 
 export const ENTITY_KIND_LABEL: Readonly<Record<EntityKind, string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
@@ -37,4 +38,27 @@ export const SIM_PAUSE_LABEL: Readonly<Record<string, string>> = {
   invalid_output: '模型的输出格式不对',
   ruling_invalid: '裁决不合规则',
   stalemate: '僵局',
+};
+
+/** 写作工作流（B78）一次运行的状态。 */
+export const WORKFLOW_STATE_LABEL: Readonly<Record<RunState, string>> = {
+  ready: '可以开始',
+  running: '进行中',
+  waiting: '等你处理',
+  failed: '出错',
+  paused: '停在中途',
+  done: '已完成',
+  abandoned: '已放弃',
+};
+
+/** 写作工作流一步的状态。 */
+export const WORKFLOW_STEP_STATUS_LABEL: Readonly<Record<WorkflowStepStatus, string>> = {
+  pending: '待做',
+  running: '进行中',
+  awaiting_author: '等你处理',
+  done: '已完成',
+  failed: '出错',
+  skipped: '已跳过',
+  interrupted: '中断',
+  stale: '可能过时',
 };

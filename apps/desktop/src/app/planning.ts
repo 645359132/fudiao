@@ -67,7 +67,8 @@ export type PlanningView = {
 /** 计划草稿；分卷字段可以省略（不分卷）。 */
 export type PlanDraft = PlanDraftData;
 
-export type PlanDraftRequest = { readonly chapterCount: number; readonly wordsPerChapter: number };
+/** stepKey：写作工作流里调用时的步骤键，中断后再做同一次时复用已完成的调用。 */
+export type PlanDraftRequest = { readonly chapterCount: number; readonly wordsPerChapter: number; readonly stepKey?: string };
 
 /** 采用草稿的结果：草稿中写了、但人物设定里找不到的名字（没有建设定，作者可以自己补）。 */
 export type AppliedDraft = { readonly view: PlanningView; readonly unmatchedCast: readonly string[] };
@@ -201,7 +202,11 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         wordsPerChapter: request.wordsPerChapter,
       });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: draftOutputTokens(request.chapterCount), effort: 'medium' }, PlanDraftOutput, options);
+      const result = await runner.structured(
+        { prompt: prompt.value, maxOutputTokens: draftOutputTokens(request.chapterCount), effort: 'medium', ...(request.stepKey !== undefined && { stepKey: request.stepKey }) },
+        PlanDraftOutput,
+        options,
+      );
       return result.ok ? ok(result.value.value) : result;
     },
 

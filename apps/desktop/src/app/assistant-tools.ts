@@ -31,7 +31,7 @@ import {
 } from '@fudiao/store';
 import type { RunEvent } from '@fudiao/engine';
 import type { AppError } from './errors';
-import { ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SIM_END_LABEL, SIM_PAUSE_LABEL, SIM_RUN_STATUS_LABEL, SKILL_STAGE_LABEL } from './labels';
+import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL, ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SIM_END_LABEL, SIM_PAUSE_LABEL, SIM_RUN_STATUS_LABEL, SKILL_STAGE_LABEL } from './labels';
 import type { BeatSheetRequest, BeatSheetView } from './narration';
 import { ACTION_LABELS, INJURY_LABELS } from './sim-describe';
 import type { SceneDraft, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
@@ -41,6 +41,8 @@ import type { SkillsView } from './writing-skills';
 import type { ReviewIssueView, ReviewOutcome, RevisionOutcome } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
+import type { WorkflowKey, WorkflowUseCases, WorkflowView } from './workflows';
+import type { ASSISTANT_WORKFLOWS } from '@fudiao/prompts';
 
 /** 助手要界面做的事：打开章节或页面；打开一章旁的候选稿或审核问题；作品换了（新建或打开了另一部）；作品内容变了。 */
 export type AssistantEffect =
@@ -71,8 +73,13 @@ export type BackgroundJobs = {
   writing(): readonly string[];
   /** 在后台连续推进这次推演，直到结束、等待作者、暂停或被停下。返回 null 表示已经开始推进，否则是原因。 */
   simulate(runId: string, sceneId: string): string | null;
-  /** 停下后台的写作、依次审核或推演；返回说明（停下了什么，或没有在进行的）。 */
-  stop(what: 'writing' | 'review' | 'simulation' | 'all'): string;
+  /** 停下后台的写作、依次审核、推演或写作工作流；返回说明（停下了什么，或没有在进行的）。 */
+  stop(what: 'writing' | 'review' | 'simulation' | 'workflow' | 'all'): string;
+  /**
+   * 在后台推进一次写作工作流（到需要作者、出错、预算用完或做完为止）；onEnd 给出停在哪里的一句话。
+   * 返回 null 表示已经开始推进，否则是原因（例如已有一个在推进）。
+   */
+  workflow(runId: string, onEnd?: (summary: string) => void): string | null;
   /**
    * 在后台做一件单章的事（写手写章、审核、写手修订），登记为任务；work 收到任务的取消信号与流式回调。
    * 排上返回 null，否则是没排上的原因。写章与修订期间这一章只读。
@@ -114,8 +121,16 @@ export type WorkSnapshot = {
   readonly volumes: readonly Volume[];
 };
 
+/** 写作工作流的用例（B78）；没有时（例如较早的试用脚本）工作流动作说明不能用。 */
+export type AssistantWorkflows = Pick<WorkflowUseCases, 'workflowCatalog' | 'quoteWorkflow' | 'startWorkflow' | 'listWorkflows' | 'workflowRun' | 'adoptWorkflowStep'>;
+
+// 提示词里可发起的工作流与应用层命令表的键须相同：两边漏了一项都会在这里报错。
+const SAME_WORKFLOWS: [WorkflowKey, (typeof ASSISTANT_WORKFLOWS)[number]] extends [(typeof ASSISTANT_WORKFLOWS)[number], WorkflowKey] ? true : never = true;
+void SAME_WORKFLOWS;
+
 /** 助手用到的现有用例（由应用服务提供）。 */
 export type AssistantHost = {
+  readonly workflows?: AssistantWorkflows;
   loadLibrary(): Promise<Result<{ readonly works: readonly { readonly id: string; readonly title: string; readonly archived: boolean; readonly missing: boolean }[] }, AppError>>;
   createWork(title: string): Promise<Result<unknown, AppError>>;
   openWork(id: string): Promise<Result<unknown, AppError>>;
@@ -1691,6 +1706,89 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       );
     },
   },
+  list_workflows: {
+    label: '列出写作工作流',
+    undo: 'read',
+    async run(_action, env) {
+      const flows = env.host.workflows;
+      if (flows === undefined) return failed('这里不能用写作工作流');
+      const catalog = flows.workflowCatalog().map((w) => `- ${w.key}：${w.title}——${w.description}（${w.steps.length} 步：${w.steps.map((s) => s.label).join(' → ')}）`);
+      const runs = await flows.listWorkflows();
+      if (!runs.ok) return failWith(runs.error);
+      const listed = runs.value.slice(0, 10).map((v) => `- ${workflowLine(v)}`);
+      return done(`可用的工作流：\n${catalog.join('\n')}\n这部作品的运行：${listed.length === 0 ? '还没有' : `\n${listed.join('\n')}`}`);
+    },
+  },
+  start_workflow: {
+    label: '开始写作工作流',
+    undo: 'kept',
+    async run(action, env) {
+      const flows = env.host.workflows;
+      const jobs = env.events.background;
+      if (flows === undefined || jobs === undefined) return failed('这里不能在后台推进写作工作流');
+      const params = { idea: action.idea ?? '', genre: action.genre ?? '', chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000 };
+      const quote = await flows.quoteWorkflow(action.workflow, params);
+      if (!quote.ok) return failWith(quote.error);
+      const started = await flows.startWorkflow({ workflow: action.workflow, params, mode: action.mode, budgetUsd: action.budgetUsd });
+      if (!started.ok) return failWith(started.error);
+      const id = started.value.run.id;
+      const refused = jobs.workflow(id, env.events.backgroundReport?.());
+      if (refused !== null) return failed(`运行 [${id}] 已建好，但没有开始推进：${refused}`);
+      env.events.onEffect?.({ kind: 'open_page', page: 'workflows' });
+      const q = quote.value;
+      const cost = q.costUsd === null ? '价格未知' : `约 $${q.costUsd.toFixed(2)}`;
+      return done(
+        `已排上：“${started.value.run.title}” [${id}] 在后台推进（${action.mode === 'step' ? '每步停下，草稿等作者在工作流页采用' : '一路做完，会覆盖内容的步骤停下等作者'}）。预计约 ${q.calls} 次调用、${Math.round((q.inputTokens + q.outputTokens) / 1000)} 千 Token，${cost}${action.budgetUsd === null ? '' : `，上限 $${action.budgetUsd}`}。进度看“正在进行的任务”，停下时停在哪里会出现在“后台刚做完的”里。`,
+      );
+    },
+  },
+  get_workflow: {
+    label: '查看写作工作流',
+    undo: 'read',
+    async run(action, env) {
+      const flows = env.host.workflows;
+      if (flows === undefined) return failed('这里不能用写作工作流');
+      const view = await findWorkflow(flows, action.run);
+      if (!view.ok) return failed(view.error);
+      const v = view.value;
+      const steps = v.steps.map((s) => `${s.idx + 1}. ${s.label}：${WORKFLOW_STEP_STATUS_LABEL[s.status]}${s.note === '' ? '' : `——${clip(s.note, 300).text}`}`);
+      const spent = v.spent.cost > 0 ? `；已用 $${v.spent.cost.toFixed(3)}${v.spent.unknown > 0 ? `（另有 ${v.spent.unknown} 次费用未知）` : ''}` : '';
+      return done(`${workflowLine(v)}${spent}\n${steps.join('\n')}`);
+    },
+  },
+  continue_workflow: {
+    label: '继续写作工作流',
+    undo: 'kept',
+    async run(action, env) {
+      const flows = env.host.workflows;
+      const jobs = env.events.background;
+      if (flows === undefined || jobs === undefined) return failed('这里不能在后台推进写作工作流');
+      const view = await findWorkflow(flows, action.run);
+      if (!view.ok) return failed(view.error);
+      const v = view.value;
+      if (v.state === 'abandoned') return failed('这次运行已经放弃');
+      if (v.state === 'done') return done('这次运行已经全部做完。');
+      if (v.state === 'running') return failed('它正在推进，不用再继续');
+      const waiting = v.steps.find((s) => s.status === 'awaiting_author');
+      let note = '';
+      if (action.adopt && waiting !== undefined) {
+        if (waiting.kind === 'manual') return failed(`第 ${waiting.idx + 1} 步“${waiting.label}”须作者自己在工作流页点（例如导出要选保存的位置）`);
+        const adopted = await flows.adoptWorkflowStep(v.run.id, waiting.idx);
+        if (!adopted.ok) return failWith(adopted.error);
+        env.changed();
+        note = `已采用第 ${waiting.idx + 1} 步“${waiting.label}”：${adopted.value.steps[waiting.idx]?.note ?? ''}。`;
+      } else if (waiting !== undefined) {
+        return failed(`停在第 ${waiting.idx + 1} 步“${waiting.label}”等作者处理（${waiting.note}）：作者同意按原样采用时用 adopt 为 true，想改的请作者在工作流页修改后采用`);
+      }
+      const blocked = v.steps.find((s) => s.status === 'failed' || s.status === 'stale');
+      if (blocked !== undefined && (waiting === undefined || blocked.idx < waiting.idx)) {
+        return failed(`第 ${blocked.idx + 1} 步“${blocked.label}”${WORKFLOW_STEP_STATUS_LABEL[blocked.status]}（${blocked.note}）：请作者在工作流页决定重做、跳过或保留`);
+      }
+      const refused = jobs.workflow(v.run.id, env.events.backgroundReport?.());
+      if (refused !== null) return failed(`${note}没有接着推进：${refused}`);
+      return done(`${note}已排上：“${v.run.title}”在后台接着推进；停下时停在哪里会出现在“后台刚做完的”里。`);
+    },
+  },
   undo_last_turn: {
     label: '撤销上一轮的改动',
     undo: 'read',
@@ -1724,6 +1822,25 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
     },
   },
 };
+
+/** 一次运行读成一行：标识、名称、状态与停在哪一步。 */
+function workflowLine(v: WorkflowView): string {
+  const at = v.steps.find((s) => s.status !== 'done' && s.status !== 'skipped');
+  const where = at === undefined ? '' : `，第 ${at.idx + 1} 步“${at.label}”${WORKFLOW_STEP_STATUS_LABEL[at.status]}${at.note === '' ? '' : `：${clip(at.note, 120).text}`}`;
+  return `[${v.run.id}] ${v.run.title}（${v.run.mode === 'step' ? '每步停下' : '一路做完'}）：${WORKFLOW_STATE_LABEL[v.state]}${where}`;
+}
+
+/** 按标识找一次运行；没给时取最近的一次。 */
+async function findWorkflow(flows: AssistantWorkflows, ref: string | null): Promise<Result<WorkflowView, string>> {
+  if (ref !== null && ref.trim() !== '') {
+    const one = await flows.workflowRun(ref.trim());
+    return one.ok ? ok(one.value) : err(one.error.code === 'not_found' ? `找不到运行“${ref}”（标识见 list_workflows）` : describeForModel(one.error));
+  }
+  const all = await flows.listWorkflows();
+  if (!all.ok) return err(describeForModel(all.error));
+  const latest = all.value[0];
+  return latest === undefined ? err('这部作品还没有运行过写作工作流；用 start_workflow 开始') : ok(latest);
+}
 
 /** 执行一个动作。 */
 export function runTool<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<Outcome> {

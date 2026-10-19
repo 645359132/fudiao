@@ -59,6 +59,10 @@ export type ChangeEntry =
 
 export const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeEntry['kind']>(['project', 'volume', 'chapter', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact', 'writer', 'text']);
 
+/** 存起来的改动读回时只认得撤销格式里的种类，别的丢弃（数据来自作品库，结构由写入方保证）。 */
+export const asChangeEntries = (value: readonly unknown[]): ChangeEntry[] =>
+  value.filter((e): e is ChangeEntry => typeof e === 'object' && e !== null && CHANGE_KINDS.has(String((e as { kind?: unknown }).kind)));
+
 /** 撤销需要的用例：助手的用例，加上删除计划、伏笔、技能与事实，恢复快照。 */
 export type UndoHost = AssistantHost;
 
