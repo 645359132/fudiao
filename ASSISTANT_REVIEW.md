@@ -15,7 +15,7 @@
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
 | 输出结构 | `packages/prompts/src/assistant.ts` | 每一步输出 `message`、`actions`（以 `tool` 区分的可辨识联合，共 59 个动作）、`done`；结构化输出管线校验 |
-| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 14）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
+| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 15）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
 | 对话循环 | `apps/desktop/src/app/assistant.ts` | 一轮最多 12 步；须确认的动作停下，排在后面的动作随它保存（`rest`），确认后接着执行；走满步数或停止时说明；之前几轮的动作结果截到 600 字，对话超过 60 条或 4 万字时从最早的一轮截断；对话按作品存进 `assistant_message` |
 | 撤销 | `apps/desktop/src/app/assistant-undo.ts` | 改结构的动作前后取现状、记下差别（对话里的 `changes` 记录），撤销时倒着改回；之后又改过的不动 |
 | 动作的命令表 | `apps/desktop/src/app/assistant-tools.ts` | 每个动作：界面名称、是否须确认、撤销方式、执行（只调用现有用例，锁定设定、快照、版本守卫、回收站照常生效）；`BackgroundJobs` 由状态层实现（写手队列、依次审核、推演、停下） |
