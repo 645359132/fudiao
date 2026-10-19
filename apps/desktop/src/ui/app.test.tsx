@@ -2105,6 +2105,14 @@ describe('后台任务不被打断', () => {
     }
     expect(store.getState().tasks.filter((t) => t.kind === 'writer').map((t) => [t.title, t.status])).toEqual([['写手 · 第一章', 'cancelled']]);
     expect(deps.llmRequests.length).toBe(before + 3);
+
+    // 这一批怎样结束的，下一句话的现状里告诉助手（M5-25），助手不会以为还在写。
+    deps.llmResponses.push(reply(JSON.stringify({ message: '停在第一章。', actions: [], done: true })));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '现在怎样了{Enter}');
+    expect(await screen.findByText('停在第一章。')).toBeTruthy();
+    const asked = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
+    expect(asked).toContain('后台刚做完的（上一句话之后）');
+    expect(asked).toContain('写手依次写 2 章：一章也没有写完；停在这里：已取消：“第一章”写了 0 / 1 段，可以接着写');
   });
 
   it('助手让写手写一章交给后台（M5-23）：这一轮先结束，写着的这一章只读，任务页有它；作者让停下时任务记为已取消', async () => {

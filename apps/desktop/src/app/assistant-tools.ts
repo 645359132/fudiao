@@ -62,8 +62,9 @@ export type AssistantSelection = { readonly chapterId: string; readonly range: E
  */
 export type BackgroundJobs = {
   /** 排上返回 null，否则是没排上的原因（例如本章正文保存不了：写手不覆盖未保存的修改）。 */
-  writeChapters(chapterIds: readonly string[], review: boolean): string | null | Promise<string | null>;
-  reviewChapters(chapterIds: readonly string[]): string | null;
+  /** onEnd：这一批结束时（写完、停下或出错）调用，给出怎样结束的一句话。 */
+  writeChapters(chapterIds: readonly string[], review: boolean, onEnd?: (summary: string) => void): string | null | Promise<string | null>;
+  reviewChapters(chapterIds: readonly string[], onEnd?: (summary: string) => void): string | null;
   /** 是否已有一次推演在后台推进（同一时间只推进一次）。 */
   simulating(): boolean;
   /** 后台写作正在写与排着的章节：助手不直接写、也不回退它们（不然轮到它时会互相当成作者改了正文而停下）。 */
@@ -98,6 +99,11 @@ export type ToolEvents = CallOptions & {
   readonly background?: BackgroundJobs;
   /** 交给用例的调用选项；没有给出时只带取消信号（在后台做的事用任务的取消信号与用量回调）。 */
   readonly callOptions?: CallOptions;
+  /**
+   * 排上一批后台写作或审核时取一个回调，这一批结束时用它给出怎样结束的一句话（AI 助手放进之后的现状）。
+   * 排上时才取：回调记住排上时打开的是哪部作品。
+   */
+  readonly backgroundReport?: () => (summary: string) => void;
 };
 
 /** 作品的现状（章节、回收站与卷），由应用服务的 reloadWork 给出。 */
@@ -638,8 +644,15 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const shown = new Set(list.map((f) => f.id));
       const suggestions = view.value.foreshadowSuggestions
         .filter((s) => shown.has(s.foreshadowId))
-        .map((s) => `- “${list.find((f) => f.id === s.foreshadowId)?.title ?? ''}”可以标为${FORESHADOW_STATUS_LABEL[s.status]}（《${titleOf.get(s.chapterId) ?? ''}》已经写完）${s.progress === null ? '' : `：${s.progress}`}`);
-      return done(`${list.map((f) => foreshadowLine(f, titleOf)).join('\n')}${suggestions.length === 0 ? '' : `\n该改状态的（作者同意后用 update_foreshadow 改）：\n${suggestions.join('\n')}`}`);
+        .map((s) => {
+          const name = list.find((f) => f.id === s.foreshadowId)?.title ?? '';
+          const at = titleOf.get(s.chapterId) ?? '';
+          return s.progress === null
+            ? `- “${name}”或许可以标为${FORESHADOW_STATUS_LABEL[s.status]}：《${at}》已经写完，但长篇记忆里没有提到它，先读正文确认真的写到了`
+            : `- “${name}”可以标为${FORESHADOW_STATUS_LABEL[s.status]}（《${at}》的长篇记忆：${s.progress}）`;
+        });
+      // 建议只按章节写没写完给出，正文里不一定真的埋下或回收了（试用中写手就漏埋过）。
+      return done(`${list.map((f) => foreshadowLine(f, titleOf)).join('\n')}${suggestions.length === 0 ? '' : `\n状态的建议（确认正文写到了、作者同意后用 update_foreshadow 改）：\n${suggestions.join('\n')}`}`);
     },
   },
   list_review_issues: {
@@ -1265,6 +1278,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const refused = await jobs.writeChapters(
         targets.map((c) => c.id),
         action.review,
+        env.events.backgroundReport?.(),
       );
       if (refused !== null) return failed(refused);
       return done(
@@ -1338,7 +1352,10 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         targets = found;
       }
       if (targets.length === 0) return failed(skipped.length > 0 ? `没有可以审核的章节：${skipped.join('；')}` : '没有已经写好的章节可以审核');
-      const refused = jobs.reviewChapters(targets.map((c) => c.id));
+      const refused = jobs.reviewChapters(
+        targets.map((c) => c.id),
+        env.events.backgroundReport?.(),
+      );
       if (refused !== null) return failed(refused);
       return done(
         `已排上：在后台依次审核 ${targets.length} 章（${titles(targets)}）。这一轮不用等，问题会列在各章旁的“审核”里，进度在“任务”页；问进度时看当前状态里的“正在进行的任务”。${skipped.length > 0 ? `没排上的：${skipped.join('；')}。` : ''}`,

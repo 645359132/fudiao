@@ -62,23 +62,28 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
   };
 
   const jobs: BackgroundJobs = {
-    writeChapters(ids, review) {
+    writeChapters(ids, review, onEnd) {
       if (writing !== null) return '写手正在写，等这一批写完或停下以后再排';
       const abort = new AbortController();
       const job = { abort, current: ids[0] ?? '', done: 0, total: ids.length, queued: [...ids] };
       writing = job;
       pending.push(
         (async () => {
+          const done: string[] = [];
+          let stop: string | null = null;
           for (const id of ids) {
             if (abort.signal.aborted) break;
             job.current = id;
             job.queued = ids.slice(ids.indexOf(id) + 1);
-            log(`  [后台] 写《${await title(id)}》`);
+            const name = await title(id);
+            log(`  [后台] 写《${name}》`);
             const written = await app.writeChapter(id, { signal: abort.signal });
             if (!written.ok || written.value.status !== 'written') {
-              log(`  [后台] 停下：${written.ok ? written.value.status : JSON.stringify(written.error)}`);
+              stop = `《${name}》${written.ok ? `${written.value.status === 'cancelled' ? '被取消' : '停下'}：${written.value.reason ?? ''}（已写 ${written.value.segmentsDone}/${written.value.segmentsTotal} 段）` : `没有写成：${describe(written.error)}`}`;
+              log(`  [后台] ${stop}`);
               break;
             }
+            done.push(`《${name}》`);
             const memory = await app.buildMemory(id, { signal: abort.signal });
             if (!memory.ok) log(`  [后台] 长篇记忆没有生成：${JSON.stringify(memory.error)}`);
             if (review) {
@@ -87,7 +92,8 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
             }
             job.done++;
           }
-          writing = null;
+          if (writing === job) writing = null;
+          onEnd?.(`写手依次写 ${ids.length} 章：${done.length === 0 ? '一章也没有写完' : `写完了${done.join('')}`}${stop === null ? '' : `；停在这里：${stop}`}`);
         })(),
       );
       return null;
@@ -106,21 +112,25 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       );
       return Promise.resolve(null);
     },
-    reviewChapters(ids) {
+    reviewChapters(ids, onEnd) {
       if (reviewing !== null) return '已经有一批在依次审核';
       const abort = new AbortController();
       const job = { abort, current: ids[0] ?? '', done: 0, total: ids.length };
       reviewing = job;
       pending.push(
         (async () => {
+          const lines: string[] = [];
           for (const id of ids) {
             if (abort.signal.aborted) break;
             job.current = id;
             const reviewed = await app.reviewChapter(id, { signal: abort.signal });
-            log(`  [后台] 审核《${await title(id)}》：${reviewed.ok ? `${reviewed.value.issues.length} 条问题` : JSON.stringify(reviewed.error)}`);
+            const line = `《${await title(id)}》${reviewed.ok ? `${reviewed.value.issues.length} 条问题${reviewed.value.modelReviewed ? '' : `（模型审核没有完成：${reviewed.value.reason ?? ''}）`}` : `没有审成：${describe(reviewed.error)}`}`;
+            log(`  [后台] 审核${line}`);
+            lines.push(line);
             job.done++;
           }
-          reviewing = null;
+          if (reviewing === job) reviewing = null;
+          onEnd?.(`依次审核 ${ids.length} 章：${lines.join('；') || '一章也没有审'}${abort.signal.aborted ? '；中途停下了' : ''}`);
         })(),
       );
       return null;

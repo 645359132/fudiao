@@ -135,4 +135,26 @@ describe('AI 助手把单章的写作、审核与修订交给后台（M5-23）',
     expect(lastResults(inline.items)?.results[0]?.detail).toMatch(/^审核完《第一章 夜叩》/);
     expect(jobs).toHaveLength(2);
   });
+
+  it('整批写作或审核结束时，怎样结束的放进之后一轮的现状（M5-25）', async () => {
+    const { deps, app } = await setup();
+    const id = value(await app.createChapter('第一章 夜叩')).chapters[0]!.id;
+    value(await app.savePlan(id, { goal: '林舟当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    const ends: ((summary: string) => void)[] = [];
+    const { background } = backgroundJobs();
+    const batch: BackgroundJobs = {
+      ...background,
+      writeChapters(_ids, _review, onEnd) {
+        if (onEnd !== undefined) ends.push(onEnd);
+        return null;
+      },
+    };
+    step(deps, { message: '已排上。', actions: [{ tool: 'write_chapters', chapters: null, review: false }], done: true });
+    value(await app.sendToAssistant('写完全书', { background: batch }));
+    expect(ends).toHaveLength(1);
+    ends[0]!('写手依次写 1 章：一章也没有写完；停在这里：第 1 段的输出被截断');
+    step(deps, { message: '第一章停下了。', actions: [], done: true });
+    value(await app.sendToAssistant('写完了吗', { background: batch }));
+    expect(lastBody(deps)).toContain('- 写手依次写 1 章：一章也没有写完；停在这里：第 1 段的输出被截断');
+  });
 });

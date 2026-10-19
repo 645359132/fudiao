@@ -336,7 +336,7 @@ export function assistantUseCases({
         results.push(...skipped(actions.slice(at), '作者停止了，这个动作没有执行。'));
         return ok(false);
       }
-      const env = toolEnv(host, project, events, () => undoLast(items, events, 'action'), () => undoPreview(items));
+      const env = toolEnv(host, project, reporting(events), () => undoLast(items, events, 'action'), () => undoPreview(items));
       const asked = await confirmationFor(action.tool, action, env);
       if (asked !== null) {
         const added: AssistantItem[] = [];
@@ -425,6 +425,17 @@ export function assistantUseCases({
       detail: `已排上：在后台${label}《${title}》。这一轮不用等，进度在“任务”页与当前状态的“正在进行的任务”；做完的结果会出现在之后的当前状态里（“后台刚做完的”），没看到结果之前不要说它已经做完。`,
     };
   }
+
+  /** 交给后台的整批写作与审核结束时把结果记下，之后一轮的现状里告诉模型；作品换了就不记。 */
+  const reporting = (events: AssistantEvents): AssistantEvents => ({
+    ...events,
+    backgroundReport: () => {
+      const key = workKey();
+      return (summary) => {
+        if (workKey() === key) finished = [...finished, summary].slice(-FINISHED_LIMIT);
+      };
+    },
+  });
 
   /** 后台动作针对的章节。 */
   async function backgroundTarget(action: BackgroundAction, env: ReturnType<typeof toolEnv>): Promise<Result<{ chapterId: string; title: string; kind: BackgroundJob['kind'] }, string>> {
@@ -654,7 +665,7 @@ export function assistantUseCases({
         const last = items.at(-1);
         if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
         const turn = turnState(items);
-        const performed = approve ? await perform(last.action, toolEnv(host, project, events, () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
+        const performed = approve ? await perform(last.action, toolEnv(host, project, reporting(events), () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
         events.onProgress?.(null);
         if (!performed.ok) return performed;
         const outcome = performed.value;

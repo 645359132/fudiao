@@ -22,6 +22,10 @@ async function main(): Promise<number> {
   const baseUrl = baseAt >= 0 ? argv[baseAt + 1] : undefined;
   const modelAt = argv.indexOf('--model');
   const wanted = modelAt >= 0 ? argv[modelAt + 1] : undefined;
+  // 服务没有给出能力、内置表里也没有的模型，最大输出按保守的 4,096 计；先思考的模型会被截断，可以在这里指定。
+  const maxOutAt = argv.indexOf('--max-output');
+  const maxOutput = maxOutAt >= 0 ? Number(argv[maxOutAt + 1]) : null;
+  if (maxOutput !== null && !(Number.isInteger(maxOutput) && maxOutput > 0)) return fail('--max-output 要给一个正整数');
   if (argv.includes('--list')) {
     for (const s of SCENARIOS) console.log(`${s.key}：${s.title}（${s.turns.length} 句）`);
     return 0;
@@ -33,7 +37,7 @@ async function main(): Promise<number> {
   const ESTIMATE = scenario.estimate;
   if (configPath === undefined && baseUrl === undefined) {
     console.error(
-      '用法：pnpm assistant:eval --config <模型配置.json> [--scenario 场景] [--out m3/runs] [--yes]\n   或：pnpm assistant:eval --base-url <OpenAI 兼容服务的地址> [--model 模型名] [--scenario 场景] [--yes]（API Key 取自环境变量 FUDIAO_EVAL_KEY；不给 --model 时列出服务的模型让你选）\n   场景：pnpm assistant:eval --list',
+      '用法：pnpm assistant:eval --config <模型配置.json> [--scenario 场景] [--out m3/runs] [--yes]\n   或：pnpm assistant:eval --base-url <OpenAI 兼容服务的地址> [--model 模型名] [--max-output Token 数] [--scenario 场景] [--yes]（API Key 取自环境变量 FUDIAO_EVAL_KEY；不给 --model 时列出服务的模型让你选）\n   场景：pnpm assistant:eval --list',
     );
     return 2;
   }
@@ -101,10 +105,13 @@ async function main(): Promise<number> {
     if (!added.ok) return fail(`模型没有添加：${JSON.stringify(added.error)}`);
     const stored = added.value.models[0];
     if (stored === undefined) return fail('模型没有添加');
-    console.log(`模型：${modelId}（上下文 ${stored.capabilities.contextWindow.toLocaleString('en-US')}，结构化输出 ${stored.capabilities.structuredOutput}）`);
+    console.log(`模型：${modelId}（上下文 ${stored.capabilities.contextWindow.toLocaleString('en-US')}，最大输出 ${(maxOutput ?? stored.capabilities.maxOutputTokens).toLocaleString('en-US')}，结构化输出 ${stored.capabilities.structuredOutput}）`);
     if (config !== null) {
       const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...config.model.capabilities, selfTestPassed: false }, prices: config.model.prices });
       if (!updated.ok) return fail(`模型的能力与价格没有保存：${JSON.stringify(updated.error)}`);
+    } else if (maxOutput !== null) {
+      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...stored.capabilities, maxOutputTokens: maxOutput }, prices: stored.prices });
+      if (!updated.ok) return fail(`模型的最大输出没有保存：${JSON.stringify(updated.error)}`);
     }
     console.log('能力自检…');
     const tested = await app.runSelfTest(stored.id);
