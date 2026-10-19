@@ -452,7 +452,7 @@ describe('AI 助手（B69）', () => {
     const background = {
       reviewChapters: () => null,
       writeChapters: () => null,
-      simulating: () => false,
+      simulating: () => false, run: () => Promise.resolve(null),
       writing: () => [],
       simulate: () => null,
       stop: (what: string) => {
@@ -470,7 +470,7 @@ describe('AI 助手（B69）', () => {
     const { deps, app } = await setup();
     const id = value(await app.createChapter('第一章 夜叩')).chapters[0]!.id;
     value(await app.savePlan(id, { goal: '林舟当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
-    const background = { reviewChapters: () => null, writeChapters: () => null, simulating: () => false, writing: () => [id], simulate: () => null, stop: () => '' };
+    const background = { reviewChapters: () => null, writeChapters: () => null, simulating: () => false, run: () => Promise.resolve(null), writing: () => [id], simulate: () => null, stop: () => '' };
     step(deps, { message: '', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: true });
     step(deps, { message: '已经排在后台了。', actions: [], done: true });
     const outcome = value(await app.sendToAssistant('写第一章', { background }));
@@ -495,7 +495,7 @@ describe('AI 助手（B69）', () => {
         written.push([ids, review]);
         return null;
       },
-      simulating: () => false,
+      simulating: () => false, run: () => Promise.resolve(null),
       writing: () => [],
       simulate: () => null,
       stop: () => '后台没有在进行的写作或审核。',
@@ -517,7 +517,7 @@ describe('AI 助手（B69）', () => {
     ]);
 
     // 后台已有一批时说明原因；指名的章节里没有正文的不排。
-    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, simulating: () => false, writing: () => [], simulate: () => null, stop: () => '' };
+    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, simulating: () => false, run: () => Promise.resolve(null), writing: () => [], simulate: () => null, stop: () => '' };
     // 动作失败时助手会再走一步说明：每次排两步。
     const failing = (actions: AssistantTurnOutput['actions']) => {
       step(deps, { message: '', actions, done: true });

@@ -1,6 +1,6 @@
 // AI 助手的真实模型试用（M5-15 之后作者要求“试一下”）：按一串作者会说的话依次和助手对话，
 // 记下每一步助手说了什么、给了哪些动作、结果如何，写成报告由人阅读判断。只经应用服务层的用例。
-// 须确认的动作按每句话的设定同意或拒绝；多章写作与审核交给这里实现的后台，和桌面端一样立即返回。
+// 须确认的动作按每句话的设定同意或拒绝；写作、审核与修订交给这里实现的后台，和桌面端一样立即返回。
 import type { AssistantItem } from '../../apps/desktop/src/app/assistant';
 import type { BackgroundJobs } from '../../apps/desktop/src/app/assistant-tools';
 import type { AppService } from '../../apps/desktop/src/app/service';
@@ -21,9 +21,9 @@ export const DEFAULT_TURNS: readonly Turn[] = [
   { say: '给这本书写个简短的大纲，然后做 3 章的章节计划，每章 1500 字左右。', expect: ['update_work', 'plan_chapters'] },
   { say: '记一条伏笔：掌柜收下的那块玉佩其实是旧案死者的遗物，第一章埋下，第三章揭开。', expect: ['add_foreshadow'] },
   { say: '让写手把第一章写出来。', expect: ['write_chapter'] },
-  { say: '审核一下第一章。', expect: ['review_chapter'] },
-  { say: '审核出来的问题里，挑最要紧的一条交给写手改掉，其余的你看着办，确实不用改的就忽略。', expect: ['list_review_issues', 'revise_review_issue'] },
-  { say: '第一章到底写了什么？玉佩那条伏笔埋下了吗？', expect: ['get_chapter_memory', 'list_foreshadows'] },
+  { say: '审核一下第一章。', expect: ['review_chapter'], waitBackground: true },
+  { say: '审核出来的问题里，挑最要紧的一条交给写手改掉，其余的你看着办，确实不用改的就忽略。', expect: ['list_review_issues', 'revise_review_issue'], waitBackground: true },
+  { say: '第一章到底写了什么？玉佩那条伏笔埋下了吗？', expect: ['get_chapter_memory', 'list_foreshadows'], waitBackground: true },
   { say: '以后对白短一点，别让人物长篇大论。另外规划时别用雪花写作法了。', expect: ['remember_preference', 'set_skill'] },
   { say: '剩下的两章交给后台写完，写完都审核一下。', expect: ['write_chapters'] },
   { say: '现在进度怎么样了？', expect: [] },
@@ -51,6 +51,8 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
   let writing: { abort: AbortController; current: string; done: number; total: number; queued: string[] } | null = null;
   let reviewing: { abort: AbortController; current: string; done: number; total: number } | null = null;
   let simulating: { abort: AbortController; runId: string } | null = null;
+  /** 单章的写作、审核与修订（M5-23）。 */
+  const single = new Set<{ readonly kind: 'writing' | 'review' | 'revise'; readonly chapterId: string; readonly title: string; readonly abort: AbortController }>();
   const pending: Promise<void>[] = [];
   const title = async (id: string) => {
     const w = await app.reloadWork();
@@ -88,7 +90,20 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       );
       return null;
     },
-    writing: () => (writing === null ? [] : [writing.current, ...writing.queued]),
+    writing: () => [...(writing === null ? [] : [writing.current, ...writing.queued]), ...[...single].flatMap((j) => (j.kind === 'review' ? [] : [j.chapterId]))],
+    run(job) {
+      const entry = { kind: job.kind, chapterId: job.chapterId, title: job.title, abort: new AbortController() };
+      single.add(entry);
+      pending.push(
+        (async () => {
+          log(`  [后台] ${job.title}`);
+          const outcome = await job.work({ signal: entry.abort.signal });
+          log(`  [后台] ${job.title}：${outcome.ok ? '做完了' : outcome.detail}`);
+          single.delete(entry);
+        })(),
+      );
+      return Promise.resolve(null);
+    },
     reviewChapters(ids) {
       if (reviewing !== null) return '已经有一批在依次审核';
       const abort = new AbortController();
@@ -129,6 +144,11 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
         writing.abort.abort();
         stopped.push(`写手停下（已写完的段落保留），后面排着的 ${writing.queued.length} 章不再写`);
       }
+      for (const j of single) {
+        if (what === 'simulation' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
+        j.abort.abort();
+        stopped.push(`${j.title}停下`);
+      }
       if ((what === 'review' || what === 'all') && reviewing !== null) {
         reviewing.abort.abort();
         stopped.push('依次审核停下');
@@ -152,6 +172,7 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       if (w !== null) out.push(`写手正在写《${await title(w.current)}》（这一批第 ${w.done + 1} / ${w.total} 章${w.queued.length > 0 ? `，后面还有 ${w.queued.length} 章` : ''}）`);
       if (r !== null) out.push(`正在依次审核：第 ${r.done + 1} / ${r.total} 章《${await title(r.current)}》`);
       if (sim !== null) out.push(`角色推演正在推进（推演 [${sim.runId}]）`);
+      for (const j of single) out.push(j.title);
       return out;
     },
     /** 等后台全部做完。 */

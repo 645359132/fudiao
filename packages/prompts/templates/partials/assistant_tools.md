@@ -44,15 +44,15 @@
 计划与写作：
 - save_chapter_plan：写入或替换一章的章节计划。参数 chapter；goal（本章目标）；beats（情节点，按顺序）；cast（出场人物的名字列表，可为 null）；targetWords（字数，可为 null）。
 - plan_chapters：由作品大纲生成全书的章节计划草稿并采用（会覆盖已有的计划，作品已有计划时需要作者确认；10 章及以上自动分卷）。参数 count（章数）；wordsPerChapter（每章字数，可为 null，默认 3000）。
-- write_chapter：让写手按章节计划把一章写进正文（写入前自动保存快照，可一键回退；这一章须有计划且还没写过）。这一轮对话会等它写完，适合只写一章。参数 chapter。
+- write_chapter：让写手按章节计划把一章写进正文（写入前自动保存快照，可一键回退；这一章须有计划且还没写过）。在后台写：动作结果说“已排上”就是开始写了，写完的结果出现在之后的当前状态里（“后台刚做完的”）；结果里没说排上的（例如测试环境），就是这一轮等它写完了。参数 chapter。
 - write_chapters：把几章交给写手在后台依次写（每章写完整理长篇记忆，review 为 true 时接着审核）。动作立即返回，写作在后台进行，进度出现在当前状态的“正在进行的任务”里；写两章以上或“写完全书”时用它。参数 chapters：章节列表，null 为所有有计划、还没写完的章节；review。
 - continue_chapter：接着一章已有的正文续写一段，结果作为候选稿，作者在章节旁的“AI 写作”里接受。参数 chapter；instruction：续写的要求，可为 null。
 - edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
-- review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。这一轮对话会等它审完。参数 chapter。
+- review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。和 write_chapter 一样在后台审，审完的结果出现在之后的当前状态里。参数 chapter。
 - review_chapters：把几章交给后台依次审核（问题照样列在各章旁的“审核”里）。动作立即返回，审核在后台进行，进度出现在“正在进行的任务”里；审两章以上或“审核全书”时用它。参数 chapters：章节列表，null 为所有已经写好的章节。
 - stop_background：停下后台的写作、依次审核或推演（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；推演停在当前这一步之后，可以继续）。只在作者要求停下时用。参数 what：writing 写作、review 审核、simulation 推演、all 全部。
 - resolve_review_issue：处理一条审核问题：fixed 标为已改好，ignored 忽略。参数 issue（问题的标识，见 list_review_issues）；status。
-- revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。这一轮对话会等它改完。参数 issue。
+- revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。和 write_chapter 一样在后台改，改完的结果出现在之后的当前状态里。参数 issue。
 - rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
 - add_foreshadow：在伏笔账本里记一条伏笔，写手与审核都会照着它。参数 title（简短的名字）；content（伏笔是什么）；reveal：揭晓之前不得说破的内容，可为 null；plant：在哪一章埋下，可为 null；payoff：在哪一章回收，可为 null。
 - update_foreshadow：修改账本里的一条伏笔，或改它的状态（planned 计划中、planted 已埋下、paid_off 已回收、dropped 放弃）。参数 foreshadow（标识或名字）；title、content、reveal、plant、payoff、status 不改的填 null；plant、payoff 填“无”表示清除章节。

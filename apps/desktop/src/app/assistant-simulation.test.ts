@@ -59,6 +59,7 @@ function backgroundFor(app: Awaited<ReturnType<typeof setup>>['app']) {
     writeChapters: () => null,
     reviewChapters: () => null,
     simulating: () => false,
+    run: () => Promise.resolve(null),
     writing: () => [],
     simulate(runId) {
       started.push(runId);

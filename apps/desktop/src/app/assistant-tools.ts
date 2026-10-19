@@ -72,6 +72,19 @@ export type BackgroundJobs = {
   simulate(runId: string, sceneId: string): string | null;
   /** 停下后台的写作、依次审核或推演；返回说明（停下了什么，或没有在进行的）。 */
   stop(what: 'writing' | 'review' | 'simulation' | 'all'): string;
+  /**
+   * 在后台做一件单章的事（写手写章、审核、写手修订），登记为任务；work 收到任务的取消信号与流式回调。
+   * 排上返回 null，否则是没排上的原因。写章与修订期间这一章只读。
+   */
+  run(job: BackgroundJob): Promise<string | null>;
+};
+
+export type BackgroundJob = {
+  readonly kind: 'writing' | 'review' | 'revise';
+  /** 任务页显示的名称。 */
+  readonly title: string;
+  readonly chapterId: string;
+  readonly work: (options: CallOptions) => Promise<Outcome>;
 };
 
 /** 动作执行时能用到的界面回调：取消信号、要界面做的事、耗时动作的进展、作者选中的文字与后台任务。 */
@@ -81,8 +94,10 @@ export type ToolEvents = CallOptions & {
   readonly onProgress?: (note: string | null) => void;
   /** 作者选中的文字；没有选中时为 null。 */
   readonly selection?: AssistantSelection | null;
-  /** 后台任务；没有时（例如测试与命令行）后台动作说明不能用。 */
+  /** 后台任务；没有时（例如测试与命令行）后台动作说明不能用，单章的写作、审核与修订就地等它做完。 */
   readonly background?: BackgroundJobs;
+  /** 交给用例的调用选项；没有给出时只带取消信号（在后台做的事用任务的取消信号与用量回调）。 */
+  readonly callOptions?: CallOptions;
 };
 
 /** 作品的现状（章节、回收站与卷），由应用服务的 reloadWork 给出。 */
@@ -317,7 +332,7 @@ export function toolEnv(
       return plans.ok && plans.value.length > 0;
     },
     changed: () => events.onEffect?.({ kind: 'changed' }),
-    call: () => (events.signal === undefined ? {} : { signal: events.signal }),
+    call: () => events.callOptions ?? (events.signal === undefined ? {} : { signal: events.signal }),
   };
 }
 

@@ -11,7 +11,7 @@ import { renderConnectionTest, SELF_TEST_EXPECTED } from '@fudiao/prompts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { createAppService } from '../app/service';
-import { createAppStore } from '../state/store';
+import { chapterLock, createAppStore } from '../state/store';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import { dramaPolicy, sceneDraftFixture } from '../testing/scenes';
@@ -2105,6 +2105,39 @@ describe('后台任务不被打断', () => {
     }
     expect(store.getState().tasks.filter((t) => t.kind === 'writer').map((t) => [t.title, t.status])).toEqual([['写手 · 第一章', 'cancelled']]);
     expect(deps.llmRequests.length).toBe(before + 3);
+  });
+
+  it('助手让写手写一章交给后台（M5-23）：这一轮先结束，写着的这一章只读，任务页有它；作者让停下时任务记为已取消', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    expect((await service.savePlan(chapterId, { goal: '目标', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+    const before = deps.llmRequests.length;
+    deps.llmResponses.push(
+      reply(JSON.stringify({ message: '', actions: [{ tool: 'write_chapter', chapter: '第一章' }], done: false })),
+      reply(JSON.stringify({ message: '写手在后台写第一章了。', actions: [], done: true })),
+      { chunks: openaiChunks('m', { text: ['林舟'], end: 'stop' }, { stopAfterText: true }), hang: true },
+    );
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '写第一章{Enter}');
+    expect(await screen.findByText('写手在后台写第一章了。')).toBeTruthy();
+    await waitFor(() => expect(deps.llmRequests.length).toBe(before + 3));
+    await waitFor(() => expect(store.getState().assistantRunning).toBe(false));
+    expect(store.getState().assistantJobs).toMatchObject([{ kind: 'writing', chapterId }]);
+    expect(chapterLock(store.getState(), chapterId)).toBe('writer');
+    expect(store.getState().backgroundWork()).toContain('写手写 · 第一章');
+
+    deps.llmResponses.push(reply(JSON.stringify({ message: '已停下。', actions: [{ tool: 'stop_background', what: 'writing' }], done: true })));
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '先停下{Enter}');
+    expect(await screen.findByText('已停下。')).toBeTruthy();
+    await waitFor(() => expect(store.getState().assistantJobs).toEqual([]));
+    expect(chapterLock(store.getState(), chapterId)).toBeNull();
+    const results = store.getState().assistantItems.filter((i) => i.role === 'results').at(-1);
+    expect(results).toMatchObject({ results: [{ tool: 'stop_background', ok: true, detail: expect.stringContaining('写手写《第一章》') }] });
+    await waitFor(() => expect(store.getState().tasks.filter((t) => t.kind === 'writer').map((t) => [t.title, t.status])).toEqual([['写手写 · 第一章', 'cancelled']]));
+    const content = await service.openChapter(chapterId);
+    expect(content.ok && content.value.saved.map((p) => p.text).join('')).toBe('');
   });
 
   it('让助手排后台写作时本章正文保存不了：不排上，如实告诉助手，写手不开始', async () => {

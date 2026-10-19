@@ -790,6 +790,8 @@ export type AssistantState = {
   readonly works: readonly string[];
   /** 正在后台进行的任务（写手、审核、推演等），一句话一项；没有时为空。 */
   readonly running?: readonly string[];
+  /** 上一句话之后在后台做完的事（单章的写作、审核与修订，M5-23），一句话一件。 */
+  readonly finished?: readonly string[];
   /** 为了放进模型的上下文，这一步缩减了对话与现状。 */
   readonly trimmed?: boolean;
   readonly work: null | {
@@ -850,6 +852,8 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
     works: [...input.state.works],
     running: [...(input.state.running ?? [])],
     hasRunning: (input.state.running ?? []).length > 0,
+    finished: [...(input.state.finished ?? [])],
+    hasFinished: (input.state.finished ?? []).length > 0,
     trimmed: input.state.trimmed === true,
     work:
       input.state.work === null

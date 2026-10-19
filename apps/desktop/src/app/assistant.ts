@@ -14,7 +14,7 @@ import {
 import { partialStringField, type LlmStreamEvent, type LlmUsage } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
-import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type Outcome, type ToolEvents } from './assistant-tools';
+import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type BackgroundJob, type BackgroundJobs, type Outcome, type ToolEvents } from './assistant-tools';
 import { captureWork, CHANGE_KINDS, chapterDigest, diffWork, textUndoSummary, undoChanges, type ChangeEntry } from './assistant-undo';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppError } from './errors';
@@ -29,8 +29,11 @@ export type AssistantItem =
   | { readonly id: string; readonly role: 'assistant'; readonly output: AssistantTurnOutput }
   | { readonly id: string; readonly role: 'results'; readonly results: readonly AssistantResult[] }
   | { readonly id: string; readonly role: 'pending'; readonly action: AssistantAction; readonly summary: string; readonly rest: readonly AssistantAction[] }
-  /** 一个动作对作品的改动（撤销用，不给模型看）；kept 为真表示动作有结果但不在撤销范围。 */
-  | { readonly id: string; readonly role: 'changes'; readonly tool: string; readonly entries: readonly ChangeEntry[]; readonly kept: boolean }
+  /**
+   * 一个动作对作品的改动（撤销用，不给模型看）；kept 为真表示动作有结果但不在撤销范围。
+   * 在后台做完的动作（M5-23）记在做完的时候，turnOf 是发起它的那一轮（作者那句话的标识），撤销时算那一轮的。
+   */
+  | { readonly id: string; readonly role: 'changes'; readonly tool: string; readonly entries: readonly ChangeEntry[]; readonly kept: boolean; readonly turnOf?: string }
   /** 撤销了某一轮：undid 是撤销掉的改动（changes 条目的标识）；作者在对话框里点的撤销要告诉模型，助手自己的撤销已在动作结果里。 */
   | {
       readonly id: string;
@@ -54,8 +57,12 @@ export function undoTarget(items: readonly AssistantItem[], skipCurrent = false)
   const undone = new Set(items.flatMap((i) => (i.role === 'undo' ? i.undid : [])));
   const starts = items.flatMap((i, at) => (i.role === 'user' ? [at] : []));
   const turns = starts.map((start, n) => items.slice(start, starts[n + 1] ?? items.length));
+  type Changes = Extract<AssistantItem, { role: 'changes' }>;
+  const open = (i: AssistantItem): i is Changes => i.role === 'changes' && i.entries.length > 0 && !undone.has(i.id);
+  const later = items.filter((i): i is Changes => open(i) && i.turnOf !== undefined);
   for (const turn of (skipCurrent ? turns.slice(0, -1) : turns).reverse()) {
-    const changes = turn.filter((i): i is Extract<AssistantItem, { role: 'changes' }> => i.role === 'changes' && i.entries.length > 0 && !undone.has(i.id));
+    const userId = turn[0]?.id;
+    const changes = [...turn.filter((i): i is Changes => open(i) && (i.turnOf === undefined || i.turnOf === userId)), ...later.filter((c) => c.turnOf === userId && !turn.includes(c))];
     if (changes.length > 0) return { changes, lastId: turn.at(-1)?.id ?? '' };
   }
   return null;
@@ -119,6 +126,12 @@ const DEFAULT_TOKENS_PER_CHAR = 1.3;
 const SCHEMA_TOKENS_PER_CHAR = 0.5;
 const CONTEXT_MARGIN = 0.05;
 const REPAIR_RESERVE = 2_000;
+/** 有后台时交给后台的单章动作（M5-23）。 */
+type BackgroundAction = Extract<AssistantAction, { tool: 'write_chapter' | 'review_chapter' | 'revise_review_issue' }>;
+const isBackgroundAction = (a: AssistantAction): a is BackgroundAction => a.tool === 'write_chapter' || a.tool === 'review_chapter' || a.tool === 'revise_review_issue';
+const BACKGROUND_LABEL: Readonly<Record<BackgroundJob['kind'], string>> = { writing: '写手写', review: '审核', revise: '写手修订' };
+/** 现状里最多列出几件后台刚做完的事。 */
+const FINISHED_LIMIT = 10;
 /** 现状中作者选中的文字最多给出的字数：太长时给开头与结尾。 */
 const SELECTION_LIMIT = 2_000;
 export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
@@ -150,6 +163,10 @@ export function assistantUseCases({
   let memory: AssistantItem[] = [];
   /** 正在进行的一轮：取消用。 */
   let running = false;
+  /** 后台做完、还没有在某一轮的现状里告诉过模型的事（一句话一件）。 */
+  let finished: string[] = [];
+  /** 这一轮的现状里已经告诉过模型的后台结果。 */
+  const told = new Set<string>();
   /** 各模型每字约多少 Token（按服务报回的用量校准）。 */
   const tokensPerChar = new Map<string, number>();
 
@@ -183,9 +200,12 @@ export function assistantUseCases({
     const works = library.ok ? library.value.works.filter((w) => !w.archived && !w.missing).map((w) => w.title) : [];
     const running = events.running?.() ?? [];
     const port = project();
-    if (port === null) return { works, running, work: null };
+    // 后台刚做完的事，这一轮每一步的现状里都带上；这一轮办完后不再列出。
+    for (const f of finished) told.add(f);
+    const recent = { finished: [...finished] };
+    if (port === null) return { works, running, ...recent, work: null };
     const work = await host.reloadWork();
-    if (!work.ok) return { works, running, work: null };
+    if (!work.ok) return { works, running, ...recent, work: null };
     const [entities, plans, lengths, relations, skills] = await Promise.all([host.listEntities(), listChapterPlans(port), chapterLengths(port), listRelationships(port), host.listWritingSkills()]);
     const preferenceSkill = skills.ok ? skills.value.skills.find((s) => s.skill.key === PREFERENCES_KEY && s.skill.enabled) : undefined;
     const planOf = new Map(plans.ok ? plans.value.map((p) => [p.chapterId, PLAN_STATUS_LABEL[p.status]]) : []);
@@ -207,6 +227,7 @@ export function assistantUseCases({
     return {
       works,
       running,
+      ...recent,
       work: {
         trashed: work.value.trashed.slice(0, 30).map((c) => ({ id: c.id, title: c.title })),
         relations: rels.map((r) => ({
@@ -345,11 +366,84 @@ export function assistantUseCases({
     return ok(false);
   }
 
+  /** 执行一个不改结构化内容的动作；写手写章记下章节与写完时的正文，写手修订前先给那一章存快照（撤销用）。 */
+  async function runText(action: AssistantAction, env: ReturnType<typeof toolEnv>): Promise<{ outcome: Outcome; entries: ChangeEntry[] }> {
+    if (action.tool === 'write_chapter') {
+      const chapter = await env.findChapter(action.chapter);
+      const outcome = await runTool(action.tool, action, env);
+      const written = outcome.ok && chapter.ok ? await chapterDigest(host, chapter.value.id) : null;
+      return { outcome, entries: chapter.ok && written?.ok === true ? [{ kind: 'writer', id: chapter.value.id, title: chapter.value.title, digest: written.value.digest }] : [] };
+    }
+    if (action.tool === 'revise_review_issue') {
+      const chapterId = await host.issueChapterId(action.issue.trim());
+      const chapter = chapterId.ok && chapterId.value !== null ? await env.findChapter(chapterId.value) : null;
+      const snapshot = chapter?.ok === true ? await host.createSnapshot(chapter.value.id) : null;
+      const outcome = await runTool(action.tool, action, env);
+      const revised = outcome.ok && chapter?.ok === true ? await chapterDigest(host, chapter.value.id) : null;
+      return {
+        outcome,
+        entries: chapter?.ok === true && snapshot?.ok === true && revised?.ok === true ? [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id, digest: revised.value.digest }] : [],
+      };
+    }
+    return { outcome: await runTool(action.tool, action, env), entries: [] };
+  }
+
+  /**
+   * 单章的写作、审核与修订交给后台（M5-23）：排上就返回，这一轮与作者的下一句话都不用等。做完时把结果放进之后的现状
+   * （“后台刚做完的”），写章与修订的改动记在发起的那一轮（turnOf），撤销那一轮时一并改回。
+   */
+  async function inBackground(action: BackgroundAction, jobs: BackgroundJobs, items: readonly AssistantItem[], events: AssistantEvents): Promise<Outcome> {
+    const port = project();
+    if (port === null) return { ok: false, detail: '还没有打开作品' };
+    const finder = toolEnv(host, project, events);
+    const target = await backgroundTarget(action, finder);
+    if (!target.ok) return { ok: false, detail: target.error };
+    const { chapterId, title, kind } = target.value;
+    const label = BACKGROUND_LABEL[kind];
+    if (kind !== 'review' && jobs.writing().includes(chapterId)) return { ok: false, detail: `《${title}》正在后台写作或修订：等它做完，或在“任务”里停下以后再说` };
+    const key = workKey();
+    const turnOf = [...items].reverse().find((i) => i.role === 'user')?.id;
+    const refused = await jobs.run({
+      kind,
+      title: `${label} · ${title}`,
+      chapterId,
+      work: async (options) => {
+        // 在后台做的事只让界面重新载入这一章，不替作者打开章节或抽屉；不带后台（这件事本身就在后台写着这一章）。
+        const quiet: ToolEvents = { ...options, callOptions: options, onEffect: (e) => (e.kind === 'chapter_changed' ? events.onEffect?.(e) : undefined) };
+        const { outcome, entries } = await runText(action, toolEnv(host, project, quiet));
+        if (workKey() === key && entries.length > 0) {
+          const item: AssistantItem = { id: deps.ids.next(), role: 'changes', tool: action.tool, entries, kept: false, ...(turnOf !== undefined && { turnOf }) };
+          await appendAssistantMessages(port, [{ id: item.id, role: item.role, payload: toStored(item) }], ctx());
+        }
+        if (workKey() === key) finished = [...finished, `${label}《${title}》${outcome.ok ? '' : '没有做完'}：${outcome.detail}`].slice(-FINISHED_LIMIT);
+        return outcome;
+      },
+    });
+    if (refused !== null) return { ok: false, detail: refused };
+    return {
+      ok: true,
+      detail: `已排上：在后台${label}《${title}》。这一轮不用等，进度在“任务”页与当前状态的“正在进行的任务”；做完的结果会出现在之后的当前状态里（“后台刚做完的”），没看到结果之前不要说它已经做完。`,
+    };
+  }
+
+  /** 后台动作针对的章节。 */
+  async function backgroundTarget(action: BackgroundAction, env: ReturnType<typeof toolEnv>): Promise<Result<{ chapterId: string; title: string; kind: BackgroundJob['kind'] }, string>> {
+    if (action.tool === 'revise_review_issue') {
+      const id = await host.issueChapterId(action.issue.trim());
+      if (!id.ok || id.value === null) return err(`找不到审核问题“${action.issue}”：先用 list_review_issues 看待处理的问题与标识`);
+      const c = await env.findChapter(id.value);
+      return c.ok ? ok({ chapterId: c.value.id, title: c.value.title, kind: 'revise' }) : c;
+    }
+    const c = await env.findChapter(action.chapter);
+    return c.ok ? ok({ chapterId: c.value.id, title: c.value.title, kind: action.tool === 'write_chapter' ? 'writing' : 'review' }) : c;
+  }
+
   /**
    * 执行一个动作并记下它对作品的改动（撤销用）：改结构的动作前后各取一份现状、记下差别；写手写章记下章节；
    * 写手修订前先给那一章存快照。作品在动作里换了（新建或打开了另一部）时不记。
    */
   async function perform(action: AssistantAction, env: ReturnType<typeof toolEnv>, items: AssistantItem[], events: AssistantEvents): Promise<Result<Outcome, AppError>> {
+    if (events.background !== undefined && isBackgroundAction(action)) return ok(await inBackground(action, events.background, items, events));
     const mode = undoModeOf(action.tool);
     const port = project();
     const key = workKey();
@@ -372,22 +466,8 @@ export function assistantUseCases({
       const moved = action.tool === 'move_chapter' ? await env.findChapter(action.chapter) : action.tool === 'move_volume' ? await env.findVolume(action.volume) : null;
       if (recorded !== null) entries = recorded;
       else if (before !== null && after !== null) entries = diffWork(before, after, new Set(moved?.ok === true ? [moved.value.id] : []));
-    } else if (mode === 'writer' && action.tool === 'write_chapter') {
-      const chapter = await env.findChapter(action.chapter);
-      outcome = await runTool(action.tool, action, env);
-      const written = outcome.ok && chapter.ok ? await chapterDigest(host, chapter.value.id) : null;
-      if (chapter.ok && written?.ok === true) entries = [{ kind: 'writer', id: chapter.value.id, title: chapter.value.title, digest: written.value.digest }];
-    } else if (mode === 'revise' && action.tool === 'revise_review_issue') {
-      const chapterId = await host.issueChapterId(action.issue.trim());
-      const chapter = chapterId.ok && chapterId.value !== null ? await env.findChapter(chapterId.value) : null;
-      const snapshot = chapter?.ok === true ? await host.createSnapshot(chapter.value.id) : null;
-      outcome = await runTool(action.tool, action, env);
-      const revised = outcome.ok && chapter?.ok === true ? await chapterDigest(host, chapter.value.id) : null;
-      if (chapter?.ok === true && snapshot?.ok === true && revised?.ok === true) {
-        entries = [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id, digest: revised.value.digest }];
-      }
     } else {
-      outcome = await runTool(action.tool, action, env);
+      ({ outcome, entries } = await runText(action, env));
     }
     const kept = mode === 'kept' && outcome.ok;
     if (entries.length > 0 || kept) {
@@ -469,6 +549,14 @@ export function assistantUseCases({
 
   /** 从当前的对话往下走，直到办完、需要作者确认、出错或走满步数。 */
   async function proceed(items: AssistantItem[], events: AssistantEvents): Promise<Result<AssistantOutcome, AppError>> {
+    told.clear();
+    const result = await steps(items, events);
+    // 告诉过模型的后台结果不再列出；这一轮出错时留到下一轮。
+    if (result.ok) finished = finished.filter((f) => !told.has(f));
+    return result;
+  }
+
+  async function steps(items: AssistantItem[], events: AssistantEvents): Promise<Result<AssistantOutcome, AppError>> {
     const turn = turnState(items);
     const limits = await runner.modelLimits();
     for (let step = 0; step < MAX_ASSISTANT_STEPS; step++) {
@@ -634,7 +722,7 @@ function toStored(item: AssistantItem): Record<string, unknown> {
     case 'pending':
       return { action: item.action, summary: item.summary, rest: item.rest };
     case 'changes':
-      return { tool: item.tool, entries: item.entries, kept: item.kept };
+      return { tool: item.tool, entries: item.entries, kept: item.kept, ...(item.turnOf !== undefined && { turnOf: item.turnOf }) };
     case 'undo':
       return { undid: item.undid, report: item.report, ok: item.ok, source: item.source, rebuilt: item.rebuilt };
   }
@@ -658,7 +746,8 @@ function fromStored(id: string, role: string, payload: Readonly<Record<string, u
   if (role === 'changes' && typeof payload['tool'] === 'string' && Array.isArray(payload['entries'])) {
     // 改动记录是这里自己写下的；种类不认识的（更新的版本写的）略去。
     const entries = payload['entries'].filter((e: unknown): e is ChangeEntry => e !== null && typeof e === 'object' && CHANGE_KINDS.has(String((e as Record<string, unknown>)['kind'])));
-    return [{ id, role, tool: payload['tool'], entries, kept: payload['kept'] === true }];
+    const turnOf = typeof payload['turnOf'] === 'string' ? { turnOf: payload['turnOf'] } : {};
+    return [{ id, role, tool: payload['tool'], entries, kept: payload['kept'] === true, ...turnOf }];
   }
   if (role === 'undo' && Array.isArray(payload['undid']) && typeof payload['report'] === 'string') {
     const undid = payload['undid'].filter((x: unknown): x is string => typeof x === 'string');

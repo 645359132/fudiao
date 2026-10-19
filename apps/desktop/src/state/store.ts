@@ -166,6 +166,8 @@ export type AppState = {
   readonly planDrafting: boolean;
   /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
   readonly writerJob: WriterJob | null;
+  /** AI 助手交给后台的单章写作、审核与修订（M5-23）；写作与修订期间那一章只读。 */
+  readonly assistantJobs: readonly { readonly id: string; readonly kind: 'writing' | 'review' | 'revise'; readonly chapterId: string }[];
   /** AI 上下文清单（B18）：最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
   readonly writingContext: ContextManifest | null;
   readonly contextSelection: EditorSelection | null;
@@ -504,6 +506,8 @@ export type ChapterLock = 'writer' | 'revise' | 'assistant';
 export function chapterLock(state: AppState, chapterId: string | null): ChapterLock | null {
   if (chapterId === null) return null;
   if (state.writerJob?.chapterId === chapterId) return 'writer';
+  const job = state.assistantJobs.find((j) => j.chapterId === chapterId && j.kind !== 'review');
+  if (job !== undefined) return job.kind === 'writing' ? 'writer' : 'revise';
   if (state.review !== null && state.review.revisingId !== null && state.review.chapterId === chapterId) return 'revise';
   if (state.assistantRunning) return 'assistant';
   return null;
@@ -651,6 +655,24 @@ export function createAppStore(service: AppService): AppStore {
     }
     let reviewAbort: AbortController | null = null;
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
+    /** AI 助手交给后台的单章任务（M5-23）的取消。 */
+    const assistantJobAborts = new Map<string, { readonly kind: 'writing' | 'review' | 'revise'; readonly abort: AbortController }>();
+    let assistantJobSeq = 0;
+
+    /** 助手的后台任务做完：重新载入受影响的计划、正文与审核问题，以及对话（撤销记录在做完时写进对话）。 */
+    async function afterAssistantJob(chapterId: string) {
+      const planning = get().planning === null ? null : await service.planningView();
+      if (planning?.ok === true) set({ planning: planning.value });
+      if (get().selectedChapterId === chapterId) {
+        const content = await service.openChapter(chapterId);
+        if (content.ok && get().selectedChapterId === chapterId) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
+      }
+      if (get().review?.chapterId === chapterId) await get().refreshReview();
+      if (!get().assistantRunning) {
+        const items = await service.assistantItems();
+        if (items.ok && !get().assistantRunning) set({ assistantItems: items.value });
+      }
+    }
 
     /** 审核一章，登记为任务。模型审核没有完成时结果中带原因（程序检查的问题已保存）。 */
     /** 写手依次写这些章（成书进度的按钮与 AI 助手的后台写作都经这里）。调用方保证同一时间只有一批。 */
@@ -944,7 +966,34 @@ export function createAppStore(service: AppService): AppStore {
           simulating: () => get().simAdvancing,
           writing() {
             const job = get().writerJob;
-            return job === null ? [] : [job.chapterId, ...job.queued];
+            const single = get().assistantJobs.flatMap((j) => (j.kind === 'review' ? [] : [j.chapterId]));
+            return [...(job === null ? [] : [job.chapterId, ...job.queued]), ...single];
+          },
+          async run(job) {
+            if (job.kind !== 'review' && (get().writerJob?.chapterId === job.chapterId || get().assistantJobs.some((j) => j.chapterId === job.chapterId && j.kind !== 'review'))) {
+              return `《${chapter(job.chapterId)?.title ?? ''}》正在后台写作或修订，等它做完或在“任务”里停下以后再说`;
+            }
+            // 写手不覆盖未保存的修改：先保存编辑器里的内容，保存不了就不排。
+            if (job.kind !== 'review' && !(await get().leaveChapter())) return '本章正文没有保存成功，没有排上：先处理好本章（复制或导出后重新打开），再排';
+            const abort = new AbortController();
+            const id = `assistant-job-${++assistantJobSeq}`;
+            const t = startTask(job.kind === 'review' ? 'review' : 'writer', job.title, job.chapterId, abort);
+            assistantJobAborts.set(id, { kind: job.kind, abort });
+            set({ assistantJobs: [...get().assistantJobs, { id, kind: job.kind, chapterId: job.chapterId }] });
+            void (async () => {
+              try {
+                const outcome = await job.work(t.options());
+                if (outcome.ok) t.finish('done', { text: outcome.detail });
+                else t.fail(outcome.detail);
+              } catch (e) {
+                t.fail(e instanceof Error ? e.message : String(e));
+              } finally {
+                assistantJobAborts.delete(id);
+                set({ assistantJobs: get().assistantJobs.filter((j) => j.id !== id) });
+                await afterAssistantJob(job.chapterId);
+              }
+            })();
+            return null;
           },
           simulate(runId, sceneId) {
             if (get().simAdvancing) return '已经有一次推演在推进，等它推完或停下以后再推';
@@ -955,6 +1004,12 @@ export function createAppStore(service: AppService): AppStore {
           },
           stop(what) {
             const stopped: string[] = [];
+            for (const [id, j] of assistantJobAborts) {
+              if (what === 'simulation' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
+              j.abort.abort();
+              const title = chapter(get().assistantJobs.find((x) => x.id === id)?.chapterId ?? '')?.title ?? '';
+              stopped.push(`${j.kind === 'writing' ? '写手写' : j.kind === 'review' ? '审核' : '写手修订'}《${title}》${j.kind === 'review' ? '' : '（已写入的部分保留）'}`);
+            }
             const job = get().writerJob;
             if (what !== 'review' && (writerRunning || job !== null)) {
               writerAbort?.abort();
@@ -1059,6 +1114,7 @@ export function createAppStore(service: AppService): AppStore {
       planUnmatched: [],
       planDrafting: false,
       writerJob: null,
+      assistantJobs: [],
       memoryBuilding: null,
       review: null,
       reviewingChapterId: null,
