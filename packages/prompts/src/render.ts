@@ -30,6 +30,7 @@ import {
   BookAuditOutput,
   BookSeedOutput,
   DirectorProposalOutput,
+  VolumeOutlineOutput,
   EvidenceJudgementOutput,
   ChapterReviewOutput,
   ChapterMemoryOutput,
@@ -68,6 +69,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   PlanDraftOutput,
   BookSeedOutput,
   BookAuditOutput,
+  VolumeOutlineOutput,
   AssistantTurnOutput,
 };
 
@@ -800,6 +802,11 @@ export type PlanDraftInput = {
   readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
+  /**
+   * 续写一卷（B82）：只给这一卷拆章，已有的章节只作为前文。summary 是本卷的梗概与主线，recent 是最近几章的梗概。
+   * 省略时按原来的写法从大纲拆全书。
+   */
+  readonly appendVolume?: { readonly title: string; readonly summary: string; readonly recent: readonly { readonly title: string; readonly summary: string }[] };
 };
 
 /** 章节计划草稿（B65）：作者侧的规划，材料是作者的大纲、设定与已有的伏笔。 */
@@ -820,6 +827,56 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     hasForeshadows: input.foreshadows.length > 0,
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,
+    appendVolume: input.appendVolume?.title ?? '',
+    appendSummary: input.appendVolume?.summary.trim() ?? '',
+    recent: (input.appendVolume?.recent ?? []).map((m) => ({ title: m.title, summary: m.summary })),
+    hasRecent: (input.appendVolume?.recent.length ?? 0) > 0,
+  });
+}
+
+export type VolumeOutlineInput = {
+  readonly title: string;
+  readonly genre: string;
+  readonly synopsis: string;
+  readonly outline: string;
+  readonly volumes: readonly { readonly title: string; readonly summary: string }[];
+  /** 人物设定的名字、说明与前文结尾的状态（取自长篇记忆，没有时为空）。 */
+  readonly characters: readonly { readonly name: string; readonly description: string; readonly state: string }[];
+  readonly relations: readonly string[];
+  readonly skills: readonly PlanningSkill[];
+  readonly writtenCount: number;
+  /** 最近几章的梗概，从远到近。 */
+  readonly memories: readonly { readonly title: string; readonly summary: string }[];
+  /** 最后一章章尾留下的事。 */
+  readonly threads: readonly string[];
+  /** 还没有回收的伏笔。 */
+  readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  readonly chapterCount: number;
+  readonly instruction: string;
+};
+
+/** 续写一卷的卷纲（B82）：作者侧的规划，材料是大纲、已有的卷、设定、最近几章的长篇记忆与没有回收的伏笔。 */
+export function renderVolumeOutline(input: VolumeOutlineInput): Result<RenderedPrompt, string> {
+  return renderTemplate('volume_outline', {
+    title: input.title,
+    genre: input.genre,
+    synopsis: input.synopsis,
+    outline: input.outline.trim() === '' ? '（还没有写大纲）' : input.outline,
+    volumes: input.volumes.map((v) => ({ title: v.title, summary: v.summary.trim() })),
+    hasVolumes: input.volumes.length > 0,
+    characters: input.characters.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim() })),
+    hasCharacters: input.characters.length > 0,
+    relations: [...input.relations],
+    hasRelations: input.relations.length > 0,
+    ...skillsData(input.skills),
+    writtenCount: input.writtenCount,
+    memories: input.memories.map((m) => ({ title: m.title, summary: m.summary })),
+    threads: [...input.threads],
+    hasThreads: input.threads.length > 0,
+    foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+    hasForeshadows: input.foreshadows.length > 0,
+    chapterCount: input.chapterCount,
+    instruction: input.instruction.trim(),
   });
 }
 

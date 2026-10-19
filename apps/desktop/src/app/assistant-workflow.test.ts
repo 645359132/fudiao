@@ -73,7 +73,7 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
 
     step(deps, {
       message: '',
-      actions: [{ tool: 'start_workflow', workflow: 'quick_book', mode: 'step', budgetUsd: null, idea: '落魄书生当铺夜遇旧主', genre: null, chapters: 6, wordsPerChapter: null, from: null, to: null, rereview: null }],
+      actions: [{ tool: 'start_workflow', workflow: 'quick_book', mode: 'step', budgetUsd: null, idea: '落魄书生当铺夜遇旧主', genre: null, chapters: 6, wordsPerChapter: null, from: null, to: null, rereview: null, instruction: null }],
       done: false,
     });
     step(deps, { message: '已经排上。', actions: [], done: true });
@@ -114,7 +114,7 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
     step(deps, {
       message: '',
       actions: [
-        { tool: 'start_workflow', workflow: 'quick_book', mode: 'auto', budgetUsd: null, idea: '一句话', genre: null, chapters: null, wordsPerChapter: null, from: null, to: null, rereview: null },
+        { tool: 'start_workflow', workflow: 'quick_book', mode: 'auto', budgetUsd: null, idea: '一句话', genre: null, chapters: null, wordsPerChapter: null, from: null, to: null, rereview: null, instruction: null },
         { tool: 'get_workflow', run: null },
       ],
       done: false,

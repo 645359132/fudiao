@@ -282,6 +282,18 @@ export const BookAuditOutput = z.object({
 });
 export type BookAuditOutput = z.infer<typeof BookAuditOutput>;
 
+/** 续写一卷的卷纲（B82）：卷名、梗概、主线、卷末转折、新人物、要回收的已有伏笔（名字）与新伏笔。 */
+export const VolumeOutlineOutput = z.object({
+  title: z.string(),
+  summary: z.string(),
+  mainline: z.array(z.string()),
+  climax: z.string(),
+  newCharacters: z.array(z.object({ name: z.string(), description: z.string() })),
+  payoffs: z.array(z.string()),
+  newForeshadows: z.array(z.object({ title: z.string(), content: z.string(), reveal: z.string() })),
+});
+export type VolumeOutlineOutput = z.infer<typeof VolumeOutlineOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

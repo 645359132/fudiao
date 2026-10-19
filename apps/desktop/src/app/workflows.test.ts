@@ -350,3 +350,72 @@ describe('全书体检（B80）', () => {
     expect(second.view.steps[0]?.note).toBe('范围内 1 章的长篇记忆都是最新的');
   });
 });
+
+describe('续写一卷（B82）', () => {
+  it('补齐记忆、卷纲（采用后新建一卷与人物、伏笔）、只给这一卷拆章、写手写这一卷；前面的章节与计划不变', async () => {
+    const { deps, app } = await setup();
+    const firstId = value(await app.createChapter('第一章 夜叩')).chapters[0]!.id;
+    const opened = value(await app.openChapter(firstId));
+    value(await app.saveChapter(firstId, opened.saved, [{ id: 'p1', text: '林舟当了玉，钱四认出了它。', source: 'handwritten' }], { splits: [], merges: [] }));
+    value(await app.savePlan(firstId, { goal: '当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 }));
+    const run = value(await app.startWorkflow({ workflow: 'next_volume', params: { chapters: 2, wordsPerChapter: 2000, instruction: '节奏快一些' }, mode: 'step', budgetUsd: null }));
+    const outline = {
+      title: '第二卷 归乡',
+      summary: '林舟带着玉佩回乡寻亲。',
+      mainline: ['离开当铺', '回到故乡', '找到旧宅'],
+      climax: '旧宅里藏着父亲的信。',
+      newCharacters: [{ name: '阿青', description: '同乡的少女' }],
+      payoffs: [],
+      newForeshadows: [{ title: '父亲的信', content: '墙缝里露出一角纸', reveal: '信里写着身世' }],
+    };
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [], openThreads: ['钱四要找人打听玉的来历'] })), reply(JSON.stringify(outline)));
+    const first = value(await app.advanceWorkflow(run.run.id));
+    expect(first.view.steps.map((s) => s.status)).toEqual(['done', 'awaiting_author', 'pending', 'pending', 'pending']);
+    const outlineBody = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
+    for (const part of ['这一卷约 2 章', '节奏快一些', '最后一章章尾留下的事', '钱四要找人打听玉的来历']) expect(outlineBody).toContain(part);
+
+    value(await app.adoptWorkflowStep(run.run.id, 1));
+    const work = value(await app.reloadWork());
+    expect(work.volumes.map((v) => [v.title, v.summary])).toEqual([['第二卷 归乡', '林舟带着玉佩回乡寻亲。\n主线：离开当铺；回到故乡；找到旧宅\n卷末：旧宅里藏着父亲的信。']]);
+    expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['阿青']);
+
+    const plan = {
+      chapters: [
+        { volume: '第二卷 归乡', title: '第二章 离开', goal: '离开当铺', cast: ['阿青'], beats: ['收拾行李'], plant: ['父亲的信'], payoff: [], treatment: '', targetWords: 2000 },
+        { volume: '第二卷 归乡', title: '第三章 旧宅', goal: '找到旧宅', cast: ['林舟'], beats: ['推开门'], plant: [], payoff: ['父亲的信'], treatment: '', targetWords: 2000 },
+      ],
+      foreshadows: [],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(plan)));
+    const second = value(await app.advanceWorkflow(run.run.id));
+    expect(second.view.steps[2]?.status).toBe('awaiting_author');
+    const planBody = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
+    for (const part of ['只给新的一卷“第二卷 归乡”拆 2 章', '新的一卷：第二卷 归乡', '最近几章的梗概', '第一章 夜叩：林舟当玉。']) expect(planBody).toContain(part);
+
+    value(await app.adoptWorkflowStep(run.run.id, 2));
+    const view = value(await app.planningView());
+    expect(view.chapters.map((c) => [c.chapter.title, c.chapter.volumeId === null ? '未分卷' : '第二卷'])).toEqual([
+      ['第一章 夜叩', '未分卷'],
+      ['第二章 离开', '第二卷'],
+      ['第三章 旧宅', '第二卷'],
+    ]);
+    expect(view.chapters[0]?.plan?.goal).toBe('当玉');
+    const letter = view.foreshadows.find((f) => f.title === '父亲的信');
+    expect(letter).toMatchObject({ plantChapterId: view.chapters[1]?.chapter.id, payoffChapterId: view.chapters[2]?.chapter.id });
+
+    const writer = fakeWriter();
+    const third = value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks }));
+    expect(writer.calls).toEqual([{ ids: [view.chapters[1]!.chapter.id, view.chapters[2]!.chapter.id], review: true }]);
+    expect(third.view.state).toBe('done');
+    // 写手是替身，新卷没有正文：本卷体检说明没有体检。
+    expect(third.view.steps[4]?.note).toBe('这一卷还没有写好的章节，没有体检');
+  });
+
+  it('还没有写好的章节时第一步说明先写几章，不调用模型', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startWorkflow({ workflow: 'next_volume', params: { chapters: 2, wordsPerChapter: 2000, instruction: '' }, mode: 'auto', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('还没有写好的章节') });
+    expect(deps.llmRequests.filter((r) => JSON.stringify(r.body).includes('volume_outline'))).toHaveLength(0);
+  });
+});

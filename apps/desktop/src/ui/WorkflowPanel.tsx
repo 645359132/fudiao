@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
-import { FORESHADOW_FINDING_LABEL, findingsOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import type { VolumeOutline } from '../app/planning';
+import { FORESHADOW_FINDING_LABEL, findingsOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
@@ -20,12 +21,18 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
   const [rereview, setRereview] = useState(false);
+  const [instruction, setInstruction] = useState('');
   const [mode, setMode] = useState<'step' | 'auto'>('step');
   const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<WorkflowQuote | null>(null);
   const bookChapters = useApp((s) => s.work?.chapters ?? []);
   const key: WorkflowKey = info.key;
-  const params = key === 'book_audit' ? { from: from === '' ? null : from, to: to === '' ? null : to, rereview } : { idea, genre, chapters, wordsPerChapter: words };
+  const params =
+    key === 'book_audit'
+      ? { from: from === '' ? null : from, to: to === '' ? null : to, rereview }
+      : key === 'next_volume'
+        ? { chapters, wordsPerChapter: words, instruction }
+        : { idea, genre, chapters, wordsPerChapter: words };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   return (
@@ -37,7 +44,25 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      {key === 'book_audit' ? (
+      {key === 'next_volume' ? (
+        <>
+          <div className="form-row">
+            <label>
+              这一卷的章数
+              <input type="number" min={1} max={100} value={chapters} onChange={(e) => setChapters(Number(e.currentTarget.value))} />
+            </label>
+            <label>
+              每章字数
+              <input type="number" min={500} step={500} value={words} onChange={(e) => setWords(Number(e.currentTarget.value))} />
+            </label>
+          </div>
+          <label>
+            给这一卷的要求（可不填）
+            <textarea rows={2} value={instruction} onChange={(e) => setInstruction(e.currentTarget.value)} />
+          </label>
+          <p className="muted">接着已经写好的章节往下写：先读最近几章的长篇记忆与没有回收的伏笔，规划下一卷，再只给这一卷拆章，前面的章节不动。</p>
+        </>
+      ) : key === 'book_audit' ? (
         <>
           <div className="form-row">
             <label>
@@ -141,7 +166,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         </label>
         <label className="check">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          {key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
+          {key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
         </label>
       </fieldset>
       <label>
@@ -186,6 +211,83 @@ function SeedStep({ view, step }: { readonly view: WorkflowView; readonly step: 
           采用骨架
         </button>
         <button type="button" disabled={busy || !changed} onClick={() => void edit(view.run.id, step.idx, draft)}>
+          保存修改
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 等作者处理的卷纲：卷名、梗概、主线、卷末转折可以改，新人物与新伏笔可以删去；采用时先存修改。 */
+function OutlineStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
+  const [draft, setDraft] = useState<VolumeOutline | null>(() => volumeOutlineOf(step));
+  const edit = useApp((s) => s.editWorkflowStep);
+  const act = useApp((s) => s.workflowStepAction);
+  const busy = useApp((s) => s.busy);
+  if (draft === null) return <p className="muted">卷纲读不出来，可以重做这一步。</p>;
+  const patch = (p: Partial<VolumeOutline>) => setDraft({ ...draft, ...p });
+  const changed = JSON.stringify(draft) !== JSON.stringify(step.output);
+  return (
+    <div className="panel-form" role="form" aria-label="卷纲草稿">
+      <label>
+        卷名
+        <input value={draft.title} onChange={(e) => patch({ title: e.currentTarget.value })} />
+      </label>
+      <label>
+        本卷梗概
+        <textarea rows={2} value={draft.summary} onChange={(e) => patch({ summary: e.currentTarget.value })} />
+      </label>
+      <label>
+        主线（一行一段）
+        <textarea rows={4} value={draft.mainline.join('\n')} onChange={(e) => patch({ mainline: e.currentTarget.value.split('\n') })} />
+      </label>
+      <label>
+        卷末转折
+        <textarea rows={2} value={draft.climax} onChange={(e) => patch({ climax: e.currentTarget.value })} />
+      </label>
+      {draft.newCharacters.length === 0 ? null : (
+        <fieldset>
+          <legend>新人物</legend>
+          {draft.newCharacters.map((c, i) => (
+            <div key={i} className="book-character">
+              <span>
+                {c.name}
+                <span className="muted">：{c.description}</span>
+              </span>
+              <button type="button" className="ghost" aria-label={`删去新人物 ${c.name}`} onClick={() => patch({ newCharacters: draft.newCharacters.filter((_, j) => j !== i) })}>
+                删去
+              </button>
+            </div>
+          ))}
+        </fieldset>
+      )}
+      {draft.newForeshadows.length === 0 ? null : (
+        <fieldset>
+          <legend>新伏笔</legend>
+          {draft.newForeshadows.map((f, i) => (
+            <div key={i} className="book-character">
+              <span>
+                {f.title}
+                <span className="muted">：{f.content}（揭晓：{f.reveal}）</span>
+              </span>
+              <button type="button" className="ghost" aria-label={`删去新伏笔 ${f.title}`} onClick={() => patch({ newForeshadows: draft.newForeshadows.filter((_, j) => j !== i) })}>
+                删去
+              </button>
+            </div>
+          ))}
+        </fieldset>
+      )}
+      {draft.payoffs.length === 0 ? null : <p className="muted">本卷要回收的伏笔：{draft.payoffs.join('、')}</p>}
+      <div className="form-actions">
+        <button
+          type="button"
+          className="primary"
+          disabled={busy || draft.title.trim() === ''}
+          onClick={() => void (async () => (changed && !(await edit(view.run.id, step.idx, { ...draft, mainline: draft.mainline.map((m) => m.trim()).filter((m) => m !== '') })) ? false : act(view.run.id, step.idx, 'adopt')))()}
+        >
+          采用卷纲
+        </button>
+        <button type="button" disabled={busy || !changed} onClick={() => void edit(view.run.id, step.idx, { ...draft, mainline: draft.mainline.map((m) => m.trim()).filter((m) => m !== '') })}>
           保存修改
         </button>
       </div>
@@ -286,6 +388,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {waiting && step.key === 'seed' && !closed ? <SeedStep key={`${step.version}`} view={view} step={step} /> : null}
       {plan === null ? null : <PlanDraftChapters draft={plan} withBeats={false} />}
       {step.key === 'suspects' ? <SuspectsStep view={view} step={step} /> : null}
+      {waiting && step.key === 'outline' && !closed ? <OutlineStep key={`${step.version}`} view={view} step={step} /> : null}
       {findings === null || findings.length === 0 ? null : (
         <ul aria-label="伏笔核对">
           {findings.map((f) => (
@@ -309,7 +412,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </>
       ) : null}
       <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' ? button('采用', 'adopt', true) : null}
+        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}

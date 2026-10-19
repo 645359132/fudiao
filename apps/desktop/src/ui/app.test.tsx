@@ -2085,6 +2085,50 @@ describe('全书体检的界面（B80）', () => {
   });
 });
 
+describe('续写一卷的界面（B82）', () => {
+  it('卷纲可以改卷名、删去新人物，采用后新建一卷；本卷计划采用后章节建在新卷里', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '旧作');
+    await addChapter(user, '第一章');
+    const id = store.getState().work!.chapters[0]!.id;
+    const opened = await service.openChapter(id);
+    if (!opened.ok) throw new Error('打不开');
+    await service.saveChapter(id, opened.value.saved, [{ id: 'p1', text: '林舟当了玉。', source: 'handwritten' }], { splits: [], merges: [] });
+    await addTestedModel(service, deps);
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的续写一卷' }));
+    const form = within(page).getByRole('form', { name: '开始续写一卷' });
+    const count = within(form).getByRole('spinbutton', { name: '这一卷的章数' });
+    await user.clear(count);
+    await user.type(count, '1');
+    deps.llmResponses.push(
+      reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [], openThreads: [] })),
+      reply(JSON.stringify({ title: '第二卷 归乡', summary: '回乡。', mainline: ['离开'], climax: '找到信。', newCharacters: [{ name: '阿青', description: '同乡' }], payoffs: [], newForeshadows: [] })),
+    );
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const outline = await within(page).findByRole('form', { name: '卷纲草稿' }, { timeout: 10_000 });
+    const title = within(outline).getByRole('textbox', { name: '卷名' });
+    await user.clear(title);
+    await user.type(title, '第二卷 还乡');
+    await user.click(within(outline).getByRole('button', { name: '删去新人物 阿青' }));
+    await user.click(within(outline).getByRole('button', { name: '采用卷纲' }));
+    await waitFor(() => expect(store.getState().work?.volumes.map((v) => v.title)).toEqual(['第二卷 还乡']));
+    expect(store.getState().entities).toEqual([]);
+
+    deps.llmResponses.push(
+      reply(JSON.stringify({ chapters: [{ volume: '第二卷 还乡', title: '第二章 离开', goal: '离开', cast: [], beats: ['收拾'], plant: [], payoff: [], treatment: '', targetWords: 2000 }], foreshadows: [] })),
+    );
+    await user.click(within(page).getByRole('button', { name: '继续' }));
+    const planStep = await within(page).findByRole('region', { name: '第 3 步：本卷章节计划' });
+    await within(planStep).findByText('第二章 离开');
+    await user.click(within(planStep).getByRole('button', { name: '采用' }));
+    // 前面没有分卷的章节排在“未分卷”里，新卷在它后面。
+    await waitFor(() => expect(tocOutline().slice(-3)).toEqual(['第一章', '卷：第二卷 还乡', '第二章 离开']));
+  });
+});
+
 describe('分卷的界面（B68）', () => {
   it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
     const { user, store } = start();

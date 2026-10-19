@@ -3,7 +3,7 @@
 // 这里是命令表（每个工作流一项：参数、预计用量与步骤）与执行器；步骤的状态转换在 packages/writing（纯函数）。
 // 步骤只调用现有的用例，所以锁定设定、写入前快照、版本守卫与段落来源照常生效。
 import { costOf, type CallOptions, type LlmUsage, type Prices } from '@fudiao/llm';
-import { BookSeedOutput, PlanDraftOutput } from '@fudiao/prompts';
+import { BookSeedOutput, PlanDraftOutput, VolumeOutlineOutput } from '@fudiao/prompts';
 import { err, ok, type Result, type WorkflowMode } from '@fudiao/shared';
 import {
   abandonWorkflowRun,
@@ -24,7 +24,7 @@ import { nextAction, runState, transition, type RunState, type StepEvent } from 
 export { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from './labels';
 import { z } from 'zod';
 import { describeError, type AppError } from './errors';
-import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView } from './planning';
+import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOutline, VolumeOutlineRequest } from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
 import { chapterLengths, type Chapter } from '@fudiao/store';
@@ -32,7 +32,7 @@ import type { AppDeps } from './ports';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book', 'book_audit'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
 
 /**
@@ -225,11 +225,19 @@ export const BookAuditParams = z.object({
 });
 export type BookAuditParams = z.infer<typeof BookAuditParams>;
 
-type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams };
+/** 续写一卷的参数：章数、每章字数与给这一卷的要求。 */
+export const NextVolumeParams = z.object({
+  chapters: z.number().int().min(1).max(100),
+  wordsPerChapter: z.number().int().min(500).max(20_000),
+  instruction: z.string(),
+});
+export type NextVolumeParams = z.infer<typeof NextVolumeParams>;
+
+type ParamsOf = { readonly quick_book: QuickBookParams; readonly book_audit: BookAuditParams; readonly next_volume: NextVolumeParams };
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
 export type WorkflowHost = {
-  reloadWork(): Promise<Result<{ readonly project: { readonly outline: string } }, AppError>>;
+  reloadWork(): Promise<Result<{ readonly project: { readonly outline: string }; readonly volumes: readonly { readonly id: string; readonly title: string }[] }, AppError>>;
   exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   quickBookStatus(): Promise<Result<QuickBookStatus, AppError>>;
   draftBookSeed(request: BookSeedRequest, options?: CallOptions): Promise<Result<BookSeed, AppError>>;
@@ -242,6 +250,10 @@ export type WorkflowHost = {
   draftSuspects(chapterIds: readonly string[], stepKey: string, options?: CallOptions): Promise<Result<{ readonly suspects: AuditSuspect[]; readonly dropped: number }, AppError>>;
   locateSuspect(suspect: AuditSuspect, stepKey: string, options?: CallOptions): Promise<Result<LocatedSuspect, AppError>>;
   saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[]): Promise<Result<number, AppError>>;
+  draftVolumeOutline(request: VolumeOutlineRequest, options?: CallOptions): Promise<Result<VolumeOutline, AppError>>;
+  applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: { readonly id: string; readonly title: string }; readonly characters: number; readonly foreshadows: number }, AppError>>;
+  draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
+  applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
 };
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
@@ -555,6 +567,170 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
   };
 }
 
+/** 续写一卷前补齐长篇记忆的章数：卷纲只读最近几章。 */
+const NEXT_VOLUME_MEMORY_CHAPTERS = 10;
+/** 本卷体检时带上前一卷的最后几章，查卷与卷之间接不接得上。 */
+const VOLUME_BOUNDARY_CHAPTERS = 2;
+
+const VolumeAuditReport = z.object({ suspects: z.number().int(), issues: z.number().int(), failed: z.number().int() });
+
+function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
+  /** 采用卷纲时新建的那一卷：按卷名找最后一个同名的（作者之后改了卷名时找不到，说明原因）。 */
+  const volumeOf = async (outline: unknown): Promise<Result<{ readonly id: string; readonly title: string }, AppError>> => {
+    const parsed = VolumeOutlineOutput.safeParse(outline);
+    if (!parsed.success) return err(invalid('先采用卷纲：这一卷还没有建'));
+    const work = await host.reloadWork();
+    if (!work.ok) return work;
+    const found = work.value.volumes.filter((v) => v.title === parsed.data.title.trim()).at(-1);
+    return found === undefined ? err(invalid(`找不到卷“${parsed.data.title.trim()}”（可能改了卷名或删掉了）：重做“卷纲”这一步，或把卷名改回来`)) : ok(found);
+  };
+  const volumeChapters = async (volumeId: string) => {
+    const view = await host.planningView();
+    return view.ok ? ok(view.value.chapters.filter((c) => c.chapter.volumeId === volumeId)) : view;
+  };
+  return {
+    title: '续写一卷',
+    description: '补齐最近几章的长篇记忆 → 下一卷的卷纲 → 本卷章节计划 → 写手写完并审核 → 本卷体检',
+    params: NextVolumeParams,
+    runTitle: (p) => `续写一卷：${p.chapters} 章`,
+    estimate(p) {
+      const words = p.chapters * p.wordsPerChapter;
+      const segments = p.chapters * Math.max(1, Math.ceil(p.wordsPerChapter / 1_500));
+      const suspects = Math.min(10, Math.ceil(p.chapters / 2));
+      return {
+        calls: 2 + segments + p.chapters * 2 + 1 + suspects,
+        inputTokens: Math.round(8_000 + 8_000 + segments * 9_000 + p.chapters * 2 * 6_000 + words * TOKENS_PER_CHAR * 2 + 4_000 + suspects * (p.wordsPerChapter * TOKENS_PER_CHAR * 2 + 2_000)),
+        outputTokens: Math.round(3_000 + p.chapters * 800 + words * TOKENS_PER_CHAR + p.chapters * (1_500 + 3_000) + 3_000 + suspects * 1_500),
+      };
+    },
+    steps: [
+      step<NextVolumeParams, { readonly chapters: readonly string[] }>({
+        key: 'memory',
+        label: '补齐长篇记忆',
+        kind: 'act',
+        output: z.object({ chapters: z.array(z.string()) }),
+        async run({ options, onProgress }) {
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const recent = view.value.chapters.filter((c) => c.hasText).slice(-NEXT_VOLUME_MEMORY_CHAPTERS);
+          if (recent.length === 0) return err(invalid('还没有写好的章节：续写一卷要接着前文写，先写几章，或用一键成书从头开始'));
+          const todo = recent.filter((c) => c.memory === null || c.memory.status === 'stale');
+          const done: string[] = [];
+          for (const [i, c] of todo.entries()) {
+            onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
+            const built = await host.buildMemory(c.chapter.id, options);
+            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}`));
+            done.push(c.chapter.id);
+          }
+          return ok({ output: { chapters: done }, note: done.length === 0 ? '最近几章的长篇记忆都是最新的' : `整理了 ${done.length} 章的长篇记忆` });
+        },
+      }),
+      step<NextVolumeParams, VolumeOutline>({
+        key: 'outline',
+        label: '卷纲',
+        kind: 'draft',
+        output: VolumeOutlineOutput,
+        async run({ params, stepKey, options, onProgress }) {
+          onProgress('正在规划下一卷：卷名、主线、新人物与伏笔');
+          const outline = await host.draftVolumeOutline({ chapterCount: params.chapters, instruction: params.instruction, stepKey }, options);
+          if (!outline.ok) return outline;
+          return ok({ output: outline.value, note: `${outline.value.title}：${outline.value.summary}` });
+        },
+        async adopt(_ctx, outline) {
+          const applied = await host.applyVolumeOutline(outline);
+          if (!applied.ok) return applied;
+          return ok(`已新建“${applied.value.volume.title}”，新人物 ${applied.value.characters} 个，新伏笔 ${applied.value.foreshadows} 条`);
+        },
+      }),
+      step<NextVolumeParams, PlanDraft>({
+        key: 'plan',
+        label: '本卷章节计划',
+        kind: 'draft',
+        output: PlanDraftOutput,
+        async run({ params, stepKey, options, onProgress, output }) {
+          const volume = await volumeOf(output('outline'));
+          if (!volume.ok) return volume;
+          onProgress(`正在给“${volume.value.title}”拆 ${params.chapters} 章的章节计划`);
+          const draft = await host.draftVolumePlans({ volumeId: volume.value.id, chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey }, options);
+          if (!draft.ok) return draft;
+          return ok({ output: draft.value, note: `“${volume.value.title}”${draft.value.chapters.length} 章的计划` });
+        },
+        async adopt({ output }, draft) {
+          const volume = await volumeOf(output('outline'));
+          if (!volume.ok) return volume;
+          const applied = await host.applyVolumeDraft(draft, volume.value.id);
+          if (!applied.ok) return applied;
+          const missing = applied.value.unmatchedCast;
+          return ok(`已在“${volume.value.title}”里新建 ${draft.chapters.length} 章并写上计划${missing.length > 0 ? `；这些人物还没有人物卡片：${missing.join('、')}` : ''}`);
+        },
+      }),
+      step<NextVolumeParams, { readonly chapters: readonly string[]; readonly summary: string }>({
+        key: 'write',
+        label: '写完并审核',
+        kind: 'act',
+        output: z.object({ chapters: z.array(z.string()), summary: z.string() }),
+        async run({ hooks, options, onProgress, output }) {
+          const volume = await volumeOf(output('outline'));
+          if (!volume.ok) return volume;
+          const chapters = await volumeChapters(volume.value.id);
+          if (!chapters.ok) return chapters;
+          const todo = chapters.value.filter((c) => c.plan !== null && (c.plan.status === 'todo' || c.plan.status === 'writing'));
+          if (todo.length === 0) return ok({ output: { chapters: [], summary: '' }, note: '这一卷没有待写的章节' });
+          onProgress(`写手依次写“${volume.value.title}”的 ${todo.length} 章，每章写完整理长篇记忆并审核`);
+          const ids = todo.map((c) => c.chapter.id);
+          const written = await hooks.writeChapters(ids, true, options);
+          if (!written.ok) return err(invalid(written.summary));
+          return ok({ output: { chapters: ids, summary: written.summary }, note: written.summary });
+        },
+      }),
+      step<NextVolumeParams, z.infer<typeof VolumeAuditReport>>({
+        key: 'audit',
+        label: '本卷体检',
+        kind: 'act',
+        output: VolumeAuditReport,
+        async run({ stepKey, options, onProgress, output }) {
+          const volume = await volumeOf(output('outline'));
+          if (!volume.ok) return volume;
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const written = view.value.chapters.filter((c) => c.hasText);
+          const first = written.findIndex((c) => c.chapter.volumeId === volume.value.id);
+          if (first < 0) return ok({ output: { suspects: 0, issues: 0, failed: 0 }, note: '这一卷还没有写好的章节，没有体检' });
+          const inVolume = written.filter((c) => c.chapter.volumeId === volume.value.id).map((c) => c.chapter.id);
+          const range = [...written.slice(Math.max(0, first - VOLUME_BOUNDARY_CHAPTERS), first).map((c) => c.chapter.id), ...inVolume];
+          onProgress(`由长篇记忆找“${volume.value.title}”里跨章的疑点`);
+          const drafted = await host.draftSuspects(range, `${stepKey}:suspects`, options);
+          if (!drafted.ok) return drafted;
+          const suspects = drafted.value.suspects.filter((s) => inVolume.includes(s.laterId));
+          const located: LocatedSuspect[] = [];
+          let failed = 0;
+          for (const [i, s] of suspects.entries()) {
+            onProgress(`核对第 ${i + 1} / ${suspects.length} 处疑点`);
+            const one = await host.locateSuspect(s, `${stepKey}:${i}`, options);
+            if (!one.ok) {
+              if (options.signal?.aborted === true) return one;
+              failed += 1;
+              continue;
+            }
+            located.push(one.value);
+          }
+          const saved = await host.saveContinuityIssues(inVolume, located);
+          if (!saved.ok) return saved;
+          return ok({
+            output: { suspects: suspects.length, issues: saved.value, failed },
+            note: suspects.length === 0 ? '本卷没有找到跨章的疑点' : `核对了 ${suspects.length - failed} 处疑点，定位出 ${saved.value} 个问题（列在各章的“审核”里）${failed > 0 ? `；${failed} 处没有核对成，重做这一步时再试` : ''}`,
+          });
+        },
+      }),
+    ],
+  };
+}
+
+export const volumeOutlineOf = (step: Pick<WorkflowStepView, 'output'>): VolumeOutline | null => {
+  const parsed = VolumeOutlineOutput.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+
 /** 体检各步的结果（界面显示用）；不是这一步或不合格时为 null。 */
 export const suspectsOf = (step: Pick<WorkflowStepView, 'output'>) => {
   const parsed = SuspectDraft.safeParse(step.output);
@@ -636,8 +812,9 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
   const WORKFLOWS: { readonly [K in WorkflowKey]: WorkflowDef<ParamsOf[K]> } = {
     quick_book: quickBook(host, project),
     book_audit: bookAudit(host),
+    next_volume: nextVolume(host),
   };
-  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit) };
+  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume) };
   const isKey = (key: string): key is WorkflowKey => (WORKFLOW_KEYS as readonly string[]).includes(key);
   const defOf = (key: string): AnyWorkflow | null => (isKey(key) ? ERASED[key] : null);
 

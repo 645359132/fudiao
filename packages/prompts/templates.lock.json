@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "18",
-    "sha256": "ec10776ebf40635144a040da720fc1d6e57699a4a03e97c712de5640f39503c9"
+    "version": "19",
+    "sha256": "ac35830dbc91424339f719e9c514d58dda6c3dc78d9735b26a61547d18a3ad13"
   },
   "baseline_scene": {
     "version": "2",
@@ -60,8 +60,8 @@
     "sha256": "e869374a4697f13251dca189d5104ddcc5a31c4858bd8067f234523256a908d7"
   },
   "plan_draft": {
-    "version": "3",
-    "sha256": "d226fa845e32c59e6900fc136f9b04cab263a7158fe5ee9a3e125d47c3c12504"
+    "version": "4",
+    "sha256": "5bc370b8245d18b545b7de0808698950f24a5d3bc4cdf0a873fdfb04b85bc377"
   },
   "run_synopsis": {
     "version": "3",
@@ -90,6 +90,10 @@
   "structured_repair": {
     "version": "1",
     "sha256": "83079ca28312d62183b4c7339bc5088c1ebb1edb2e40c81714574fef13d9a723"
+  },
+  "volume_outline": {
+    "version": "1",
+    "sha256": "b12f5becd8ad66d7e877b843e5a9c1425c93c8624ec600ef464b6292b0fdc8ac"
   },
   "writer_chapter": {
     "version": "7",
