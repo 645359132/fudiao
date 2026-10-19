@@ -6,6 +6,7 @@ import { memoryEventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine } from './engine';
+import { reviewItems } from './run-view';
 import type { RunEvent } from './events';
 import { contextOf, fakeModel, testConfig, waitProposal, type Policy } from './testing/fake-model';
 
@@ -195,6 +196,28 @@ describe('导演提议', () => {
     expect(heard.length).toBeGreaterThan(0);
     // 导演事件在回合之间注入，角色在下一回合的视图中看到。
     expect(ofType(events.slice(committedAt), 'RoundStarted')[0]?.round).toBe(2);
+  });
+
+  it('自动采用的导演事件与自动接受的裁决一样列为待复核：导演写的现象经感知进了角色的认知', async () => {
+    const s = setup({
+      character_action: (ctx) => (ctx.subject === 'antagonist' && ctx.round === 1 ? waitProposal({ kind: 'attack', target: 'protagonist', item: 'crossbow' }) : waitProposal()),
+      director: (ctx) => (ctx.round === 1 ? tilesNoise : { propose: false, rationale: '', event: null }),
+    });
+    await start(s, scene, director());
+    const events = await s.events();
+    expect(reviewItems(events, 1, 3)).toEqual([
+      { id: '1:r0', kind: 'ruling', round: 1, rationale: '按常理推断', detail: '' },
+      { id: 'director:1', kind: 'director', round: 1, rationale: '局面停滞，需要外部压力', detail: '一盏风灯从梁上坠落 哐当一声巨响' },
+    ]);
+    // 只列所选回合范围内的。
+    expect(reviewItems(events, 2, 3)).toEqual([]);
+
+    // 作者在交互模式里亲自采用的导演提议不需要再复核。
+    const i = setup({ director: (ctx) => (ctx.round === 1 ? tilesNoise : { propose: false, rationale: '', event: null }) });
+    await start(i, scene, director({}, { mode: 'interactive' }));
+    await i.engine.decideDirector('run1', scene, true);
+    await i.engine.run('run1', scene);
+    expect(reviewItems(await i.events(), 1, 3)).toEqual([]);
   });
 
   it('达到提议次数上限后不再询问', async () => {

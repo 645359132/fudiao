@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine, replayRun } from './engine';
 import type { RunEvent } from './events';
-import { fakeModel, testConfig, waitProposal, type Policy } from './testing/fake-model';
+import { fakeModel, testConfig, waitProposal, type FakeOptions, type Policy } from './testing/fake-model';
 
 const AT = '2026-10-07T00:00:00.000Z';
 
-function setup(policy: Policy = {}, options: Parameters<typeof fakeModel>[1] = {}, budget?: BudgetGuard) {
+function setup(policy: Policy = {}, options: FakeOptions = {}, budget?: BudgetGuard) {
   const store = memoryEventStore();
   const calls = memoryCallLog();
   const model = fakeModel(policy, options);
@@ -203,7 +203,7 @@ describe('轮流对话', () => {
     },
   };
 
-  it('听者在第 2 句后打断：后半句不进入任何认知，打断者获得发言权，回应不再额外调用', async () => {
+  it('听者在第 2 句后打断：后半句不进入任何认知，打断者获得发言权，看过后半句的回应作废重问', async () => {
     const s = setup(policy);
     await runToStop(s, scene, config);
     const events = await s.events();
@@ -214,9 +214,35 @@ describe('轮流对话', () => {
 
     const rounds = ofType(events, 'RoundEnded');
     expect(rounds.map((r) => r.nextFloor)).toEqual([A, P, A]);
-    // 对手在第 1 回合的回应就是第 2 回合的行动：第 2 回合没有对手的提案调用。
-    expect(s.model.calls.filter((c) => c.round === 2 && c.subject === 'antagonist' && c.step === 'propose')).toEqual([]);
-    expect(ofType(events, 'ProposalSubmitted').filter((e) => e.source === 'prepared').map((e) => e.round)).toEqual([2, 3]);
+    // 对手在第 1 回合的回应看到了没说出口的第 3 句，作废；第 2 回合按他实际听到的重新询问。
+    const asked = s.model.calls.filter((c) => c.round === 2 && c.subject === 'antagonist' && c.step === 'propose');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.text).not.toContain('是给你们东家的');
+    const used = ofType(events, 'ProposalSubmitted').filter((e) => e.forRound === e.round);
+    expect(used.filter((e) => e.source === 'prepared').map((e) => e.round)).toEqual([3]);
+    // 没有被打断的回应（第 2 回合主角听完了对手的话）照常留到下一次发言，不再额外调用。
+    expect(s.model.calls.filter((c) => c.round === 3 && c.step === 'propose')).toEqual([]);
+  });
+
+  it('听不到或听不清台词的人不拿到台词，轮到他发言时按自己的认知再问', async () => {
+    // 对手在南门：耳语隔一个区域听不到，正常音量只听得到有人在说话。
+    const apart = warehouse();
+    for (const volume of ['whisper', 'normal'] as const) {
+      const s = setup({
+        character_action: (ctx) =>
+          ctx.subject === 'protagonist'
+            ? waitProposal({ kind: 'speak', utterance: { sentences: ['金丝雀暗号在第三根梁上。'], volume } })
+            : waitProposal({ interruptAfter: 0 }),
+      });
+      await runToStop(s, apart, testConfig({ protocol: 'turn_based', maxRounds: 2, firstSpeaker: P }));
+      const antagonist = s.model.calls.filter((c) => c.subject === 'antagonist');
+      // 对手只在自己持有发言权时被问行动；他看见主角在说话，认知更新照常进行，但请求里没有台词。
+      const actions = antagonist.filter((c) => c.request.task === 'character_action');
+      expect(actions.map((c) => `${c.round}:${c.step}`), volume).toEqual(['2:propose']);
+      for (const c of antagonist) expect(c.text, volume).not.toContain('金丝雀暗号');
+      // 听不到的人的回应不参与打断。
+      expect(ofType(await s.events(), 'ProposalsComplete')[0]?.interruption, volume).toBeNull();
+    }
   });
 
   it('离场的人不再接收发言，在场少于两人时结束', async () => {

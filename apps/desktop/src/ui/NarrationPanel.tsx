@@ -56,6 +56,9 @@ function SheetEditor({ view }: { readonly view: BeatSheetView }) {
           ))}
         </tbody>
       </table>
+      {beats.some((b) => b.treatment === 'omit') && (
+        <p className="muted">标为省略的见闻不写进正文；省略的最早那一回合之后，{view.povName}的内心片段也不再作为素材，免得经心理描写带出来。</p>
+      )}
       <label>
         文风（可不填）
         <input

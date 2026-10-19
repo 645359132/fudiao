@@ -428,7 +428,8 @@ type RoundRecord = { readonly round: number; readonly occurrences: readonly Occu
 const sceneNames = (scene: Scene) => namesOf([...scene.zones, ...scene.actors, ...scene.items, ...scene.mechanisms]);
 
 /** 作者侧提示词中的“发生的事”：按全局记录完整呈现，不经过任何角色的感知。 */
-function occurrenceAsObservation(o: Occurrence): Observation {
+function occurrenceAsObservation(o: Occurrence, options: { readonly hideWhispers?: boolean } = {}): Observation {
+  const hidden = options.hideWhispers === true && o.speech?.volume === 'whisper';
   return {
     occurrence: o.id,
     channel: 'participant',
@@ -440,18 +441,18 @@ function occurrenceAsObservation(o: Occurrence): Observation {
     ...(o.mechanism && { mechanism: o.mechanism }),
     ...(o.attempted && { attempted: o.attempted }),
     ...(o.kind === 'failed_attempt' && { failed: true as const }),
-    ...(o.speech && { speech: { clarity: 'full', sentences: o.speech.sentences, volume: o.speech.volume } }),
+    ...(o.speech && { speech: hidden ? { clarity: 'muffled' } : { clarity: 'full', sentences: o.speech.sentences, volume: o.speech.volume } }),
     ...(o.description && { description: o.description }),
   };
 }
 
-function globalRounds(rounds: readonly RoundRecord[], names: ReturnType<typeof namesOf>) {
+function globalRounds(rounds: readonly RoundRecord[], names: ReturnType<typeof namesOf>, options: { readonly hideWhispers?: boolean } = {}) {
   return rounds.map((r) => ({
     round: r.round,
     // 观察与发现机关不改变局面，不列出。
     events: r.occurrences
       .filter((o) => o.kind !== 'observe' && o.kind !== 'discovered')
-      .map((o) => observationModel(occurrenceAsObservation(o), names, null)),
+      .map((o) => observationModel(occurrenceAsObservation(o, options), names, null)),
   }));
 }
 
@@ -511,7 +512,8 @@ export function renderDirectorProposal(input: DirectorInput): Result<RenderedPro
         zone: loc?.kind === 'zone' ? names(loc.zone) : null,
       };
     }),
-    rounds: globalRounds(input.recent, names),
+    // 导演的外部事件会按感知分发给角色：耳语的内容导演用不上，不给，免得经事件描述传给听不到的人。
+    rounds: globalRounds(input.recent, names, { hideWhispers: true }),
   });
 }
 

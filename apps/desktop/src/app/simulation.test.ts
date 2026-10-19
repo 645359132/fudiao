@@ -692,6 +692,57 @@ describe('推演写成正文：节拍表与候选稿（B29、B45、B62）', () =
     expect(value(await app.openChapter(chapter.id)).saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
   });
 
+  it('标为省略的见闻之后的内心片段不再作为素材，免得经心理描写带进正文', async () => {
+    const thinking: Policy = {
+      ...policy,
+      character_action: (ctx) => ({ ...policy.character_action!(ctx), innerThought: `第${ctx.round}回合的心思` }),
+    };
+    const { app, runId, fake } = await finished(thinking);
+    const sheet = value(await app.draftBeatSheet(runId, { pov: 'protagonist', fromRound: 1, toRound: 3, notes: '' }));
+    const second = sheet.beats.find((b) => b.round === 2);
+    expect(second).toBeDefined();
+    const beats = sheet.beats.map(({ ref, note, withhold }) => ({ ref, note, withhold, treatment: ref === second!.ref ? ('omit' as const) : ('brief' as const) }));
+    value(await app.saveBeatSheet(sheet.sheet.id, { beats, style: '' }));
+    const chapter = value(await app.createChapter('第一章')).chapters[0]!;
+    value(await app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    const text = fake.calls.at(-1)!.text;
+    // 第 2 回合的心思形成于第 2 回合的见闻之前，可以用；之后的不用。
+    expect(text).toContain('第1回合的心思');
+    expect(text).toContain('第2回合的心思');
+    expect(text).not.toContain('第3回合的心思');
+  });
+
+  it('轮流对话中被打断而作废的回应，它的内心片段不进入节拍表与正文', async () => {
+    const ctx = await ready({
+      character_action: (c) => {
+        if (c.subject === 'protagonist') {
+          return waitProposal({ kind: 'speak', utterance: { sentences: ['我不是来找麻烦的。', '这封信是给你们东家的。'], volume: 'normal' } });
+        }
+        return c.step === 'respond'
+          ? waitProposal({ kind: 'speak', interruptAfter: 1, innerThought: '作废的心思', utterance: { sentences: ['住口。'], volume: 'shout' } })
+          : waitProposal({ innerThought: '重新想过' });
+      },
+    });
+    const spec = warehouseSpec();
+    spec.actors[1]!.zone = 'center';
+    const scene = value(
+      await ctx.app.saveSimScene(null, { ...sceneFields(spec as Record<string, unknown>), protocol: 'turn_based', maxRounds: 2, firstSpeaker: 'protagonist' }),
+    );
+    const runId = value(await ctx.app.startSimRun(scene.id, { mode: 'auto', seed: 7 })).run.id;
+    value(await ctx.app.continueSimRun(runId));
+    expect(ctx.fake.calls.some((c) => c.text.includes('这封信是给你们东家的') && c.step === 'respond')).toBe(true);
+
+    const sheet = value(await ctx.app.draftBeatSheet(runId, { pov: 'antagonist', fromRound: 1, toRound: 2, notes: '' }));
+    const chapter = value(await ctx.app.createChapter('第一章')).chapters[0]!;
+    value(await ctx.app.narrateBeatSheet(sheet.sheet.id, chapter.id));
+    const [beatSheet, narration] = ctx.fake.calls.slice(-2);
+    expect(beatSheet?.request.task).toBe('beat_sheet');
+    for (const c of [beatSheet!, narration!]) {
+      expect(c.text).not.toContain('作废的心思');
+      expect(c.text).toContain('重新想过');
+    }
+  });
+
   it('章末已有正文时另起一段；这一章有未保存的修改、节拍全部省略时不写', async () => {
     const { app, runId, deps } = await finished();
     const sheet = value(await app.draftBeatSheet(runId, { pov: 'antagonist', fromRound: 1, toRound: 1, notes: '' }));
