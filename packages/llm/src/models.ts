@@ -1,4 +1,4 @@
-// 模型列表与能力自检（需求 B56、B57，施工文档第五章）。
+// 模型列表与能力自检（需求 B56、B57，施工文档第六章）。
 import { err, ok, type Result } from '@fudiao/shared';
 import type { z } from 'zod';
 import { structured, type StructuredError } from './structured';
@@ -37,7 +37,7 @@ export type SelfTestReport = {
   readonly reason: string | null;
 };
 
-/** 连续通过的次数达到这个数才算自检通过（施工文档第五章）。 */
+/** 连续通过的次数达到这个数才算自检通过（施工文档第六章）。 */
 export const SELF_TEST_RUNS = 3;
 
 /**

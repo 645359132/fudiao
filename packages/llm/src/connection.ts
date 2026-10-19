@@ -1,4 +1,4 @@
-// 连接测试（需求 B15、施工文档第五章）：向选定的模型发一个最小请求，给出延迟、实际提供服务的模型与错误原因。
+// 连接测试（需求 B15、施工文档第六章）：向选定的模型发一个最小请求，给出延迟、实际提供服务的模型与错误原因。
 // 提示词来自 packages/prompts 的 connection_test 模板（硬性规则 12），由调用方渲染后传入。
 import type { LlmError, LlmMessage, LlmPort, ModelProfile, PromptBlock } from './types';
 

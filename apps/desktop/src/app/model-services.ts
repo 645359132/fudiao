@@ -1,4 +1,4 @@
-// 模型服务的用例（需求 B15、施工文档第五章）：服务、凭据、模型、默认模型与连接测试。
+// 模型服务的用例（需求 B15、施工文档第六章）：服务、凭据、模型、默认模型与连接测试。
 // 服务配置在应用设置库 app.sqlite；API Key 经凭据端口写入系统凭据管理器，界面与这里都拿不到明文。
 import {
   COMPATIBLE_DIALECT,
@@ -43,7 +43,7 @@ import type { AppError } from './errors';
 import { THINKING_ALLOWANCE } from './thinking';
 import type { AppDeps, CredentialStatus, KeyHeader } from './ports';
 
-/** 新添加的模型按保守能力处理（施工文档第五章）。存储与模型端口的能力描述须一致，否则这里通不过类型检查。 */
+/** 新添加的模型按保守能力处理（施工文档第六章）。存储与模型端口的能力描述须一致，否则这里通不过类型检查。 */
 const NEW_MODEL_CAPABILITIES: StoredCapabilities = CONSERVATIVE_CAPABILITIES satisfies ModelCapabilities;
 
 /** 各服务种类的默认地址与认证方式。地址是服务的接口地址，不是模型名称（硬性规则 13 只禁止写死模型）。 */
@@ -77,7 +77,7 @@ export function buildAdapter(provider: Provider, fetch: typeof globalThis.fetch)
 }
 
 /**
- * 新模型的能力与价格：保守能力 ← 内置能力表 ← 服务返回的信息（施工文档第五章的来源顺序）；价格只来自内置表。
+ * 新模型的能力与价格：保守能力 ← 内置能力表 ← 服务返回的信息（施工文档第六章的来源顺序）；价格只来自内置表。
  * 自检结果总是从“未通过”开始。
  */
 export function resolveModel(

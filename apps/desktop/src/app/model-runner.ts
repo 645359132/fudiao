@@ -1,4 +1,4 @@
-// 桌面端的模型调用（需求 B19、B35、B36，施工文档第五章）：用默认模型、经凭据代理发出，每次调用写入作品库的 llm_call；
+// 桌面端的模型调用（需求 B19、B35、B36，施工文档第六章）：用默认模型、经凭据代理发出，每次调用写入作品库的 llm_call；
 // 结构化输出经管线校验与有限次修正，仍失败时暂停并说明原因；必须输出结构化数据的任务只能用通过能力自检的模型。
 import {
   structured,
@@ -178,7 +178,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     const db = project();
     const log = db === null ? unsavedLog : projectCallLog(db, () => deps.ids.next());
     if (db !== null && unsaved.length > 0) await flushUnsaved(log);
-    // 网络中断或服务端错误时整次重新请求（withRetry 在调用记录外面：每次尝试各记一条，失败的不计入完成记录）。
+    // 网络中断时整次重新请求（withRetry 在调用记录外面：每次尝试各记一条，失败的不计入完成记录）。
     const port = withRetry(withCallLog(adapter, log, () => deps.clock.now()), deps.retry);
     return ok({ port, llmRequest, name, contextWindow: model.capabilities.contextWindow });
   }

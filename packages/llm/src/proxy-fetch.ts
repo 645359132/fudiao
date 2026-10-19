@@ -1,4 +1,4 @@
-// 经 Rust 凭据代理发出的 fetch（施工文档第五章“分工”）：桌面端把它交给适配器的 SDK，SDK 中的 API Key 填占位值，
+// 经 Rust 凭据代理发出的 fetch（施工文档第六章“分工”）：桌面端把它交给适配器的 SDK，SDK 中的 API Key 填占位值，
 // 由代理换成真实凭据，WebView 拿不到明文。传输层（Tauri 的 invoke 与 Channel）由桌面端实现，这里把事件流还原成标准的 Response。
 
 /** 与 Rust 的 `NetRequest` 对应。 */
@@ -27,7 +27,7 @@ export interface NetTransport {
 /** SDK 要求提供 API Key 才会发请求；真实凭据由代理注入，这个占位值不会离开本机。 */
 export const PLACEHOLDER_API_KEY = 'fudiao-credential-proxy';
 
-/** 代理拒绝了请求。按 fetch 的约定是 TypeError（网络错误），适配器据此归为 network。 */
+/** 代理拒绝了请求。按 fetch 的约定是 TypeError，适配器认出这个类型后归为 bad_request（不重试）。 */
 export class ProxyRejectedError extends TypeError {
   constructor(readonly detail: unknown) {
     super(`凭据代理拒绝了请求：${describe(detail)}`);

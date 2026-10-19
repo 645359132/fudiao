@@ -1,4 +1,4 @@
-// 应用设置库 app.sqlite 的仓储（施工文档第五章“服务、模型与任务分配的配置”，需求 B15）。
+// 应用设置库 app.sqlite 的仓储（施工文档第六章“服务、模型与任务分配的配置”，需求 B15）。
 // 只保存服务、模型与任务分配；API Key 在系统凭据管理器中，以服务标识为条目名。
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';

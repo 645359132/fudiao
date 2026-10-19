@@ -17,7 +17,7 @@ export type OpenAIAdapterOptions = {
 };
 
 /**
- * OpenAI 官方接口的 Responses API 适配器（施工文档第五章：OpenAI 新模型的推理控制与结构化输出以 Responses API 为主）。
+ * OpenAI 官方接口的 Responses API 适配器（施工文档第六章：OpenAI 新模型的推理控制与结构化输出以 Responses API 为主）。
  * 不在服务端保存对话（store: false）；结构化输出按能力描述：native 发送 json_schema，json_object 只要求合法 JSON。
  */
 export class OpenAIAdapter implements LlmPort, ModelLister {
