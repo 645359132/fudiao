@@ -137,6 +137,11 @@ export type LlmError = {
   readonly message: string;
   readonly status?: number;
   readonly retryAfterMs?: number;
+  /**
+   * 服务已经开始回复后才出的错（读到一半连接断了、流没有结束标记就关闭）：这次可能已经计费。
+   * usage 是出错前已知的部分用量（Anthropic 在流开始时给出输入用量，OpenAI 写法在结束时才给），不知道时为 null。
+   */
+  readonly partial?: { readonly usage: LlmUsage | null };
 };
 
 export type LlmStreamEvent =

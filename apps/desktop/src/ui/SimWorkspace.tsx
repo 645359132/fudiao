@@ -263,6 +263,7 @@ function RunView({ detail }: { readonly detail: SimRunDetail }) {
           {' '}
           已用 {usd(view.spentUsd)}
           {budget === null ? '' : ` / 预算 ${usd(budget)}`}
+          {view.estimatedCalls > 0 ? `（其中 ${view.estimatedCalls} 次调用服务没有返回用量，按估计的上限计入）` : ''}
           {view.unknownCostCalls > 0 ? `（另有 ${view.unknownCostCalls} 次调用费用未知）` : ''}
         </span>
       </p>

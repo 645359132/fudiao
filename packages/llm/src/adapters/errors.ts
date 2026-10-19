@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { ProxyRejectedError } from '../proxy-fetch';
-import type { LlmError, LlmErrorCode } from '../types';
+import type { LlmError, LlmErrorCode, LlmUsage } from '../types';
 
 type StatusError = { readonly status: number; readonly headers: Headers | undefined; readonly message: string };
 
@@ -25,6 +25,14 @@ export function mapSdkError(error: unknown): LlmError {
   // 读流式回复时连接断了（fetch 的网络错误是 TypeError，例如凭据代理的“error decoding response body”）：网络故障，可以重试。
   if (error instanceof TypeError) return { code: 'network', message: error.message };
   return { code: 'unknown', message: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * 流没有结束标记就关闭了（连接被中途断开而没报错，例如代理或服务端提前关闭）：已收到的只是半截，
+ * 不能当作完成。按网络故障处理，可以整次重试；服务已经开始回复，可能已计费。
+ */
+export function streamError(usage: LlmUsage | null): LlmError {
+  return { code: 'network', message: '回复没有结束就断开了', partial: { usage } };
 }
 
 function fromStatus(error: StatusError): LlmError {

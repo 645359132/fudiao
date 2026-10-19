@@ -119,7 +119,11 @@ type Summary = {
   readonly pause: string | null;
   readonly rounds: number;
   readonly calls: number;
+  /** 已知的费用；没有用量、可能已计费的调用按请求的最坏估计另计在 estimatedUsd（estimatedCalls 次）。 */
   readonly costUsd: number;
+  readonly estimatedUsd: number;
+  readonly estimatedCalls: number;
+  /** 可能已计费、连估计也没有（价格未配置）的调用数。 */
   readonly unknownCostCalls: number;
   readonly needsReview: number;
   readonly evidenceGaps: number;
@@ -138,8 +142,11 @@ function summarize(outDir: string, scenePath: string, status: RunStatus, stored:
     ? readFileSync(callsFile, 'utf8')
         .split('\n')
         .filter((l) => l.trim() !== '')
-        .map((l) => JSON.parse(l) as { cost: number | null; status: string })
+        .map((l) => JSON.parse(l) as { cost: number | null; costEstimate?: number | null; status: string; error?: { partial?: unknown } })
     : [];
+  // 可能已计费：没有失败，或失败前服务已经开始回复（与作品库的 mayBeBilled 相同）。
+  const unknown = records.filter((r) => r.cost === null && (r.status !== 'error' || r.error?.partial !== undefined));
+  const estimated = unknown.filter((r) => typeof r.costEstimate === 'number');
   return {
     runId: status.runId,
     scene: scenePath,
@@ -149,7 +156,9 @@ function summarize(outDir: string, scenePath: string, status: RunStatus, stored:
     rounds: status.round,
     calls: records.length,
     costUsd: records.reduce((n, r) => n + (r.cost ?? 0), 0),
-    unknownCostCalls: records.filter((r) => r.cost === null && r.status !== 'error').length,
+    estimatedUsd: estimated.reduce((n, r) => n + (r.costEstimate ?? 0), 0),
+    estimatedCalls: estimated.length,
+    unknownCostCalls: unknown.length - estimated.length,
     needsReview: status.state.needsReview.length,
     evidenceGaps: events.filter((e) => e.type === 'EvidenceGapFlagged').length,
     stalemates: events.filter((e) => e.type === 'StalemateDetected').length,
@@ -303,6 +312,8 @@ export async function runCommand(args: Args, deps: CliDeps): Promise<number> {
     deps.console.out(
       `运行 ${runId}：${summary.phase}${summary.endReason ? `（${summary.endReason}）` : ''}${summary.pause ? `（暂停：${summary.pause}）` : ''}，` +
         `${summary.rounds} 回合，${summary.calls} 次调用，费用 $${summary.costUsd.toFixed(4)}` +
+        (summary.estimatedCalls > 0 ? `（另有 ${summary.estimatedCalls} 次没有用量，按估计的上限约 $${summary.estimatedUsd.toFixed(4)}）` : '') +
+        (summary.unknownCostCalls > 0 ? `（另有 ${summary.unknownCostCalls} 次费用未知）` : '') +
         (summary.needsReview > 0 ? `，${summary.needsReview} 条裁决待复核` : '') +
         (summary.evidenceGaps > 0 ? `，${summary.evidenceGaps} 处缺少证据链的命中` : '') +
         (summary.stalemates > 0 ? `，${summary.stalemates} 次僵局` : '') +

@@ -1,4 +1,4 @@
-import type { LlmCallRow, UsageTotals } from '@fudiao/store';
+import { mayBeBilled, type LlmCallRow, type UsageTotals } from '@fudiao/store';
 import { useApp } from './store-context';
 
 /** 任务种类的中文名（术语表）。 */
@@ -33,11 +33,23 @@ const STATUS: Readonly<Record<LlmCallRow['status'], string>> = {
 const n = (v: number) => v.toLocaleString('zh-CN');
 const usd = (v: number) => `$${v.toFixed(4)}`;
 
-/** 费用：未知的部分明确标出（B19）。 */
+/** 费用：按估计计入的与未知的部分明确标出（B19）。 */
 function costText(t: UsageTotals): string {
-  if (t.unknownCost === 0) return usd(t.cost);
-  if (t.unknownCost === t.calls) return '未知';
-  return `${usd(t.cost)} 以上（${t.unknownCost} 次费用未知）`;
+  const unknown = t.unknownCost - t.estimatedCalls;
+  if (unknown > 0 && unknown === t.calls) return '未知';
+  const parts = [
+    ...(t.estimatedCalls > 0 ? [`含 ${t.estimatedCalls} 次按估计计入`] : []),
+    ...(unknown > 0 ? [`另有 ${unknown} 次费用未知`] : []),
+  ];
+  const total = usd(t.cost + t.estimatedCost);
+  return parts.length === 0 ? total : `${unknown > 0 ? `${total} 以上` : `约 ${total}`}（${parts.join('，')}）`;
+}
+
+/** 一次调用的费用：没有用量的按请求的最坏估计（输入估计加输出上限）注明“估计”；还没开始回复就失败的不计费。 */
+function callCost(c: LlmCallRow): string {
+  if (c.cost !== null) return usd(c.cost);
+  if (!mayBeBilled(c)) return '—';
+  return c.costEstimate === null ? '未知' : `估计不超过 ${usd(c.costEstimate)}`;
 }
 
 function TotalsCells({ t }: { readonly t: UsageTotals }) {
@@ -74,7 +86,9 @@ export function UsagePanel() {
           返回正文
         </button>
       </div>
-      <p className="muted">费用按“模型服务”中配置的价格估算；没有配置价格或服务没有返回用量时，费用记为未知。实际费用以服务商账单为准。</p>
+      <p className="muted">
+        费用按“模型服务”中配置的价格估算。服务没有返回用量、或回复到一半断开（可能已计费）时，按请求估计的上限（输入估计加输出上限）计入并注明是估计；没有配置价格时费用记为未知。实际费用以服务商账单为准。
+      </p>
       {usage === null ? null : (
         <>
           <table className="source-table" aria-label="用量合计">
@@ -130,7 +144,7 @@ export function UsagePanel() {
                     </td>
                     <td>{STATUS[c.status]}</td>
                     <td>{c.usage === null ? '未知' : `${n(c.usage.input + c.usage.cacheRead)} / ${n(c.usage.output)}`}</td>
-                    <td>{c.cost === null ? (c.status === 'error' ? '—' : '未知') : usd(c.cost)}</td>
+                    <td>{callCost(c)}</td>
                   </tr>
                 ))}
               </tbody>

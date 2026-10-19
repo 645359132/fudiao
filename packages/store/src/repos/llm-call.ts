@@ -23,6 +23,8 @@ export type LlmCallRow = {
   readonly status: LlmCallStatus;
   readonly usage: LlmCallUsage | null;
   readonly cost: number | null;
+  /** 费用未知、又可能已经计费时按请求的最坏估计记下的费用（迁移 0018）；见 mayBeBilled。 */
+  readonly costEstimate: number | null;
   /** 调用结果（含文本）或错误；由应用层按模型端口的类型校验。 */
   readonly response: unknown;
   readonly error: unknown;
@@ -61,6 +63,7 @@ const Row = z
     cache_read_tokens: z.number().int().nullable(),
     cache_write_tokens: z.number().int().nullable(),
     cost: z.number().nullable(),
+    cost_estimate: z.number().nullable(),
     response: jsonOrNull,
     error: jsonOrNull,
     started_at: z.string(),
@@ -84,6 +87,7 @@ const Row = z
           ? null
           : { input: r.input_tokens, output: r.output_tokens, cacheRead: r.cache_read_tokens ?? 0, cacheWrite: r.cache_write_tokens ?? 0 },
       cost: r.cost,
+      costEstimate: r.cost_estimate,
       response: r.response,
       error: r.error,
       startedAt: r.started_at,
@@ -92,12 +96,12 @@ const Row = z
   );
 
 const COLUMNS =
-  'id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at';
+  'id, step_key, task_kind, provider, model, served_model, params, template_id, template_version, request_hash, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, response, error, started_at, finished_at, cost_estimate';
 
 export async function appendLlmCall(port: SqlPort, row: LlmCallRow): Promise<Result<void, RepoError>> {
   const done = await port.transaction([
     {
-      sql: `INSERT INTO llm_call (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO llm_call (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         row.id,
         row.stepKey,
@@ -119,6 +123,7 @@ export async function appendLlmCall(port: SqlPort, row: LlmCallRow): Promise<Res
         row.error === null || row.error === undefined ? null : JSON.stringify(row.error),
         row.startedAt,
         row.finishedAt,
+        row.costEstimate,
       ],
     },
   ]);
@@ -156,6 +161,17 @@ export function listLlmCalls(port: SqlPort, limit = 100): Promise<Result<LlmCall
   return queryAll(port, Row, `SELECT ${COLUMNS} FROM llm_call ORDER BY finished_at DESC, id DESC LIMIT ?`, [limit]);
 }
 
+/**
+ * 这次调用可能已经计费：没有失败，或失败前服务已经开始回复（错误里带 partial，见 packages/llm 的 LlmError）。
+ * 还没收到回复就失败的（鉴权、限流、连不上等）不计费。与 SQL 里的 BILLED 一致。
+ */
+export function mayBeBilled(row: Pick<LlmCallRow, 'status' | 'error'>): boolean {
+  if (row.status !== 'error') return true;
+  return typeof row.error === 'object' && row.error !== null && 'partial' in row.error;
+}
+
+const BILLED = `(status <> 'error' OR json_extract(error, '$.partial') IS NOT NULL)`;
+
 export type UsageTotals = {
   readonly calls: number;
   readonly inputTokens: number;
@@ -164,8 +180,11 @@ export type UsageTotals = {
   readonly cacheWriteTokens: number;
   /** 已知费用之和（美元）。 */
   readonly cost: number;
-  /** 费用未知的调用数（价格未配置或服务没有返回用量）；大于 0 时总费用只是下限（B19）。 */
+  /** 费用未知、又可能已经计费的调用数（价格未配置、服务没有返回用量或回复到一半出错）；含按估计计入的（B19）。 */
   readonly unknownCost: number;
+  /** 其中有估计值的调用数与估计之和（美元，按请求的最坏估计）；其余 unknownCost - estimatedCalls 次连估计也没有。 */
+  readonly estimatedCalls: number;
+  readonly estimatedCost: number;
 };
 
 export type UsageSummary = {
@@ -182,13 +201,17 @@ const TotalsRow = z.object({
   cache_write_tokens: z.number().nullable(),
   cost: z.number().nullable(),
   unknown_cost: z.number().nullable(),
+  estimated_calls: z.number().nullable(),
+  estimated_cost: z.number().nullable(),
 });
 
 const AGGREGATE = `count(*) AS calls,
   sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
   sum(cache_read_tokens) AS cache_read_tokens, sum(cache_write_tokens) AS cache_write_tokens,
   sum(cost) AS cost,
-  sum(CASE WHEN cost IS NULL AND status <> 'error' THEN 1 ELSE 0 END) AS unknown_cost`;
+  sum(CASE WHEN cost IS NULL AND ${BILLED} THEN 1 ELSE 0 END) AS unknown_cost,
+  sum(CASE WHEN cost IS NULL AND cost_estimate IS NOT NULL AND ${BILLED} THEN 1 ELSE 0 END) AS estimated_calls,
+  sum(CASE WHEN cost IS NULL AND ${BILLED} THEN cost_estimate END) AS estimated_cost`;
 
 const totals = (r: z.infer<typeof TotalsRow>): UsageTotals => ({
   calls: r.calls,
@@ -198,9 +221,11 @@ const totals = (r: z.infer<typeof TotalsRow>): UsageTotals => ({
   cacheWriteTokens: r.cache_write_tokens ?? 0,
   cost: r.cost ?? 0,
   unknownCost: r.unknown_cost ?? 0,
+  estimatedCalls: r.estimated_calls ?? 0,
+  estimatedCost: r.estimated_cost ?? 0,
 });
 
-/** 用量与费用的汇总（B19）：全部、按任务、按模型。失败的调用计入次数，没有用量也不算“费用未知”。 */
+/** 用量与费用的汇总（B19）：全部、按任务、按模型。失败的调用计入次数；只有已经开始回复的才算“费用未知”。 */
 export async function usageSummary(port: SqlPort): Promise<Result<UsageSummary, RepoError>> {
   const all = await queryOne(port, TotalsRow, `SELECT ${AGGREGATE} FROM llm_call`);
   if (!all.ok) return all;
@@ -213,15 +238,34 @@ export async function usageSummary(port: SqlPort): Promise<Result<UsageSummary, 
   );
   if (!byModel.ok) return byModel;
   return ok({
-    total: all.value === null ? totals({ calls: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost: 0, unknown_cost: 0 }) : totals(all.value),
+    total: all.value === null ? totals({ calls: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost: 0, unknown_cost: 0, estimated_calls: 0, estimated_cost: 0 }) : totals(all.value),
     byTask: byTask.value.map((r) => ({ task: r.task_kind, ...totals(r) })),
     byModel: byModel.value.map((r) => ({ provider: r.provider, model: r.model, ...totals(r) })),
   });
 }
 
 const RunCallRow = z
-  .object({ step_key: z.string(), task_kind: z.string(), status: z.string(), cost: z.number().nullable(), started_at: z.string(), finished_at: z.string() })
-  .transform((r) => ({ stepKey: r.step_key, taskKind: r.task_kind, status: r.status, cost: r.cost, startedAt: r.started_at, finishedAt: r.finished_at }));
+  .object({
+    step_key: z.string(),
+    task_kind: z.string(),
+    status: z.string(),
+    cost: z.number().nullable(),
+    cost_estimate: z.number().nullable(),
+    billed: z.number().int(),
+    started_at: z.string(),
+    finished_at: z.string(),
+  })
+  .transform((r) => ({
+    stepKey: r.step_key,
+    taskKind: r.task_kind,
+    status: r.status,
+    cost: r.cost,
+    costEstimate: r.cost_estimate,
+    /** 见 mayBeBilled。 */
+    billed: r.billed === 1,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
+  }));
 export type RunCall = z.output<typeof RunCallRow>;
 
 /**
@@ -232,7 +276,7 @@ export function listRunCalls(port: SqlPort, runId: string): Promise<Result<RunCa
   return queryAll(
     port,
     RunCallRow,
-    'SELECT step_key, task_kind, status, cost, started_at, finished_at FROM llm_call WHERE step_key >= ? AND step_key < ? ORDER BY started_at, id',
+    `SELECT step_key, task_kind, status, cost, cost_estimate, ${BILLED} AS billed, started_at, finished_at FROM llm_call WHERE step_key >= ? AND step_key < ? ORDER BY started_at, id`,
     // “;”是“:”的下一个字符：区间正好是以“运行标识:”开头的全部步骤键。
     [`${runId}:`, `${runId};`],
   );

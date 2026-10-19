@@ -1,5 +1,5 @@
 // 测试模型：按请求的步骤键与模板生成合法的 JSON，不访问任何模型服务。仅供测试使用。
-import { requestHash, CONSERVATIVE_CAPABILITIES, type LlmPort, type LlmRequest, type LlmResult, type ModelProfile } from '@fudiao/llm';
+import { requestHash, CONSERVATIVE_CAPABILITIES, type LlmPort, type LlmRequest, type LlmResult, type LlmUsage, type ModelProfile } from '@fudiao/llm';
 import type {
   ActionProposal,
   BeatSheetOutput,
@@ -96,6 +96,8 @@ export type FakeOptions = {
   readonly delay?: (ctx: CallContext) => number;
   /** 让某次调用以截断或拒答结束（输出不完整）。 */
   readonly outcome?: (ctx: CallContext) => 'truncated' | 'refused' | undefined;
+  /** 返回的用量；不给时每次 1,000 输入、200 输出，返回 null 模拟服务没有给出用量。 */
+  readonly usage?: (ctx: CallContext) => LlmUsage | null;
 };
 
 export function fakeModel(policy: Policy = {}, options: FakeOptions = {}) {
@@ -128,7 +130,7 @@ export function fakeModel(policy: Policy = {}, options: FakeOptions = {}) {
       const result: LlmResult = {
         outcome: ended ?? 'completed',
         text: ended === undefined ? text : text.slice(0, 10),
-        usage: { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: options.usage === undefined ? { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 } : options.usage(ctx),
         provider: request.model.provider,
         servedModel: request.model.model,
         stopReason: ended === 'truncated' ? 'max_tokens' : 'end_turn',

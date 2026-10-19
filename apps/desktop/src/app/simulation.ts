@@ -58,8 +58,12 @@ export type SimRunView = {
   readonly awaitingDirector: boolean;
   readonly pause: RunStatus['state']['pause'];
   readonly endReason: RunStatus['state']['endReason'];
-  /** 这次运行已用的费用（美元，来自调用记录）；unknownCostCalls 是费用未知的调用数。 */
+  /**
+   * 这次运行已用的费用（美元，来自调用记录），含按估计计入的部分：estimatedCalls 次调用服务没有返回用量（或回复到一半断开），
+   * 按请求的最坏估计计入；unknownCostCalls 次连估计也没有（价格未配置）。
+   */
   readonly spentUsd: number;
+  readonly estimatedCalls: number;
   readonly unknownCostCalls: number;
 };
 
@@ -259,12 +263,16 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     },
   };
 
-  /** 这次运行已用的费用：调用记录里它的全部调用之和。 */
-  async function spending(port: SqlPort, runId: string): Promise<Result<{ spentUsd: number; unknownCostCalls: number }, AppError>> {
+  /** 这次运行已用的费用：调用记录里它的全部调用之和；没有用量、可能已计费的按记下的估计计入（与预算守卫一致）。 */
+  async function spending(port: SqlPort, runId: string): Promise<Result<{ spentUsd: number; estimatedCalls: number; unknownCostCalls: number }, AppError>> {
     const calls = await listRunCalls(port, runId);
     if (!calls.ok) return err(repo(calls.error));
-    const done = calls.value.filter((c) => c.status !== 'error' && c.status !== 'cancelled');
-    return ok({ spentUsd: calls.value.reduce((n, c) => n + (c.cost ?? 0), 0), unknownCostCalls: done.filter((c) => c.cost === null).length });
+    const unknown = calls.value.filter((c) => c.cost === null && c.billed);
+    return ok({
+      spentUsd: calls.value.reduce((n, c) => n + (c.cost ?? c.costEstimate ?? 0), 0),
+      estimatedCalls: unknown.filter((c) => c.costEstimate !== null).length,
+      unknownCostCalls: unknown.filter((c) => c.costEstimate === null).length,
+    });
   }
 
   /** 引擎每次操作新建：事件与调用记录都在作品库里；有预算的运行带上预算守卫，已用的费用从调用记录接着算。 */

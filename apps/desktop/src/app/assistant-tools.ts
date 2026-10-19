@@ -1647,7 +1647,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       ];
       return done(
         [
-          `推演 [${v.run.id}]：${runState(v)}；已用 $${v.spentUsd.toFixed(4)}${v.unknownCostCalls > 0 ? `（另有 ${v.unknownCostCalls} 次调用费用未知）` : ''}${v.run.budgetUsd === null ? '' : `，费用上限 $${v.run.budgetUsd}`}`,
+          `推演 [${v.run.id}]：${runState(v)}；已用 $${v.spentUsd.toFixed(4)}${v.estimatedCalls > 0 ? `（其中 ${v.estimatedCalls} 次没有用量，按估计的上限计入）` : ''}${v.unknownCostCalls > 0 ? `（另有 ${v.unknownCostCalls} 次调用费用未知）` : ''}${v.run.budgetUsd === null ? '' : `，费用上限 $${v.run.budgetUsd}`}`,
           `角色：${actorList(d.cast.actors)}`,
           review === 0 ? '' : `自动接受的裁决 ${review} 条，采纳进作品前要作者逐项复核`,
           waiting.length === 0 ? '' : `等作者在推演页处理：\n${waiting.join('\n')}`,

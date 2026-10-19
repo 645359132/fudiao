@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { BudgetGuard, costOf, estimateInputTokens, withBudget } from './budget';
+import { BudgetGuard, costOf, estimateInputTokens, withBudget, worstCase } from './budget';
 import { memoryCallLog, withCallLog } from './call-log';
 import { inspectRequests } from './inspect';
 import { routeByProvider } from './router';
@@ -189,6 +189,64 @@ describe('预算守卫', () => {
     for (let i = 0; i < 4; i++) await guarded.complete(request);
     expect(requests).toHaveLength(1);
   });
+
+  // 一次调用的最坏估计：输入 5 字（“规则”“行动？”）按 5 Token、输出按上限 1,000，约 0.02002 美元。
+  const worst = (5 * 4 + 1_000 * 20) / 1_000_000;
+
+  it('同时发出的调用：给进行中的调用预留最坏估计，合计不超过预算', async () => {
+    const { port, requests } = scriptedPort([{ text: 'a', usage: usage(100, 50) }]);
+    const guard = new BudgetGuard({ limitUsd: 0.05 });
+    const guarded = withBudget(port, guard);
+    const results = await Promise.all(Array.from({ length: 5 }, () => guarded.complete(baseRequest())));
+    expect(requests).toHaveLength(2);
+    expect(results.filter((r) => !r.ok && r.error.code === 'budget_exceeded')).toHaveLength(3);
+    // 结束后预留换成实际费用（100 输入、50 输出），之后的调用照常放行。
+    expect(guard.spentUsd).toBeCloseTo(2 * 0.0014, 9);
+    expect(guard.reservedUsd).toBe(0);
+    expect((await guarded.complete(baseRequest())).ok).toBe(true);
+  });
+
+  it('同时发出的调用按 Token 数限制时同样预留', async () => {
+    const { port, requests } = scriptedPort([{ text: 'a', usage: usage(10, 10) }]);
+    const guard = new BudgetGuard({ limitTokens: 2_500 });
+    await Promise.all(Array.from({ length: 4 }, () => withBudget(port, guard).complete(baseRequest())));
+    expect(requests).toHaveLength(2);
+    expect(guard.reservedTokens).toBe(0);
+    expect(guard.spentTokens).toBe(40);
+  });
+
+  it('失败时释放预留，不计费用', async () => {
+    const { port } = scriptedPort([{ code: 'server', message: '500' }]);
+    const guard = new BudgetGuard({ limitUsd: 0.05 });
+    const results = await Promise.all(Array.from({ length: 2 }, () => withBudget(port, guard).complete(baseRequest())));
+    expect(results.every((r) => !r.ok && r.error.code === 'server')).toBe(true);
+    expect([guard.spentUsd, guard.reservedUsd, guard.estimatedCalls]).toEqual([0, 0, 0]);
+  });
+
+  it('服务没有返回用量时按请求的最坏估计计入已花费，并记为估计', async () => {
+    const { port, requests } = scriptedPort([{ text: 'a', usage: null }]);
+    const guard = new BudgetGuard({ limitUsd: 0.05 });
+    const guarded = withBudget(port, guard);
+    for (let i = 0; i < 4; i++) await guarded.complete(baseRequest());
+    expect(requests).toHaveLength(2);
+    expect(guard.spentUsd).toBeCloseTo(2 * worst, 9);
+    expect(guard.estimatedCalls).toBe(2);
+    expect(guard.unknownCostCalls).toBe(0);
+  });
+
+  it('服务已经开始回复后出错（可能已计费）时同样按估计计入；部分用量已知时输入取实际值', async () => {
+    const partial = { inputTokens: 300, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    const { port } = scriptedPort([{ code: 'network', message: '断开', partial: { usage: partial } }]);
+    const guard = new BudgetGuard({ limitUsd: 1 });
+    await withBudget(port, guard).complete(baseRequest());
+    expect(guard.spentUsd).toBeCloseTo((300 * 4 + 1_000 * 20) / 1_000_000, 9);
+    expect(guard.estimatedCalls).toBe(1);
+  });
+
+  it('请求的最坏估计：价格未知时费用为 null，Token 照算', () => {
+    expect(worstCase(baseRequest())).toEqual({ tokens: 1_005, usd: expect.closeTo(worst, 9) });
+    expect(worstCase(baseRequest({ model: { ...baseRequest().model, prices: undefined as never } }))).toEqual({ tokens: 1_005, usd: null });
+  });
 });
 
 describe('调用记录与幂等步骤', () => {
@@ -234,6 +292,27 @@ describe('调用记录与幂等步骤', () => {
     expect(log.records().map((r) => [r.stepKey, r.status])).toEqual([
       [null, 'completed'],
       [null, 'completed'],
+    ]);
+  });
+
+  it('服务没有返回用量时费用为未知，并按请求的最坏估计记下估计值', async () => {
+    const log = memoryCallLog();
+    await withCallLog(scriptedPort([{ text: 'x', usage: null }]).port, log, at).complete(baseRequest());
+    await withCallLog(scriptedPort([{ text: 'x' }]).port, log, at).complete(baseRequest());
+    expect(log.records().map((r) => [r.cost === null, r.costEstimate])).toEqual([
+      [true, expect.closeTo((5 * 4 + 1_000 * 20) / 1_000_000, 9)],
+      [false, null],
+    ]);
+  });
+
+  it('出错时：服务已经开始回复的记下部分用量与估计（可能已计费），没开始的不记', async () => {
+    const log = memoryCallLog();
+    const partial = { inputTokens: 300, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    await withCallLog(scriptedPort([{ code: 'network', message: '断开', partial: { usage: partial } }]).port, log, at).complete(baseRequest());
+    await withCallLog(scriptedPort([{ code: 'auth', message: '401' }]).port, log, at).complete(baseRequest());
+    expect(log.records()).toEqual([
+      expect.objectContaining({ status: 'error', cost: null, costEstimate: expect.closeTo((300 * 4 + 1_000 * 20) / 1_000_000, 9), error: expect.objectContaining({ partial: { usage: partial } }) }),
+      expect.objectContaining({ status: 'error', cost: null, costEstimate: null }),
     ]);
   });
 

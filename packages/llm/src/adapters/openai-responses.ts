@@ -4,7 +4,7 @@ import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
-import { mapSdkError } from './errors';
+import { mapSdkError, streamError } from './errors';
 
 export type OpenAIAdapterOptions = {
   readonly apiKey: string;
@@ -57,6 +57,9 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
     let status: string | null = null;
     let incomplete: string | null = null;
     let failure: LlmError | null = null;
+    // 收到第一个事件后服务就开始回复了，之后出错可能已经计费（LlmError.partial）。
+    let started = false;
+    let ended = false;
 
     try {
       const stream = await this.client.responses.create(buildResponseParams(request), {
@@ -64,6 +67,7 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
       });
       // 只处理文字、拒答、结束与失败事件；工具调用、推理摘要等事件与这里的用途无关。
       for await (const event of stream) {
+        started = true;
         if (event.type === 'response.created') {
           if (event.response.model) servedModel = event.response.model;
         } else if (event.type === 'response.output_text.delta') {
@@ -72,6 +76,7 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
         } else if (event.type === 'response.refusal.delta') {
           refusalText += event.delta;
         } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
+          ended = true;
           const r = event.response;
           if (r.model) servedModel = r.model;
           status = r.status ?? null;
@@ -91,10 +96,13 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
       if (options.signal?.aborted === true || error instanceof OpenAI.APIUserAbortError) {
         return ok({ ...base, outcome: 'cancelled', text, usage, servedModel, stopReason: null });
       }
-      return err(mapSdkError(error));
+      const mapped = mapSdkError(error);
+      return err(started ? { ...mapped, partial: { usage } } : mapped);
     }
     if (options.signal?.aborted === true) return ok({ ...base, outcome: 'cancelled', text, usage, servedModel, stopReason: null });
-    if (failure !== null) return err(failure);
+    if (failure !== null) return err(started ? { ...failure, partial: { usage } } : failure);
+    // 正常结束一定有 completed 或 incomplete 事件；没有就关闭的流是半截。
+    if (!ended) return err(streamError(usage));
 
     const refused = refusalText !== '' || incomplete === 'content_filter';
     return ok({

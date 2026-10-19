@@ -46,10 +46,8 @@ export function fakeFetch(responses: readonly FakeResponse[]) {
         : new ReadableStream<Uint8Array>({
             start(controller) {
               for (const chunk of spec.chunks ?? []) controller.enqueue(encoder.encode(chunk));
-              if (spec.breakAfterChunks === true) {
-                controller.error(new TypeError('网络请求失败：error decoding response body'));
-                return;
-              }
+              // 断开放在 pull 里：在 start 里报错会丢掉还没读走的数据块。
+              if (spec.breakAfterChunks === true) return;
               if (!spec.hang) {
                 controller.close();
                 return;
@@ -57,6 +55,10 @@ export function fakeFetch(responses: readonly FakeResponse[]) {
               const abort = () => controller.error(new DOMException('The operation was aborted.', 'AbortError'));
               if (signal?.aborted) abort();
               else signal?.addEventListener('abort', abort, { once: true });
+            },
+            // 数据块都读走后才调用（队列空了才要更多）。
+            pull(controller) {
+              if (spec.breakAfterChunks === true) controller.error(new TypeError('网络请求失败：error decoding response body'));
             },
           });
 
