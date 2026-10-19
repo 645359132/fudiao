@@ -61,10 +61,13 @@ export type AssistantSelection = { readonly chapterId: string; readonly range: E
  * 返回 null 表示已经排上，否则是没有排上的原因（例如已有一批在进行）。
  */
 export type BackgroundJobs = {
-  writeChapters(chapterIds: readonly string[], review: boolean): string | null;
+  /** 排上返回 null，否则是没排上的原因（例如本章正文保存不了：写手不覆盖未保存的修改）。 */
+  writeChapters(chapterIds: readonly string[], review: boolean): string | null | Promise<string | null>;
   reviewChapters(chapterIds: readonly string[]): string | null;
   /** 是否已有一次推演在后台推进（同一时间只推进一次）。 */
   simulating(): boolean;
+  /** 后台写作正在写与排着的章节：助手不直接写、也不回退它们（不然轮到它时会互相当成作者改了正文而停下）。 */
+  writing(): readonly string[];
   /** 在后台连续推进这次推演，直到结束、等待作者、暂停或被停下。返回 null 表示已经开始推进，否则是原因。 */
   simulate(runId: string, sceneId: string): string | null;
   /** 停下后台的写作、依次审核或推演；返回说明（停下了什么，或没有在进行的）。 */
@@ -109,10 +112,10 @@ export type AssistantHost = {
   restoreChapter(chapter: Chapter): Promise<Result<unknown, AppError>>;
   createSnapshot(chapterId: string): Promise<Result<{ readonly id: string }, AppError>>;
   restoreSnapshot(snapshotId: string): Promise<Result<unknown, AppError>>;
-  openChapter(chapterId: string): Promise<Result<{ readonly saved: readonly { readonly id: string; readonly text: string }[] }, AppError>>;
+  openChapter(chapterId: string): Promise<Result<{ readonly saved: readonly { readonly id: string; readonly text: string }[]; readonly draft: unknown }, AppError>>;
   search(query: string): Promise<Result<SearchResult, AppError>>;
   listEntities(): Promise<Result<Entity[], AppError>>;
-  createEntity(kind: EntityKind, name: string): Promise<Result<{ readonly created: Entity }, AppError>>;
+  createEntity(kind: EntityKind, name: string, id?: string): Promise<Result<{ readonly created: Entity }, AppError>>;
   updateEntity(entity: Entity, patch: EntityPatch): Promise<Result<unknown, AppError>>;
   deleteEntity(entity: Entity): Promise<Result<unknown, AppError>>;
   listFacts(): Promise<Result<Fact[], AppError>>;
@@ -271,12 +274,26 @@ export type ToolEnv = {
   readonly call: () => CallOptions;
   /** 撤销上一轮的改动（由对话循环提供）。 */
   readonly undoLastTurn?: () => Promise<Outcome>;
+  /**
+   * 只在 f 执行期间记下对作品的改动（撤销用）。先调用模型、再写入作品的动作用它包住写入的那一步：
+   * 等模型的时候作者在界面上做的修改不算助手的改动。不用它的动作，整个执行期间的改动都记下。
+   */
+  readonly recordChanges?: <T>(f: () => Promise<T>) => Promise<T>;
+  /** 撤销上一轮会回退的正文（写手写章、写手修订）的说明；没有时为 null。撤销正文要先请作者确认。 */
+  readonly undoTextPreview?: () => string | null;
 };
 
-export function toolEnv(host: AssistantHost, project: () => SqlPort | null, events: ToolEvents, undoLastTurn?: () => Promise<Outcome>): ToolEnv {
+export function toolEnv(
+  host: AssistantHost,
+  project: () => SqlPort | null,
+  events: ToolEvents,
+  undoLastTurn?: () => Promise<Outcome>,
+  undoTextPreview?: () => string | null,
+): ToolEnv {
   const work = () => host.reloadWork();
   return {
     ...(undoLastTurn !== undefined && { undoLastTurn }),
+    ...(undoTextPreview !== undefined && { undoTextPreview }),
     host,
     project,
     events,
@@ -420,11 +437,17 @@ type ActionOf<K extends AssistantTool> = Extract<AssistantAction, { readonly too
  */
 export type UndoMode = 'read' | 'work' | 'writer' | 'revise' | 'kept';
 
+/**
+ * 须确认的动作：给作者看的说明，以及作者确认后执行的动作。说明里的那一项按确认时找到的为准：
+ * 动作里的名称换成它的标识，作者确认之前改了名、又有了同名的，执行的仍是确认的那一项。
+ */
+export type Confirmation<K extends AssistantTool = AssistantTool> = { readonly summary: string; readonly action: ActionOf<K> };
+
 /** 命令表的一项。confirm 给出时，返回非 null 的说明就先停下请作者确认（删除与覆盖类的动作）。 */
 type Tool<K extends AssistantTool> = {
   readonly label: string;
   readonly undo: UndoMode;
-  readonly confirm?: (action: ActionOf<K>, env: ToolEnv) => string | null | Promise<string | null>;
+  readonly confirm?: (action: ActionOf<K>, env: ToolEnv) => string | Confirmation<K> | null | Promise<string | Confirmation<K> | null>;
   readonly run: (action: ActionOf<K>, env: ToolEnv) => Promise<Outcome>;
 };
 
@@ -772,7 +795,11 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   delete_volume: {
     label: '删除卷',
     undo: 'work',
-    confirm: (action) => `删除卷“${action.volume}”`,
+    // 找不到时不必确认：执行时照样找不到，原因告诉模型。
+    confirm: async (action, env) => {
+      const v = await env.findVolume(action.volume);
+      return v.ok ? { summary: `删除卷“${v.value.title}”`, action: { ...action, volume: v.value.id } } : null;
+    },
     async run(action, env) {
       const v = await env.findVolume(action.volume);
       if (!v.ok) return failed(v.error);
@@ -867,7 +894,10 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   trash_chapter: {
     label: '移入回收站',
     undo: 'work',
-    confirm: (action) => `把“${action.chapter}”移入回收站`,
+    confirm: async (action, env) => {
+      const c = await env.findChapter(action.chapter);
+      return c.ok ? { summary: `把“${c.value.title}”移入回收站`, action: { ...action, chapter: c.value.id } } : null;
+    },
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
@@ -925,7 +955,10 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   delete_entity: {
     label: '删除设定',
     undo: 'work',
-    confirm: (action) => `删除设定“${action.entity}”（与它有关的人物关系也一并删除）`,
+    confirm: async (action, env) => {
+      const e = await env.findEntity(action.entity);
+      return e.ok ? { summary: `删除设定“${e.value.name}”（与它有关的人物关系也一并删除）`, action: { ...action, entity: e.value.id } } : null;
+    },
     async run(action, env) {
       const e = await env.findEntity(action.entity);
       if (!e.ok) return failed(e.error);
@@ -1148,7 +1181,8 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       env.events.onProgress?.(`正在按大纲生成 ${action.count} 章的章节计划`);
       const draft = await env.host.draftPlans({ chapterCount: action.count, wordsPerChapter: action.wordsPerChapter ?? 3000 }, env.call());
       if (!draft.ok) return failWith(draft.error);
-      const applied = await env.host.applyPlanDraft(draft.value);
+      const apply = () => env.host.applyPlanDraft(draft.value);
+      const applied = await (env.recordChanges === undefined ? apply() : env.recordChanges(apply));
       if (!applied.ok) return failWith(applied.error);
       env.changed();
       const volumes = new Set(draft.value.chapters.map((c) => (c.volume ?? '').trim()).filter((v) => v !== '')).size;
@@ -1163,6 +1197,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
+      if (env.events.background?.writing().includes(c.value.id) === true) return failed(`《${c.value.title}》排在后台的写作里：等它写完，或在“任务”里停下以后再说`);
       env.events.onEffect?.({ kind: 'open_chapter', chapterId: c.value.id });
       env.events.onProgress?.(`写手正在写《${c.value.title}》`);
       const written = await env.host.writeChapter(c.value.id, {
@@ -1212,7 +1247,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         targets = found;
       }
       if (targets.length === 0) return failed(skipped.length > 0 ? `没有可以写的章节：${skipped.join('；')}` : '没有有计划、还没写完的章节；先用 plan_chapters 或 save_chapter_plan 做计划');
-      const refused = jobs.writeChapters(
+      const refused = await jobs.writeChapters(
         targets.map((c) => c.id),
         action.review,
       );
@@ -1351,10 +1386,14 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   rollback_writer: {
     label: '回退写手写入',
     undo: 'kept',
-    confirm: (action) => `把“${action.chapter}”回退到写手写入之前（现稿会先存为快照）`,
+    confirm: async (action, env) => {
+      const c = await env.findChapter(action.chapter);
+      return c.ok ? { summary: `把“${c.value.title}”回退到写手写入之前（现稿会先存为快照）`, action: { ...action, chapter: c.value.id } } : null;
+    },
     async run(action, env) {
       const c = await env.findChapter(action.chapter);
       if (!c.ok) return failed(c.error);
+      if (env.events.background?.writing().includes(c.value.id) === true) return failed(`《${c.value.title}》排在后台的写作里：等它写完，或在“任务”里停下以后再回退`);
       const rolled = await env.host.rollbackWriter(c.value.id);
       if (!rolled.ok) return failWith(rolled.error);
       env.changed();
@@ -1623,6 +1662,8 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   undo_last_turn: {
     label: '撤销上一轮的改动',
     undo: 'read',
+    // 和“回退写手写入”一样：要把正文改回去时先请作者确认。
+    confirm: (_action, env) => env.undoTextPreview?.() ?? null,
     run(_action, env) {
       return env.undoLastTurn === undefined ? Promise.resolve(failed('这里不能撤销')) : env.undoLastTurn();
     },
@@ -1658,9 +1699,11 @@ export function runTool<K extends AssistantTool>(tool: K, action: ActionOf<K>, e
 }
 
 /** 这个动作执行前要作者确认时，给作者看的说明；不需要确认时为 null。 */
-export async function confirmationFor<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<string | null> {
+export async function confirmationFor<K extends AssistantTool>(tool: K, action: ActionOf<K>, env: ToolEnv): Promise<Confirmation<K> | null> {
   const confirm: Tool<K>['confirm'] = TOOLS[tool].confirm;
-  return confirm === undefined ? null : confirm(action, env);
+  if (confirm === undefined) return null;
+  const asked = await confirm(action, env);
+  return asked === null ? null : typeof asked === 'string' ? { summary: asked, action } : asked;
 }
 
 /** 动作的改动怎样撤销。 */

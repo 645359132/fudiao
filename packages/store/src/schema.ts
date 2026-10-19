@@ -47,6 +47,13 @@ export const TABLES: readonly TableSpec[] = [
     json: ['source_spans'],
   },
   {
+    // 删除过的段落最后的版本（迁移 0017，由触发器写入），找回同一标识时版本接着往上加。
+    name: 'paragraph_retired',
+    columns: ['id', 'version'],
+    primaryKey: ['id'],
+    json: [],
+  },
+  {
     name: 'chapter_snapshot',
     columns: ['id', 'chapter_id', 'reason', 'title', 'paragraphs', 'created_at'],
     primaryKey: ['id'],

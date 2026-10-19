@@ -134,4 +134,14 @@ describe('能力自检', () => {
     await runSelfTest(new OpenAIChatAdapter({ baseURL: 'http://127.0.0.1:11434/v1', fetch: plain.fetch, maxRetries: 0 }), thinking, prompt, schema, check);
     expect(sent(plain.requests[0]?.body)[0]).toBe(1_024);
   });
+
+  it('输出上限不超过模型的最大输出：上限较小的服务不会因请求超限而永远过不了自检', async () => {
+    const good = JSON.stringify(expected);
+    const small: ModelProfile = { provider: 'p', model: 'm', capabilities: { ...CONSERVATIVE_CAPABILITIES, maxOutputTokens: 8_192 } };
+    const capped = fakeFetch([reply(good), reply(good), reply(good)]);
+    const port = new OpenAIChatAdapter({ baseURL: 'http://127.0.0.1:11434/v1', fetch: capped.fetch, maxRetries: 0 });
+    expect((await runSelfTest(port, small, prompt, schema, check, {}, { maxOutputTokens: 33_024 })).passed).toBe(true);
+    const b = (capped.requests[0]?.body ?? {}) as Record<string, unknown>;
+    expect(b['max_completion_tokens'] ?? b['max_tokens']).toBe(8_192);
+  });
 });

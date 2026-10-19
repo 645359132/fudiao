@@ -3,7 +3,7 @@
 // 未经作者接受的内容不写入作品（硬性规则 21）。
 import { err, ok, type Result } from '@fudiao/shared';
 import {
-  applyRangeReplace,
+  acceptCandidateRange,
   createCandidate,
   createSnapshot,
   findCallByRequestHash,
@@ -38,11 +38,17 @@ export function candidateRange(paragraphs: readonly SavedParagraph[], selection:
   return { from: end, to: end };
 }
 
-/** 范围涉及的段落的当前版本。 */
-function versionsIn(paragraphs: readonly SavedParagraph[], range: TextRange): Record<string, number> {
+/**
+ * 候选稿依据的段落的当前版本：范围涉及的段落；接在一段末尾另起新段的（续写、推演写成的正文）再加上紧跟其后的那一段。
+ * 在段末接续写不改动那一段（版本不变），后面多出或换了段落（例如先接受了另一份续写）时据此判为过期。
+ */
+export function candidateVersions(paragraphs: readonly SavedParagraph[], candidate: { readonly operation: CandidateOperation; readonly target: TextRange }): Record<string, number> {
+  const range = candidate.target;
   const i = paragraphs.findIndex((p) => p.id === range.from.paragraphId);
   const j = paragraphs.findIndex((p) => p.id === range.to.paragraphId);
-  return Object.fromEntries(paragraphs.slice(i, j + 1).map((p) => [p.id, p.version]));
+  const at = paragraphs[j];
+  const appends = (candidate.operation === 'continue' || candidate.operation === 'narrate') && i === j && at !== undefined && range.from.offset === at.text.length && range.to.offset === at.text.length;
+  return Object.fromEntries(paragraphs.slice(i, appends ? j + 2 : j + 1).map((p) => [p.id, p.version]));
 }
 
 /**
@@ -94,7 +100,7 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
           operation: input.operation,
           target: range,
           baseText,
-          baseVersions: versionsIn(paragraphs.value, range),
+          baseVersions: candidateVersions(paragraphs.value, { operation: input.operation, target: range }),
           // 与写手写入的正文一样规范标点（B74）。
           generated: normalizePunctuation(input.text.trim()),
           llmCallId: call.ok ? (call.value?.id ?? null) : null,
@@ -126,7 +132,7 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
     },
 
     /**
-     * 接受候选稿：原文没变才写入；先建快照（可以回退），再在一个事务中替换正文、写入来源。
+     * 接受候选稿：原文没变才写入；先建快照（可以回退），再在一个事务中替换正文、写入来源并把候选稿标为已接受。
      * 返回写入后的本章段落，界面据此重新载入编辑器。
      */
     async acceptCandidate(candidateId: string): Promise<Result<{ candidate: Candidate; paragraphs: SavedParagraph[] }, AppError>> {
@@ -143,7 +149,7 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
         await setCandidateStatus(p.value, candidate, 'stale', STALE_REASON, ctx());
         return err(settings(`候选稿已过期：${STALE_REASON}，请重新生成`));
       };
-      const current = versionsIn(paragraphs.value, candidate.target);
+      const current = candidateVersions(paragraphs.value, candidate);
       const sameVersions =
         Object.keys(current).length === Object.keys(candidate.baseVersions).length && Object.entries(candidate.baseVersions).every(([id, v]) => current[id] === v);
       if (!sameVersions || textInRange(paragraphs.value, candidate.target) !== candidate.baseText) return stale();
@@ -152,10 +158,14 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
       if (!plan.ok) return stale();
       const snapshot = await createSnapshot(p.value, { id: deps.ids.next(), chapterId: candidate.chapterId, reason: 'accept_candidate' }, ctx());
       if (!snapshot.ok) return err(repo(snapshot.error));
-      const applied = await applyRangeReplace(p.value, candidate.chapterId, plan.value, ctx());
-      if (!applied.ok) return applied.error.code === 'conflict' ? stale() : err(repo(applied.error));
-      const accepted = await setCandidateStatus(p.value, candidate, 'accepted', null, ctx());
-      if (!accepted.ok) return err(repo(accepted.error));
+      // 正文与候选稿状态在同一事务中写入；冲突时先看是候选稿被处理过，还是原文被改过。
+      const accepted = await acceptCandidateRange(p.value, candidate, plan.value, ctx());
+      if (!accepted.ok) {
+        if (accepted.error.code !== 'conflict') return err(repo(accepted.error));
+        const latest = await getCandidate(p.value, candidateId);
+        if (latest.ok && (latest.value.status !== 'pending' || latest.value.version !== candidate.version)) return err(settings('这份候选稿在接受期间被修改或处理过，请重新查看'));
+        return stale();
+      }
       const after = await listParagraphs(p.value, candidate.chapterId);
       return after.ok ? ok({ candidate: accepted.value, paragraphs: after.value }) : err(repo(after.error));
     },

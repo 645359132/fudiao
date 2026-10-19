@@ -2,8 +2,8 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort } from '../sql';
-import { guardedUpdate, insertReturning, queryAll, queryOne, type RepoError, type WriteContext } from './common';
-import type { TextRange } from './paragraph-range';
+import { guardedUpdate, insertReturning, parseRows, queryAll, queryOne, type RepoError, type WriteContext } from './common';
+import { rangeReplaceStatements, type RangePlan, type TextRange } from './paragraph-range';
 
 /** narrate：由推演的节拍表写成的正文（B29、B62），带着它依据的节拍表。 */
 export const CANDIDATE_OPERATIONS = ['continue', 'rewrite', 'expand', 'shorten', 'polish', 'narrate'] as const;
@@ -133,4 +133,24 @@ export function setCandidateStatus(
     sql: `UPDATE candidate SET status = ?, status_reason = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'pending' RETURNING ${COLUMNS}`,
     params: [status, reason, ctx.now, candidate.id, candidate.version],
   });
+}
+
+/**
+ * 接受候选稿：替换正文（带段落版本守卫）与把候选稿标为已接受在同一个事务中。
+ * 候选稿在此期间被修改或处理过、段落被改过时整体回滚，返回冲突，不会出现正文写了、候选稿仍待处理的情况。
+ */
+export async function acceptCandidateRange(port: SqlPort, candidate: Candidate, plan: RangePlan, ctx: WriteContext): Promise<Result<Candidate, RepoError>> {
+  const done = await port.transaction([
+    {
+      sql: `UPDATE candidate SET status = 'accepted', status_reason = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'pending' RETURNING ${COLUMNS}`,
+      params: [ctx.now, candidate.id, candidate.version],
+      expectChanges: 1,
+    },
+    ...rangeReplaceStatements(candidate.chapterId, plan, ctx),
+  ]);
+  if (!done.ok) return err(done.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: done.error });
+  const rows = parseRows(CandidateRow, done.value[0]?.rows ?? []);
+  if (!rows.ok) return rows;
+  const row = rows.value[0];
+  return row === undefined ? err({ code: 'not_found' }) : ok(row);
 }

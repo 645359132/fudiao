@@ -42,7 +42,7 @@ export type { Evaluation, EvaluationAnswers, EvaluationMeasured, EvaluationScore
 export { getEvaluation, saveEvaluation } from './evaluation';
 export { BEAT_TREATMENTS, createBeatSheet, getBeatSheet, listBeatSheets, updateBeatSheet } from './beat-sheet';
 export type { Candidate, CandidateInput, CandidateOperation, CandidateStatus } from './candidate';
-export { CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
+export { acceptCandidateRange, CANDIDATE_OPERATIONS, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
 export type { ParagraphAnchor } from './common';
 export type { Foreshadow, ForeshadowFields, ForeshadowStatus } from './foreshadow';
 export { createForeshadow, deleteForeshadow, FORESHADOW_STATUSES, getForeshadow, listForeshadows, updateForeshadow } from './foreshadow';
@@ -56,7 +56,7 @@ export type { IssueEvidence, IssueInput, IssueKind, IssueSeverity, IssueStatus, 
 export { addIssues, countPendingIssues, getIssue, ISSUE_KINDS, ISSUE_STATUSES, listIssues, replacePendingIssues, reviewStaleIssues, setIssueStatus } from './review-issue';
 export type { WriterProgress } from './chapter-plan';
 export type { SegmentWrite } from './writer-segment';
-export { appendWrittenSegment, resetWriterRun, startWriterRun } from './writer-segment';
+export { appendWrittenSegment, resetWriterRun, rollbackWriterRun, startWriterRun } from './writer-segment';
 export type { SimProtocol, SimRun, SimRunInput, SimRunProgress, SimRunStatus, SimScene, SimSceneFields, SimSnapshot } from './sim';
 export {
   createSimRun,

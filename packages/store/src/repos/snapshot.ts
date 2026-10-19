@@ -2,7 +2,7 @@
 // 快照保存段落标识、文字、来源标记与事件关联：恢复后锚点仍指向原段落，来源与关联不丢失。
 import { err, keysBetween, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
-import type { SqlPort, Statement } from '../sql';
+import type { SqlPort, Statement, StatementResult } from '../sql';
 import { insertReturning, queryAll, queryOne, type RepoError, type WriteContext } from './common';
 import { listParagraphs } from './paragraph';
 import type { SavedParagraph } from './paragraph-plan';
@@ -15,6 +15,8 @@ const SnapshotParagraph = z.object({
   source: z.enum(['handwritten', 'ai_generated', 'ai_modified', 'mixed']),
   sourceSpans: z.unknown(),
   aiOriginText: z.string().nullable(),
+  /** 快照时的段落版本（审查 2026-10-19 起记录；更早的快照没有）。找回已删除的段落时据此决定版本。 */
+  version: z.number().int().optional(),
   links: z.array(z.object({ eventId: z.string(), mode: z.enum(['direct', 'flashback', 'retold', 'implied']) })),
 });
 export type SnapshotParagraph = z.infer<typeof SnapshotParagraph>;
@@ -45,6 +47,7 @@ const CurrentRow = z.object({
   source_kind: z.enum(['handwritten', 'ai_generated', 'ai_modified', 'mixed']),
   source_spans: z.string(),
   ai_origin_text: z.string().nullable(),
+  version: z.number().int(),
   links: z.string(),
 });
 
@@ -53,7 +56,7 @@ async function currentParagraphs(port: SqlPort, chapterId: string): Promise<Resu
   const rows = await queryAll(
     port,
     CurrentRow,
-    `SELECT p.id, p.text, p.source_kind, p.source_spans, p.ai_origin_text,
+    `SELECT p.id, p.text, p.source_kind, p.source_spans, p.ai_origin_text, p.version,
        (SELECT json_group_array(json_object('eventId', l.event_id, 'mode', l.mode))
           FROM (SELECT event_id, mode FROM event_paragraph_link WHERE paragraph_id = p.id ORDER BY event_id) AS l) AS links
      FROM paragraph p WHERE p.chapter_id = ? ORDER BY p.order_key`,
@@ -67,6 +70,7 @@ async function currentParagraphs(port: SqlPort, chapterId: string): Promise<Resu
       source: r.source_kind,
       sourceSpans: JSON.parse(r.source_spans) as unknown,
       aiOriginText: r.ai_origin_text,
+      version: r.version,
       links: JSON.parse(r.links) as SnapshotParagraph['links'],
     })),
   );
@@ -115,12 +119,16 @@ export async function getSnapshot(port: SqlPort, id: string): Promise<Result<Sna
  * 把一章恢复到快照：先把现稿存为“恢复前”快照（作者可以再次回退），再在一个事务中
  * 换回快照中的段落。段落沿用原标识；快照之后新增的段落删除；事件关联取快照中的关联（事件仍存在时）
  * 与现存段落当前关联的并集。文字或来源变化的段落版本加一，锚点据此判断原文是否变化。
+ * 找回已删除的段落时，删除前没再改过的沿用快照时的版本，改过的接着删除时的版本往上加（迁移 0017），不会倒退。
+ * 以读到的现稿为守卫：恢复期间本章被改动（另一处保存、写手追加）时整体不写，返回冲突。
  */
 export async function restoreSnapshot(
   port: SqlPort,
   input: { readonly snapshotId: string; readonly backupId: string },
   ctx: WriteContext,
-): Promise<Result<{ readonly paragraphs: SavedParagraph[]; readonly backup: SnapshotSummary }, RepoError>> {
+  /** 与恢复放在同一事务里的其他语句（回退写手写入时清除写作进度）；它们的守卫不满足时整体回滚。 */
+  also: readonly Statement[] = [],
+): Promise<Result<{ readonly paragraphs: SavedParagraph[]; readonly backup: SnapshotSummary; readonly also: readonly StatementResult[] }, RepoError>> {
   const snapshot = await getSnapshot(port, input.snapshotId);
   if (!snapshot.ok) return snapshot;
   const chapterId = snapshot.value.chapterId;
@@ -135,8 +143,16 @@ export async function restoreSnapshot(
   const existing = new Set(current.value.map((p) => p.id));
   const keys = keysBetween(null, null, restored.length);
   const statements: Statement[] = [snapshotStatement(input.backupId, chapterId, 'before_restore', chapter.value.title, current.value, ctx)];
+  // 守卫：段落数没变（没有新增），下面每个现存段落的版本也没变。
+  statements.push({
+    sql: 'UPDATE chapter SET updated_at = ? WHERE id = ? AND (SELECT count(*) FROM paragraph WHERE chapter_id = ?) = ?',
+    params: [ctx.now, chapterId, chapterId, current.value.length],
+    expectChanges: 1,
+  });
   // 先把本章所有段落挪到临时键，新顺序写入时不会撞上章内唯一约束。
-  statements.push({ sql: "UPDATE paragraph SET order_key = '~' || id WHERE chapter_id = ?", params: [chapterId] });
+  for (const p of current.value) {
+    statements.push({ sql: "UPDATE paragraph SET order_key = '~' || id WHERE id = ? AND chapter_id = ? AND version = ?", params: [p.id, chapterId, p.version ?? 0], expectChanges: 1 });
+  }
   for (const p of current.value) {
     if (!keep.has(p.id)) statements.push({ sql: 'DELETE FROM paragraph WHERE id = ? AND chapter_id = ?', params: [p.id, chapterId] });
   }
@@ -150,9 +166,13 @@ export async function restoreSnapshot(
         params: [p.text, p.source, spans, p.aiOriginText, p.text, p.source, spans, p.aiOriginText, keys[i] ?? '', ctx.now, p.id, chapterId],
       });
     } else {
+      const was = p.version ?? null;
       statements.push({
-        sql: 'INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        params: [p.id, chapterId, keys[i] ?? '', p.text, p.source, spans, p.aiOriginText, ctx.now, ctx.now],
+        sql: `INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, created_at, updated_at, version)
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                CASE WHEN r.version IS NULL THEN COALESCE(?, 1) WHEN r.version = ? THEN r.version ELSE max(COALESCE(?, 0), r.version) + 1 END
+              FROM (SELECT (SELECT version FROM paragraph_retired WHERE id = ?) AS version) AS r`,
+        params: [p.id, chapterId, keys[i] ?? '', p.text, p.source, spans, p.aiOriginText, ctx.now, ctx.now, was, was, was, p.id],
       });
     }
     for (const link of p.links) {
@@ -163,11 +183,13 @@ export async function restoreSnapshot(
     }
   });
   statements.push({ sql: 'UPDATE chapter SET updated_at = ? WHERE id = ?', params: [ctx.now, chapterId] });
+  const alsoAt = statements.length;
+  statements.push(...also);
 
   const done = await port.transaction(statements);
-  if (!done.ok) return err({ code: 'sql', error: done.error });
+  if (!done.ok) return err(done.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: done.error });
   const backupRow = SnapshotSummaryRow.safeParse(done.value[0]?.rows[0]);
   if (!backupRow.success) return err({ code: 'invalid', detail: '恢复前快照没有写入' });
   const paragraphs = await listParagraphs(port, chapterId);
-  return paragraphs.ok ? ok({ paragraphs: paragraphs.value, backup: backupRow.data }) : paragraphs;
+  return paragraphs.ok ? ok({ paragraphs: paragraphs.value, backup: backupRow.data, also: done.value.slice(alsoAt) }) : paragraphs;
 }

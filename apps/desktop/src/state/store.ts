@@ -922,9 +922,17 @@ export function createAppStore(service: AppService): AppStore {
         effort: get().library?.preferences.assistant.effort ?? 'medium',
         running: () => get().backgroundWork(),
         background: {
-          writeChapters(chapterIds, review) {
-            const job = get().writerJob;
-            if (writerRunning || job !== null) return `写手正在写${job === null ? '' : `《${chapter(job.chapterId)?.title ?? ''}》`}，等这一批写完或在“任务”里停下以后再排`;
+          async writeChapters(chapterIds, review) {
+            const busy = () => {
+              const job = get().writerJob;
+              return writerRunning || job !== null ? `写手正在写${job === null ? '' : `《${chapter(job.chapterId)?.title ?? ''}》`}，等这一批写完或在“任务”里停下以后再排` : null;
+            };
+            const before = busy();
+            if (before !== null) return before;
+            // 先保存编辑器里的内容（写手不覆盖未保存的修改）；保存不了就不排，免得助手说“已排上”而写手没有开始。
+            if (!(await get().leaveChapter())) return '本章正文没有保存成功，后台写作没有排上：先处理好本章（复制或导出后重新打开），再排';
+            const after = busy();
+            if (after !== null) return after;
             void get().writeChapters(chapterIds, { review });
             return null;
           },
@@ -934,6 +942,10 @@ export function createAppStore(service: AppService): AppStore {
             return null;
           },
           simulating: () => get().simAdvancing,
+          writing() {
+            const job = get().writerJob;
+            return job === null ? [] : [job.chapterId, ...job.queued];
+          },
           simulate(runId, sceneId) {
             if (get().simAdvancing) return '已经有一次推演在推进，等它推完或停下以后再推';
             void advanceSim(runId);

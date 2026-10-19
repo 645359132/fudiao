@@ -364,6 +364,14 @@ export function createAppService(deps: AppDeps) {
     ...simEvaluation,
     ...relations,
 
+    /** 交给写手修订与写手写章共用一把锁：写手正在写这一章时不修订，修订期间也不开始写。 */
+    async reviseIssue(issueId: string, options: CallOptions = {}) {
+      const chapterId = await review.issueChapterId(issueId);
+      if (!chapterId.ok) return chapterId;
+      if (chapterId.value === null) return err(repo({ code: 'not_found' }));
+      return writer.withWriterLock(chapterId.value, () => review.reviseIssue(issueId, options));
+    },
+
     /** 接受候选稿后本章正文已变，删除旧草稿，避免下次打开时提示恢复旧内容。 */
     async acceptCandidate(candidateId: string) {
       const accepted = await candidates.acceptCandidate(candidateId);
@@ -574,6 +582,10 @@ export function createAppService(deps: AppDeps) {
     /** 恢复到快照；现稿先存为“恢复前”快照。恢复后草稿已无意义，一并删除。 */
     async restoreSnapshot(snapshotId: string): Promise<Result<ChapterContent, AppError>> {
       if (session === null) return err({ code: 'no_work' });
+      const snapshot = await getSnapshot(session.port, snapshotId);
+      if (!snapshot.ok) return err(repo(snapshot.error));
+      const refused = await writer.restoreRefused(snapshot.value.chapterId);
+      if (refused !== null) return err(refused);
       const restored = await restoreSnapshot(session.port, { snapshotId, backupId: deps.ids.next() }, ctx());
       if (!restored.ok) return err(repo(restored.error));
       const chapterId = restored.value.backup.chapterId;
@@ -708,9 +720,10 @@ export function createAppService(deps: AppDeps) {
     /** 设定条目（需求 B09）。修改后返回最新的完整列表。 */
     listEntities: () => entities(),
 
-    async createEntity(kind: EntityKind, name: string): Promise<Result<{ entities: Entity[]; created: Entity }, AppError>> {
+    /** id 只在撤销 AI 助手的删除时给出：以原来的标识重建，以它为依据的事实、关系与计划照旧指向它。 */
+    async createEntity(kind: EntityKind, name: string, id?: string): Promise<Result<{ entities: Entity[]; created: Entity }, AppError>> {
       if (session === null) return err({ code: 'no_work' });
-      const created = await createEntity(session.port, { id: deps.ids.next(), kind, name }, ctx());
+      const created = await createEntity(session.port, { id: id ?? deps.ids.next(), kind, name }, ctx());
       if (!created.ok) return err(repo(created.error));
       const list = await entities();
       return list.ok ? ok({ entities: list.value, created: created.value }) : list;
@@ -764,7 +777,7 @@ export function createAppService(deps: AppDeps) {
   };
 
   // AI 助手（B69）：工具调用上面的用例，规则与守卫照常生效。
-  const assistant = assistantUseCases({ deps, host: app, project: () => session?.port ?? null, runner });
+  const assistant = assistantUseCases({ deps, host: app, project: () => session?.port ?? null, workKey: () => session?.entry.path ?? null, runner });
 
   // 快速成书（B67）：骨架与各步状态；计划、写作与审核沿用上面的用例。
   return {

@@ -254,6 +254,7 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "volume",
         "chapter",
         "paragraph",
+        "paragraph_retired",
         "chapter_snapshot",
         "entity",
         "fact",

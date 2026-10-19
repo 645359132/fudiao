@@ -45,7 +45,7 @@ import {
   type StoryEvent,
 } from '@fudiao/store';
 import { normalizePunctuation } from '@fudiao/writing';
-import { insertFor, STALE_REASON } from './candidates';
+import { candidateVersions, insertFor, STALE_REASON } from './candidates';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -554,8 +554,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
         return err(settings(`候选稿已过期：${STALE_REASON}，请重新写成正文`));
       };
       const i = paragraphs.value.findIndex((p) => p.id === candidate.target.from.paragraphId);
-      const j = paragraphs.value.findIndex((p) => p.id === candidate.target.to.paragraphId);
-      const versions = Object.fromEntries(paragraphs.value.slice(i, j + 1).map((p) => [p.id, p.version]));
+      const versions = candidateVersions(paragraphs.value, candidate);
       const same =
         i >= 0 &&
         Object.keys(versions).length === Object.keys(candidate.baseVersions).length &&

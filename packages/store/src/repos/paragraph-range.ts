@@ -22,7 +22,8 @@ export type RangeInsert = {
 type Out = { readonly text: string; readonly spans: readonly AiSpan[]; readonly aiOriginText: string | null; readonly source: SourceKind };
 
 export type RangePlan = {
-  readonly update: Out & { readonly id: string; readonly expectedVersion: number };
+  /** unchanged：首段文字与来源都不变（在段末接以换行开头的续写），只核对版本，不改写、版本不加。 */
+  readonly update: Out & { readonly id: string; readonly expectedVersion: number; readonly unchanged: boolean };
   readonly inserts: readonly (Out & { readonly id: string; readonly orderKey: string })[];
   readonly deletes: readonly { readonly id: string; readonly expectedVersion: number }[];
   /** 并入首段的段落（事件关联取并集）与新段落（复制首段的关联）。 */
@@ -80,14 +81,17 @@ export function planRangeReplace(paragraphs: readonly SavedParagraph[], range: T
     return finish(text, spans, head.text === '' && tail.text === '', insert.unedited);
   });
 
-  const [head, ...rest] = outs;
-  if (head === undefined) return err('没有要写入的文字');
+  // 在段末接以换行开头的文字（续写）：首段原样不动，保留来源与生成原文，否则会被当成改过的 AI 段落、丢掉生成原文。
+  const appendsAfter = i === j && range.from.offset === first.text.length && range.to.offset === range.from.offset && pieces.length > 1 && pieces[0]?.text === '';
+  const [computed, ...rest] = outs;
+  if (computed === undefined) return err('没有要写入的文字');
+  const head: Out = appendsAfter ? { text: first.text, spans: first.spans, aiOriginText: first.aiOriginText, source: first.source } : computed;
   const nextKey = paragraphs[j + 1]?.orderKey ?? null;
   const keys = keysBetween(first.orderKey, nextKey, rest.length);
   const inserts = rest.map((o, k) => ({ ...o, id: newId(), orderKey: keys[k] ?? '' }));
   const merged = paragraphs.slice(i + 1, j + 1);
   return ok({
-    update: { ...head, id: first.id, expectedVersion: first.version },
+    update: { ...head, id: first.id, expectedVersion: first.version, unchanged: appendsAfter },
     inserts,
     deletes: merged.map((p) => ({ id: p.id, expectedVersion: p.version })),
     linkCopies: [...merged.map((p) => ({ from: p.id, to: first.id })), ...inserts.map((p) => ({ from: first.id, to: p.id }))],
@@ -110,11 +114,13 @@ export function rangeReplaceStatements(chapterId: string, plan: RangePlan, ctx: 
   const guarded = (sql: string, params: SqlValue[]): Statement => ({ sql, params, expectChanges: 1 });
   const u = plan.update;
   statements.push(
-    guarded(
-      `UPDATE paragraph SET text = ?, source_kind = ?, source_spans = ?, ai_origin_text = ?, version = version + 1, updated_at = ?
-        WHERE id = ? AND chapter_id = ? AND version = ?`,
-      [u.text, u.source, JSON.stringify(u.spans), u.aiOriginText, ctx.now, u.id, chapterId, u.expectedVersion],
-    ),
+    u.unchanged
+      ? guarded('UPDATE paragraph SET updated_at = updated_at WHERE id = ? AND chapter_id = ? AND version = ?', [u.id, chapterId, u.expectedVersion])
+      : guarded(
+          `UPDATE paragraph SET text = ?, source_kind = ?, source_spans = ?, ai_origin_text = ?, version = version + 1, updated_at = ?
+            WHERE id = ? AND chapter_id = ? AND version = ?`,
+          [u.text, u.source, JSON.stringify(u.spans), u.aiOriginText, ctx.now, u.id, chapterId, u.expectedVersion],
+        ),
   );
   for (const d of plan.deletes) {
     statements.push(guarded('UPDATE paragraph SET updated_at = updated_at WHERE id = ? AND chapter_id = ? AND version = ?', [d.id, chapterId, d.expectedVersion]));

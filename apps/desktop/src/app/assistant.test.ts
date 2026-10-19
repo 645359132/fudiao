@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { openaiChunks } from '@fudiao/llm/testing';
 import type { AssistantTurnOutput } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
+import { loadMigrations, openProjectDb } from '@fudiao/store/node';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import type { AssistantEffect, AssistantItem, AssistantSelection, AssistantUsage } from './assistant';
@@ -100,6 +101,52 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.usage()).recent.filter((c) => c.taskKind === 'assistant')).toHaveLength(4);
   });
 
+  it('一轮里两次换作品：作者的话与这一轮的对话都存进最后打开的作品，不丢', async () => {
+    const { deps, app } = await setup(null);
+    step(deps, {
+      message: '建两本。',
+      actions: [
+        { tool: 'create_work', title: '甲书', genre: '', synopsis: '', outline: null },
+        { tool: 'create_work', title: '乙书', genre: '', synopsis: '', outline: null },
+      ],
+      done: true,
+    });
+    value(await app.sendToAssistant('建两本书'));
+    expect(value(await app.reloadWork()).project.title).toBe('乙书');
+    const items = value(await app.assistantItems());
+    expect(items[0]).toMatchObject({ role: 'user', text: '建两本书' });
+    expect(roles(items)).toEqual(['user', 'assistant', 'changes', 'changes', 'results']);
+  });
+
+  it('生成章节计划期间作者新建的设定不算助手的改动：撤销这一轮只撤助手采用的计划，作者的设定留着', async () => {
+    const { deps, app } = await setup();
+    value(await app.updateWorkInfo({ outline: '林舟深夜当玉，掌柜起疑。' }));
+    step(deps, { message: '生成计划。', actions: [{ tool: 'plan_chapters', count: 1, wordsPerChapter: null }], done: true });
+    deps.llmResponses.push(
+      reply(JSON.stringify({ chapters: [{ title: '第一章 夜叩', goal: '当玉', cast: [], beats: ['叩门'], plant: [], payoff: [], treatment: '', targetWords: 3000 }], foreshadows: [] })),
+    );
+    // 第二个请求（生成计划草稿）到达时，作者在设定页新建了一个人物。
+    deps.beforeLlm.push(null, async () => {
+      value(await app.createEntity('character', '作者新建的人'));
+    });
+    value(await app.sendToAssistant('按大纲生成一章的计划'));
+    expect(value(await app.planningView()).chapters.some((c) => c.plan !== null)).toBe(true);
+    value(await app.undoAssistantTurn());
+    expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['作者新建的人']);
+    expect(value(await app.planningView()).chapters.every((c) => c.plan === null)).toBe(true);
+  });
+
+  it('对话存不进作品库时停下并说明，不当作没事接着调用模型', async () => {
+    const { deps, app } = await setup();
+    const other = openProjectDb(value(await app.reloadWork()).entry.path, { migrations: loadMigrations(), now: '2026-10-19T00:00:00.000Z' });
+    if (!other.ok) throw new Error('open');
+    value(await other.value.db.transaction([{ sql: "CREATE TRIGGER fail_append BEFORE INSERT ON assistant_message BEGIN SELECT RAISE(ABORT, '磁盘已满'); END" }]));
+    other.value.db.close();
+    step(deps, { message: '好。', actions: [], done: true });
+    expect(await app.sendToAssistant('你好')).toMatchObject({ ok: false, error: { code: 'repo' } });
+    expect(deps.llmRequests).toHaveLength(0);
+  });
+
   it('思考深度与上下文用量：按作者选的深度发请求；每一步结束后报告发给模型的 Token 数与模型的上下文上限', async () => {
     const { deps, app } = await setup();
     const model = value(await app.loadModelServices()).models[0]!;
@@ -115,6 +162,20 @@ describe('AI 助手（B69）', () => {
     deps.llmResponses.push(reply(JSON.stringify(done)));
     value(await app.sendToAssistant('再说一句'));
     expect(body(deps, 1)).toContain('"reasoning_effort":"medium"');
+  });
+
+  it('确认绑定在确认时找到的那一项：作者确认之前改了名、又新建了同名的设定，删掉的仍是确认的那一个', async () => {
+    const { deps, app } = await setup();
+    const qian = value(await app.createEntity('character', '钱四')).created;
+    step(deps, { message: '要删掉钱四，请确认。', actions: [{ tool: 'delete_entity', entity: '钱' }], done: false });
+    const asked = value(await app.sendToAssistant('删掉钱四'));
+    expect(asked.items.at(-1)).toMatchObject({ role: 'pending', summary: expect.stringContaining('“钱四”') });
+    value(await app.updateEntity(qian, { name: '钱老四' }));
+    value(await app.createEntity('character', '钱五'));
+    step(deps, { message: '删了。', actions: [], done: true });
+    const done = value(await app.resolveAssistantPending(true));
+    expect(lastResults(done.items)?.results[0]).toMatchObject({ tool: 'delete_entity', ok: true });
+    expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['钱五']);
   });
 
   it('删除类动作先停下请作者确认；确认后执行并接着执行同一步里排在后面的动作，拒绝时它们都不执行并如实告诉模型', async () => {
@@ -392,6 +453,7 @@ describe('AI 助手（B69）', () => {
       reviewChapters: () => null,
       writeChapters: () => null,
       simulating: () => false,
+      writing: () => [],
       simulate: () => null,
       stop: (what: string) => {
         asked.push(what);
@@ -402,6 +464,18 @@ describe('AI 助手（B69）', () => {
     const outcome = value(await app.sendToAssistant('先别写了', { background }));
     expect(asked).toEqual(['writing']);
     expect(lastResults(outcome.items)).toMatchObject({ results: [{ tool: 'stop_background', ok: true, detail: '已停下：写手停在这一段之后。' }] });
+  });
+
+  it('排在后台写作里的章节（正在写或排着）助手不直接写，也不回退', async () => {
+    const { deps, app } = await setup();
+    const id = value(await app.createChapter('第一章 夜叩')).chapters[0]!.id;
+    value(await app.savePlan(id, { goal: '林舟当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    const background = { reviewChapters: () => null, writeChapters: () => null, simulating: () => false, writing: () => [id], simulate: () => null, stop: () => '' };
+    step(deps, { message: '', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: true });
+    step(deps, { message: '已经排在后台了。', actions: [], done: true });
+    const outcome = value(await app.sendToAssistant('写第一章', { background }));
+    expect(lastResults(outcome.items)?.results[0]).toMatchObject({ tool: 'write_chapter', ok: false, detail: expect.stringContaining('后台') });
+    expect(deps.llmRequests).toHaveLength(2);
   });
 
   it('写或审核多章交给后台：动作立即返回“已排上”，后台收到按书中顺序的章节；没有后台时说明不能用', async () => {
@@ -422,6 +496,7 @@ describe('AI 助手（B69）', () => {
         return null;
       },
       simulating: () => false,
+      writing: () => [],
       simulate: () => null,
       stop: () => '后台没有在进行的写作或审核。',
     };
@@ -442,7 +517,7 @@ describe('AI 助手（B69）', () => {
     ]);
 
     // 后台已有一批时说明原因；指名的章节里没有正文的不排。
-    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, simulating: () => false, simulate: () => null, stop: () => '' };
+    const busy = { reviewChapters: () => '已经有一批在依次审核', writeChapters: () => null, simulating: () => false, writing: () => [], simulate: () => null, stop: () => '' };
     // 动作失败时助手会再走一步说明：每次排两步。
     const failing = (actions: AssistantTurnOutput['actions']) => {
       step(deps, { message: '', actions, done: true });

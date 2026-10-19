@@ -2107,6 +2107,28 @@ describe('后台任务不被打断', () => {
     expect(deps.llmRequests.length).toBe(before + 3);
   });
 
+  it('让助手排后台写作时本章正文保存不了：不排上，如实告诉助手，写手不开始', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    expect((await service.savePlan(chapterId, { goal: '目标', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+    // 和助手说话时正文保存了；之后作者又改了几个字，到排后台写作时存不进去（例如正文已在别处修改）。
+    let leaves = 0;
+    store.setState({ leaveChapter: () => Promise.resolve(++leaves === 1) });
+    deps.llmResponses.push(
+      reply(JSON.stringify({ message: '', actions: [{ tool: 'write_chapters', chapters: null, review: false }], done: true })),
+      reply(JSON.stringify({ message: '没有排上：本章正文没有保存成功。', actions: [], done: true })),
+    );
+    await user.type(screen.getByRole('textbox', { name: '给助手的话' }), '把这一章写完{Enter}');
+    expect(await screen.findByText('没有排上：本章正文没有保存成功。')).toBeTruthy();
+    const results = store.getState().assistantItems.filter((i) => i.role === 'results').at(-1);
+    expect(results).toMatchObject({ results: [{ tool: 'write_chapters', ok: false, detail: expect.stringContaining('没有保存成功') }] });
+    expect(store.getState().writerJob).toBeNull();
+    expect(store.getState().tasks.filter((t) => t.kind === 'writer')).toEqual([]);
+  });
+
   it('没有任务在进行时，回到作品列表不用确认', async () => {
     const { user } = start();
     await createWork(user, '雨夜');

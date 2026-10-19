@@ -208,6 +208,41 @@ describe('写手成章', () => {
     expect(value(await app.listSnapshots(c2)).filter((s) => s.reason === 'writer')).toHaveLength(1);
   });
 
+  it('输出被截断：半截的这一段不写入，停下并说明；接着写时重新调用这一段，不复用截断的结果', async () => {
+    const { deps, app, c2 } = await setup();
+    deps.llmResponses.push(reply('林舟又叩响了门。'), { chunks: openaiChunks('m', { text: ['钱四的目光停'], end: 'length' }) });
+    const stopped = value(await app.writeChapter(c2));
+    expect(stopped).toMatchObject({ status: 'stopped', segmentsDone: 1, plan: { status: 'writing' } });
+    expect(stopped.reason).toContain('截断');
+    expect(await texts(app, c2)).toEqual(['林舟又叩响了门。']);
+
+    const requestsBefore = deps.llmRequests.length;
+    deps.llmResponses.push(reply('林舟转身走进雨里。'));
+    expect(value(await app.writeChapter(c2))).toMatchObject({ status: 'written', segmentsDone: 2 });
+    expect(deps.llmRequests.length - requestsBefore).toBe(1);
+    expect(await texts(app, c2)).toEqual(['林舟又叩响了门。', '林舟转身走进雨里。']);
+  });
+
+  it('写手写到一半或正在写时不能恢复快照（否则接着写会缺前面的段却标为写完）；回退到写手写入前以后可以', async () => {
+    const { deps, app, c2 } = await setup();
+    const manual = value(await app.createSnapshot(c2));
+    deps.llmResponses.push(reply('林舟又叩响了门。'));
+    expect(value(await app.writeChapter(c2))).toMatchObject({ status: 'stopped', segmentsDone: 1 });
+    expect(await app.restoreSnapshot(manual.id)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写到一半') } });
+    expect(await texts(app, c2)).toEqual(['林舟又叩响了门。']);
+
+    const abort = new AbortController();
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['钱四'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    const running = app.writeChapter(c2, { signal: abort.signal });
+    while (app.writingChapters().length === 0) await new Promise((r) => setTimeout(r, 5));
+    expect(await app.restoreSnapshot(manual.id)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写手正在写这一章') } });
+    abort.abort();
+    await running;
+
+    value(await app.rollbackWriter(c2));
+    expect(value(await app.restoreSnapshot(manual.id)).saved).toEqual([]);
+  });
+
   it('作者取消：正在写的段不写入，已写的段保留，可以接着写', async () => {
     const { deps, app, c2 } = await setup();
     deps.llmResponses.push(reply('林舟又叩响了门。'), reply('林舟转身走进雨里。'));

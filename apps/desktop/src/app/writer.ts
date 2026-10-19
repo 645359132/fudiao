@@ -2,12 +2,14 @@
 // 按章节计划的情节点分段写：每段一次调用；写完一段就接在章末，并在同一事务中更新计划里的进度。
 // 写第一段之前保存“写手写入”快照，作者可以一键回退；写入的段落记为 AI 生成（硬性规则 21）。
 // 每段的步骤键是“章节 + 这次写作的标识 + 段号”：中断后续写时，已写入的段跳过，已完成但没写入的调用复用记录，不重复计费。
+// 输出被截断的段不写入：停下说明，续写时这一段换一个步骤键（加“重写次数”），不复用截断的结果。
 import type { CallOptions } from '@fudiao/llm';
 import { renderWriterChapter } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   appendWrittenSegment,
   createSnapshot,
+  findCompletedCall,
   getChapterPlan,
   getProject,
   listChapterMemories,
@@ -19,8 +21,7 @@ import {
   listForeshadows,
   listParagraphs,
   listRelationships,
-  resetWriterRun,
-  restoreSnapshot,
+  rollbackWriterRun,
   startWriterRun,
   type Chapter,
   type ChapterPlan,
@@ -64,6 +65,16 @@ const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 const tail = (text: string) => (text.length <= TAIL_CHARS ? text : text.slice(-TAIL_CHARS));
 const body = (paragraphs: readonly SavedParagraph[]) => paragraphs.map((p) => p.text).join('\n');
+
+/** 截断过的段落另起步骤键：第一次用原键，之后依次加“:r1”“:r2”……，直到一个没有截断记录的键。 */
+export async function retryableStepKey(port: SqlPort, base: string): Promise<Result<string, RepoError>> {
+  for (let attempt = 0; ; attempt++) {
+    const key = attempt === 0 ? base : `${base}:r${attempt}`;
+    const found = await findCompletedCall(port, key);
+    if (!found.ok) return found;
+    if (found.value?.status !== 'truncated') return ok(key);
+  }
+}
 
 export function writerUseCases(deps: AppDeps, session: () => { readonly port: SqlPort; readonly path: string } | null, runner: ReturnType<typeof modelRunner>) {
   const ctx = () => ({ now: deps.clock.now() });
@@ -230,13 +241,15 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
           isLast: i === total - 1,
         });
         if (!prompt.ok) return err(settings(prompt.error));
-        const result = await runner.text(
-          { prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: `writer:${chapterId}:${progress.runId}:${i}` },
-          events,
-        );
+        const stepKey = await retryableStepKey(port, `writer:${chapterId}:${progress.runId}:${i}`);
+        if (!stepKey.ok) return err(repo(stepKey.error));
+        const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value }, events);
         if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
         if (result.value.outcome === 'cancelled') return outcome('cancelled', null);
         if (result.value.outcome === 'refused') return outcome('stopped', `模型拒绝了这一段${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`);
+        if (result.value.outcome === 'truncated') {
+          return outcome('stopped', `第 ${i + 1} 段的输出被截断，没有写入；可以在模型服务中调高这个模型的最大输出，或换一个模型，再接着写（这一段会重新写）`);
+        }
         // 写手的输出先规范标点（B74），再按行切成段落。
         const texts = splitParagraphs(normalizePunctuation(result.value.text));
         if (texts.length === 0) return outcome('stopped', '模型没有写出文字');
@@ -261,11 +274,11 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       if (!plan.ok) return err(repo(plan.error));
       const progress = plan.value?.progress ?? null;
       if (plan.value === null || progress === null) return err(settings('这一章没有写手写入的记录'));
-      const restored = await restoreSnapshot(s.port, { snapshotId: progress.snapshotId, backupId: deps.ids.next() }, ctx());
-      if (!restored.ok) return err(repo(restored.error));
+      // 恢复正文与清除进度在同一事务中（rollbackWriterRun），之后才删草稿。
+      const reset = await rollbackWriterRun(s.port, plan.value, { snapshotId: progress.snapshotId, backupId: deps.ids.next() }, ctx());
+      if (!reset.ok) return err(repo(reset.error));
       await deps.drafts.remove(s.path, chapterId);
-      const reset = await resetWriterRun(s.port, plan.value, ctx());
-      return reset.ok ? reset : err(repo(reset.error));
+      return reset;
     },
   };
 
@@ -273,20 +286,40 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
   // 两个写手会互相当成“作者改了本章”而停下。写作期间也不能回退这一章。
   const writing = new Set<string>();
   const busy = (chapterId: string) => (writing.has(chapterId) ? err(settings('写手正在写这一章：等它写完，或在“任务”里停下以后再说')) : null);
+  /** 在这一章的写手锁里做 f：写手写章与写手修订共用，同一章同时只有一个在改正文。 */
+  async function locked<T>(chapterId: string, f: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
+    const refused = busy(chapterId);
+    if (refused !== null) return refused;
+    writing.add(chapterId);
+    try {
+      return await f();
+    } finally {
+      writing.delete(chapterId);
+    }
+  }
   return {
     ...cases,
-    async writeChapter(chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> {
-      const refused = busy(chapterId);
-      if (refused !== null) return refused;
-      writing.add(chapterId);
-      try {
-        return await cases.writeChapter(chapterId, events);
-      } finally {
-        writing.delete(chapterId);
-      }
-    },
+    writeChapter: (chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> => locked(chapterId, () => cases.writeChapter(chapterId, events)),
+    withWriterLock: locked,
     async rollbackWriter(chapterId: string): Promise<Result<ChapterPlan, AppError>> {
       return busy(chapterId) ?? cases.rollbackWriter(chapterId);
+    },
+    /**
+     * 恢复快照前的检查：写手正在写这一章，或写到一半（进度没写完）时不恢复——恢复后“接着写”会从第 k 段续写，
+     * 前面已写的段却已不在正文里，章节仍会标为写完。要恢复先回退到写手写入前，或接着写完。
+     */
+    async restoreRefused(chapterId: string): Promise<AppError | null> {
+      const refused = busy(chapterId);
+      if (refused !== null) return refused.error;
+      const s = session();
+      if (s === null) return { code: 'no_work' };
+      const plan = await getChapterPlan(s.port, chapterId);
+      if (!plan.ok) return repo(plan.error);
+      const progress = plan.value?.progress ?? null;
+      if (plan.value?.status === 'writing' && progress !== null && progress.done < progress.segments.length) {
+        return settings('写手把这一章写到一半：先回退到写手写入前，或接着写完，再恢复快照');
+      }
+      return null;
     },
     /** 正在由写手写作的章节（AI 助手的现状里列出）。 */
     writingChapters: (): readonly string[] => [...writing],

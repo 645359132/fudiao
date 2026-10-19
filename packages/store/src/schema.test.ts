@@ -42,6 +42,7 @@ const sample: Statement[] = [
     "INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, version, created_at, updated_at) VALUES ('01G2', '01C1', 'a1', '他没有回头。', 'ai_modified', '[{\"start\":0,\"end\":6}]', '他始终没有回头。', '01G1', 3, ?, ?)",
     ...T,
   ),
+  s("INSERT INTO paragraph_retired (id, version) VALUES ('01G9', 4)"),
   s("INSERT INTO chapter_snapshot (id, chapter_id, reason, title, paragraphs, created_at) VALUES ('01S1', '01C1', 'manual', '第一章 雨夜', '[{\"id\":\"01G1\",\"text\":\"雨下得更紧了。\"}]', ?)", NOW),
   s("INSERT INTO entity (id, kind, name, aliases, data, locked, created_at, updated_at) VALUES ('01E1', 'character', '沈砚', '[\"沈先生\"]', '{\"age\":28}', 1, ?, ?)", ...T),
   s("INSERT INTO entity (id, kind, name, created_at, updated_at) VALUES ('01E2', 'location', '当铺', ?, ?)", ...T),
@@ -449,6 +450,14 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect(await importData(target, { schemaVersion: 7, tables })).toMatchObject({ ok: true });
     const after = await exported(target);
     expect(after.tables).toEqual({ ...data.tables, evaluation: [] });
+  });
+
+  it('结构版本 16 导出的数据（没有删除过的段落的版本）导入后为空', async () => {
+    const data = await exported(await seeded());
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'paragraph_retired'));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 16, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, paragraph_retired: [] });
   });
 
   it('结构版本 14 导出的数据（没有封面）导入后封面为空', async () => {

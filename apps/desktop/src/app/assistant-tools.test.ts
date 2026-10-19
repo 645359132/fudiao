@@ -2,7 +2,7 @@ import { ASSISTANT_TOOLS, AssistantAction, type AssistantTool } from '@fudiao/pr
 import { describe, expect, it } from 'vitest';
 import { confirmationFor, toolLabel, type ToolEnv } from './assistant-tools';
 
-/** 只回答“作品有没有章节计划”的执行环境；动作没有被执行，其余用到就失败。 */
+/** 只回答“作品有没有章节计划”与按名称找章节、卷、设定的执行环境；动作没有被执行，其余用到就失败。 */
 function envWithPlans(hasPlans: boolean): ToolEnv {
   const unused = () => {
     throw new Error('确认阶段不应调用');
@@ -17,9 +17,10 @@ function envWithPlans(hasPlans: boolean): ToolEnv {
     project: unused,
     events: {},
     work: unused,
-    findChapter: unused,
-    findVolume: unused,
-    findEntity: unused,
+    // 按名称找到的一项：标识为“id:名称”，名称原样（确认说明用找到的那一项）。
+    findChapter: (ref) => Promise.resolve({ ok: true, value: { id: `id:${ref}`, title: ref } as never }),
+    findVolume: (ref) => Promise.resolve({ ok: true, value: { id: `id:${ref}`, title: ref } as never }),
+    findEntity: (ref) => Promise.resolve({ ok: true, value: { id: `id:${ref}`, name: ref } as never }),
     hasPlans: () => Promise.resolve(hasPlans),
     changed: unused,
     call: unused,
@@ -50,6 +51,7 @@ describe('AI 助手的命令表（B69、B71）', () => {
     const plan = sample('plan_chapters');
     expect(await confirmationFor(plan.tool, plan, envWithPlans(false))).toBeNull();
     const trash = AssistantAction.parse({ tool: 'trash_chapter', chapter: '第三章' });
-    expect(await confirmationFor(trash.tool, trash, envWithPlans(false))).toBe('把“第三章”移入回收站');
+    // 确认绑定找到的那一项：作者确认后执行的动作用它的标识。
+    expect(await confirmationFor(trash.tool, trash, envWithPlans(false))).toEqual({ summary: '把“第三章”移入回收站', action: { tool: 'trash_chapter', chapter: 'id:第三章' } });
   });
 });
