@@ -6,6 +6,7 @@ import { exportData, importData } from '../data-export';
 import { loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
 import { createChapter } from './chapter';
 import { listParagraphs, saveChapterParagraphs } from './paragraph';
+import type { SqlValue, Statement } from '../sql';
 import type { CurrentParagraph, SavedParagraph } from './paragraph-plan';
 import { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
 
@@ -62,8 +63,8 @@ describe('章节快照', () => {
     expect(value(await listSnapshots(db, 'c1')).map((s) => s.id)).toEqual(['s2', 's1']);
     const full = value(await getSnapshot(db, 's1'));
     expect(full.paragraphs).toEqual([
-      { id: 'a', text: '雨下得更紧了。', source: 'handwritten', sourceSpans: [], aiOriginText: null, links: [{ eventId: 'e1', mode: 'flashback' }] },
-      { id: 'b', text: '他没有回头。', source: 'ai_modified', sourceSpans: [{ start: 0, end: 6 }], aiOriginText: null, links: [] },
+      { id: 'a', text: '雨下得更紧了。', source: 'handwritten', sourceSpans: [], aiOriginText: null, version: 1, links: [{ eventId: 'e1', mode: 'flashback' }] },
+      { id: 'b', text: '他没有回头。', source: 'ai_modified', sourceSpans: [{ start: 0, end: 6 }], aiOriginText: null, version: 1, links: [] },
     ]);
   });
 
@@ -88,6 +89,58 @@ describe('章节快照', () => {
     expect(result.paragraphs.find((p) => p.id === 'c')?.version).toBe(3);
     expect(result.paragraphs.find((p) => p.id === 'a')?.version).toBe(1);
     expect(value(await listParagraphs(db, 'c1'))).toEqual(result.paragraphs);
+  });
+
+  it('找回已删除的段落时版本不倒退：删除前改过的，版本比删除时大；快照之后没改过就删的，沿用快照时的版本', async () => {
+    const db = await fresh();
+    let saved = value(await saveChapterParagraphs(db, 'c1', [], [cur('a', '甲'), cur('b', '乙')], NONE, t0));
+    saved = value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲'), cur('b', '乙二')], NONE, t0));
+    value(await createSnapshot(db, { id: 's1', chapterId: 'c1', reason: 'manual' }, t1));
+    // b 在快照之后又改了一次（版本 3），然后删掉；a 没改过就删掉。
+    saved = value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲'), cur('b', '乙三')], NONE, t1));
+    expect(saved.find((p) => p.id === 'b')?.version).toBe(3);
+    value(await saveChapterParagraphs(db, 'c1', saved, [cur('c', '丙')], NONE, t1));
+    const restored = value(await restoreSnapshot(db, { snapshotId: 's1', backupId: 'r1' }, t2));
+    expect(restored.paragraphs.map((p) => [p.id, p.text, p.version])).toEqual([
+      ['a', '甲', 1],
+      ['b', '乙二', 4],
+    ]);
+  });
+
+  it('编辑器撤销找回已删除的段落标识时，版本同样接着删除时的版本往上加', async () => {
+    const db = await fresh();
+    let saved = value(await saveChapterParagraphs(db, 'c1', [], [cur('a', '甲')], NONE, t0));
+    saved = value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲二')], NONE, t0));
+    saved = value(await saveChapterParagraphs(db, 'c1', saved, [cur('b', '乙')], NONE, t1));
+    saved = value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲'), cur('b', '乙')], NONE, t1));
+    expect(saved.find((p) => p.id === 'a')?.version).toBe(3);
+  });
+
+  it('恢复期间正文被改动（另一处保存、写手追加）：不恢复，返回冲突', async () => {
+    const db = await fresh();
+    const saved = value(await saveChapterParagraphs(db, 'c1', [], [cur('a', '甲'), cur('b', '乙')], NONE, t0));
+    value(await createSnapshot(db, { id: 's1', chapterId: 'c1', reason: 'manual' }, t1));
+    value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲改'), cur('b', '乙')], NONE, t1));
+    const racing = (statement: string) => ({
+      query: (sql: string, params?: readonly SqlValue[]) => db.query(sql, params),
+      transaction: async (statements: readonly Statement[]) => {
+        value(await db.transaction([{ sql: statement }]));
+        return db.transaction(statements);
+      },
+    });
+    const now = async () => value(await listParagraphs(db, 'c1')).map((p) => p.text);
+    const before = await now();
+    expect(await restoreSnapshot(racing("UPDATE paragraph SET text = '又改', version = version + 1 WHERE id = 'b'"), { snapshotId: 's1', backupId: 'r1' }, t2)).toEqual({ ok: false, error: { code: 'conflict' } });
+    expect(await now()).toEqual(['甲改', '又改']);
+    expect(before).toEqual(['甲改', '乙']);
+    expect(
+      await restoreSnapshot(
+        racing("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('z', 'c1', 'zz', '追加', '2026-10-08T00:00:00.000Z', '2026-10-08T00:00:00.000Z')"),
+        { snapshotId: 's1', backupId: 'r2' },
+        t2,
+      ),
+    ).toEqual({ ok: false, error: { code: 'conflict' } });
+    expect(value(await listSnapshots(db, 'c1')).map((s) => s.id)).toEqual(['s1']);
   });
 
   it('恢复前自动把现稿存为快照，可以再次回退', async () => {

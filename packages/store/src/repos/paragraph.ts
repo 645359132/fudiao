@@ -77,8 +77,10 @@ export async function saveChapterParagraphs(
   // 2. 新增段落。
   for (const p of plan.inserts) {
     statements.push({
-      sql: 'INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      params: [p.id, chapterId, p.orderKey, p.text, p.source, JSON.stringify(p.spans), p.aiOriginText, p.splitFrom, ctx.now, ctx.now],
+      // 编辑器撤销可能找回删除过的段落标识：版本接着删除时的往上加（迁移 0017），旧记录不会被当成原文没变。
+      sql: `INSERT INTO paragraph (id, chapter_id, order_key, text, source_kind, source_spans, ai_origin_text, split_from, created_at, updated_at, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT version + 1 FROM paragraph_retired WHERE id = ?), 1))`,
+      params: [p.id, chapterId, p.orderKey, p.text, p.source, JSON.stringify(p.spans), p.aiOriginText, p.splitFrom, ctx.now, ctx.now, p.id],
     });
   }
   // 3. 修改：文本或来源变化时版本加一（锚点据此判断原文是否变化），只改排序键时不加。

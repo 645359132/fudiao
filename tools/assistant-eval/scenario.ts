@@ -88,6 +88,7 @@ export function backgroundFor(app: AppService, log: (line: string) => void) {
       );
       return null;
     },
+    writing: () => (writing === null ? [] : [writing.current, ...writing.queued]),
     reviewChapters(ids) {
       if (reviewing !== null) return '已经有一批在依次审核';
       const abort = new AbortController();

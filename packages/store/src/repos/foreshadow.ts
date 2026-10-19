@@ -109,8 +109,18 @@ export function updateForeshadow(port: SqlPort, current: Foreshadow, fields: For
   });
 }
 
+/** 章节计划里要埋或要收这条伏笔（记在 JSON 里，外键管不到）的计划数。 */
+const PLAN_USES =
+  "(SELECT count(*) FROM chapter_plan p WHERE EXISTS (SELECT 1 FROM json_each(p.foreshadow_plant) j WHERE j.value = ?) OR EXISTS (SELECT 1 FROM json_each(p.foreshadow_payoff) j WHERE j.value = ?))";
+
+/** 删除伏笔。章节计划里还要埋或要收它时拒绝（in_use），不然计划里留下指不到的标识；判断写在删除语句里，不会在两步之间被别处加进计划。 */
 export async function deleteForeshadow(port: SqlPort, current: Foreshadow): Promise<Result<void, RepoError>> {
-  const result = await port.transaction([{ sql: 'DELETE FROM foreshadow WHERE id = ? AND version = ?', params: [current.id, current.version], expectChanges: 1 }]);
+  const result = await port.transaction([
+    { sql: `DELETE FROM foreshadow WHERE id = ? AND version = ? AND ${PLAN_USES} = 0`, params: [current.id, current.version, current.id, current.id], expectChanges: 1 },
+  ]);
   if (result.ok) return ok(undefined);
-  return err(result.error.code === 'guard_failed' ? { code: 'conflict' } : { code: 'sql', error: result.error });
+  if (result.error.code !== 'guard_failed') return err({ code: 'sql', error: result.error });
+  const used = await port.query(`SELECT ${PLAN_USES} AS n`, [current.id, current.id]);
+  if (!used.ok) return err({ code: 'sql', error: used.error });
+  return err(Number(used.value[0]?.['n'] ?? 0) > 0 ? { code: 'in_use' } : { code: 'conflict' });
 }

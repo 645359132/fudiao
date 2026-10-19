@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import { openaiChunks } from '@fudiao/llm/testing';
 import type { ChapterReviewOutput } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
@@ -204,6 +205,32 @@ describe('交给写手修订（B64）', () => {
 
     // 已交写手的问题不能再处理一次。
     expect(await app.reviseIssue(conflict.id)).toMatchObject({ ok: false, error: { code: 'settings' } });
+  });
+
+  it('写手正在写这一章时不交给写手修订（同一章同时只有一个写手）', async () => {
+    const { deps, app, c1 } = await setup();
+    deps.llmResponses.push(review([draft({})]));
+    const conflict = value(await app.reviewChapter(c1)).issues.find((i) => i.kind === 'setting_conflict')!;
+    // 写手的第一个请求到达时，作者在审核抽屉里点了“交给写手修订”。
+    let revised: Awaited<ReturnType<typeof app.reviseIssue>> | null = null;
+    deps.beforeLlm.push(async () => {
+      revised = await app.reviseIssue(conflict.id);
+    });
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'));
+    expect(value(await app.writeChapter(c1)).status).toBe('written');
+    expect(revised).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写手正在写这一章') } });
+  });
+
+  it('修订的输出被截断：半截的文字不写入，说明原因，问题仍待处理', async () => {
+    const { deps, app, c1 } = await setup();
+    deps.llmResponses.push(review([draft({})]));
+    const conflict = value(await app.reviewChapter(c1)).issues.find((i) => i.kind === 'setting_conflict')!;
+    const before = await paragraphs(app, c1);
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['林舟叹了口'], end: 'length' }) });
+    expect(await app.reviseIssue(conflict.id)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('截断') } });
+    expect((await paragraphs(app, c1)).map((p) => p.text)).toEqual(before.map((p) => p.text));
+    expect(value(await app.listSnapshots(c1))).toEqual([]);
+    expect(value(await app.reviewIssues(c1)).some((i) => i.id === conflict.id)).toBe(true);
   });
 
   it('写手没有改动、没有写出文字或有未保存的修改时不写入，问题仍待处理', async () => {

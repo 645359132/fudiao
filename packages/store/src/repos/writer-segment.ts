@@ -4,7 +4,8 @@
 import { err, keysBetween, ok, type Result } from '@fudiao/shared';
 import type { SqlPort, Statement } from '../sql';
 import { PLAN_COLUMNS, PlanRow, type ChapterPlan, type WriterProgress } from './chapter-plan';
-import { guardedUpdate, type RepoError, type WriteContext } from './common';
+import { guardedUpdate, parseRows, type RepoError, type WriteContext } from './common';
+import { restoreSnapshot } from './snapshot';
 import { listParagraphs } from './paragraph';
 import type { SavedParagraph } from './paragraph-plan';
 
@@ -36,6 +37,30 @@ export function resetWriterRun(port: SqlPort, plan: ChapterPlan, ctx: WriteConte
     },
     'chapter_id',
   );
+}
+
+/**
+ * 回退到写手写入前：恢复“写手写入”快照（现稿先存为恢复前快照）与清除进度、计划回到待写在同一个事务中，
+ * 不会出现正文回退了、计划仍是已写（或反过来）。计划在别处改过时整体回滚，返回冲突。
+ */
+export async function rollbackWriterRun(
+  port: SqlPort,
+  plan: ChapterPlan,
+  input: { readonly snapshotId: string; readonly backupId: string },
+  ctx: WriteContext,
+): Promise<Result<ChapterPlan, RepoError>> {
+  const restored = await restoreSnapshot(port, input, ctx, [
+    {
+      sql: `UPDATE chapter_plan SET status = 'todo', progress = NULL, version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${PLAN_COLUMNS}`,
+      params: [ctx.now, plan.chapterId, plan.version],
+      expectChanges: 1,
+    },
+  ]);
+  if (!restored.ok) return restored;
+  const rows = parseRows(PlanRow, restored.value.also[0]?.rows ?? []);
+  if (!rows.ok) return rows;
+  const row = rows.value[0];
+  return row === undefined ? err({ code: 'not_found' }) : ok(row);
 }
 
 export type SegmentWrite = {

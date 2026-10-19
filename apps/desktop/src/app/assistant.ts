@@ -14,7 +14,7 @@ import { partialStringField, type LlmStreamEvent } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
 import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type Outcome, type ToolEvents } from './assistant-tools';
-import { captureWork, CHANGE_KINDS, diffWork, undoChanges, type ChangeEntry } from './assistant-undo';
+import { captureWork, CHANGE_KINDS, chapterDigest, diffWork, textUndoSummary, undoChanges, type ChangeEntry } from './assistant-undo';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
@@ -104,7 +104,7 @@ export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
 /** 这一轮从哪一条开始，以及开始时打开的作品：作品在这一轮里换了时，这一轮的对话随之存进新的作品。 */
-type TurnState = { readonly turnStart: number; workBefore: SqlPort | null };
+type TurnState = { turnStart: number; workBefore: string | null };
 
 /** 没有执行的动作也要告诉模型，免得它以为做过了。 */
 const skipped = (actions: readonly AssistantAction[], detail: string): AssistantResult[] => actions.map((a) => ({ tool: a.tool, ok: false, detail }));
@@ -113,11 +113,14 @@ export function assistantUseCases({
   deps,
   host,
   project,
+  workKey,
   runner,
 }: {
   readonly deps: AppDeps;
   readonly host: AssistantHost;
   readonly project: () => SqlPort | null;
+  /** 当前打开的作品（作品库的位置）；作品库的连接可能在换作品后沿用同一个对象，不能据连接判断换没换作品。 */
+  readonly workKey: () => string | null;
   readonly runner: ReturnType<typeof modelRunner>;
 }) {
   const ctx = () => ({ now: deps.clock.now() });
@@ -135,12 +138,17 @@ export function assistantUseCases({
   }
 
   /** 追加并保存；作品没有打开时只在内存里。 */
-  async function append(items: AssistantItem[], added: readonly AssistantItem[], events: AssistantEvents): Promise<void> {
-    items.push(...added);
+  /** 存不进作品库时返回错误：调用方停下这一轮，不让界面上的对话与存下的不一致、也不接着调用模型。 */
+  async function append(items: AssistantItem[], added: readonly AssistantItem[], events: AssistantEvents): Promise<Result<void, AppError>> {
     const port = project();
+    if (port !== null) {
+      const saved = await appendAssistantMessages(port, added.map((a) => ({ id: a.id, role: a.role, payload: toStored(a) })), ctx());
+      if (!saved.ok) return err({ code: 'repo', error: saved.error });
+    }
+    items.push(...added);
     if (port === null) memory = [...items];
-    else await appendAssistantMessages(port, added.map((a) => ({ id: a.id, role: a.role, payload: toStored(a) })), ctx());
     events.onUpdate?.([...items]);
+    return ok(undefined);
   }
 
   // —— 现状 ——
@@ -236,68 +244,101 @@ export function assistantUseCases({
     return converted.slice(start);
   };
 
-  const turnState = (items: readonly AssistantItem[]): TurnState => ({ turnStart: items.map((i) => i.role).lastIndexOf('user'), workBefore: project() });
+  /** 助手撤销上一轮时要改回的正文（见 undo_last_turn 的确认）。 */
+  const undoPreview = (items: readonly AssistantItem[]): string | null => {
+    const target = undoTarget(items, true);
+    return target === null ? null : textUndoSummary(target.changes.map((c) => c.entries));
+  };
+
+  const turnState = (items: readonly AssistantItem[]): TurnState => ({ turnStart: items.map((i) => i.role).lastIndexOf('user'), workBefore: workKey() });
 
   /**
    * 依次执行动作，结果记进 results。遇到须作者确认的就停下：排在它后面的动作随等待确认的那一条保存，
    * 作者确认后接着执行（不然它们会悄悄丢掉，模型还以为做过了）。返回是否停在等待确认。
    */
-  async function runActions(actions: readonly AssistantAction[], results: AssistantResult[], items: AssistantItem[], events: AssistantEvents, turn: TurnState): Promise<boolean> {
+  async function runActions(
+    actions: readonly AssistantAction[],
+    results: AssistantResult[],
+    items: AssistantItem[],
+    events: AssistantEvents,
+    turn: TurnState,
+  ): Promise<Result<boolean, AppError>> {
     for (const [at, action] of actions.entries()) {
       if (aborted(events)) {
         results.push(...skipped(actions.slice(at), '作者停止了，这个动作没有执行。'));
-        return false;
+        return ok(false);
       }
-      const env = toolEnv(host, project, events, () => undoLast(items, events, 'action'));
-      const summary = await confirmationFor(action.tool, action, env);
-      if (summary !== null) {
+      const env = toolEnv(host, project, events, () => undoLast(items, events, 'action'), () => undoPreview(items));
+      const asked = await confirmationFor(action.tool, action, env);
+      if (asked !== null) {
         const added: AssistantItem[] = [];
         if (results.length > 0) added.push({ id: deps.ids.next(), role: 'results', results: [...results] });
-        added.push({ id: deps.ids.next(), role: 'pending', action, summary, rest: actions.slice(at + 1) });
-        await append(items, added, events);
-        return true;
+        // 存下确认时找到的那一项（标识），作者确认后执行的就是说明里的那一个。
+        added.push({ id: deps.ids.next(), role: 'pending', action: asked.action, summary: asked.summary, rest: actions.slice(at + 1) });
+        const saved = await append(items, added, events);
+        return saved.ok ? ok(true) : saved;
       }
-      const outcome = await perform(action, env, items, events);
+      const performed = await perform(action, env, items, events);
       events.onProgress?.(null);
+      if (!performed.ok) return performed;
+      const outcome = performed.value;
       results.push({ tool: action.tool, ok: outcome.ok, detail: outcome.detail });
       // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
       const now = project();
-      if (now !== turn.workBefore && now !== null) {
-        await appendAssistantMessages(now, items.slice(Math.max(0, turn.turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
+      if (workKey() !== turn.workBefore && now !== null) {
+        const moved = await appendAssistantMessages(now, items.slice(Math.max(0, turn.turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
+        if (!moved.ok) return err({ code: 'repo', error: moved.error });
         items.splice(0, Math.max(0, turn.turnStart));
         memory = [];
-        turn.workBefore = now;
+        turn.workBefore = workKey();
+        // 这一轮现在从头开始：同一轮里再换一次作品时，从作者的话起整轮存过去。
+        turn.turnStart = 0;
       }
     }
-    return false;
+    return ok(false);
   }
 
   /**
    * 执行一个动作并记下它对作品的改动（撤销用）：改结构的动作前后各取一份现状、记下差别；写手写章记下章节；
    * 写手修订前先给那一章存快照。作品在动作里换了（新建或打开了另一部）时不记。
    */
-  async function perform(action: AssistantAction, env: ReturnType<typeof toolEnv>, items: AssistantItem[], events: AssistantEvents): Promise<Outcome> {
+  async function perform(action: AssistantAction, env: ReturnType<typeof toolEnv>, items: AssistantItem[], events: AssistantEvents): Promise<Result<Outcome, AppError>> {
     const mode = undoModeOf(action.tool);
     const port = project();
+    const key = workKey();
     let entries: ChangeEntry[] = [];
     let outcome: Outcome;
     if (mode === 'work') {
+      // 动作自己指明写入的那一步时只记那一步的改动（见 ToolEnv.recordChanges），否则记整个执行期间的。
+      let recorded: ChangeEntry[] | null = null;
+      const recordChanges = async <T>(f: () => Promise<T>): Promise<T> => {
+        const before = await captureWork(host, port);
+        const result = await f();
+        const after = workKey() === key ? await captureWork(host, port) : null;
+        recorded = before !== null && after !== null ? diffWork(before, after, new Set()) : [];
+        return result;
+      };
       const before = await captureWork(host, port);
-      outcome = await runTool(action.tool, action, env);
-      const after = project() === port ? await captureWork(host, port) : null;
+      outcome = await runTool(action.tool, action, { ...env, recordChanges });
+      const after = workKey() === key ? await captureWork(host, port) : null;
       // 移动的那一卷或那一章，位置的变化要记下（撤销时放回去）。
       const moved = action.tool === 'move_chapter' ? await env.findChapter(action.chapter) : action.tool === 'move_volume' ? await env.findVolume(action.volume) : null;
-      if (before !== null && after !== null) entries = diffWork(before, after, new Set(moved?.ok === true ? [moved.value.id] : []));
+      if (recorded !== null) entries = recorded;
+      else if (before !== null && after !== null) entries = diffWork(before, after, new Set(moved?.ok === true ? [moved.value.id] : []));
     } else if (mode === 'writer' && action.tool === 'write_chapter') {
       const chapter = await env.findChapter(action.chapter);
       outcome = await runTool(action.tool, action, env);
-      if (outcome.ok && chapter.ok) entries = [{ kind: 'writer', id: chapter.value.id, title: chapter.value.title }];
+      const written = outcome.ok && chapter.ok ? await chapterDigest(host, chapter.value.id) : null;
+      if (chapter.ok && written?.ok === true) entries = [{ kind: 'writer', id: chapter.value.id, title: chapter.value.title, digest: written.value.digest }];
     } else if (mode === 'revise' && action.tool === 'revise_review_issue') {
       const chapterId = await host.issueChapterId(action.issue.trim());
       const chapter = chapterId.ok && chapterId.value !== null ? await env.findChapter(chapterId.value) : null;
       const snapshot = chapter?.ok === true ? await host.createSnapshot(chapter.value.id) : null;
       outcome = await runTool(action.tool, action, env);
-      if (outcome.ok && chapter?.ok === true && snapshot?.ok === true) entries = [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id }];
+      const revised = outcome.ok && chapter?.ok === true ? await chapterDigest(host, chapter.value.id) : null;
+      if (chapter?.ok === true && snapshot?.ok === true && revised?.ok === true) {
+        entries = [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id, digest: revised.value.digest }];
+      }
     } else {
       outcome = await runTool(action.tool, action, env);
     }
@@ -305,10 +346,12 @@ export function assistantUseCases({
     if (entries.length > 0 || kept) {
       const item: AssistantItem = { id: deps.ids.next(), role: 'changes', tool: action.tool, entries, kept };
       // 作品在这个动作里换了：先只放进这一轮的对话，随后整轮存进新的作品（见 runActions）。
-      if (project() === port) await append(items, [item], events);
-      else items.push(item);
+      if (workKey() === key) {
+        const saved = await append(items, [item], events);
+        if (!saved.ok) return saved;
+      } else items.push(item);
     }
-    return outcome;
+    return ok(outcome);
   }
 
   /**
@@ -340,7 +383,8 @@ export function assistantUseCases({
       .filter((x) => x !== '')
       .join('');
     const ok = undone.length > 0;
-    await append(items, [{ id: deps.ids.next(), role: 'undo', undid: target.changes.map((c) => c.id), report, ok, source, rebuilt: done.value.rebuilt }], events);
+    const saved = await append(items, [{ id: deps.ids.next(), role: 'undo', undid: target.changes.map((c) => c.id), report, ok, source, rebuilt: done.value.rebuilt }], events);
+    if (!saved.ok) return { ok: false, detail: `${report}但撤销的记录没有存进作品库，对话框里可能显示得不对` };
     return { ok, detail: report };
   }
 
@@ -378,20 +422,24 @@ export function assistantUseCases({
       const usage = result.value.attempts.at(-1)?.usage ?? null;
       if (usage !== null) events.onUsage?.({ promptTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens, contextWindow: result.value.contextWindow });
       const output = result.value.value;
-      await append(items, [{ id: deps.ids.next(), role: 'assistant', output }], events);
+      const said = await append(items, [{ id: deps.ids.next(), role: 'assistant', output }], events);
       events.onDraft?.(null);
+      if (!said.ok) return said;
       if (output.actions.length === 0) return ok({ items, pending: false });
       const results: AssistantResult[] = [];
-      if (await runActions(output.actions, results, items, events, turn)) return ok({ items, pending: true });
-      await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
+      const ran = await runActions(output.actions, results, items, events, turn);
+      if (!ran.ok) return ran;
+      if (ran.value) return ok({ items, pending: true });
+      const saved = await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
+      if (!saved.ok) return saved;
       // 说办完了而动作都成功，就停下；有动作失败时再走一步，让助手说明或换个办法。
       if (output.done && results.every((r) => r.ok)) return ok({ items, pending: false });
     }
     // 作者停止了，或走满了步数：说清楚停在哪里，不让上一步“还要继续”的话悬着。
     const stopped = aborted(events) ? '已按作者的要求停下，' : `这一轮已经走了 ${MAX_ASSISTANT_STEPS} 步，先停在这里；`;
     const note = `${stopped}上面列出的是已经做完的。要接着做，说“继续”即可。`;
-    await append(items, [{ id: deps.ids.next(), role: 'assistant', output: { message: note, actions: [], done: true } }], events);
-    return ok({ items, pending: false });
+    const saved = await append(items, [{ id: deps.ids.next(), role: 'assistant', output: { message: note, actions: [], done: true } }], events);
+    return saved.ok ? ok({ items, pending: false }) : saved;
   }
 
   return {
@@ -411,13 +459,15 @@ export function assistantUseCases({
         const items = loaded.value;
         const last = items.at(-1);
         if (last?.role === 'pending') {
-          await append(
+          const declined = await append(
             items,
             [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: false, detail: '作者没有确认，接着说了别的，这个动作没有执行。' }, ...skipped(last.rest, '排在等待确认的动作后面，也没有执行；需要的话重新给出。')] }],
             events,
           );
+          if (!declined.ok) return declined;
         }
-        await append(items, [{ id: deps.ids.next(), role: 'user', text: text.trim() }], events);
+        const said = await append(items, [{ id: deps.ids.next(), role: 'user', text: text.trim() }], events);
+        if (!said.ok) return said;
         return await proceed(items, events);
       } finally {
         running = false;
@@ -435,14 +485,19 @@ export function assistantUseCases({
         const last = items.at(-1);
         if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
         const turn = turnState(items);
-        const outcome = approve ? await perform(last.action, toolEnv(host, project, events, () => undoLast(items, events, 'action')), items, events) : { ok: false, detail: '作者没有同意，这个动作没有执行。' };
+        const performed = approve ? await perform(last.action, toolEnv(host, project, events, () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
         events.onProgress?.(null);
+        if (!performed.ok) return performed;
+        const outcome = performed.value;
         const results: AssistantResult[] = [{ tool: last.action.tool, ok: outcome.ok, detail: approve ? `作者确认后执行：${outcome.detail}` : outcome.detail }];
         // 同一步里排在它后面的动作：确认了就接着执行（可能又停在下一个须确认的动作上），没同意就都不执行。
         if (approve) {
-          if (await runActions(last.rest, results, items, events, turn)) return ok({ items, pending: true });
+          const ran = await runActions(last.rest, results, items, events, turn);
+          if (!ran.ok) return ran;
+          if (ran.value) return ok({ items, pending: true });
         } else results.push(...skipped(last.rest, '排在作者没有同意的动作后面，也没有执行；需要的话重新给出。'));
-        await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
+        const saved = await append(items, [{ id: deps.ids.next(), role: 'results', results }], events);
+        if (!saved.ok) return saved;
         return await proceed(items, events);
       } finally {
         running = false;

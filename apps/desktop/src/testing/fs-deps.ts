@@ -45,6 +45,8 @@ export type TestDeps = AppDeps & {
   readonly secrets: Map<string, StoredSecret>;
   /** 模型服务的预设响应，按调用顺序取用；用完后为网络错误。 */
   readonly llmResponses: FakeResponse[];
+  /** 依次对应之后的模型请求：不为 null 时先执行它再给出响应（模拟模型生成期间作者在界面上的操作）。 */
+  readonly beforeLlm: ((() => Promise<void>) | null)[];
   /** 到达“模型服务”的请求（经模拟的凭据代理注入凭据之后）。 */
   readonly llmRequests: { url: string; headers: Record<string, string>; body: unknown }[];
   readonly limits: (readonly (readonly [string, number])[])[];
@@ -78,11 +80,13 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
   const secrets = new Map<string, StoredSecret>();
   const llmResponses: FakeResponse[] = [];
   const llmRequests: { url: string; headers: Record<string, string>; body: unknown }[] = [];
+  const beforeLlm: ((() => Promise<void>) | null)[] = [];
   const limits: (readonly (readonly [string, number])[])[] = [];
   let settings: ProjectDb | null = null;
   // 模型服务：每次请求取下一个预设响应，并记下到达服务的请求。
-  const service = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const service = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     if (options.fetch !== undefined) return options.fetch(input, init);
+    await beforeLlm.shift()?.();
     const { fetch, requests } = fakeFetch([llmResponses.shift() ?? { networkError: true }]);
     const response = fetch(input, init);
     llmRequests.push(...requests);
@@ -142,6 +146,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     picks,
     secrets,
     llmResponses,
+    beforeLlm,
     llmRequests,
     limits,
     // 测试结束时关闭作品库与设置库，临时目录才能删除。

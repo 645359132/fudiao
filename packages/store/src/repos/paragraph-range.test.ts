@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
-import { createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
+import { acceptCandidateRange, createCandidate, getCandidate, listCandidates, setCandidateStatus, updateCandidateContent } from './candidate';
 import { createChapter } from './chapter';
 import { listParagraphs, saveChapterParagraphs } from './paragraph';
 import type { SavedParagraph } from './paragraph-plan';
@@ -81,6 +81,21 @@ describe('按范围替换正文', () => {
     expect(links.ok && links.value.length).toBe(3);
   });
 
+  it('在 AI 段落末尾接受以换行开头的续写：原段落不动（仍为 AI 生成、保留生成原文、版本不变），续写成为新段落', async () => {
+    const { db, saved } = await chapterWith(['他推开门。']);
+    const whole = { from: { paragraphId: 'p0', offset: 0 }, to: { paragraphId: 'p0', offset: 5 } };
+    value(await applyRangeReplace(db, 'c1', value(planRangeReplace(saved, whole, ai('他轻轻推开了门。'), newId)), ctx));
+    const before = value(await listParagraphs(db, 'c1'));
+    expect(before[0]).toMatchObject({ source: 'ai_generated', aiOriginText: '他轻轻推开了门。', version: 2 });
+    const end = { paragraphId: 'p0', offset: 8 };
+    value(await applyRangeReplace(db, 'c1', value(planRangeReplace(before, { from: end, to: end }, ai('\n屋里很暗。'), newId)), ctx));
+    const after = value(await listParagraphs(db, 'c1'));
+    expect(after.map((p) => [p.id, p.text, p.source, p.aiOriginText, p.version])).toEqual([
+      ['p0', '他轻轻推开了门。', 'ai_generated', '他轻轻推开了门。', 2],
+      [expect.any(String), '屋里很暗。', 'ai_generated', '屋里很暗。', 1],
+    ]);
+  });
+
   it('跨段替换：中间的段落并入首段，事件关联取并集', async () => {
     const { db, saved } = await chapterWith(['雨下得更紧了。', '他推开门。', '柜台后没有人。']);
     value(await db.transaction([
@@ -120,5 +135,19 @@ describe('候选稿', () => {
     expect(value(await listCandidates(db, 'c1', ['accepted'])).map((x) => x.id)).toEqual(['k1']);
     expect(await updateCandidateContent(db, c, '再改', ctx)).toMatchObject({ ok: false, error: { code: 'conflict' } });
     expect(value(await getCandidate(db, 'k1')).status).toBe('accepted');
+  });
+  it('接受候选稿：替换正文与标为已接受在同一事务；候选稿已被改动或处理过时正文也不写入', async () => {
+    const { db, saved } = await chapterWith(['他推开门。']);
+    const target = { from: { paragraphId: 'p0', offset: 1 }, to: { paragraphId: 'p0', offset: 3 } };
+    const c = value(await createCandidate(db, { id: 'k1', chapterId: 'c1', operation: 'rewrite', target, baseText: '推开', baseVersions: { p0: 1 }, generated: '轻推', llmCallId: null }, ctx));
+    const plan = value(planRangeReplace(saved, target, ai('轻推'), newId));
+    value(await updateCandidateContent(db, c, '轻轻推开', ctx));
+    expect(await acceptCandidateRange(db, c, plan, ctx)).toEqual({ ok: false, error: { code: 'conflict' } });
+    expect(value(await listParagraphs(db, 'c1'))[0]).toMatchObject({ text: '他推开门。', version: 1 });
+    expect(value(await getCandidate(db, 'k1')).status).toBe('pending');
+
+    const fresh = value(await getCandidate(db, 'k1'));
+    expect(value(await acceptCandidateRange(db, fresh, value(planRangeReplace(saved, target, ai('轻轻推开'), newId)), ctx))).toMatchObject({ status: 'accepted' });
+    expect(value(await listParagraphs(db, 'c1'))[0]?.text).toBe('他轻轻推开门。');
   });
 });

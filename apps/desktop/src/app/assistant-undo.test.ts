@@ -120,7 +120,7 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     expect(body(deps, 2)).toContain('作者在对话框里点了撤销：已撤销：');
   });
 
-  it('删掉的设定连同它的关系一并重建（标识换了，关系指向重建的设定）', async () => {
+  it('删掉的设定连同它的关系一并重建：沿用原来的标识，以它为依据的事实与关系照旧指向它', async () => {
     const { deps, app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;
     value(await app.updateEntity(lin, { description: '落魄书生', aliases: ['阿舟'] }));
@@ -139,7 +139,8 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     expect(await structure(app)).toEqual(before);
     const relation = value(await app.relationsView()).relationships[0]!;
     const rebuilt = value(await app.listEntities()).find((e) => e.name === '林舟')!;
-    expect(rebuilt.id).not.toBe(lin.id);
+    expect(rebuilt.id).toBe(lin.id);
+    expect(rebuilt).toMatchObject({ description: '落魄书生', aliases: ['阿舟'] });
     expect([relation.fromId, relation.toId]).toContain(rebuilt.id);
     expect(lastUndo(undone.items)?.report).toContain('删掉的设定“林舟”');
     // 再撤销一次是更早的那一轮：关系也去掉。
@@ -190,9 +191,14 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     value(await app.sendToAssistant('写第一章'));
     expect(value(await app.openChapter(chapter.id)).saved).toHaveLength(3);
 
+    // 要撤销的那一轮里有写手写的章：和直接回退写手写入一样，先请作者确认。
     step(deps, { message: '', actions: [{ tool: 'undo_last_turn' }], done: false });
+    const asked = value(await app.sendToAssistant('撤销刚才的'));
+    expect(asked.pending).toBe(true);
+    expect(asked.items.at(-1)).toMatchObject({ role: 'pending', summary: expect.stringContaining('《第一章 夜叩》') });
+    expect(value(await app.openChapter(chapter.id)).saved).toHaveLength(3);
     step(deps, { message: '撤销了写手写的第一章。', actions: [], done: true });
-    const first = value(await app.sendToAssistant('撤销刚才的'));
+    const first = value(await app.resolveAssistantPending(true));
     expect(lastResults(first.items)?.results[0]).toMatchObject({ tool: 'undo_last_turn', ok: true, detail: expect.stringContaining('写手写入的《第一章 夜叩》') });
     expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['门在他身后合上了。']);
     expect(value(await app.planningView()).chapters[0]?.plan).toMatchObject({ status: 'todo', goal: '林舟当玉' });
@@ -209,5 +215,35 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     step(deps, { message: '没有可以撤销的了。', actions: [], done: true });
     const third = value(await app.sendToAssistant('再撤销'));
     expect(lastResults(third.items)?.results[0]).toMatchObject({ ok: false, detail: expect.stringContaining('没有可以撤销的改动') });
+  });
+
+  it('写手写的章、写手修订的段落之后又被作者改过（或有未保存的修改）时，撤销不动它们', async () => {
+    const { deps, app } = await setup();
+    const chapter = value(await app.createChapter('第一章 夜叩')).chapters[0]!;
+    step(deps, { message: '', actions: [{ tool: 'save_chapter_plan', chapter: '第一章 夜叩', goal: '林舟当玉', beats: ['叩门', '压价'], cast: null, targetWords: 3000 }], done: true });
+    value(await app.sendToAssistant('给第一章做个计划'));
+    step(deps, { message: '让写手写。', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: true });
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'), reply(JSON.stringify({ summary: '林舟叩门当玉。', cast: [], foreshadows: [], openThreads: [] })));
+    value(await app.sendToAssistant('写第一章'));
+    const written = value(await app.openChapter(chapter.id)).saved;
+    value(await app.saveChapter(chapter.id, written, written.map((p, i) => ({ id: p.id, text: i === 0 ? '林舟又一次叩响了门。' : p.text, source: 'handwritten' })), { splits: [], merges: [] }));
+
+    expect(await app.undoAssistantTurn()).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('之后又改过') } });
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['林舟又一次叩响了门。', '钱四压低了价。']);
+    expect(value(await app.planningView()).chapters[0]?.plan?.status).toBe('written');
+
+  });
+
+  it('写手写的章有未保存的修改时，撤销不动它（回退会丢掉草稿）', async () => {
+    const { deps, app } = await setup();
+    const chapter = value(await app.createChapter('第一章 夜叩')).chapters[0]!;
+    value(await app.savePlan(chapter.id, { goal: '林舟当玉', castIds: [], beats: ['叩门', '压价'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    step(deps, { message: '让写手写。', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: true });
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('钱四压低了价。'), reply(JSON.stringify({ summary: '林舟叩门当玉。', cast: [], foreshadows: [], openThreads: [] })));
+    value(await app.sendToAssistant('写第一章'));
+    const draft = JSON.stringify({ version: 1, chapterId: chapter.id, writtenAt: '2026-10-19T00:00:00.000Z', paragraphs: [{ id: 'x', text: '还没保存的一段。', source: 'handwritten' }] });
+    value(await deps.drafts.write(value(await app.reloadWork()).entry.path, chapter.id, draft));
+    expect(value(await app.undoAssistantTurn()).items.at(-1)).toMatchObject({ role: 'undo', ok: false, report: expect.stringContaining('未保存的修改') });
+    expect(value(await app.openChapter(chapter.id)).saved).toHaveLength(2);
   });
 });

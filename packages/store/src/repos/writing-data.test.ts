@@ -73,6 +73,16 @@ describe('伏笔账本', () => {
     value(await deleteForeshadow(db, paid));
     expect(await getForeshadow(db, 'f1')).toEqual({ ok: false, error: { code: 'not_found' } });
   });
+
+  it('章节计划里要埋或要收的伏笔不能删除（否则计划里留下指不到的标识）；从计划里去掉以后可以', async () => {
+    const db = await fresh();
+    const f = value(await createForeshadow(db, { id: 'f1', ...fields }, ctx));
+    const plan = value(await saveChapterPlan(db, 'c2', null, { goal: '收回玉佩', castIds: [], beats: ['对质'], foreshadowPlant: [], foreshadowPayoff: ['f1'], treatment: '', targetWords: 3000 }, ctx));
+    expect(await deleteForeshadow(db, f)).toEqual({ ok: false, error: { code: 'in_use' } });
+    expect(value(await getForeshadow(db, 'f1')).id).toBe('f1');
+    value(await saveChapterPlan(db, 'c2', plan, { goal: '收回玉佩', castIds: [], beats: ['对质'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }, later));
+    value(await deleteForeshadow(db, f));
+  });
 });
 
 describe('章节计划', () => {

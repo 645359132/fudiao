@@ -42,7 +42,7 @@ export const SELF_TEST_RUNS = 3;
 
 /**
  * 自检请求的输出上限与思考深度。答案本身很短，但有的服务把思考计入输出（DeepSeek 默认先思考）：
- * 上限只够答案时，偶尔一次思考得长就会被截断而判为未通过。调用方按自己的思考余量给出。
+ * 上限只够答案时，偶尔一次思考得长就会被截断而判为未通过。调用方按自己的思考余量给出，实际请求不超过模型的最大输出。
  */
 export type SelfTestBudget = { readonly maxOutputTokens: number; readonly effort?: Effort };
 export const DEFAULT_SELF_TEST_BUDGET: SelfTestBudget = { maxOutputTokens: 1_024 };
@@ -72,7 +72,8 @@ export async function runSelfTest<T>(
         system: prompt.system,
         messages: prompt.messages,
         output: prompt.output,
-        maxOutputTokens: budget.maxOutputTokens,
+        // 加上思考余量后可能超过模型的最大输出，超过的请求会被服务拒绝。
+        maxOutputTokens: Math.min(budget.maxOutputTokens, model.capabilities.maxOutputTokens),
         ...(budget.effort !== undefined && { effort: budget.effort }),
       },
       { ...options, maxRepairs: 0, repairMessage: () => '' },

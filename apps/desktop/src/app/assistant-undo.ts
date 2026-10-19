@@ -52,10 +52,10 @@ type RecordChange<K extends Kind> = { readonly kind: K; readonly id: string; rea
 /** 一个动作留下的可撤销改动（存进对话，作品重新打开后照样能撤销）。 */
 export type ChangeEntry =
   | { readonly [K in Kind]: RecordChange<K> }[Kind]
-  /** 写手写了这一章：撤销即回退写手写入。 */
-  | { readonly kind: 'writer'; readonly id: string; readonly title: string }
-  /** 写手修订了这一章：撤销即恢复修订前存的快照。 */
-  | { readonly kind: 'text'; readonly id: string; readonly title: string; readonly snapshotId: string };
+  /** 写手写了这一章：撤销即回退写手写入。digest 是写完时正文的摘要，之后又改过的不回退（较早的记录没有）。 */
+  | { readonly kind: 'writer'; readonly id: string; readonly title: string; readonly digest?: string }
+  /** 写手修订了这一章：撤销即恢复修订前存的快照。digest 同上。 */
+  | { readonly kind: 'text'; readonly id: string; readonly title: string; readonly snapshotId: string; readonly digest?: string };
 
 export const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeEntry['kind']>(['project', 'volume', 'chapter', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact', 'writer', 'text']);
 
@@ -73,6 +73,29 @@ const describeError = (e: AppError): string => {
   }
   return e.code;
 };
+
+/**
+ * 一章已保存正文的摘要（段落标识与文字），记下写手写完时的样子，撤销前据此判断之后有没有改过。
+ * 有未保存的修改时 draft 为 true：回退与恢复快照会丢掉草稿。
+ */
+export async function chapterDigest(host: UndoHost, chapterId: string): Promise<Result<{ readonly digest: string; readonly draft: boolean }, AppError>> {
+  const opened = await host.openChapter(chapterId);
+  if (!opened.ok) return opened;
+  // FNV-1a（32 位）：只用来比较同一章前后是否相同，不需要防碰撞。
+  let hash = 0x811c9dc5;
+  const text = opened.value.saved.map((p) => `${p.id}\u0000${p.text}`).join('\u0001');
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return ok({ digest: `${text.length}:${hash.toString(16)}`, draft: opened.value.draft !== null });
+}
+
+/** 撤销上一轮会改回的正文（写手写章与修订）；没有时为 null。 */
+export function textUndoSummary(groups: readonly (readonly ChangeEntry[])[]): string | null {
+  const titles = [...new Set(groups.flat().flatMap((e) => (e.kind === 'writer' || e.kind === 'text' ? [`《${e.title}》`] : [])))];
+  return titles.length === 0 ? null : `撤销上一轮的改动，其中${titles.join('、')}的正文会回到写手写入或修订之前（现稿先存为快照）`;
+}
 
 /** 取作品的结构化现状。没有打开作品时为 null。 */
 export async function captureWork(host: UndoHost, port: SqlPort | null): Promise<WorkImage | null> {
@@ -212,7 +235,7 @@ export type UndoOutcome = { readonly undone: readonly string[]; readonly skipped
 
 /**
  * 撤销一批改动（一轮里按执行顺序排列的各个动作的改动，每个动作一组）：倒着一组一组改回。
- * 删掉后重建的设定、卷与关系标识会变，后面用到旧标识的改动按新标识处理。
+ * 删掉后重建的卷与关系标识会变（设定沿用原来的标识），后面用到旧标识的改动按新标识处理。
  */
 export async function undoChanges(
   host: UndoHost,
@@ -231,7 +254,8 @@ export async function undoChanges(
     if (now === null) return err({ code: 'no_work' });
     // 先改回改动的，再删掉新建的，最后重建删掉的；删除与重建按依赖排序。
     const order: readonly ChangeEntry['kind'][] = ['writer', 'text', 'project', 'chapter', 'volume', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact'];
-    const deleteOrder: readonly ChangeEntry['kind'][] = ['relationship', 'foreshadow', 'plan', 'fact', 'chapter', 'volume', 'entity', 'skill'];
+    // 计划在伏笔之前：计划里要埋或要收的伏笔不能删。
+    const deleteOrder: readonly ChangeEntry['kind'][] = ['relationship', 'plan', 'foreshadow', 'fact', 'chapter', 'volume', 'entity', 'skill'];
     const recreateOrder: readonly ChangeEntry['kind'][] = ['entity', 'volume', 'chapter', 'relationship'];
     const rank = (list: readonly string[], kind: string) => (list.includes(kind) ? list.indexOf(kind) : list.length);
     const modified = group.filter((e) => e.kind === 'writer' || e.kind === 'text' || (e.before !== null && e.after !== null)).sort((a, b) => rank(order, a.kind) - rank(order, b.kind));
@@ -286,8 +310,15 @@ async function undoOne(host: UndoHost, entry: ChangeEntry, now: WorkImage, remap
   const failed = (r: Result<unknown, AppError>): string | null => (r.ok ? null : describeError(r.error));
   const changedSince = '之后又改过，没有动它';
   const gone = '已经不在了';
-  if (entry.kind === 'writer') return failed(await host.rollbackWriter(entry.id));
-  if (entry.kind === 'text') return failed(await host.restoreSnapshot(entry.snapshotId));
+  if (entry.kind === 'writer' || entry.kind === 'text') {
+    // 正文在写手写完（或修订完）之后又被改过、或有未保存的修改时不动它，和其他改动一样。
+    if (entry.digest === undefined) return '较早的记录，确认不了之后有没有改过正文，没有动它';
+    const current = await chapterDigest(host, entry.id);
+    if (!current.ok) return describeError(current.error);
+    if (current.value.draft) return '这一章有未保存的修改，没有动它';
+    if (current.value.digest !== entry.digest) return changedSince;
+    return entry.kind === 'writer' ? failed(await host.rollbackWriter(entry.id)) : failed(await host.restoreSnapshot(entry.snapshotId));
+  }
 
   const key = id(entry.id) ?? entry.id;
   const current = (now[entry.kind] as Readonly<Record<string, unknown>>)[key] ?? null;
@@ -365,9 +396,10 @@ async function undoOne(host: UndoHost, entry: ChangeEntry, now: WorkImage, remap
       if (entry.before === null) return e === undefined ? gone : failed(await host.deleteEntity(e));
       const b = entry.before;
       if (entry.after === null) {
-        const created = await host.createEntity(b.kind, b.name);
+        // 沿用原来的标识：以它为依据的事实（记的是标识）不会因此永远待复核。之前的撤销重建时换过标识的，沿用那个。
+        const created = await host.createEntity(b.kind, b.name, key);
         if (!created.ok) return describeError(created.error);
-        remap.set(entry.id, created.value.created.id);
+        if (created.value.created.id !== entry.id) remap.set(entry.id, created.value.created.id);
         return failed(await host.updateEntity(created.value.created, { description: b.description, aliases: [...b.aliases], attributes: b.attributes }));
       }
       if (e === undefined) return gone;

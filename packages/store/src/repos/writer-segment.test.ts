@@ -6,7 +6,8 @@ import { loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
 import { createChapter } from './chapter';
 import { getChapterPlan, saveChapterPlan, type ChapterPlan, type WriterProgress } from './chapter-plan';
 import { listParagraphs } from './paragraph';
-import { appendWrittenSegment, resetWriterRun, startWriterRun } from './writer-segment';
+import { createSnapshot } from './snapshot';
+import { appendWrittenSegment, resetWriterRun, rollbackWriterRun, startWriterRun } from './writer-segment';
 
 const ctx = { now: '2026-10-13T00:00:00.000Z' };
 const later = { now: '2026-10-13T01:00:00.000Z' };
@@ -100,5 +101,20 @@ describe('写手写入一段', () => {
     const { db, plan } = await fresh();
     const started = value(await startWriterRun(db, plan, progress, ctx));
     expect(value(await resetWriterRun(db, started, later))).toMatchObject({ status: 'todo', progress: null });
+  });
+
+  it('回退到写入前：恢复快照与清除进度在同一事务；计划在别处改过时正文也不恢复', async () => {
+    const { db, plan } = await fresh(['作者写的开头。']);
+    value(await createSnapshot(db, { id: 's1', chapterId: 'c1', reason: 'writer' }, ctx));
+    let started = value(await startWriterRun(db, plan, progress, ctx));
+    const written = value(await appendWrittenSegment(db, { plan: started, paragraphs: value(await listParagraphs(db, 'c1')), texts: ['林舟叩门。'], newId }, ctx));
+    started = written.plan;
+    const stale = { ...started, version: started.version - 1 };
+    expect(await rollbackWriterRun(db, stale, { snapshotId: 's1', backupId: 'b1' }, later)).toEqual({ ok: false, error: { code: 'conflict' } });
+    expect(value(await listParagraphs(db, 'c1')).map((p) => p.text)).toEqual(['作者写的开头。', '林舟叩门。']);
+    expect(value(await getChapterPlan(db, 'c1'))?.status).toBe('writing');
+
+    expect(value(await rollbackWriterRun(db, started, { snapshotId: 's1', backupId: 'b2' }, later))).toMatchObject({ status: 'todo', progress: null });
+    expect(value(await listParagraphs(db, 'c1')).map((p) => p.text)).toEqual(['作者写的开头。']);
   });
 });

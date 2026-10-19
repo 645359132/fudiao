@@ -2,7 +2,7 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort, Statement } from '../sql';
-import { jsonColumn, queryAll, queryOne, type RepoError, type WriteContext } from './common';
+import { jsonColumn, queryAll, type RepoError, type WriteContext } from './common';
 
 export const ASSISTANT_ROLES = ['user', 'assistant', 'results', 'pending', 'changes', 'undo'] as const;
 export type AssistantRole = (typeof ASSISTANT_ROLES)[number];
@@ -16,19 +16,16 @@ export function listAssistantMessages(port: SqlPort): Promise<Result<StoredAssis
   return queryAll(port, Row, 'SELECT id, seq, role, payload, created_at FROM assistant_message ORDER BY seq');
 }
 
-/** 依次追加几条消息；seq 接在已有的最后一条之后，同一事务写入。 */
+/** 依次追加几条消息；seq 接在已有的最后一条之后，在写入的事务里取（同时追加的两批不会撞号）。 */
 export async function appendAssistantMessages(
   port: SqlPort,
   messages: readonly { readonly id: string; readonly role: AssistantRole; readonly payload: Readonly<Record<string, unknown>> }[],
   ctx: WriteContext,
 ): Promise<Result<void, RepoError>> {
   if (messages.length === 0) return ok(undefined);
-  const last = await queryOne(port, z.object({ seq: z.number().int().nullable() }), 'SELECT max(seq) AS seq FROM assistant_message');
-  if (!last.ok) return last;
-  const start = (last.value?.seq ?? 0) + 1;
-  const statements: Statement[] = messages.map((m, i) => ({
-    sql: 'INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES (?, ?, ?, ?, ?)',
-    params: [m.id, start + i, m.role, JSON.stringify(m.payload), ctx.now],
+  const statements: Statement[] = messages.map((m) => ({
+    sql: 'INSERT INTO assistant_message (id, seq, role, payload, created_at) SELECT ?, COALESCE(max(seq), 0) + 1, ?, ?, ? FROM assistant_message',
+    params: [m.id, m.role, JSON.stringify(m.payload), ctx.now],
   }));
   const done = await port.transaction(statements);
   return done.ok ? ok(undefined) : err({ code: 'sql', error: done.error });
