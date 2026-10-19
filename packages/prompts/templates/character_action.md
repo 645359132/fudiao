@@ -1,6 +1,6 @@
 ---
 id: character_action
-version: 9
+version: 10
 task: character_action
 output: ActionProposal
 ---
@@ -57,10 +57,10 @@ output: ActionProposal
 {{> situation}}
 @@user
 {{#protocol.simultaneous}}所有人在这一回合同时行动，你不知道别人此刻会做什么。{{/protocol.simultaneous}}{{#protocol.turnBased}}这是轮流说话的场合。{{#pendingSpeech}}
-{{speaker}}正在对你说（按句编号）：
+{{speaker}}正在说话，你听得清（按句编号）：
 {{#sentences}}
 {{n}}. {{text}}
 {{/sentences}}
-你可以听完再回应，也可以在某一句之后打断（interruptAfter）。打断之后，你没听到的部分不算你知道的事。也可以沉默（wait）或离场（withdraw）。
+你可以听完再回应，也可以在某一句之后打断（interruptAfter），也可以沉默（wait）或离场（withdraw）。
 {{/pendingSpeech}}{{^pendingSpeech}}现在轮到你开口。{{/pendingSpeech}}{{/protocol.turnBased}}
 请以{{self.name}}的身份决定这一回合的行动，按要求输出 JSON。

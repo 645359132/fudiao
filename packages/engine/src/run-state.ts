@@ -1,7 +1,9 @@
 import {
+  adjudicate,
   applyEvent,
   initialState,
   type Action,
+  type Adjudication,
   type ActorId,
   type Occurrence,
   type RuleViolation,
@@ -56,6 +58,11 @@ export type RunState = {
   /** 本回合被规则拒绝的提案，按尝试顺序；用于在同一对话中请求修正。 */
   readonly rejections: ReadonlyMap<ActorId, readonly { readonly proposal: ProposalRecord; readonly violation: RuleViolation }[]>;
   readonly proposalsComplete: Extract<EngineEvent, { type: 'ProposalsComplete' }> | null;
+  /**
+   * 提案收齐时的程序裁决与待语义裁决的请求（失败时为错误码）。回合内到提交前世界不变（裁决不读认知），
+   * 归约时算一次，恢复时据此判断哪些请求还没有提出或确认。
+   */
+  readonly adjudication: Result<Adjudication, string> | null;
   readonly rulingsProposed: ReadonlyMap<string, RulingProposal>;
   readonly rulingsConfirmed: ReadonlyMap<string, RulingConfirmation>;
   readonly committed: boolean;
@@ -72,6 +79,11 @@ export type RunState = {
   readonly stalemates: readonly { readonly round: number; readonly kind: StalemateKind }[];
   /** 当前回合边界上的导演提议及是否已决定。 */
   readonly director: { readonly proposed: DirectorProposal | null; readonly decided: boolean; readonly adopted: number };
+  /**
+   * 本回合各对象（角色，或裁决、僵局、导演的 all）的重做次数：作者在截断、拒答等暂停后继续，或修改了该角色的认知。
+   * 次数大于零时步骤键换新后缀，不再复用失败或已过时的调用结果。回合开始时清零。
+   */
+  readonly redo: ReadonlyMap<ActorId | 'all', number>;
 };
 
 export type RoundRecord = {
@@ -84,6 +96,14 @@ export type RoundRecord = {
 export type DirectorProposal = Extract<EngineEvent, { type: 'DirectorProposed' }>;
 
 export type ReduceError = { readonly seq: number; readonly code: string; readonly detail?: string };
+
+/** 本回合实际裁决的行动：轮流对话中被打断的台词只算打断点之前的句子。 */
+export function roundActions(s: Pick<RunState, 'proposals' | 'proposalsComplete'>): Action[] {
+  const actions = [...s.proposals.values()].map((p) => p.action);
+  const cut = s.proposalsComplete?.interruption;
+  if (cut === null || cut === undefined) return actions;
+  return actions.map((a) => (a.utterance === undefined ? a : { ...a, utterance: { ...a.utterance, deliveredCount: cut.after } }));
+}
 
 const presentActors = (sim: SimState): ActorId[] =>
   (Object.keys(sim.world.actors) as ActorId[]).filter((a) => sim.world.actors[a]?.status === 'present');
@@ -103,9 +123,9 @@ function phaseOf(s: Omit<RunState, 'phase'>, awaitingAuthor: boolean): Phase {
   if (s.proposalsComplete === null) return 'AwaitingProposals';
   if (!s.committed) {
     if (awaitingAuthor) return 'AwaitingAuthor';
-    return [...s.rulingsProposed.keys()].every((id) => s.rulingsConfirmed.has(id)) && s.rulingsProposed.size > 0
-      ? 'Committing'
-      : 'Adjudicating';
+    // 以本回合需要的全部请求为准：只看“已提出的都已确认”会在后一条还没提出时就去提交。
+    const pending = s.adjudication?.ok === true ? s.adjudication.value.pending : [];
+    return pending.length > 0 && pending.every((r) => s.rulingsConfirmed.has(r.id)) ? 'Committing' : 'Adjudicating';
   }
   if (!s.evidenceChecked) return 'UpdatingBeliefs';
   return 'CheckingEnd';
@@ -144,6 +164,7 @@ const ALLOWED: Readonly<Record<Phase, ReadonlySet<RunEvent['type']>>> = {
     'RunEnded',
   ]),
   AwaitingProposals: new Set([
+    'ViewBuilt',
     'ProposalSubmitted',
     'ProposalRejected',
     'ProposalsComplete',
@@ -168,6 +189,7 @@ const ALLOWED: Readonly<Record<Phase, ReadonlySet<RunEvent['type']>>> = {
   ]),
   CheckingEnd: new Set(['StalemateDetected', 'RoundEnded', 'RunEnded', 'RunPaused']),
   Paused: new Set([
+    'ViewBuilt',
     'RunResumed',
     'RunEnded',
     'AuthorIntervened',
@@ -204,6 +226,7 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
     prepared: new Map(),
     rejections: new Map(),
     proposalsComplete: null,
+    adjudication: null,
     rulingsProposed: new Map(),
     rulingsConfirmed: new Map(),
     committed: false,
@@ -215,8 +238,12 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
     current: { changed: false, occurrences: [] },
     stalemates: [],
     director: { proposed: null, decided: false, adopted: 0 },
+    redo: new Map(),
   };
   let awaitingAuthor = false;
+  const redoOnce = (subject: ActorId | 'all') => {
+    s.redo = new Map([...s.redo, [subject, (s.redo.get(subject) ?? 0) + 1]]);
+  };
 
   for (const stored of events.slice(1)) {
     const event = stored.payload as RunEvent;
@@ -238,13 +265,17 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
         s.prepared = new Map([...s.prepared].filter(([, p]) => p.forRound >= event.round));
         s.rejections = new Map();
         s.proposalsComplete = null;
+        s.adjudication = null;
         s.rulingsProposed = new Map();
         s.rulingsConfirmed = new Map();
         s.committed = false;
         s.reviewed = new Set();
         s.evidenceChecked = false;
         s.director = { proposed: null, decided: false, adopted: s.director.adopted };
+        s.redo = new Map();
       }
+      // 作者改了认知，这个人之后的请求内容随之改变：换新的步骤键，不与改之前（取消或崩溃时）留下的记录冲突。
+      if (event.type === 'KnowledgeEdited') redoOnce(event.actor);
       if (event.type === 'StateChanged') {
         // 回合之间的导演与作者事件也累计进来，计入下一回合的记录。
         s.current = {
@@ -259,6 +290,7 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
       case 'RunStarted':
         return err({ seq: stored.seq, code: 'duplicate_start' });
       case 'ViewBuilt':
+        // 回合内作者改认知后会再记一次，记下改后的视图哈希。
         s.views = new Set([...s.views, event.actor]);
         break;
       case 'ProposalSubmitted':
@@ -280,9 +312,14 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
         ]);
         break;
       }
-      case 'ProposalsComplete':
+      case 'ProposalsComplete': {
         s.proposalsComplete = event;
+        const adj = adjudicate(scene, s.sim, roundActions(s));
+        s.adjudication = adj.ok ? adj : err(adj.error.code);
+        // 被打断时，本回合听者的回应都是看过没说出口的句子后形成的，作废；轮到他们发言时按实际听到的再问。
+        if (event.interruption !== null) s.prepared = new Map([...s.prepared].filter(([, p]) => p.round !== event.round));
         break;
+      }
       case 'AdjudicationProposed':
         s.rulingsProposed = new Map([...s.rulingsProposed, [event.requestId, event]]);
         awaitingAuthor = config.mode === 'interactive';
@@ -335,6 +372,7 @@ export function reduceRun(scene: Scene, runId: string, events: readonly { seq: n
         break;
       case 'RunResumed':
         s.pause = null;
+        if (event.retry !== undefined) redoOnce(event.retry);
         break;
       case 'RunEnded':
         s.endReason = event.reason;

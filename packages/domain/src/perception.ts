@@ -1,7 +1,8 @@
+import { deliveredSentences, type Action } from './actions';
 import type { ActorId } from './ids';
 import type { Occurrence } from './occurrence';
 import type { Scene } from './scene/validate';
-import type { WorldState } from './world';
+import type { SimState, WorldState } from './world';
 import { canSee, soundReach } from './zone-graph';
 
 /** 某个角色对一件事的感知。只看见的角色得到视觉信息，只听见的得到声音信息。 */
@@ -54,4 +55,29 @@ export function perceive(scene: Scene, roundStart: WorldState, occurrence: Occur
     });
   }
   return perceptions;
+}
+
+/**
+ * 轮流对话中，一个行动的台词在说出之前，其余在场的人里谁听得清（full）、谁只听得到有人说话（muffled）。
+ * 与提交时分发台词的感知规则相同：说话发生在说话者回合开始时所在的区域。说话者自己不在其中，听不到的人不在其中。
+ */
+export function speechAudience(scene: Scene, state: SimState, action: Action): ReadonlyMap<ActorId, 'full' | 'muffled'> {
+  const u = action.utterance;
+  const zone = state.world.actors[action.actor]?.zone;
+  if (u === undefined || zone === undefined || deliveredSentences(u).length === 0) return new Map();
+  const speech: Occurrence = {
+    id: 'pending',
+    kind: 'speak',
+    actor: action.actor,
+    participants: [action.actor],
+    zones: [zone],
+    visible: true,
+    loudness: scene.loudness.speak[u.volume],
+    speech: { sentences: deliveredSentences(u), volume: u.volume },
+  };
+  return new Map(
+    perceive(scene, state.world, speech).flatMap((p) =>
+      p.actor !== action.actor && (p.speech === 'full' || p.speech === 'muffled') ? [[p.actor, p.speech] as const] : [],
+    ),
+  );
 }

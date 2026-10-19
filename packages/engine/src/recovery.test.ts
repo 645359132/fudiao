@@ -1,11 +1,12 @@
 import { stateHash, type Scene } from '@fudiao/domain';
-import { canaryScene, staticForbidden, warehouse } from '@fudiao/domain/testing';
+import { A, P, canaryScene, staticForbidden, warehouse } from '@fudiao/domain/testing';
 import { inspectRequests, memoryCallLog, type CallLog, type LlmPort } from '@fudiao/llm';
 import { memoryEventStore, type EventStore } from '@fudiao/store';
 import { describe, expect, it } from 'vitest';
 import type { RunConfig } from './config';
 import { createEngine } from './engine';
-import { contextOf, fakeModel, testConfig, waitProposal, type Policy } from './testing/fake-model';
+import type { RunEvent } from './events';
+import { contextOf, fakeModel, testConfig, waitProposal, type FakeOptions, type Policy } from './testing/fake-model';
 
 const AT = '2026-10-07T00:00:00.000Z';
 
@@ -72,7 +73,12 @@ function crashingModel(inner: LlmPort, n: number): LlmPort {
 async function runAll(scene: Scene, config: RunConfig, store: EventStore, calls: CallLog, llm: LlmPort): Promise<void> {
   const engine = createEngine({ llm, events: store, calls, now: () => AT });
   if ((await store.read('run1')).length === 0) await engine.start('run1', scene, config);
-  const result = await engine.run('run1', scene);
+  let result = await engine.run('run1', scene);
+  // 截断、拒答等暂停后，作者点继续。
+  while (result.ok && result.value.phase === 'Paused') {
+    await engine.resume('run1', scene);
+    result = await engine.run('run1', scene);
+  }
   if (!result.ok) throw new Error(JSON.stringify(result.error));
 }
 
@@ -82,10 +88,11 @@ async function runWithCrash(
   config: RunConfig,
   wrap: { store?: (s: EventStore) => EventStore; llm?: (p: LlmPort) => LlmPort },
   use: Policy = policy,
+  options: FakeOptions = {},
 ) {
   const store = memoryEventStore();
   const calls = memoryCallLog();
-  const model = fakeModel(use);
+  const model = fakeModel(use, options);
   let crashed = false;
   try {
     await runAll(scene, config, wrap.store?.(store) ?? store, calls, wrap.llm?.(model.port) ?? model.port);
@@ -196,7 +203,93 @@ describe('故障注入：开启僵局检测与导演', () => {
   }, 120_000);
 });
 
+describe('故障注入：截断暂停、作者继续后重试', () => {
+  const scene = warehouse();
+  const config = testConfig({ maxRounds: 3 });
+  // 第 1 回合的裁决、第 2 回合主角的认知更新各截断一次。
+  const options: FakeOptions = {
+    outcome: (ctx) =>
+      ctx.redo === 0 && ((ctx.step === 'rule' && ctx.round === 1) || (ctx.step === 'beliefs' && ctx.round === 2 && ctx.subject === 'protagonist'))
+        ? 'truncated'
+        : undefined,
+  };
+
+  it('基线运行经过两次暂停与继续，跑完', async () => {
+    const baseline = await runWithCrash(scene, config, {}, policy, options);
+    const events = baseline.events as RunEvent[];
+    expect(events.filter((e) => e.type === 'RunResumed')).toEqual([
+      { type: 'RunResumed', retry: 'all' },
+      { type: 'RunResumed', retry: P },
+    ]);
+    expect(events.at(-1)?.type).toBe('RunEnded');
+  });
+
+  it('每一次追加前后与每一次调用中崩溃：恢复后记录一致，调用不重复', async () => {
+    const baseline = await runWithCrash(scene, config, {}, policy, options);
+    let crashes = 0;
+    for (let n = 1; n <= baseline.events.length; n++) {
+      for (const when of ['before', 'after'] as const) {
+        const result = await runWithCrash(scene, config, { store: (s) => crashingStore(s, n, when) }, policy, options);
+        if (!result.crashed) continue;
+        crashes++;
+        expect(result.events, `第 ${n} 次追加${when === 'before' ? '前' : '后'}崩溃`).toEqual(baseline.events);
+        expect(result.modelCalls).toBe(baseline.modelCalls);
+      }
+    }
+    expect(crashes).toBeGreaterThan(20);
+    for (let n = 1; n <= baseline.modelCalls; n++) {
+      const result = await runWithCrash(scene, config, { llm: (p) => crashingModel(p, n) }, policy, options);
+      expect(result.events, `第 ${n} 次调用中崩溃`).toEqual(baseline.events);
+      expect(result.completedCalls).toBe(baseline.completedCalls);
+    }
+  }, 120_000);
+});
+
 describe('金丝雀：引擎发出的角色请求', () => {
+  it('轮流对话：听不到的耳语与被打断后没说出口的句子不进入其他角色的任何后续请求与认知', async () => {
+    const WHISPER = 'CANARY-WHISPER';
+    const MARK = 'CANARY-UNSAID';
+    const store = memoryEventStore();
+    const model = fakeModel({
+      character_action: (ctx) => {
+        if (ctx.subject === 'protagonist') {
+          return ctx.round === 1
+            ? waitProposal({ kind: 'speak', utterance: { sentences: [`${WHISPER}在梁上。`], volume: 'whisper' } })
+            : waitProposal({ kind: 'speak', utterance: { sentences: ['你先听我说。', `${MARK}-没说出口。`], volume: 'shout' } });
+        }
+        // 对手一开口就打断；回应里的内心片段提到了后面的句子，也必须作废。
+        return waitProposal({ kind: 'speak', interruptAfter: 1, innerThought: ctx.text.includes(`${MARK}-没说出口`) ? `${MARK}-想到了` : '', utterance: { sentences: ['住口。'], volume: 'shout' } });
+      },
+    });
+    const seen: { subject: string; round: number; step: string; text: string }[] = [];
+    const llm = inspectRequests(model.port, (request) => {
+      const ctx = contextOf(request);
+      seen.push({ subject: ctx.subject, round: ctx.round, step: ctx.step, text: ctx.text });
+    });
+    const engine = createEngine({ llm, events: store, calls: memoryCallLog(), now: () => AT });
+    // 对手在南门，与主角隔一个区域：耳语听不到，喊话听得清。
+    const scene = warehouse();
+    await engine.start('run1', scene, testConfig({ protocol: 'turn_based', maxRounds: 4, firstSpeaker: P }));
+    const done = await engine.run('run1', scene);
+    expect(done.ok && done.value.phase).toBe('Ended');
+
+    const toAntagonist = seen.filter((c) => c.subject === 'antagonist');
+    expect(toAntagonist.length).toBeGreaterThan(2);
+    for (const c of toAntagonist) {
+      expect(c.text, `${c.round}:${c.step}`).not.toContain(WHISPER);
+      // 唯一的例外是听者决定打断点的那一次回应请求（作者确认的“一次决策”），它的结果在被打断后作废。
+      if (c.step !== 'respond') expect(c.text, `${c.round}:${c.step}`).not.toContain(MARK);
+    }
+    expect(toAntagonist.some((c) => c.step === 'respond')).toBe(true);
+    if (!done.ok) return;
+    expect(JSON.stringify(done.value.state.sim.knowledge[A])).not.toContain(MARK);
+    expect(JSON.stringify(done.value.state.sim.knowledge[A])).not.toContain(WHISPER);
+    // 作废的回应不会成为行动，内心片段不会出现在用上的提案里。
+    const used = (await store.read('run1')).map((e) => e.payload as RunEvent).filter((e) => e.type === 'ProposalSubmitted' && e.forRound === e.round);
+    expect(JSON.stringify(used)).not.toContain(MARK + '-想到了');
+  });
+
+
   it('角色请求中不出现场景元信息、秘密与他人的角色卡', async () => {
     const scene = canaryScene();
     const store = memoryEventStore();

@@ -3,7 +3,7 @@
 // 提示词模板的参数就是这个视图；他人的认知、角色卡、秘密与全局局面都不进入请求。
 // 结果先成为候选稿（作者决定 2026-10-14），作者比较、修改后接受才写入章节。
 import { ActorId, buildCharacterView, parseScene, type CharacterView, type KnowledgeId, type Occurrence, type Scene } from '@fudiao/domain';
-import { buildViewerData, reduceRun, type RunEvent } from '@fudiao/engine';
+import { reduceRun, reviewItems, type RunEvent } from '@fudiao/engine';
 import type { CallOptions } from '@fudiao/llm';
 import { BeatSheetOutput, renderBeatSheet, renderCandidateText } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
@@ -107,8 +107,15 @@ export type AdoptionDraft = {
   readonly povName: string;
   readonly events: readonly AdoptionEvent[];
   readonly beliefs: readonly AdoptionBelief[];
-  /** 自动接受、须逐条复核的裁决。 */
-  readonly reviews: readonly { readonly requestId: string; readonly round: number; readonly rationale: string }[];
+  /** 自动接受的裁决与自动采用的导演事件，须逐条复核（requestId 为裁决请求标识或 director:回合）。 */
+  readonly reviews: readonly {
+    readonly requestId: string;
+    readonly kind: 'ruling' | 'director';
+    readonly round: number;
+    readonly rationale: string;
+    /** 导演事件旁人看到、听到的现象。 */
+    readonly detail: string;
+  }[];
   readonly entities: readonly EntityLink[];
 };
 
@@ -120,7 +127,7 @@ export type AdoptionRequest = {
   readonly worldFacts: readonly string[];
   /** 记为视角角色认知的见闻（AdoptionBelief 的 ref）。 */
   readonly beliefs: readonly string[];
-  /** 作者复核过的自动接受的裁决。 */
+  /** 作者复核过的自动接受的裁决与导演事件。 */
   readonly reviewed: readonly string[];
   /** 作者核对过涉及锁定设定的内容。 */
   readonly confirmLocked: boolean;
@@ -191,14 +198,33 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       .filter((k) => k.body.kind !== 'text' && k.round >= fromRound && k.round <= toRound)
       .sort((a, b) => a.round - b.round)
       .map((k) => k.id);
+    // 只取成为这一回合行动的提案：轮流对话中听者预先给出的回应若被打断会作废（它看过没说出口的句子），
+    // 用上时会以“上一回合的回应”再提交一次，那时才计入。
     const thoughts = upTo
       .map((e) => e.payload as RunEvent)
       .flatMap((e) =>
-        e.type === 'ProposalSubmitted' && e.actor === actor.data && e.proposal !== null && e.round >= fromRound && e.round <= toRound && e.proposal.innerThought.trim() !== ''
+        e.type === 'ProposalSubmitted' &&
+        e.actor === actor.data &&
+        e.forRound === e.round &&
+        e.proposal !== null &&
+        e.round >= fromRound &&
+        e.round <= toRound &&
+        e.proposal.innerThought.trim() !== ''
           ? [{ round: e.round, text: e.proposal.innerThought }]
           : [],
       );
     return ok({ scene, view, upToSeq, materials, thoughts });
+  }
+
+  /**
+   * 写正文时可用的内心片段。某回合的见闻被作者标为省略时，此后回合的内心片段可能想到它，
+   * 不再作为素材（第 k 回合的片段形成于第 k 回合行动之前，只可能想到更早的见闻）。
+   */
+  function thoughtsBefore(beats: readonly Beat[], moment: Moment): Moment['thoughts'] {
+    const roundOf = new Map(moment.view.knowledge.map((k) => [k.id as string, k.round]));
+    const omitted = beats.filter((b) => b.treatment === 'omit').map((b) => roundOf.get(b.ref) ?? Number.POSITIVE_INFINITY);
+    const cut = Math.min(Number.POSITIVE_INFINITY, ...omitted);
+    return moment.thoughts.filter((t) => t.round <= cut);
   }
 
   function viewOf(sheet: BeatSheet, moment: Moment): BeatSheetView {
@@ -315,11 +341,12 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
         return [{ ref: b.ref, round: b.round, text: b.text, modality: k.modality === 'claimed' ? 'heard' : k.modality, confidence: k.confidence, about: [...k.about] }];
       });
 
-    // 自动模式里自动接受、待复核的裁决（范围内的回合）。
-    const data = buildViewerData(scene, runId, inRange.map((e) => e.payload as RunEvent));
-    const reviews = data.rounds
-      .filter((r) => r.round >= fromRound && r.round <= toRound)
-      .flatMap((r) => r.rulings.filter((x) => x.needsReview).map((x) => ({ requestId: x.requestId, round: r.round, rationale: x.rationale })));
+    // 自动模式里自动接受的裁决与自动采用的导演事件（范围内的回合），待复核。
+    const reviews = reviewItems(
+      inRange.map((e) => e.payload as RunEvent),
+      fromRound,
+      toRound,
+    ).map(({ id, ...item }) => ({ requestId: id, ...item }));
 
     const draft: AdoptionDraft = {
       candidateId,
@@ -467,7 +494,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       const { draft, candidate, occurrences, entityOf, lockedNames } = loaded.value;
 
       const unreviewed = draft.reviews.filter((r) => !request.reviewed.includes(r.requestId));
-      if (unreviewed.length > 0) return err(settings(`还有 ${unreviewed.length} 条自动接受的裁决没有复核：自动模式的结果须逐条复核后才能采纳`));
+      if (unreviewed.length > 0) return err(settings(`还有 ${unreviewed.length} 条自动接受的裁决或导演事件没有复核：自动模式的结果须逐条复核后才能采纳`));
       const chosen = draft.events.filter((e) => request.events.includes(e.key));
       if (chosen.length === 0) return err(settings('请至少选一件事：推演写成的正文要关联它讲述的事件'));
       const draftFile = await deps.drafts.read(s.path, candidate.chapterId);
@@ -578,7 +605,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       if (!moment.ok) return moment;
       const prompt = renderCandidateText(moment.value.view, {
         beats: sheet.value.beats.map((b) => ({ ...b, ref: b.ref as KnowledgeId })),
-        thoughts: moment.value.thoughts.map((t) => t.text),
+        thoughts: thoughtsBefore(sheet.value.beats, moment.value).map((t) => t.text),
         ...(sheet.value.style.trim() !== '' && { style: sheet.value.style.trim() }),
       });
       if (!prompt.ok) return err(settings(prompt.error));

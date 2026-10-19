@@ -36,8 +36,8 @@
     "sha256": "1b915ac3a2801ea74c726048a3072255650dc3a27c1bd46b36ea3b207903c3f0"
   },
   "character_action": {
-    "version": "9",
-    "sha256": "d078c4c6f100d3a2a45ef9a42abf7298184c438ba85473bf1a314853328d3502"
+    "version": "10",
+    "sha256": "bb5df2fd3828f70a6cdabab604c40e00190f942e1b99715fff9e2f10c1e5db7d"
   },
   "connection_test": {
     "version": "1",

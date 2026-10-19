@@ -108,7 +108,14 @@ export type EngineEvent =
     }
   | { readonly type: 'RoundEnded'; readonly round: number; readonly stateHash: string; readonly nextFloor: ActorId | null }
   | { readonly type: 'RunPaused'; readonly reason: PauseReason; readonly actor?: ActorId; readonly detail?: string }
-  | { readonly type: 'RunResumed' }
+  | {
+      readonly type: 'RunResumed';
+      /**
+       * 作者在截断、拒答、输出不合格、调用失败或裁决不合格后继续：这个对象（角色，或裁决、僵局、导演的 all）
+       * 本回合的步骤键换新后缀重新调用，不再复用失败的结果。手动暂停后继续时没有。
+       */
+      readonly retry?: ActorId | 'all';
+    }
   | { readonly type: 'RunEnded'; readonly reason: EndReason };
 
 export type RunEvent = EngineEvent | DomainEvent | KnowledgeEdited;

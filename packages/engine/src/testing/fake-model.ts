@@ -19,6 +19,8 @@ export type CallContext = {
   readonly step: string;
   readonly subject: string;
   readonly attempt: number;
+  /** 作者继续或改认知后的重做序号（步骤键末尾的 :rN），没有时为 0。 */
+  readonly redo: number;
   readonly text: string;
 };
 
@@ -78,24 +80,33 @@ const defaults: Required<Policy> = {
 };
 
 export function contextOf(request: LlmRequest): CallContext {
-  const key = (request.stepKey ?? '').split('#')[0] ?? '';
+  const full = (request.stepKey ?? '').split('#')[0] ?? '';
+  const redo = /:r(\d+)$/.exec(full);
+  const key = redo === null ? full : full.slice(0, -redo[0].length);
   // 裁决请求的标识本身含冒号（如 1:r0），尝试次数取最后一段，对象取中间各段。
   const parts = key.split(':');
   const [, round = '0', step = ''] = parts;
   const subject = parts.slice(3, -1).join(':');
   const attempt = parts.at(-1) ?? '0';
   const text = [...request.system.map((s) => s.text), ...request.messages.map((m) => m.content)].join('\n');
-  return { request, round: Number(round), step, subject, attempt: Number(attempt), text };
+  return { request, round: Number(round), step, subject, attempt: Number(attempt), redo: Number(redo?.[1] ?? 0), text };
 }
 
-export function fakeModel(policy: Policy = {}, options: { delay?: (ctx: CallContext) => number } = {}) {
+export type FakeOptions = {
+  readonly delay?: (ctx: CallContext) => number;
+  /** 让某次调用以截断或拒答结束（输出不完整）。 */
+  readonly outcome?: (ctx: CallContext) => 'truncated' | 'refused' | undefined;
+};
+
+export function fakeModel(policy: Policy = {}, options: FakeOptions = {}) {
   const calls: CallContext[] = [];
   const port: LlmPort = {
-    async complete(request) {
+    async complete(request, callOptions = {}) {
       const ctx = contextOf(request);
       calls.push(ctx);
       const delay = options.delay?.(ctx) ?? 0;
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      const ended = callOptions.signal?.aborted === true ? 'cancelled' : options.outcome?.(ctx);
       const p = { ...defaults, ...policy };
       // 评估用的两种结构化输出按输出 schema 区分，其余按任务种类。
       const byOutput: Readonly<Record<string, () => unknown>> = {
@@ -113,13 +124,15 @@ export function fakeModel(policy: Policy = {}, options: { delay?: (ctx: CallCont
         director: () => p.director(ctx),
       };
       const output = (byOutput[request.output?.name ?? ''] ?? byTask[request.task] ?? (() => p.judgement(ctx)))();
+      const text = typeof output === 'string' ? output : JSON.stringify(output);
       const result: LlmResult = {
-        outcome: 'completed',
-        text: typeof output === 'string' ? output : JSON.stringify(output),
+        outcome: ended ?? 'completed',
+        text: ended === undefined ? text : text.slice(0, 10),
         usage: { inputTokens: 1_000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
         provider: request.model.provider,
         servedModel: request.model.model,
-        stopReason: 'end_turn',
+        stopReason: ended === 'truncated' ? 'max_tokens' : 'end_turn',
+        ...(ended === 'refused' && { refusal: { category: 'test', explanation: null } }),
         fallbackUsed: false,
         requestHash: requestHash(request),
       };

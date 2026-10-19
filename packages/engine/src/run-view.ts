@@ -277,3 +277,37 @@ export function buildViewerData(scene: Scene, runId: string, events: readonly Ru
     rounds,
   };
 }
+
+/** 采纳进作品前须作者逐条复核的自动结果：自动接受的裁决与自动采用的导演事件（id 为请求标识或 director:回合）。 */
+export type ReviewItem = {
+  readonly id: string;
+  readonly kind: 'ruling' | 'director';
+  readonly round: number;
+  readonly rationale: string;
+  /** 导演事件旁人看到、听到的现象；裁决为空。 */
+  readonly detail: string;
+};
+
+/**
+ * 回合范围内须复核的自动结果。导演的外部事件由模型自由书写，经感知进入角色的认知，
+ * 自动模式下没有人看过，与自动接受的裁决一样，采纳前要作者复核。只读事件。
+ */
+export function reviewItems(events: readonly RunEvent[], fromRound: number, toRound: number): ReviewItem[] {
+  const items: ReviewItem[] = [];
+  const rationale = new Map<string, string>();
+  let director: Extract<RunEvent, { type: 'DirectorProposed' }> | null = null;
+  for (const e of events) {
+    if (e.type === 'AdjudicationProposed') rationale.set(e.requestId, e.rationale);
+    if (e.type === 'DirectorProposed') director = e;
+    const inRange = 'round' in e && e.round >= fromRound && e.round <= toRound;
+    if (!inRange) continue;
+    if (e.type === 'AdjudicationConfirmed' && e.needsReview) {
+      items.push({ id: e.requestId, kind: 'ruling', round: e.round, rationale: rationale.get(e.requestId) ?? '', detail: '' });
+    }
+    if (e.type === 'DirectorDecided' && e.accepted && e.by === 'auto' && director !== null) {
+      const shown = director.event?.occurrences.flatMap((o) => [o.description?.visual, o.description?.sound]).filter((t): t is string => t !== undefined && t !== '') ?? [];
+      items.push({ id: `director:${e.round}`, kind: 'director', round: e.round, rationale: director.rationale, detail: shown.join(' ') });
+    }
+  }
+  return items;
+}

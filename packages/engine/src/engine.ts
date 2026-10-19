@@ -1,5 +1,4 @@
 import {
-  adjudicate,
   applyEffects,
   buildCharacterView,
   checkAction,
@@ -10,6 +9,7 @@ import {
   planBeliefUpdate,
   planKnowledgeEdit,
   screenSecretInferences,
+  speechAudience,
   startRound,
   stateHash,
   type Action,
@@ -119,6 +119,18 @@ export const sceneHash = (scene: Scene): string => sha256(canonicalJson(scene));
 const byActor = <T extends { readonly actor: string }>(a: T, b: T) => (a.actor < b.actor ? -1 : a.actor > b.actor ? 1 : 0);
 
 const STOP_PHASES: ReadonlySet<Phase> = new Set(['AwaitingAuthor', 'Paused', 'Ended']);
+
+/** 这些暂停后作者点继续，出问题的步骤换新的步骤键重新调用；其余暂停（作者、提案不合规则、僵局）照原样继续。 */
+const RETRYABLE: ReadonlySet<PauseReason> = new Set(['llm_error', 'refused', 'truncated', 'invalid_output', 'ruling_invalid']);
+
+/**
+ * 步骤键 `runId:回合:步骤:对象:尝试次数`；本回合这个对象重做过时加 `:rN`（见 RunState.redo），
+ * 不再复用失败或请求内容已过时的调用记录。同样的事件记录总得到同样的步骤键，恢复时照常查重。
+ */
+function stepKey(state: RunState, base: string, subject: ActorId | 'all'): string {
+  const n = state.redo.get(subject) ?? 0;
+  return n === 0 ? base : `${base}:r${n}`;
+}
 
 /** 一次模型步骤的结果：成功、需要暂停或结束运行、或被取消（不写入任何事件）。 */
 type Outcome<T> =
@@ -248,16 +260,16 @@ export function createEngine(deps: EngineDeps) {
       },
     ]);
     const attempt = rejections.length;
-    const stepKey = `${runId}:${sim.round}:${responding ? 'respond' : 'propose'}:${actor}:${attempt}`;
+    const key = stepKey(state, `${runId}:${sim.round}:${responding ? 'respond' : 'propose'}:${actor}:${attempt}`, actor);
     const outcome = await call(
       ActionProposal,
-      request('character_action', config.models.character_action, prompt, stepKey, extra),
+      request('character_action', config.models.character_action, prompt, key, extra),
       config,
       signal,
       actor,
     );
     if (outcome.kind !== 'ok') return outcome;
-    return { kind: 'ok', value: { proposal: outcome.value, action: proposalToAction(outcome.value, actor), attempt, stepKey } };
+    return { kind: 'ok', value: { proposal: outcome.value, action: proposalToAction(outcome.value, actor), attempt, stepKey: key } };
   }
 
   function submission(
@@ -354,7 +366,9 @@ export function createEngine(deps: EngineDeps) {
     }
 
     const sentences = own.action.kind === 'speak' && own.action.utterance ? own.action.utterance.sentences : [];
-    const listeners = present.filter((a) => a !== floor);
+    // 只有听得清台词的人这时回应（硬性规则 2）：听不清、听不到的人拿不到台词，轮到他发言时按自己的认知再问。
+    const audience = speechAudience(scene, sim, own.action);
+    const listeners = present.filter((a) => a !== floor && audience.get(a) === 'full');
     if (sentences.length > 0) {
       const waiting = listeners.filter((a) => state.prepared.get(a)?.round !== sim.round);
       if (waiting.length > 0) {
@@ -385,18 +399,8 @@ export function createEngine(deps: EngineDeps) {
 
   // —— 裁决 ——
 
-  function roundActions(state: RunState): Action[] {
-    const actions = [...state.proposals.values()].map((p) => p.action);
-    const cut = state.proposalsComplete?.interruption;
-    if (cut === null || cut === undefined) return actions;
-    return actions.map((a) =>
-      a.utterance === undefined ? a : { ...a, utterance: { ...a.utterance, deliveredCount: cut.after } },
-    );
-  }
-
-  function adjudication(state: RunState, scene: Scene): Result<Adjudication, string> {
-    const result = adjudicate(scene, state.sim, roundActions(state));
-    return result.ok ? result : err(result.error.code);
+  function adjudication(state: RunState): Result<Adjudication, string> {
+    return state.adjudication ?? err('no_proposals');
   }
 
   /** 校验一条裁决：范围、不变式。返回问题描述，交给模型修正或报告给作者。 */
@@ -422,9 +426,9 @@ export function createEngine(deps: EngineDeps) {
     const extra: LlmMessage[] = [];
     let previousIssue: string | undefined;
     for (let attempt = 0; attempt <= config.maxRepairs; attempt++) {
-      const stepKey = `${runId}:${sim.round}:rule:${req.id}:${attempt}`;
+      const key = stepKey(state, `${runId}:${sim.round}:rule:${req.id}:${attempt}`, 'all');
       const repairOf = previousIssue === undefined ? undefined : [previousIssue];
-      const outcome = await call(SemanticRulingOutput, request('semantic_ruling', config.models.semantic_ruling, prompt, stepKey, extra, repairOf), config, signal);
+      const outcome = await call(SemanticRulingOutput, request('semantic_ruling', config.models.semantic_ruling, prompt, key, extra, repairOf), config, signal);
       if (outcome.kind !== 'ok') return outcome;
       const converted = rulingFromOutput(req.id, outcome.value);
       const issue = converted.ok ? rulingIssue(scene, state, adj, req, converted.value) : `effects[${converted.error.index}]: ${converted.error.issue}`;
@@ -438,7 +442,7 @@ export function createEngine(deps: EngineDeps) {
   }
 
   async function stepAdjudicating(state: RunState, scene: Scene, signal?: AbortSignal): Promise<RunEvent[] | 'cancelled'> {
-    const adj = adjudication(state, scene);
+    const adj = adjudication(state);
     if (!adj.ok) return [{ type: 'RunPaused', reason: 'ruling_invalid', detail: adj.error }];
     const round = state.sim.round;
     if (adj.value.pending.length === 0) return commitEvents(state, scene, adj.value);
@@ -446,16 +450,22 @@ export function createEngine(deps: EngineDeps) {
     const missing = adj.value.pending.filter((r) => !state.rulingsProposed.has(r.id));
     const events: RunEvent[] = [];
     const results = await Promise.all(missing.map(async (req) => ({ req, outcome: await askRuling(state, scene, adj.value, req, signal) })));
+    if (results.some((r) => r.outcome.kind === 'cancelled')) return 'cancelled';
+    // 一条暂停时，其余已完成的裁决照常写入，暂停事件放在最后：恢复后只补问缺的那条。
+    let stop: RunEvent | undefined;
     for (const { req, outcome } of results) {
-      if (outcome.kind === 'cancelled') return 'cancelled';
-      if (outcome.kind === 'stop') return [...events, outcome.event];
+      if (outcome.kind === 'cancelled') continue;
+      if (outcome.kind === 'stop') {
+        stop ??= outcome.event;
+        continue;
+      }
       events.push({ type: 'AdjudicationProposed', round, requestId: req.id, ...outcome.value });
       if (state.config.mode === 'auto') {
         // 自动模式：自动接受并标记待复核，采纳进作品前必须逐项经作者复核。
         events.push({ type: 'AdjudicationConfirmed', round, requestId: req.id, ruling: outcome.value.ruling, by: 'auto', needsReview: true });
       }
     }
-    return events;
+    return stop === undefined ? events : [...events, stop];
   }
 
   function commitEvents(state: RunState, scene: Scene, adj: Adjudication): RunEvent[] {
@@ -491,7 +501,7 @@ export function createEngine(deps: EngineDeps) {
             const prompt = unwrapPrompt(renderBeliefUpdate(view, fresh));
             const outcome = await call(
               BeliefUpdateOutput,
-              request('belief_update', config.models.belief_update, prompt, `${runId}:${round}:beliefs:${actor}:0`),
+              request('belief_update', config.models.belief_update, prompt, stepKey(state, `${runId}:${round}:beliefs:${actor}:0`, actor)),
               config,
               signal,
               actor,
@@ -505,14 +515,20 @@ export function createEngine(deps: EngineDeps) {
           return { actor, outcome: { kind: 'ok' as const, value: fallback.ok ? [fallback.value] : [] } };
         }),
       );
+      if (results.some((r) => r.outcome.kind === 'cancelled')) return 'cancelled';
       const events: RunEvent[] = [];
       // 新增条目的标识按该角色已有条目数分配，各角色互不影响，按角色顺序写入即可。
+      // 有人暂停时，其余已完成的认知更新照常写入，暂停事件放在最后：之后作者改认知，不会与丢掉的结果冲突。
+      let stop: RunEvent | undefined;
       for (const { actor, outcome } of results) {
-        if (outcome.kind === 'cancelled') return 'cancelled';
-        if (outcome.kind === 'stop') return [...events, outcome.event];
+        if (outcome.kind === 'cancelled') continue;
+        if (outcome.kind === 'stop') {
+          stop ??= outcome.event;
+          continue;
+        }
         events.push(...outcome.value, { type: 'BeliefsReviewed', round, actor });
       }
-      return events;
+      return stop === undefined ? events : [...events, stop];
     }
 
     // 证据链：本回合新增的推测与秘密有关时，请求命中判断；只作提示，不作结论（B44）。
@@ -527,7 +543,7 @@ export function createEngine(deps: EngineDeps) {
         const prompt = unwrapPrompt(renderEvidenceJudgement(buildCharacterView(scene, sim, actor), candidates, secrets));
         const outcome = await call(
           EvidenceJudgementOutput,
-          request('judgement', config.models.judgement, prompt, `${runId}:${round}:evidence:${actor}:0`),
+          request('judgement', config.models.judgement, prompt, stepKey(state, `${runId}:${round}:evidence:${actor}:0`, actor)),
           config,
           signal,
           actor,
@@ -535,11 +551,13 @@ export function createEngine(deps: EngineDeps) {
         return { actor, candidates, outcome };
       }),
     );
+    // 证据链整体是一个批次：有人暂停时一条命中也不写；恢复后已完成的判断按原步骤键从调用记录复用，不重复写入、不重复计费。
+    if (results.some((r) => r.outcome?.kind === 'cancelled')) return 'cancelled';
+    const stopped = results.find((r) => r.outcome?.kind === 'stop')?.outcome;
+    if (stopped?.kind === 'stop') return [stopped.event];
     const events: RunEvent[] = [];
     for (const { actor, candidates, outcome } of results) {
-      if (outcome === null) continue;
-      if (outcome.kind === 'cancelled') return 'cancelled';
-      if (outcome.kind === 'stop') return [...events, outcome.event];
+      if (outcome?.kind !== 'ok') continue;
       for (const j of outcome.value.judgements) {
         // 一条推测可能对照几个秘密，按推测与秘密一起对应。
         const candidate = candidates.find((c) => c.inference === j.inference && c.secret === j.secret);
@@ -587,7 +605,7 @@ export function createEngine(deps: EngineDeps) {
         const prompt = unwrapPrompt(renderStalemateJudgement(scene, recent.map((r) => ({ round: r.round, occurrences: r.occurrences }))));
         const outcome = await call(
           StalemateJudgementOutput,
-          request('judgement', config.models.stalemate, prompt, `${runId}:${sim.round}:stalemate:all:0`),
+          request('judgement', config.models.stalemate, prompt, stepKey(state, `${runId}:${sim.round}:stalemate:all:0`, 'all')),
           config,
           signal,
         );
@@ -631,7 +649,12 @@ export function createEngine(deps: EngineDeps) {
         ...(config.director.trigger === 'stalemate' && stalemate !== undefined && stalemate !== 'goal_unreachable' && { stalemate }),
       }),
     );
-    const outcome = await call(DirectorProposalOutput, request('director', model, prompt, `${runId}:${sim.round}:director:all:0`), config, signal);
+    const outcome = await call(
+      DirectorProposalOutput,
+      request('director', model, prompt, stepKey(state, `${runId}:${sim.round}:director:all:0`, 'all')),
+      config,
+      signal,
+    );
     if (outcome.kind === 'cancelled') return 'cancelled';
     if (outcome.kind === 'stop') return [outcome.event];
 
@@ -677,7 +700,7 @@ export function createEngine(deps: EngineDeps) {
       case 'Adjudicating':
         return stepAdjudicating(state, scene, signal);
       case 'Committing': {
-        const adj = adjudication(state, scene);
+        const adj = adjudication(state);
         return adj.ok ? commitEvents(state, scene, adj.value) : [{ type: 'RunPaused', reason: 'ruling_invalid', detail: adj.error }];
       }
       case 'UpdatingBeliefs':
@@ -740,7 +763,7 @@ export function createEngine(deps: EngineDeps) {
         return err({ code: 'invalid_phase' });
       }
       const chosen = { ...(ruling ?? proposed.ruling), requestId };
-      const adj = adjudication(state, scene);
+      const adj = adjudication(state);
       const req = adj.ok ? adj.value.pending.find((r) => r.id === requestId) : undefined;
       if (!adj.ok || req === undefined) return err({ code: 'invalid_ruling' });
       const issue = rulingIssue(scene, state, adj.value, req, chosen);
@@ -814,6 +837,13 @@ export function createEngine(deps: EngineDeps) {
           const planned = planKnowledgeEdit(scene, sim, intervention.actor, { add: intervention.add, retract: intervention.retract });
           if (!planned.ok) return err({ code: 'invalid_intervention', detail: planned.error.code });
           events = [marker(intervention.actor), planned.value];
+          // 本回合他还要据此提出行动：重记视图哈希，让 ViewBuilt 对应他实际拿到的视图。
+          const actor = intervention.actor;
+          if (state.inRound && state.views.has(actor) && state.proposalsComplete === null && !state.proposals.has(actor)) {
+            const edited = applyEvent(scene, sim, planned.value);
+            if (!edited.ok) return err({ code: 'invalid_intervention', detail: edited.error.code });
+            events.push({ type: 'ViewBuilt', round: sim.round, actor, viewHash: sha256(canonicalJson(buildCharacterView(scene, edited.value, actor))) });
+          }
           break;
         }
         case 'external_event': {
@@ -841,8 +871,10 @@ export function createEngine(deps: EngineDeps) {
     async resume(runId: string, scene: Scene): Promise<Result<RunStatus, EngineError>> {
       const loaded = await load(runId, scene);
       if (!loaded.ok) return loaded;
-      if (loaded.value.phase !== 'Paused') return err({ code: 'invalid_phase' });
-      const appended = await append(loaded.value, [{ type: 'RunResumed' }]);
+      const { phase, pause } = loaded.value;
+      if (phase !== 'Paused' || pause === null) return err({ code: 'invalid_phase' });
+      const retry = RETRYABLE.has(pause.reason) ? (pause.actor ?? 'all') : undefined;
+      const appended = await append(loaded.value, [{ type: 'RunResumed', ...(retry !== undefined && { retry }) }]);
       return appended.ok ? this.status(runId, scene) : appended;
     },
 

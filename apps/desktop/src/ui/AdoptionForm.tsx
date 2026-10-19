@@ -34,11 +34,11 @@ export function AdoptionForm({ draft }: { readonly draft: AdoptionDraft }) {
     >
       {draft.reviews.length > 0 && (
         <fieldset>
-          <legend>自动接受的裁决：逐条复核后才能采纳</legend>
+          <legend>自动接受的裁决与导演事件：逐条复核后才能采纳</legend>
           {draft.reviews.map((r) => (
             <label key={r.requestId}>
               <input type="checkbox" checked={reviewed.includes(r.requestId)} onChange={(e) => setReviewed(toggle(reviewed, r.requestId, e.currentTarget.checked))} />
-              已复核：第 {r.round} 回合 · {r.rationale}
+              已复核：第 {r.round} 回合 · {r.kind === 'director' ? `导演安排的事：${r.detail}（${r.rationale}）` : r.rationale}
             </label>
           ))}
         </fieldset>

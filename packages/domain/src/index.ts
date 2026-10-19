@@ -39,7 +39,7 @@ export {
 } from './ids';
 export type { Occurrence, OccurrenceKind } from './occurrence';
 export type { Perception } from './perception';
-export { perceive } from './perception';
+export { perceive, speechAudience } from './perception';
 export type { RngState } from './rng';
 export { drawInt, seedRng } from './rng';
 export type { CheckResult, RuleViolation, RuleViolationCode } from './rules/check';

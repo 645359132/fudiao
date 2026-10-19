@@ -82,7 +82,7 @@ describe('角色行动提案', () => {
     expect(prompt.system[1]?.text).toContain('带着密信从南门脱身');
     expect(prompt.system[1]?.text).toContain('仓库中央[center]');
     expect(prompt.system[2]?.text).toContain('现在是第 1 回合');
-    expect(prompt.template).toEqual({ id: 'character_action', version: '9' });
+    expect(prompt.template).toEqual({ id: 'character_action', version: '10' });
     expect(prompt.output?.name).toBe('ActionProposal');
   });
 
@@ -136,8 +136,10 @@ describe('角色行动提案', () => {
         }),
       ),
     );
-    expect(text).toContain('对手正在对你说');
+    expect(text).toContain('对手正在说话，你听得清');
     expect(text).toContain('2. 我数到三。');
+    // 不靠提示词要求模型“忽略”没听到的部分（硬性规则 2）：被打断时这次回应由引擎作废。
+    expect(text).not.toContain('不算你知道的事');
   });
 });
 
@@ -327,6 +329,36 @@ describe('金丝雀泄露测试（提示词）', () => {
     // 物品位置属于全局局面，导演可以看到；角色卡与认知、秘密、场景元信息不可以。
     expect(text).toContain(`${CANARY}-ITEM-letter`);
     for (const marker of [`${CANARY}-CARD-`, `${CANARY}-SECRET-`, `${CANARY}-META-`]) expect(text).not.toContain(marker);
+  });
+
+  it('导演看不到耳语的内容：只知道有人耳语，免得写进外部事件、经感知进入别人的认知', () => {
+    const state = { ...initialState(canary, 1), round: 3 };
+    const [a, b] = canary.actors.map((x) => x.id);
+    const zone = canary.zones[0]!.id;
+    const speak = (id: string, volume: 'whisper' | 'normal', text: string) => ({
+      id,
+      kind: 'speak' as const,
+      actor: a!,
+      participants: [a!],
+      zones: [zone],
+      visible: true,
+      loudness: 1,
+      target: b!,
+      speech: { sentences: [text], volume },
+    });
+    const text = fullText(
+      unwrap(
+        renderDirectorProposal({
+          scene: canary,
+          state,
+          recent: [{ round: 3, occurrences: [speak('3:0', 'whisper', `${CANARY}-WHISPER`), speak('3:1', 'normal', '大家都听得见')] }],
+          tensionCurve: '平稳',
+          maxRounds: 8,
+        }),
+      ),
+    );
+    expect(text).not.toContain(`${CANARY}-WHISPER`);
+    expect(text).toContain('大家都听得见');
   });
 
   it('僵局判断只含各人的当前目标，不含角色卡的其他内容、认知与秘密', () => {
