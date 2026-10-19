@@ -3,17 +3,19 @@
 //! - 凭据与源（协议、主机、端口）绑定，只附加到这个源；请求的目标不是这个源时拒绝，一个字节也不发。
 //! - 需要凭据的服务必须是 https；本地端点（不需要凭据）只允许回环地址，代理不能被当作任意地址的 fetch。
 //! - 不跟随重定向：自定义的认证头（`x-api-key`）在跨主机重定向时不会被去掉，3xx 原样交给 SDK。
-//! - 不重试（由 SDK 负责）；按源限制并发；可取消，取消前已收到的内容照常交给适配器。
-//! - 不记录请求头与正文；错误说明中去掉 URL。
+//! - 回环地址的请求不经系统代理与 HTTP_PROXY，不会被转发出本机。
+//! - 不重试（由 SDK 负责）；按源限制并发；可取消（先于开始到达的取消也生效），取消前已收到的内容照常交给适配器。
+//! - 不记录请求头与正文；错误说明中去掉 URL；错误响应中回显的密钥换成 `***`。
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 use url::{Host, Url};
 
 /// 认证头的写法：Anthropic 用 `x-api-key`，OpenAI 及其兼容接口（含 Gemini 兼容模式）用 `Authorization: Bearer`。
@@ -55,6 +57,12 @@ pub struct Binding {
 }
 
 pub const DEFAULT_CONCURRENCY: usize = 4;
+/// 与服务设置的取值范围（packages/store/src/app/model-services.ts，1 到 64）一致；信号量的名额也不能过大。
+pub const MAX_CONCURRENCY: usize = 64;
+
+fn clamp_concurrency(n: usize) -> usize {
+    n.clamp(1, MAX_CONCURRENCY)
+}
 
 impl Binding {
     /// 由服务的地址（base URL）建立绑定，并检查协议与主机。
@@ -77,7 +85,7 @@ impl Binding {
         Ok(Binding {
             origin: origin_of(&url),
             auth,
-            concurrency: concurrency.max(1),
+            concurrency: clamp_concurrency(concurrency),
         })
     }
 }
@@ -194,31 +202,137 @@ pub struct Prepared {
     concurrency: usize,
     request: reqwest::Request,
     cancel: Arc<Notify>,
+    loopback: bool,
+    /// 用于从错误响应中去掉回显的密钥；不需要凭据的服务为 None。
+    secret: Option<String>,
+}
+
+impl Prepared {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// 错误响应（4xx、5xx）的响应体最多读这么多，去掉密钥后整块交给界面。
+const MAX_ERROR_BODY: usize = 1024 * 1024;
+/// 开始前到达的取消保留多久、最多几条（请求结束后才到的取消也会记在这里，不能无限增长）。
+const EARLY_CANCEL_TTL: Duration = Duration::from_secs(60);
+const EARLY_CANCEL_MAX: usize = 1024;
+
+#[derive(Default)]
+struct Inflight {
+    running: HashMap<String, Arc<Notify>>,
+    /// 在 `prepare` 之前到达的取消。界面的取消与 `net_fetch` 是两次独立的调用，到达顺序没有保证。
+    cancelled_early: HashMap<String, Instant>,
+}
+
+/// 一个源的并发名额。上限改变时就地增减名额，不换信号量：换了之后旧信号量上的请求不再计数，
+/// 同源不同上限的服务交替请求时上限形同虚设。名额一时收不回来的记为欠额，请求结束时抵掉。
+struct Limiter {
+    limit: usize,
+    semaphore: Arc<Semaphore>,
+    debt: Arc<AtomicUsize>,
+}
+
+impl Limiter {
+    fn new(limit: usize) -> Limiter {
+        Limiter {
+            limit,
+            semaphore: Arc::new(Semaphore::new(limit)),
+            debt: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn resize(&mut self, limit: usize) {
+        if limit > self.limit {
+            let more = limit - self.limit;
+            let paid = self
+                .debt
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |d| {
+                    Some(d - d.min(more))
+                })
+                .map(|d| d.min(more))
+                .unwrap_or(0);
+            self.semaphore.add_permits(more - paid);
+        } else if limit < self.limit {
+            let fewer = self.limit - limit;
+            let forgotten = self.semaphore.forget_permits(fewer);
+            self.debt.fetch_add(fewer - forgotten, Ordering::SeqCst);
+        }
+        self.limit = limit;
+    }
+}
+
+/// 请求占用的名额；有欠额时结束后不归还。
+struct Slot {
+    permit: Option<OwnedSemaphorePermit>,
+    debt: Arc<AtomicUsize>,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        if let Some(permit) = self.permit.take() {
+            let owed = self
+                .debt
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |d| d.checked_sub(1))
+                .is_ok();
+            if owed {
+                permit.forget();
+            }
+        }
+    }
 }
 
 pub struct Proxy {
+    /// 发往 https 服务，照常使用系统代理设置。
     client: reqwest::Client,
+    /// 发往回环地址，不经任何代理：系统代理或 HTTP_PROXY 会把带凭据与正文的请求转发出本机。
+    local: reqwest::Client,
     credentials: Arc<dyn Credentials>,
-    /// 每个源的并发上限与信号量；上限改变时换一个新的信号量（进行中的请求在旧信号量上照常完成）。
-    limits: Mutex<HashMap<String, (usize, Arc<Semaphore>)>>,
+    limits: Mutex<HashMap<String, Limiter>>,
     /// 服务设置中的并发上限（`net_set_limits`），没有设置时用绑定中的默认值。
     overrides: Mutex<HashMap<String, usize>>,
-    inflight: Mutex<HashMap<String, Arc<Notify>>>,
+    inflight: Mutex<Inflight>,
+}
+
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(30))
+}
+
+/// 把密钥原文换成 `***`。中转站可能在错误说明里回显请求头，原样转发会写进调用记录与导出。
+fn redact(bytes: &[u8], secret: &str) -> Vec<u8> {
+    let needle = secret.as_bytes();
+    if needle.is_empty() {
+        return bytes.to_vec();
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(needle) {
+            out.extend_from_slice(b"***");
+            i += needle.len();
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 impl Proxy {
     pub fn new(credentials: Arc<dyn Credentials>) -> Proxy {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(30))
-            .build()
-            .expect("无法建立 HTTP 客户端");
         Proxy {
-            client,
+            client: client_builder().build().expect("无法建立 HTTP 客户端"),
+            local: client_builder()
+                .no_proxy()
+                .build()
+                .expect("无法建立 HTTP 客户端"),
             credentials,
             limits: Mutex::new(HashMap::new()),
             overrides: Mutex::new(HashMap::new()),
-            inflight: Mutex::new(HashMap::new()),
+            inflight: Mutex::new(Inflight::default()),
         }
     }
 
@@ -227,7 +341,7 @@ impl Proxy {
         let mut overrides = self.overrides.lock().unwrap();
         overrides.clear();
         for (provider_id, limit) in limits {
-            overrides.insert(provider_id.clone(), (*limit).max(1));
+            overrides.insert(provider_id.clone(), clamp_concurrency(*limit));
         }
     }
 
@@ -244,7 +358,8 @@ impl Proxy {
         if origin != binding.origin {
             return Err(NetError::HostNotAllowed { origin });
         }
-        if url.scheme() != "https" && !is_loopback(&url) {
+        let loopback = is_loopback(&url);
+        if url.scheme() != "https" && !loopback {
             return Err(NetError::InsecureScheme);
         }
         let method = reqwest::Method::from_bytes(req.method.as_bytes()).map_err(|_| {
@@ -253,23 +368,25 @@ impl Proxy {
             }
         })?;
 
-        let mut builder = self.client.request(method, url);
+        let client = if loopback { &self.local } else { &self.client };
+        let mut builder = client.request(method, url);
         for (name, value) in &req.headers {
             if DROPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
                 continue;
             }
             builder = builder.header(name, value);
         }
-        builder = match &binding.auth {
-            Auth::None => builder,
-            Auth::ApiKey {
-                header: KeyHeader::XApiKey,
-                secret,
-            } => builder.header("x-api-key", secret),
-            Auth::ApiKey {
-                header: KeyHeader::Bearer,
-                secret,
-            } => builder.header("authorization", format!("Bearer {secret}")),
+        let secret = match &binding.auth {
+            Auth::None => None,
+            Auth::ApiKey { header, secret } => {
+                builder = match header {
+                    KeyHeader::XApiKey => builder.header("x-api-key", secret),
+                    KeyHeader::Bearer => {
+                        builder.header("authorization", format!("Bearer {secret}"))
+                    }
+                };
+                Some(secret.clone())
+            }
         };
         if let Some(body) = req.body {
             builder = builder.body(body);
@@ -281,10 +398,14 @@ impl Proxy {
         let cancel = Arc::new(Notify::new());
         {
             let mut inflight = self.inflight.lock().unwrap();
-            if inflight.contains_key(&req.id) {
+            if inflight.running.contains_key(&req.id) {
                 return Err(NetError::DuplicateId);
             }
-            inflight.insert(req.id.clone(), cancel.clone());
+            if inflight.cancelled_early.remove(&req.id).is_some() {
+                // Notify 会存下这个许可：`run` 一开始就选中取消，不发出请求。
+                cancel.notify_one();
+            }
+            inflight.running.insert(req.id.clone(), cancel.clone());
         }
         Ok(Prepared {
             id: req.id,
@@ -298,19 +419,20 @@ impl Proxy {
                 .unwrap_or(binding.concurrency),
             request,
             cancel,
+            loopback,
+            secret,
         })
     }
 
-    fn semaphore(&self, origin: &str, concurrency: usize) -> Arc<Semaphore> {
+    fn limiter(&self, origin: &str, concurrency: usize) -> (Arc<Semaphore>, Arc<AtomicUsize>) {
         let mut limits = self.limits.lock().unwrap();
-        match limits.get(origin) {
-            Some((limit, semaphore)) if *limit == concurrency => semaphore.clone(),
-            _ => {
-                let semaphore = Arc::new(Semaphore::new(concurrency));
-                limits.insert(origin.to_string(), (concurrency, semaphore.clone()));
-                semaphore
-            }
+        let limiter = limits
+            .entry(origin.to_string())
+            .or_insert_with(|| Limiter::new(concurrency));
+        if limiter.limit != concurrency {
+            limiter.resize(concurrency);
         }
+        (limiter.semaphore.clone(), limiter.debt.clone())
     }
 
     /// 发出请求并经 `emit` 回传事件，直到结束、失败或取消。
@@ -321,80 +443,132 @@ impl Proxy {
             concurrency,
             request,
             cancel,
+            loopback,
+            secret,
         } = prepared;
-        let semaphore = self.semaphore(&origin, concurrency);
+        let (semaphore, debt) = self.limiter(&origin, concurrency);
+        let client = if loopback { &self.local } else { &self.client };
         // 三处 select 都先看取消（biased）：开始前已到的取消与可以发送同时就绪时，随机选择会把请求连同凭据发出去。
         let event = tokio::select! {
             biased;
             _ = cancel.notified() => Some(NetEvent::End { cancelled: true }),
             permit = semaphore.acquire_owned() => {
-                let _permit = permit.expect("信号量不会关闭");
-                self.forward(request, &cancel, &mut emit).await
+                let _slot = Slot { permit: Some(permit.expect("信号量不会关闭")), debt };
+                forward(client, request, &cancel, secret.as_deref(), &mut emit).await
             }
         };
         if let Some(event) = event {
             emit(event);
         }
-        self.inflight.lock().unwrap().remove(&id);
+        self.inflight.lock().unwrap().running.remove(&id);
     }
 
-    /// 转发并流式回传；返回最后一个事件。
-    async fn forward(
-        &self,
-        request: reqwest::Request,
-        cancel: &Notify,
-        emit: &mut (impl FnMut(NetEvent) + Send),
-    ) -> Option<NetEvent> {
-        let response = tokio::select! {
-            biased;
-            _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
-            r = self.client.execute(request) => r,
-        };
-        let response = match response {
-            Ok(r) => r,
-            Err(e) => {
-                return Some(NetEvent::Failed {
-                    message: e.without_url().to_string(),
-                })
-            }
-        };
-        let headers = response
-            .headers()
-            .iter()
-            .filter(|(name, _)| name.as_str() != "set-cookie")
-            .filter_map(|(name, value)| {
-                value
-                    .to_str()
-                    .ok()
-                    .map(|v| (name.as_str().to_string(), v.to_string()))
-            })
-            .collect();
-        emit(NetEvent::Head {
-            status: response.status().as_u16(),
-            headers,
-        });
-        let mut body = response.bytes_stream();
-        loop {
-            tokio::select! {
-                biased;
-                _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
-                chunk = body.next() => match chunk {
-                    Some(Ok(bytes)) => emit(NetEvent::Chunk { data: bytes.to_vec() }),
-                    Some(Err(e)) => return Some(NetEvent::Failed { message: e.without_url().to_string() }),
-                    None => return Some(NetEvent::End { cancelled: false }),
-                },
+    /// 取消一个请求；返回它是否正在进行。还没开始的请求记下来，开始时直接结束，不发出。
+    pub fn cancel(&self, id: &str) -> bool {
+        let mut inflight = self.inflight.lock().unwrap();
+        if let Some(cancel) = inflight.running.get(id) {
+            cancel.notify_one();
+            return true;
+        }
+        let now = Instant::now();
+        let early = &mut inflight.cancelled_early;
+        early.retain(|_, at| now.duration_since(*at) < EARLY_CANCEL_TTL);
+        if early.len() >= EARLY_CANCEL_MAX {
+            if let Some(oldest) = early
+                .iter()
+                .min_by_key(|(_, at)| **at)
+                .map(|(k, _)| k.clone())
+            {
+                early.remove(&oldest);
             }
         }
+        early.insert(id.to_string(), now);
+        false
     }
 
-    /// 取消一个请求；返回是否找到。取消在请求开始前到达时同样生效。
-    pub fn cancel(&self, id: &str) -> bool {
-        match self.inflight.lock().unwrap().get(id) {
-            Some(cancel) => {
-                cancel.notify_one();
-                true
+    #[cfg(test)]
+    fn early_cancels(&self) -> usize {
+        self.inflight.lock().unwrap().cancelled_early.len()
+    }
+}
+
+/// 转发并流式回传；返回最后一个事件。
+async fn forward(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    cancel: &Notify,
+    secret: Option<&str>,
+    emit: &mut (impl FnMut(NetEvent) + Send),
+) -> Option<NetEvent> {
+    let response = tokio::select! {
+        biased;
+        _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
+        r = client.execute(request) => r,
+    };
+    let response = match response {
+        Ok(r) => r,
+        Err(e) => {
+            return Some(NetEvent::Failed {
+                message: e.without_url().to_string(),
+            })
+        }
+    };
+    let clean = |text: &str| match secret {
+        Some(s) if !s.is_empty() => text.replace(s, "***"),
+        _ => text.to_string(),
+    };
+    let headers = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.as_str() != "set-cookie")
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_string(), clean(v)))
+        })
+        .collect();
+    let status = response.status();
+    emit(NetEvent::Head {
+        status: status.as_u16(),
+        headers,
+    });
+    let mut body = response.bytes_stream();
+    if status.is_client_error() || status.is_server_error() {
+        // 错误响应不长，读完再去掉密钥：密钥可能跨两块，流式替换会漏。
+        let mut buf = Vec::new();
+        let ending = loop {
+            tokio::select! {
+                biased;
+                _ = cancel.notified() => break NetEvent::End { cancelled: true },
+                chunk = body.next() => match chunk {
+                    Some(Ok(bytes)) => {
+                        buf.extend_from_slice(&bytes);
+                        if buf.len() >= MAX_ERROR_BODY {
+                            buf.truncate(MAX_ERROR_BODY);
+                            break NetEvent::End { cancelled: false };
+                        }
+                    }
+                    Some(Err(e)) => break NetEvent::Failed { message: e.without_url().to_string() },
+                    None => break NetEvent::End { cancelled: false },
+                },
             }
-            None => false,
+        };
+        if !buf.is_empty() {
+            let data = secret.map_or(buf.clone(), |s| redact(&buf, s));
+            emit(NetEvent::Chunk { data });
+        }
+        return Some(ending);
+    }
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.notified() => return Some(NetEvent::End { cancelled: true }),
+            chunk = body.next() => match chunk {
+                Some(Ok(bytes)) => emit(NetEvent::Chunk { data: bytes.to_vec() }),
+                Some(Err(e)) => return Some(NetEvent::Failed { message: e.without_url().to_string() }),
+                None => return Some(NetEvent::End { cancelled: false }),
+            },
         }
     }
 }
@@ -412,11 +586,15 @@ pub async fn net_fetch(
 ) -> Result<(), NetError> {
     let prepared = state.proxy.prepare(request)?;
     let proxy = state.proxy.clone();
+    let id = prepared.id().to_string();
     tauri::async_runtime::spawn(async move {
+        let canceller = proxy.clone();
         proxy
             .run(prepared, move |event| {
-                // 界面已关闭时发送失败，忽略即可。
-                let _ = channel.send(event);
+                // 界面已关闭或不再接收时停止读取，不再空读计费的输出。
+                if channel.send(event).is_err() {
+                    canceller.cancel(&id);
+                }
             })
             .await;
     });
@@ -431,4 +609,54 @@ pub fn net_cancel(state: tauri::State<'_, NetState>, id: String) -> bool {
 #[tauri::command]
 pub fn net_set_limits(state: tauri::State<'_, NetState>, limits: Vec<(String, usize)>) {
     state.proxy.set_limits(&limits);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_replaces_every_occurrence() {
+        assert_eq!(
+            redact(b"key sk-1 and sk-1sk-1 end", "sk-1"),
+            b"key *** and ****** end".to_vec()
+        );
+        assert_eq!(redact(b"abc", ""), b"abc".to_vec());
+    }
+
+    #[test]
+    fn early_cancels_are_bounded() {
+        let proxy = Proxy::new(Arc::new(MemoryCredentials::default()));
+        for i in 0..EARLY_CANCEL_MAX + 100 {
+            assert!(!proxy.cancel(&format!("r{i}")));
+        }
+        assert_eq!(proxy.early_cancels(), EARLY_CANCEL_MAX);
+    }
+
+    #[tokio::test]
+    async fn limiter_resizes_in_place() {
+        let mut limiter = Limiter::new(3);
+        let semaphore = limiter.semaphore.clone();
+        let held: Vec<_> = (0..3)
+            .map(|_| Slot {
+                permit: Some(semaphore.clone().try_acquire_owned().unwrap()),
+                debt: limiter.debt.clone(),
+            })
+            .collect();
+        // 三个都在用时降到 1：欠 2 个，前两个结束时不归还。
+        limiter.resize(1);
+        assert_eq!(limiter.debt.load(Ordering::SeqCst), 2);
+        drop(held);
+        assert_eq!(semaphore.available_permits(), 1);
+        assert_eq!(limiter.debt.load(Ordering::SeqCst), 0);
+        // 有欠额时升高，先抵欠额。
+        let a = semaphore.clone().try_acquire_owned().unwrap();
+        limiter.resize(0);
+        assert_eq!(limiter.debt.load(Ordering::SeqCst), 1);
+        limiter.resize(4);
+        assert_eq!(limiter.debt.load(Ordering::SeqCst), 0);
+        assert_eq!(semaphore.available_permits(), 3);
+        drop(a);
+        assert_eq!(semaphore.available_permits(), 4);
+    }
 }

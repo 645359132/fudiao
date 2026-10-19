@@ -170,10 +170,15 @@ pub struct PackFile {
     pub content: String,
 }
 
+/// 路径中有一段是 `..` 或 `.`。只按段判断：章节标题里的“等等..他是谁”不算。
+fn has_dot_segment(path: &str) -> bool {
+    path.split('/').any(|seg| seg == ".." || seg == ".")
+}
+
 /// 作品包中只接受这三类条目：`manifest.json`、`chapters/*.md`、`data/*.jsonl`。
-/// 拒绝绝对路径、反斜杠与 `..`，防止解包或打包时写到别处。
+/// 拒绝绝对路径、反斜杠与 `..` 段，防止解包或打包时写到别处。
 pub fn valid_entry(path: &str) -> bool {
-    if path.contains("..") || path.contains('\\') || path.starts_with('/') || path.contains(':') {
+    if has_dot_segment(path) || path.contains('\\') || path.starts_with('/') || path.contains(':') {
         return false;
     }
     let file_in = |dir: &str, ext: &str| {
@@ -199,26 +204,37 @@ pub fn pack(files: &[PackFile]) -> Result<Vec<u8>, FileError> {
 
 /// 读取作品包：只取允许的条目，其他条目（例如压缩软件附带的目录）忽略；带路径穿越的条目整体拒绝。
 pub fn unpack(bytes: &[u8]) -> Result<Vec<PackFile>, FileError> {
+    unpack_with_limits(bytes, MAX_TEXT_BYTES, MAX_PACKAGE_BYTES)
+}
+
+/// 大小按实际解压出的字节计算：条目声明的大小可以伪造，解压炸弹读到上限就停下。
+fn unpack_with_limits(
+    bytes: &[u8],
+    max_entry: u64,
+    max_total: u64,
+) -> Result<Vec<PackFile>, FileError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(io)?;
     let mut files = Vec::new();
     let mut total = 0u64;
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(io)?;
+        let entry = archive.by_index(i).map_err(io)?;
         let name = entry.name().to_string();
-        if name.contains("..") || name.starts_with('/') || name.contains('\\') {
+        if has_dot_segment(&name) || name.starts_with('/') || name.contains('\\') {
             return Err(io(format!("作品包含有不安全的路径：{name}")));
         }
         if entry.is_dir() || !valid_entry(&name) {
             continue;
         }
-        total += entry.size();
-        if entry.size() > MAX_TEXT_BYTES || total > MAX_PACKAGE_BYTES {
+        let mut buf = Vec::new();
+        entry
+            .take(max_entry + 1)
+            .read_to_end(&mut buf)
+            .map_err(io)?;
+        total += buf.len() as u64;
+        if buf.len() as u64 > max_entry || total > max_total {
             return Err(io("作品包过大"));
         }
-        let mut content = String::new();
-        entry
-            .read_to_string(&mut content)
-            .map_err(|_| io(format!("{name} 不是 UTF-8 文本")))?;
+        let content = String::from_utf8(buf).map_err(|_| io(format!("{name} 不是 UTF-8 文本")))?;
         files.push(PackFile {
             path: name,
             content,
@@ -381,6 +397,71 @@ mod tests {
                 content: "{}".into()
             }]
         );
+    }
+
+    #[test]
+    fn dots_inside_a_title_are_not_traversal() {
+        let files = vec![
+            PackFile {
+                path: "chapters/0001-等等..他是谁.md".into(),
+                content: "# 等等..他是谁\n".into(),
+            },
+            PackFile {
+                path: "chapters/0002-…….md".into(),
+                content: "# ……\n".into(),
+            },
+            PackFile {
+                path: "chapters/0003-...md".into(),
+                content: "# ..\n".into(),
+            },
+        ];
+        assert_eq!(unpack(&pack(&files).unwrap()).unwrap(), files);
+        for bad in [
+            "chapters/../x.md",
+            "chapters/./x.md",
+            "../x.md",
+            "./manifest.json",
+        ] {
+            assert!(!valid_entry(bad), "{bad}");
+        }
+    }
+
+    /// 把条目声明的未压缩大小（本地头与中央目录）改成 `declared`。
+    fn forge_declared_size(mut bytes: Vec<u8>, declared: u32) -> Vec<u8> {
+        for (sig, offset) in [(b"PK\x03\x04", 22), (b"PK\x01\x02", 24)] {
+            let mut at = 0;
+            while let Some(pos) = bytes[at..].windows(4).position(|w| w == sig) {
+                let start = at + pos + offset;
+                bytes[start..start + 4].copy_from_slice(&declared.to_le_bytes());
+                at += pos + 4;
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn unpack_counts_the_bytes_actually_read() {
+        let bytes = pack(&[PackFile {
+            path: "data/chapter.jsonl".into(),
+            content: "雨".repeat(100_000),
+        }])
+        .unwrap();
+        assert!(unpack_with_limits(&bytes, 1_000_000, 10_000_000).is_ok());
+        assert!(unpack_with_limits(&bytes, 1_000, 10_000_000).is_err());
+        // 声明只有 10 字节、实际解压出 30 万字节的条目：不能按声明放行。
+        let forged = forge_declared_size(bytes, 10);
+        assert!(unpack_with_limits(&forged, 1_000, 10_000_000).is_err());
+
+        // 每个条目都不超过单条上限，合计超过总上限。
+        let files: Vec<PackFile> = (0..4)
+            .map(|i| PackFile {
+                path: format!("data/t{i}.jsonl"),
+                content: "x".repeat(600),
+            })
+            .collect();
+        let bytes = pack(&files).unwrap();
+        assert!(unpack_with_limits(&bytes, 1_000, 3_000).is_ok());
+        assert!(unpack_with_limits(&bytes, 1_000, 2_000).is_err());
     }
 
     #[test]

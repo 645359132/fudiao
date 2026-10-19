@@ -97,3 +97,38 @@ fn auto_backups_keep_the_latest_thirty() {
     assert_eq!(all.iter().filter(|b| b.kind == "manual").count(), 1);
     assert_eq!(all[0].created_at, "2026-10-08T00:31:00.000Z");
 }
+
+#[test]
+fn backup_time_must_be_an_iso_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, _) = Database::open(dir.path(), EMBEDDED, T0).unwrap();
+    for bad in [
+        "../../evil",
+        "2026-10-08T01:00:00.000Z/../../x",
+        r"2026-10-08T01:00:00.00\Z",
+        r"..\..\2026-10-08T01:00:0",
+        "",
+    ] {
+        assert!(backup::create(&db, "manual", bad).is_err(), "{bad}");
+    }
+    assert!(backup::create(&db, "manual", T1).is_ok());
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(names.iter().all(|n| !n.contains("evil")), "{names:?}");
+    assert!(Database::open(dir.path(), EMBEDDED, "../x").is_err());
+}
+
+#[test]
+fn queries_cannot_attach_other_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (db, _) = Database::open(dir.path(), EMBEDDED, T0).unwrap();
+    let other = dir.path().join("other.sqlite");
+    let attach = format!("ATTACH '{}' AS other", other.to_string_lossy());
+    assert!(db.query(&attach, &[]).is_err());
+    assert!(db.transaction(&[sql(&attach)]).is_err());
+    assert!(!other.exists());
+    // 备份（写连接上的 VACUUM INTO）照常可用。
+    assert!(backup::create(&db, "manual", T1).is_ok());
+}

@@ -16,7 +16,9 @@ use std::{
     time::Duration,
 };
 
-use rusqlite::{params_from_iter, Connection, ErrorCode, OpenFlags, TransactionBehavior};
+use rusqlite::{
+    limits::Limit, params_from_iter, Connection, ErrorCode, OpenFlags, TransactionBehavior,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -114,18 +116,24 @@ impl Database {
         writer.busy_timeout(BUSY_TIMEOUT).map_err(|e| io(&e))?;
 
         let report = migrate::migrate(&writer, project_dir, migrations, now)?;
+        // ATTACH 能通过 query 的只读检查，在事务里也能执行，借它可以读写任意位置的文件。
+        // 所有连接都禁止；备份的 VACUUM INTO 内部要用到它，由 vacuum_into 临时放开。
+        writer
+            .set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)
+            .map_err(|e| io(&e))?;
 
         // 只读连接在迁移完成后打开，读到的总是最新结构。
         let mut readers = Vec::with_capacity(READERS);
         for _ in 0..READERS {
             let reader = Connection::open_with_flags(
                 &path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | OpenFlags::SQLITE_OPEN_URI,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )
             .map_err(|e| io(&e))?;
             reader.busy_timeout(BUSY_TIMEOUT).map_err(|e| io(&e))?;
+            reader
+                .set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)
+                .map_err(|e| io(&e))?;
             readers.push(Mutex::new(reader));
         }
         Ok((
@@ -147,9 +155,15 @@ impl Database {
     /// 用写连接把整个库写成一份一致的副本（备份）。
     pub fn vacuum_into(&self, target: &Path) -> Result<(), SqlError> {
         let conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
+        conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 1)
+            .map_err(|e| map_error(e, 0))?;
+        let result = conn
+            .execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])
             .map(|_| ())
-            .map_err(|e| map_error(e, 0))
+            .map_err(|e| map_error(e, 0));
+        conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)
+            .map_err(|e| map_error(e, 0))?;
+        result
     }
 
     /// 在只读连接上执行一条只读语句。
