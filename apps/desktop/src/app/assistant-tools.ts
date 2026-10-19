@@ -1734,11 +1734,11 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const id = started.value.run.id;
       const refused = jobs.workflow(id, env.events.backgroundReport?.());
       if (refused !== null) return failed(`运行 [${id}] 已建好，但没有开始推进：${refused}`);
-      env.events.onEffect?.({ kind: 'open_page', page: 'workflows' });
+      env.events.onEffect?.({ kind: 'open_page', page: 'book' });
       const q = quote.value;
       const cost = q.costUsd === null ? '价格未知' : `约 $${q.costUsd.toFixed(2)}`;
       return done(
-        `已排上：“${started.value.run.title}” [${id}] 在后台推进（${action.mode === 'step' ? '每步停下，草稿等作者在工作流页采用' : '一路做完，会覆盖内容的步骤停下等作者'}）。预计约 ${q.calls} 次调用、${Math.round((q.inputTokens + q.outputTokens) / 1000)} 千 Token，${cost}${action.budgetUsd === null ? '' : `，上限 $${action.budgetUsd}`}。进度看“正在进行的任务”，停下时停在哪里会出现在“后台刚做完的”里。`,
+        `已排上：“${started.value.run.title}” [${id}] 在后台推进（${action.mode === 'step' ? '每步停下，草稿等作者在成书页采用' : '一路做完，会覆盖内容的步骤停下等作者'}）。预计约 ${q.calls} 次调用、${Math.round((q.inputTokens + q.outputTokens) / 1000)} 千 Token，${cost}${action.budgetUsd === null ? '' : `，上限 $${action.budgetUsd}`}。进度看“正在进行的任务”，停下时停在哪里会出现在“后台刚做完的”里。`,
       );
     },
   },
@@ -1772,17 +1772,17 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       const waiting = v.steps.find((s) => s.status === 'awaiting_author');
       let note = '';
       if (action.adopt && waiting !== undefined) {
-        if (waiting.kind === 'manual') return failed(`第 ${waiting.idx + 1} 步“${waiting.label}”须作者自己在工作流页点（例如导出要选保存的位置）`);
+        if (waiting.kind === 'manual') return failed(`第 ${waiting.idx + 1} 步“${waiting.label}”须作者自己在成书页点（例如导出要选保存的位置）`);
         const adopted = await flows.adoptWorkflowStep(v.run.id, waiting.idx);
         if (!adopted.ok) return failWith(adopted.error);
         env.changed();
         note = `已采用第 ${waiting.idx + 1} 步“${waiting.label}”：${adopted.value.steps[waiting.idx]?.note ?? ''}。`;
       } else if (waiting !== undefined) {
-        return failed(`停在第 ${waiting.idx + 1} 步“${waiting.label}”等作者处理（${waiting.note}）：作者同意按原样采用时用 adopt 为 true，想改的请作者在工作流页修改后采用`);
+        return failed(`停在第 ${waiting.idx + 1} 步“${waiting.label}”等作者处理（${waiting.note}）：作者同意按原样采用时用 adopt 为 true，想改的请作者在成书页修改后采用`);
       }
       const blocked = v.steps.find((s) => s.status === 'failed' || s.status === 'stale');
       if (blocked !== undefined && (waiting === undefined || blocked.idx < waiting.idx)) {
-        return failed(`第 ${blocked.idx + 1} 步“${blocked.label}”${WORKFLOW_STEP_STATUS_LABEL[blocked.status]}（${blocked.note}）：请作者在工作流页决定重做、跳过或保留`);
+        return failed(`第 ${blocked.idx + 1} 步“${blocked.label}”${WORKFLOW_STEP_STATUS_LABEL[blocked.status]}（${blocked.note}）：请作者在成书页决定重做、跳过或保留`);
       }
       const refused = jobs.workflow(v.run.id, env.events.backgroundReport?.());
       if (refused !== null) return failed(`${note}没有接着推进：${refused}`);

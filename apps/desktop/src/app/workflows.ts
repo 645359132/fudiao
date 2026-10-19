@@ -81,6 +81,8 @@ type StepSpec<P, O> = {
   readonly adopt?: (ctx: StepContext<P>, output: O) => Promise<Result<string, AppError>>;
   /** 采用会覆盖或删除作品内容时给作者看的说明（“一路做完”时也停下等作者确认）；没有时为 null。 */
   readonly confirm?: (ctx: StepContext<P>, output: O) => Promise<string | null>;
+  /** 这一步用不着做时（例如没写想法而作品已有大纲）给出原因，执行器直接跳过它；要做时为 null。 */
+  readonly skipIf?: (ctx: StepContext<P>) => Promise<string | null>;
 };
 
 type Step<P> = {
@@ -91,6 +93,7 @@ type Step<P> = {
   readonly run: (ctx: StepContext<P>) => Promise<Result<StepResult<unknown>, AppError>>;
   readonly adopt?: (ctx: StepContext<P>, output: unknown) => Promise<Result<string, AppError>>;
   readonly confirm?: (ctx: StepContext<P>, output: unknown) => Promise<string | null>;
+  readonly skipIf?: (ctx: StepContext<P>) => Promise<string | null>;
 };
 
 const invalid = (detail: string): AppError => ({ code: 'settings', detail });
@@ -104,13 +107,14 @@ function step<P, O>(spec: StepSpec<P, O>): Step<P> {
     const parsed = parse(value);
     return parsed.ok ? f(ctx, parsed.value) : Promise.resolve(failed(parsed.error));
   };
-  const { adopt, confirm } = spec;
+  const { adopt, confirm, skipIf } = spec;
   return {
     key: spec.key,
     label: spec.label,
     kind: spec.kind,
     parse,
     run: spec.run,
+    ...(skipIf !== undefined && { skipIf }),
     ...(adopt !== undefined && { adopt: typed(adopt, (why) => err(invalid(`这一步的结果不完整：${why}`))) }),
     ...(confirm !== undefined && { confirm: typed(confirm, () => null) }),
   };
@@ -162,7 +166,7 @@ function erase<P>(def: WorkflowDef<P>): AnyWorkflow {
     runTitle: (v) => typed(v, def.runTitle, def.title),
     estimate: (v) => typed(v, def.estimate, { calls: 0, inputTokens: 0, outputTokens: 0 }),
     steps: def.steps.map((s): Step<unknown> => {
-      const { adopt, confirm } = s;
+      const { adopt, confirm, skipIf } = s;
       return {
         key: s.key,
         label: s.label,
@@ -182,6 +186,12 @@ function erase<P>(def: WorkflowDef<P>): AnyWorkflow {
           confirm: (c: StepContext<unknown>, output: unknown) => {
             const b = bind(c);
             return b.ok ? confirm(b.value, output) : Promise.resolve(null);
+          },
+        }),
+        ...(skipIf !== undefined && {
+          skipIf: (c: StepContext<unknown>) => {
+            const b = bind(c);
+            return b.ok ? skipIf(b.value) : Promise.resolve(null);
           },
         }),
       };
@@ -259,6 +269,11 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
         async confirm() {
           const work = await host.reloadWork();
           return work.ok && work.value.project.outline.trim() !== '' ? '采用会替换作品已有的大纲（大纲没有历史版本）' : null;
+        },
+        async skipIf({ params }) {
+          if (params.idea.trim() !== '') return null;
+          const work = await host.reloadWork();
+          return work.ok && work.value.project.outline.trim() !== '' ? '没有写想法，沿用作品已有的大纲与人物' : null;
         },
         async adopt(_ctx, seed) {
           const applied = await host.applyBookSeed(seed);
@@ -486,6 +501,8 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     if (def === null) return err(invalid(`不认得的工作流“${data.run.workflow}”`));
     const spec = def.steps[idx];
     if (spec === undefined) return err(invalid('这次运行的步骤与工作流的定义对不上'));
+    const skip = spec.skipIf === undefined ? null : await spec.skipIf(contextFor(def, data, idx, env, { value: EMPTY_USAGE }, prices));
+    if (skip !== null) return apply(port, data, { type: 'skip', idx }, { [idx]: { note: skip } });
     const started = await apply(port, data, { type: 'start', idx }, { [idx]: { startedAt: deps.clock.now(), finishedAt: null, note: '' } });
     if (!started.ok) return started;
     env.onStep?.(viewOf(started.value));

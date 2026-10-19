@@ -1902,15 +1902,16 @@ describe('快速成书的界面（B67）', () => {
   it('新作品从成书页开始：先连模型，再由一句想法生成大纲与人物、改过后采用，拆出章节计划，写作看板出现', async () => {
     const { deps, service, store, user } = start();
     await createWork(user, '新作品');
-    const page = await screen.findByRole('region', { name: '快速成书' });
-    const step = (n: number) => within(page).getByRole('region', { name: new RegExp(`^第 ${n} 步`) });
-    await waitFor(() => expect(step(1).textContent).toContain('还没有设置默认模型'));
-    expect(within(step(2)).getByRole('button', { name: '生成大纲与人物' }).matches(':disabled')).toBe(true);
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('还没有设置默认模型'));
+    // 新作品还没有运行：一键成书的开始表单已经展开；模型不能用时不能开始。
+    const form = within(page).getByRole('form', { name: '开始一键成书' });
+    expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(true);
 
-    // 在“模型服务”里配好模型后回到成书页：第一步完成。
+    // 在“模型服务”里配好模型后回到成书页：显示已连接。
     await addTestedModel(service, deps);
     await user.click(screen.getByRole('button', { name: '成书' }));
-    await waitFor(() => expect(step(1).textContent).toContain('已连接'));
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
 
     const seed = {
       title: '当铺夜谈',
@@ -1923,27 +1924,26 @@ describe('快速成书的界面（B67）', () => {
       ],
     };
     // 没有想法时随机生成一句（不调用模型），类型一并填上；之后可以改。
-    const ideaBox = within(step(2)).getByRole('textbox', { name: '一句话的想法' });
+    const ideaBox = within(form).getByRole('textbox', { name: '一句话的想法' });
     expect(ideaBox.getAttribute('placeholder')).toBe('没有想法？随机生成一个');
     const calls = deps.llmRequests.length;
-    await user.click(within(step(2)).getByRole('button', { name: '随机生成' }));
+    await user.click(within(form).getByRole('button', { name: '随机生成' }));
     expect((ideaBox as HTMLTextAreaElement).value).not.toBe('');
-    expect(within(step(2)).getByRole<HTMLInputElement>('textbox', { name: '类型（可不填）' }).value).not.toBe('');
+    expect(within(form).getByRole<HTMLInputElement>('textbox', { name: '类型（可不填）' }).value).not.toBe('');
     expect(deps.llmRequests).toHaveLength(calls);
     await user.clear(ideaBox);
-    deps.llmResponses.push(reply(JSON.stringify(seed)));
     await user.type(ideaBox, '落魄书生当铺夜遇旧主');
-    const chapters = within(step(2)).getByRole('spinbutton', { name: '章数' });
+    const chapters = within(form).getByRole('spinbutton', { name: '章数' });
     await user.clear(chapters);
     await user.type(chapters, '2');
-    await user.click(within(step(2)).getByRole('button', { name: '生成大纲与人物' }));
-    const skeleton = await within(step(2)).findByRole('form', { name: '作品骨架' });
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const skeleton = await within(page).findByRole('form', { name: '作品骨架草稿' });
     expect(within(skeleton).getByRole('textbox', { name: '大纲' })).toHaveProperty('value', seed.outline);
     await user.click(within(skeleton).getByRole('button', { name: '删去人物 路人' }));
     await user.click(within(skeleton).getByRole('button', { name: '采用骨架' }));
-    await waitFor(() => expect(step(2).textContent).toContain('大纲已写好，人物 1 个'));
-    expect(store.getState().work?.project).toMatchObject({ title: '当铺夜谈', outline: seed.outline });
-    expect(store.getState().entities.map((e) => e.name)).toEqual(['林舟']);
+    await waitFor(() => expect(store.getState().work?.project).toMatchObject({ title: '当铺夜谈', outline: seed.outline }));
+    await waitFor(() => expect(store.getState().entities.map((e) => e.name)).toEqual(['林舟']));
 
     // 草稿自动分卷（B68）：每卷第一章之前列出卷名与梗概，采用后目录按卷分组。
     const plan = {
@@ -1958,16 +1958,18 @@ describe('快速成书的界面（B67）', () => {
       foreshadows: [],
     };
     deps.llmResponses.push(reply(JSON.stringify(plan)));
-    await user.click(within(step(3)).getByRole('button', { name: '生成章节计划' }));
-    await within(step(3)).findByText('第一章 夜叩');
-    expect(step(3).textContent).toContain('共 2 章，分 2 卷。');
-    expect(step(3).textContent).toContain('第一卷 当玉：林舟当玉被压价');
-    await user.click(within(step(3)).getByRole('button', { name: '采用计划' }));
-    await waitFor(() => expect(step(3).textContent).toContain('2 章，2 章有计划'));
-    expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 身世']);
+    await user.click(within(page).getByRole('button', { name: '继续' }));
+    const planStep = await within(page).findByRole('region', { name: '第 3 步：章节计划' });
+    await within(planStep).findByText('第一章 夜叩');
+    expect(planStep.textContent).toContain('共 2 章，分 2 卷。');
+    expect(planStep.textContent).toContain('第一卷 当玉：林舟当玉被压价');
+    await user.click(within(planStep).getByRole('button', { name: '采用' }));
+    await waitFor(() => expect(chapterTitles()).toEqual(['第一章 夜叩', '第二章 身世']));
     expect(tocOutline()).toEqual(['卷：第一卷 当玉', '第一章 夜叩', '卷：第二卷 身世', '第二章 身世']);
-    expect(within(step(4)).getByRole('region', { name: '成书进度' })).toBeTruthy();
-    expect(within(step(4)).getByRole('button', { name: '依次写完待写的 2 章' })).toBeTruthy();
+    // 下一步“写完并审核”里是成书进度看板，可以一键依次写完。
+    const writeStep = await within(page).findByRole('region', { name: '第 4 步：写完并审核' });
+    expect(within(writeStep).getByRole('region', { name: '成书进度' })).toBeTruthy();
+    await waitFor(() => expect(within(writeStep).getByRole('button', { name: '依次写完待写的 2 章' })).toBeTruthy());
   });
 
   it('已有章节的作品打开第一章；常用功能在左侧导航，导入导出等在顶栏的“更多”里', async () => {
@@ -1981,7 +1983,7 @@ describe('快速成书的界面（B67）', () => {
     await user.click(screen.getByRole('button', { name: '作品列表' }));
     await user.click(await screen.findByRole('button', { name: '旧作' }));
     await screen.findByRole('navigation', { name: '章节目录' });
-    await waitFor(() => expect(screen.queryByRole('region', { name: '快速成书' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('region', { name: '成书' })).toBeNull());
   });
 
 });
@@ -1991,11 +1993,11 @@ describe('写作工作流的界面（B78）', () => {
     const { deps, service, store, user } = start();
     await createWork(user, '新作品');
     await addTestedModel(service, deps);
-    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '工作流' }));
-    const page = await screen.findByRole('region', { name: '写作工作流' });
-    await user.click(within(page).getByRole('button', { name: '新的一键成书' }));
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
     const form = within(page).getByRole('form', { name: '开始一键成书' });
-    await user.type(within(form).getByRole('textbox', { name: /一句话的想法/ }), '落魄书生当铺夜遇旧主');
+    await user.type(within(form).getByRole('textbox', { name: '一句话的想法' }), '落魄书生当铺夜遇旧主');
     const count = within(form).getByRole('spinbutton', { name: '章数' });
     await user.clear(count);
     await user.type(count, '2');

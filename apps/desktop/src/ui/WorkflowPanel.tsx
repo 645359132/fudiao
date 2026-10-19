@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import { planDraftOf, seedDraftOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
+import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
 
-/** 开始表单：一键成书的参数、模式与预算；先估算再开始。 */
-function StartForm({ info }: { readonly info: WorkflowInfo }) {
+/** 开始表单：一键成书的参数、模式与预算；先估算再开始。模型还不能用时不能开始。 */
+function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly modelReady: boolean }) {
   const quoteWorkflow = useApp((s) => s.quoteWorkflow);
   const startWorkflow = useApp((s) => s.startWorkflow);
   const advancing = useApp((s) => s.workflowAdvancing);
@@ -31,17 +33,34 @@ function StartForm({ info }: { readonly info: WorkflowInfo }) {
         void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      <label>
-        一句话的想法（已有大纲时可以不写，跳过“大纲与人物”）
-        <textarea
-          rows={2}
-          value={idea}
-          onChange={(e) => {
-            setIdea(e.currentTarget.value);
+      <div className="book-idea-head">
+        <label htmlFor="workflow-idea">一句话的想法</label>
+        <button
+          type="button"
+          className="link"
+          title="从人物、处境与转折中随机拼一句，可以接着改；填了类型时按类型挑"
+          onClick={() => {
+            // 随机只用来给作者一个起点，不进入推演，不需要可复现。
+            const next = randomIdea(genre, Math.random);
+            setIdea(next.idea);
+            setGenre(next.genre);
             touched();
           }}
-        />
-      </label>
+        >
+          随机生成
+        </button>
+      </div>
+      <textarea
+        id="workflow-idea"
+        rows={2}
+        placeholder="没有想法？随机生成一个"
+        value={idea}
+        onChange={(e) => {
+          setIdea(e.currentTarget.value);
+          touched();
+        }}
+      />
+      <p className="muted">已有大纲时可以不写，开始后跳过“大纲与人物”这一步。</p>
       <div className="form-row">
         <label>
           类型（可不填）
@@ -98,7 +117,7 @@ function StartForm({ info }: { readonly info: WorkflowInfo }) {
         <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
           估算费用
         </button>
-        <button type="submit" className="primary" disabled={advancing !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
+        <button type="submit" className="primary" disabled={!modelReady || advancing !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
           开始
         </button>
       </div>
@@ -165,11 +184,15 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {waiting && step.key === 'seed' && !closed ? <SeedStep key={`${step.version}`} view={view} step={step} /> : null}
       {plan === null ? null : <PlanDraftChapters draft={plan} withBeats={false} />}
       {step.key === 'write' ? (
-        <p>
-          <button type="button" className="ghost" onClick={() => void openPlanning()}>
-            打开计划页看成书进度
-          </button>
-        </p>
+        <>
+          <p className="muted">
+            每章写完整理长篇记忆并审核；也可以在下面的成书进度里自己排定章节。
+            <button type="button" className="link" onClick={() => void openPlanning()}>
+              查看与修改计划
+            </button>
+          </p>
+          <PipelineBoard />
+        </>
       ) : null}
       <div className="form-actions">
         {waiting && step.kind === 'draft' && step.key !== 'seed' ? button('采用', 'adopt', true) : null}
@@ -244,22 +267,61 @@ function RunView({ view }: { readonly view: WorkflowView }) {
   );
 }
 
+/** 默认模型能不能用，以及这部作品走到了哪里（大纲、人物、计划、写完的章数）。 */
+function BookStatus() {
+  const status = useApp((s) => s.quickBook);
+  const openModelServices = useApp((s) => s.openModelServices);
+  const showPanel = useApp((s) => s.showPanel);
+  if (status === null) return <p className="muted">正在读取…</p>;
+  const { model } = status;
+  return (
+    <div className="book-status" aria-label="作品现状">
+      {model.ready ? (
+        <p>已连接：{model.name}</p>
+      ) : (
+        <p>
+          {model.problem}。
+          {model.name === null ? '在“模型服务”里添加服务、填写 API Key、获取模型列表，运行能力自检后设为默认模型。' : '打开“模型服务”，对这个模型运行能力自检；通不过时换一个模型设为默认。'}
+          <button type="button" className="link" onClick={() => void openModelServices()}>
+            设置模型服务
+          </button>
+        </p>
+      )}
+      <p className="muted">
+        {status.outline ? `大纲已写好，人物 ${status.characters} 个` : '还没有大纲'}；{status.chapters} 章，{status.planned} 章有计划，已写 {status.written} 章
+        {status.pendingIssues > 0 ? `，待处理的审核问题 ${status.pendingIssues} 条` : ''}。
+        <button type="button" className="link" onClick={() => void showPanel('info')}>
+          查看或修改作品信息
+        </button>
+      </p>
+    </div>
+  );
+}
+
 /**
- * 写作工作流（B78）：选一个工作流，软件按固定的步骤依次做；每步的结果在这里看、改、采用，
- * 可以停下、接着做、重做或跳过一步。推进在后台进行，可以离开这一页。
+ * 成书（B67、B78）：写作工作流——选一个工作流，软件按固定的步骤依次做；每步的结果在这里看、改、采用，
+ * 可以停下、接着做、重做或跳过一步。推进在后台进行，可以离开这一页。还没有运行时展开“一键成书”的开始表单。
  */
 export function WorkflowPanel() {
   const catalog = useApp((s) => s.workflowCatalog);
   const runs = useApp((s) => s.workflows);
   const selectedId = useApp((s) => s.workflowId);
   const select = useApp((s) => s.selectWorkflow);
-  const [starting, setStarting] = useState<WorkflowKey | null>(null);
+  const modelReady = useApp((s) => s.quickBook?.model.ready ?? false);
+  const modelServicesOpen = useApp((s) => s.modelServicesOpen);
+  const refresh = useApp((s) => s.refreshQuickBook);
+  const [starting, setStarting] = useState<WorkflowKey | null>(runs !== null && runs.length > 0 ? null : 'quick_book');
+  // 从“模型服务”回来时重新读取：模型是否可用只在那里改变。
+  useEffect(() => {
+    if (!modelServicesOpen) void refresh();
+  }, [modelServicesOpen, refresh]);
   const selected = runs?.find((v) => v.run.id === selectedId) ?? null;
   const info = catalog.find((w) => w.key === starting) ?? null;
   return (
-    <section className="workflow-page" aria-label="写作工作流">
-      <h2>写作工作流</h2>
-      <p className="muted">选一个工作流，软件按固定的步骤依次做；每步的结果都可以看、改、采用，随时停下，关掉软件后也能接着做。</p>
+    <section className="workflow-page" aria-label="成书">
+      <h2>成书</h2>
+      <p className="muted">选一个写作工作流，软件按固定的步骤依次做；每步的结果都可以看、改、采用，随时停下，关掉软件后也能接着做。</p>
+      <BookStatus />
       <ul className="workflow-cards" aria-label="可用的工作流">
         {catalog.map((w) => (
           <li key={w.key} className="workflow-card">
@@ -271,7 +333,7 @@ export function WorkflowPanel() {
           </li>
         ))}
       </ul>
-      {info === null ? null : <StartForm key={info.key} info={info} />}
+      {info === null ? null : <StartForm key={info.key} info={info} modelReady={modelReady} />}
       {runs === null || runs.length === 0 ? null : (
         <>
           <label className="workflow-pick">

@@ -65,12 +65,12 @@
 - narrate_simulation：按一个角色的视角，把一次推演中已经结束的回合写成正文，作为候选稿放在这一章末尾；只用这个角色当时知道的信息。候选稿要作者在章节旁的“AI 写作”里用“采纳…”写进作品，不能直接接受。参数 run；pov：视角角色（名字或键）；chapter：写进哪一章；fromRound、toRound：回合范围，null 为从第 1 回合到最后一个结束的回合。
 写作工作流（按固定的步骤依次做完一件大事，每步的结果存在作品里，作者可以看、改、采用，可以停下、接着做、重做或跳过一步）：
 - list_workflows：列出可用的工作流（名称、说明、步骤）与这部作品的运行（标识、状态、停在哪一步）。没有参数。
-- start_workflow：开始一个工作流，在后台推进。quick_book 一键成书：检查模型 → 由想法生成大纲与人物 → 拆章节计划 → 写手写完并审核 → 导出（导出须作者自己点）。mode：step 每步停下给作者看（草稿要作者在工作流页采用），auto 一路做完（草稿直接采用；会替换已有大纲或覆盖已有计划时仍停下等作者）。动作立即返回，进度出现在“正在进行的任务”里，停下时停在哪里出现在“后台刚做完的”里。会按步骤调用模型，开始前在 message 里说一句。参数 workflow；mode；budgetUsd：费用上限（美元），null 为不设；idea：一句话的想法（已有大纲、不需要生成时可为 null）；genre：类型，可为 null；chapters：章数，null 为 20；wordsPerChapter：每章字数，null 为 3000。
+- start_workflow：开始一个工作流，在后台推进。quick_book 一键成书：检查模型 → 由想法生成大纲与人物 → 拆章节计划 → 写手写完并审核 → 导出（导出须作者自己点）。mode：step 每步停下给作者看（草稿要作者在成书页采用），auto 一路做完（草稿直接采用；会替换已有大纲或覆盖已有计划时仍停下等作者）。动作立即返回，进度出现在“正在进行的任务”里，停下时停在哪里出现在“后台刚做完的”里。会按步骤调用模型，开始前在 message 里说一句。参数 workflow；mode；budgetUsd：费用上限（美元），null 为不设；idea：一句话的想法（已有大纲、不需要生成时可为 null）；genre：类型，可为 null；chapters：章数，null 为 20；wordsPerChapter：每章字数，null 为 3000。
 - get_workflow：看一次运行的各步状态与结果的概要。参数 run：运行的标识，null 为最近的一次。
-- continue_workflow：让停下、中断或等作者的运行在后台接着推进。adopt 为 true 时先按原样采用正在等作者的那一步（作者说“就这样”“采用”时）；须作者确认的覆盖，作者在对话里明确同意了才用 adopt。出错或可能过时的步骤要作者在工作流页决定重做、跳过或保留。参数 run；adopt。
+- continue_workflow：让停下、中断或等作者的运行在后台接着推进。adopt 为 true 时先按原样采用正在等作者的那一步（作者说“就这样”“采用”时）；须作者确认的覆盖，作者在对话里明确同意了才用 adopt。出错或可能过时的步骤要作者在成书页决定重做、跳过或保留。参数 run；adopt。
 撤销：
 - undo_last_turn：撤销上一轮（作者上一句话）里你对作品做的改动：新建的设定、关系、卷、章节、计划、伏笔与候选事实删掉，改过的改回去，删掉的设定、关系与卷重建，写手写的章回退到写入之前，写手的修订恢复到修订之前。之后又被改过的不动；候选稿、审核结果、推演记录、新建的作品不在撤销范围。只在作者要求撤销时用；再用一次撤销更早的一轮。没有参数。
 导出：
 - export_book：导出正文，软件会请作者选择保存位置。参数 format（txt 或 markdown）；chapter：只导出这一章，null 为整本。
 界面：
-- open_page：打开一个页面。参数 page：book 成书、workflows 写作工作流、planning 计划、settings 设定、relations 人物关系、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。
+- open_page：打开一个页面。参数 page：book 成书（写作工作流）、planning 计划、settings 设定、relations 人物关系、facts 事实、simulation 推演、search 查找、skills 写作技能、usage 用量与费用、tasks 任务。

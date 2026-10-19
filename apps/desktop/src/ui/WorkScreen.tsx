@@ -10,7 +10,6 @@ import { SearchPanel } from './SearchPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SkillsPanel } from './SkillsPanel';
 import { PlanningPanel } from './PlanningPanel';
-import { QuickBookPanel } from './QuickBookPanel';
 import { WorkflowPanel } from './WorkflowPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { SourcesPanel } from './SourcesPanel';
@@ -44,7 +43,6 @@ export function WorkScreen() {
   const openPlanning = useApp((s) => s.openPlanning);
   const openSimulation = useApp((s) => s.openSimulation);
   const openQuickBook = useApp((s) => s.openQuickBook);
-  const openWorkflows = useApp((s) => s.openWorkflows);
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
   const busy = useApp((s) => s.busy);
@@ -141,8 +139,7 @@ export function WorkScreen() {
             <aside className="sidebar">
               {/* 一页走完成书流程放在最前；推演、事实与查找等进阶功能在下面。 */}
               <nav className="nav" aria-label="作品导航">
-                {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '快速成书：想法、大纲、章节计划、写完、导出')}
-                {navItem('workflows', 'workflow', '工作流', panel === 'workflows', () => void openWorkflows(), undefined, '写作工作流：按固定的步骤依次做，每步可以看、改、采用，可以停下与接着做')}
+                {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '写作工作流：一键成书等，按固定的步骤依次做，每步可以看、改、采用')}
                 {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
                 {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
                 {navItem('relations', 'relations', '人物关系', panel === 'relations', () => void openRelations(), undefined, '人物关系网：谁和谁是什么关系，随章节变化')}
@@ -164,7 +161,7 @@ export function WorkScreen() {
             />
           </>
         )}
-        <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'relations' ? <RelationsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <QuickBookPanel /> : panel === 'workflows' ? <WorkflowPanel /> : <ChapterPanel />}</div></main>
+        <main className="work-main"><div className="work-main-inner">{panel === 'info' ? <WorkInfoPanel /> : panel === 'trash' ? <TrashPanel /> : panel === 'history' ? <HistoryPanel /> : panel === 'backups' ? <BackupsPanel /> : panel === 'settings' ? <SettingsPanel /> : panel === 'facts' ? <FactsPanel /> : panel === 'relations' ? <RelationsPanel /> : panel === 'sources' ? <SourcesPanel /> : panel === 'search' ? <SearchPanel /> : panel === 'usage' ? <UsagePanel /> : panel === 'tasks' ? <TasksPanel /> : panel === 'skills' ? <SkillsPanel /> : panel === 'planning' ? <PlanningPanel /> : panel === 'simulation' ? <SimulationPanel /> : panel === 'book' ? <WorkflowPanel /> : <ChapterPanel />}</div></main>
       </div>
     </div>
   );

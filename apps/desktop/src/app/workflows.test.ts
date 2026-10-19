@@ -236,6 +236,19 @@ describe('写作工作流（B78）', () => {
     expect(value(await app.listWorkflows()).map((v) => v.run.id)).toEqual([run.run.id]);
   });
 
+  it('没写想法而作品已有大纲时跳过“大纲与人物”；没有大纲时这一步说明要先写想法', async () => {
+    const { deps, app } = await setup();
+    const none = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, idea: ' ' }, mode: 'step', budgetUsd: null }));
+    const failed = value(await app.advanceWorkflow(none.run.id));
+    expect(failed.view.steps[1]).toMatchObject({ status: 'failed', note: expect.stringContaining('先写一句想法') });
+    value(await app.updateWorkInfo({ outline: '开端：林舟当玉。结局：得知身世。' }));
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, idea: '' }, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(draft)));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps.map((s) => s.status)).toEqual(['done', 'skipped', 'awaiting_author', 'pending', 'pending']);
+    expect(out.view.steps[1]?.note).toBe('没有写想法，沿用作品已有的大纲与人物');
+  });
+
   it('模型步骤的步骤键为“workflow:运行:步骤:第几次”', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));

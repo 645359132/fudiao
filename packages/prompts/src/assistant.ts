@@ -13,7 +13,7 @@ export const ENTITY_KINDS_FOR_ASSISTANT = ['character', 'location', 'organizatio
 export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as const;
 
 /** 助手可以打开的页面。 */
-export const ASSISTANT_PAGES = ['book', 'workflows', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
+export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
 
 /** 助手可以发起的写作工作流（与应用层工作流命令表的键相同，由类型检查核对）。 */
 export const ASSISTANT_WORKFLOWS = ['quick_book'] as const;
