@@ -8,10 +8,8 @@ import { countWords } from '@fudiao/shared';
 import { createAppService } from '../../apps/desktop/src/app/service';
 import { fsDeps } from '../../apps/desktop/src/testing/fs-deps';
 import { parseConfig, type EvalConfig } from '../m3-eval/book';
-import { DEFAULT_TURNS, renderReport, runScenario } from './scenario';
-
-/** 偏高的估计：助手每一步约 1.5 万 Token 输入、3 千输出（含思考），每句话约 3 步；另加写 3 章、长篇记忆与审核。 */
-const ESTIMATE = { input: DEFAULT_TURNS.length * 3 * 15_000 + 3 * 40_000, output: DEFAULT_TURNS.length * 3 * 3_000 + 3 * 25_000 };
+import { renderReport, runScenario } from './scenario';
+import { SCENARIOS, scenarioByKey, withFaults } from './scenarios';
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -24,9 +22,18 @@ async function main(): Promise<number> {
   const baseUrl = baseAt >= 0 ? argv[baseAt + 1] : undefined;
   const modelAt = argv.indexOf('--model');
   const wanted = modelAt >= 0 ? argv[modelAt + 1] : undefined;
+  if (argv.includes('--list')) {
+    for (const s of SCENARIOS) console.log(`${s.key}：${s.title}（${s.turns.length} 句）`);
+    return 0;
+  }
+  const scenarioAt = argv.indexOf('--scenario');
+  const scenarioKey = scenarioAt >= 0 ? (argv[scenarioAt + 1] ?? '') : 'default';
+  const scenario = scenarioByKey(scenarioKey);
+  if (scenario === undefined) return fail(`没有这个场景：${scenarioKey}（--list 列出全部）`);
+  const ESTIMATE = scenario.estimate;
   if (configPath === undefined && baseUrl === undefined) {
     console.error(
-      '用法：pnpm assistant:eval --config <模型配置.json> [--out m3/runs] [--yes]\n   或：pnpm assistant:eval --base-url <OpenAI 兼容服务的地址> [--model 模型名] [--yes]（API Key 取自环境变量 FUDIAO_EVAL_KEY；不给 --model 时列出服务的模型让你选）',
+      '用法：pnpm assistant:eval --config <模型配置.json> [--scenario 场景] [--out m3/runs] [--yes]\n   或：pnpm assistant:eval --base-url <OpenAI 兼容服务的地址> [--model 模型名] [--scenario 场景] [--yes]（API Key 取自环境变量 FUDIAO_EVAL_KEY；不给 --model 时列出服务的模型让你选）\n   场景：pnpm assistant:eval --list',
     );
     return 2;
   }
@@ -49,7 +56,7 @@ async function main(): Promise<number> {
 
   const prices = config?.model.prices ?? null;
   const cost = prices === null ? null : (ESTIMATE.input * prices.input + ESTIMATE.output * prices.output) / 1_000_000;
-  console.log(`服务：${provider.name}（${provider.baseUrl}）；对话 ${DEFAULT_TURNS.length} 句，其间写 3 章（每章约 1500 字）并审核。`);
+  console.log(`服务：${provider.name}（${provider.baseUrl}）；场景：${scenario.title}，对话 ${scenario.turns.length} 句。`);
   console.log(cost === null ? `没有价格，无法估算费用；用量约输入 ${ESTIMATE.input.toLocaleString('en-US')}、输出 ${ESTIMATE.output.toLocaleString('en-US')} Token（偏高的估计）。` : `预计费用不超过约 $${cost.toFixed(2)}。`);
   if (!yes) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -65,7 +72,8 @@ async function main(): Promise<number> {
   const dir = resolve(out, `assistant-${startedAt.replace(/[:.]/g, '-')}`);
   mkdirSync(dir, { recursive: true });
   const deps = fsDeps(dir, { fetch: globalThis.fetch, realTime: true });
-  const app = createAppService(deps);
+  const faults = scenario.faults;
+  const app = createAppService(faults === undefined ? deps : { ...deps, llm: { forProvider: (p) => withFaults(deps.llm.forProvider(p), faults, (line) => console.log(line)) } });
   try {
     const library = await app.loadLibrary();
     if (!library.ok) return fail(`作品库没有打开：${JSON.stringify(library.error)}`);
@@ -103,7 +111,12 @@ async function main(): Promise<number> {
     if (!tested.ok) return fail(`能力自检没有完成：${JSON.stringify(tested.error)}`);
     if (!tested.value.report.passed) return fail(`能力自检没有通过：${JSON.stringify(tested.value.report)}`);
 
-    const records = await runScenario(app, DEFAULT_TURNS, { log: (line) => console.log(line), now: () => Date.now() });
+    if (scenario.prepare !== undefined) {
+      console.log('准备作品…');
+      const prepared = await scenario.prepare(app);
+      if (!prepared.ok) return fail(prepared.error);
+    }
+    const records = await runScenario(app, scenario.turns, { log: (line) => console.log(line), now: () => Date.now() });
 
     const usage = await app.usage();
     const total = usage.ok ? usage.value.summary.total : null;
@@ -119,7 +132,7 @@ async function main(): Promise<number> {
         book.push(`# ${c.title}\n\n${text}`);
       }
     }
-    writeFileSync(join(dir, 'report.md'), renderReport(records, { model: `${provider.name} / ${modelId}`, startedAt, usage: usageLine, chapters: chapterLines.join('\n') }));
+    writeFileSync(join(dir, 'report.md'), renderReport(records, { scenario: scenario.title, model: `${provider.name} / ${modelId}`, startedAt, usage: usageLine, chapters: chapterLines.join('\n') }));
     writeFileSync(join(dir, 'book.txt'), `${book.join('\n\n')}\n`);
     console.log(`\n用量：${usageLine}\n报告：${join(dir, 'report.md')}\n正文：${join(dir, 'book.txt')}`);
     return 0;

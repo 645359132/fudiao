@@ -92,6 +92,7 @@
 - M5-18 已完成：界面测试覆盖经助手停下后台写作（写到一半的一章不写入、后面排着的章不再写、任务记为已取消）。
 - M5-19 已完成（ASSISTANT_REVIEW.md 第五节第 2 项）：AI 助手操作角色推演——`create_sim_scene`（描述生成场景、校验通过才保存）、`start_simulation`/`continue_simulation`（经 `BackgroundJobs.simulate` 在后台推进，与推演页的“继续”共用 `advanceSim`）、`get_simulation`（全局概要，只用于汇报）、`narrate_simulation`（节拍表与候选稿，只用视角角色的认知，不带助手写的说明）、`list_simulations`，`stop_background` 可停推演；`assistant_turn` 版本 11，共 57 个动作。
 - M5-20 已完成（ASSISTANT_REVIEW.md 第五节第 3 项）：撤销 AI 助手一轮的改动——命令表每个动作写明 `undo` 方式；改结构的动作前后取现状（`app/assistant-undo.ts` 的 `captureWork`、`diffWork`），差别存进对话的 `changes` 记录（迁移 `0016_assistant_undo.sql`），`undoChanges` 倒着改回（之后又改过的不动、锁定设定不改、新建章节移入回收站、重建记录的新标识记在 `undo` 记录里）；写手写章回退、修订恢复快照；对话框的“撤销这一轮的改动”与动作 `undo_last_turn`（`assistant_turn` 版本 12，共 58 个动作）；仓储 `deleteChapterPlan`。
+- M5-24 已完成（ASSISTANT_REVIEW.md 第五节第 10 项）：AI 助手试用增加几组对话——`tools/assistant-eval/scenarios.ts`：`long-work`（打开已有的大部头：分卷、120 章、长大纲与关系网）、`edit-and-export`（选区修改、续写、导出、拒绝确认与撤销）、`faults`（在模型端口上注入连接中断与不合格的输出，看重试与修正）；`--scenario` 选择、`--list` 列出，每组各自估计费用。真实模型的试用待作者确认费用后运行。
 - M5-23 已完成（ASSISTANT_REVIEW.md 第五节第 4 项）：AI 助手的 `write_chapter`、`review_chapter`、`revise_review_issue` 有后台时交给后台——`BackgroundJobs.run`（状态层登记为任务、`assistantJobs` 让写作与修订中的那一章只读、`stop_background` 可停），排上就返回；做完的结果放进之后一轮的现状（“后台刚做完的”，只说一次）；写章与修订的撤销记录在做完时写进对话，`turnOf` 指向发起的那一轮；没有后台（测试、命令行与试用脚本）时照旧就地做完；`assistant_turn` 版本 14。测试见 `assistant-background.test.ts` 与界面测试。
 - M5-22 已完成（ASSISTANT_REVIEW.md 第五节第 7 项）：没有打开作品时的模型调用（例如 AI 助手新建作品之前的几步）记录暂存在调用器（`model-runner.ts`，最多 500 条），下一次在作品里调用时补记进那部作品的调用记录，用量与费用不漏算。
 - M5-21 已完成（ASSISTANT_REVIEW.md 第五节第 6 项）：AI 助手的请求按模型的上下文上限缩减——`modelRunner.modelLimits`；`assistant.ts` 的 `fitPrompt` 按每字 Token 数估算（起初 1.3，按服务报回的用量分模型校准；原生结构化输出时输出结构按每字 0.5 计入），留出 5% 余量、输出上限与一次修正的余量，放不下时依次换四级更少的对话与现状（简介、大纲与卷简介留开头与结尾），现状写明缩减过；新动作 `get_work`（作品信息全文）；`assistant_turn` 版本 13，共 59 个动作。测试见 `assistant-context.test.ts`。
@@ -230,10 +231,14 @@ pnpm m0 outcomes <运行标识…>
 
 运行记录写在 `m0/runs/`（不入库）。
 
-AI 助手的真实模型试用（14 句对话，其间写 3 章并审核；报告写在 `m3/runs/`，不入库）：
+AI 助手的真实模型试用（默认 14 句对话，其间写 3 章并审核；`--scenario` 选其他场景，`--list` 列出；报告写在 `m3/runs/`，不入库）：
 
 ```bash
 pnpm assistant:eval --base-url https://example.com/v1
+```
+
+```bash
+pnpm assistant:eval --base-url https://example.com/v1 --scenario long-work
 ```
 
 Rust 测试（`generate_context!` 在编译期读取前端产物，首次运行前先构建界面）：

@@ -2,7 +2,7 @@
 // 记下每一步助手说了什么、给了哪些动作、结果如何，写成报告由人阅读判断。只经应用服务层的用例。
 // 须确认的动作按每句话的设定同意或拒绝；写作、审核与修订交给这里实现的后台，和桌面端一样立即返回。
 import type { AssistantItem } from '../../apps/desktop/src/app/assistant';
-import type { BackgroundJobs } from '../../apps/desktop/src/app/assistant-tools';
+import type { AssistantSelection, BackgroundJobs } from '../../apps/desktop/src/app/assistant-tools';
 import type { AppService } from '../../apps/desktop/src/app/service';
 
 type Tool = Extract<AssistantItem, { role: 'assistant' }>['output']['actions'][number]['tool'];
@@ -13,6 +13,8 @@ export type Turn = {
   readonly expect?: readonly Tool[];
   readonly approve?: boolean;
   readonly waitBackground?: boolean;
+  /** 说这句话时作者在正文里选中的文字（这一章里第一处与它相同的地方）。 */
+  readonly select?: { readonly chapter: string; readonly text: string };
 };
 
 /** 默认的一串话：开新书、建人物与关系、计划、写一章、审核与处理问题、问前文与伏笔、偏好与技能、后台写作与停下、删除须确认。 */
@@ -187,6 +189,20 @@ const describe = (error: unknown): string => {
   return e.detail ?? e.code ?? JSON.stringify(error);
 };
 
+/** 按章名与文字找出作者的选区（只在一段之内）。 */
+export async function selectionFor(app: AppService, select: NonNullable<Turn['select']>): Promise<AssistantSelection | null> {
+  const work = await app.reloadWork();
+  const chapter = work.ok ? work.value.chapters.find((c) => c.title === select.chapter) : undefined;
+  if (chapter === undefined) return null;
+  const content = await app.openChapter(chapter.id);
+  if (!content.ok) return null;
+  for (const p of content.value.saved) {
+    const at = p.text.indexOf(select.text);
+    if (at >= 0) return { chapterId: chapter.id, text: select.text, range: { from: { paragraphId: p.id, offset: at }, to: { paragraphId: p.id, offset: at + select.text.length } } };
+  }
+  return null;
+}
+
 export async function runScenario(app: AppService, turns: readonly Turn[], hooks: Hooks): Promise<TurnRecord[]> {
   const bg = backgroundFor(app, hooks.log);
   // running 要同步给出：每次发话前算好，助手每一步都读这一份（后台在这一轮里的变化下一句话才看得到）。
@@ -199,7 +215,9 @@ export async function runScenario(app: AppService, turns: readonly Turn[], hooks
     const start = before.ok ? before.value.length : 0;
     const started = hooks.now();
     hooks.log(`\n【作者】${turn.say}`);
-    const events = { background: bg.jobs, running: () => running };
+    const selection = turn.select === undefined ? null : await selectionFor(app, turn.select);
+    if (turn.select !== undefined && selection === null) hooks.log(`  （没有找到要选中的文字：${turn.select.text.slice(0, 20)}……）`);
+    const events = { background: bg.jobs, running: () => running, ...(selection !== null && { selection }) };
     let outcome = await app.sendToAssistant(turn.say, events);
     let error: string | null = null;
     while (outcome.ok && outcome.value.pending) {
@@ -229,8 +247,8 @@ export async function runScenario(app: AppService, turns: readonly Turn[], hooks
   return records;
 }
 
-export function renderReport(records: readonly TurnRecord[], meta: { readonly model: string; readonly startedAt: string; readonly usage: string; readonly chapters: string }): string {
-  const lines = [`# AI 助手试用报告`, '', `- 模型：${meta.model}`, `- 开始：${meta.startedAt}`, `- 用量：${meta.usage}`, '', meta.chapters, ''];
+export function renderReport(records: readonly TurnRecord[], meta: { readonly scenario?: string; readonly model: string; readonly startedAt: string; readonly usage: string; readonly chapters: string }): string {
+  const lines = [`# AI 助手试用报告`, '', ...(meta.scenario === undefined ? [] : [`- 场景：${meta.scenario}`]), `- 模型：${meta.model}`, `- 开始：${meta.startedAt}`, `- 用量：${meta.usage}`, '', meta.chapters, ''];
   for (const [i, r] of records.entries()) {
     lines.push(`## ${i + 1}. ${r.say}`, '');
     lines.push(`用时 ${(r.ms / 1000).toFixed(1)} 秒；用到的动作：${r.used.join('、') || '无'}${r.missing.length > 0 ? `；期望而没用到：${r.missing.join('、')}` : ''}${r.error === null ? '' : `；出错：${r.error}`}`, '');
