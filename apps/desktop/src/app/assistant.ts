@@ -9,8 +9,9 @@ import {
   type AssistantHistoryItem,
   type AssistantResult,
   type AssistantState,
+  type RenderedPrompt,
 } from '@fudiao/prompts';
-import { partialStringField, type LlmStreamEvent } from '@fudiao/llm';
+import { partialStringField, type LlmStreamEvent, type LlmUsage } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
 import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
 import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type Outcome, type ToolEvents } from './assistant-tools';
@@ -84,19 +85,40 @@ export type AssistantOutcome = { readonly items: readonly AssistantItem[]; reado
 
 /** 一轮请求中模型最多走几步（每步一次调用），防止来回打转；走满时告诉作者停在了哪里。 */
 export const MAX_ASSISTANT_STEPS = 12;
-/** 给模型的对话最多带最近这么多条（从作者的一句话开始）。 */
-const HISTORY_LIMIT = 60;
 /**
- * 之前几轮的动作结果（读章节、列问题等）在对话里只留这么多字：那一轮已经用过了，留着全文只会让每一步越来越长。
- * 这一轮的结果照原样给出。
+ * 带给模型的对话与现状有多少（一级比一级少）。平常用第一级：对话最多最近 60 条、4 万字（超出时从最早的一轮开头略去，
+ * 这一轮总是保留）；之前几轮的动作结果只留 600 字（那一轮已经用过了，留着全文只会让每一步越来越长）；现状最多列
+ * 120 章、200 项设定、80 条关系。估算放不进模型的上下文时依次换下一级；后两级连这一轮较早的动作结果也截短，
+ * 后三级把作品的简介、大纲与卷简介截成开头与结尾（全文用 get_work 查看）。
  */
-const EARLIER_RESULT_LIMIT = 600;
-/** 带给模型的对话（不含现状）最多这么多字，超过时从最早的一轮开始略去。 */
-const HISTORY_CHARS = 40_000;
-/** 现状中最多列出的章节与设定。 */
-const MAX_LISTED_CHAPTERS = 120;
-const MAX_LISTED_ENTITIES = 200;
-const MAX_LISTED_RELATIONS = 80;
+type Budget = {
+  readonly historyItems: number;
+  readonly historyChars: number;
+  readonly earlierResult: number;
+  /** 这一轮里除最新一条以外的动作结果最多留多少字；null 为不截。 */
+  readonly currentResult: number | null;
+  readonly chapters: number;
+  readonly entities: number;
+  readonly relations: number;
+  /** 简介与大纲各留多少字、每卷简介留多少字；null 为不截。 */
+  readonly outline: number | null;
+  readonly volumeSummary: number | null;
+};
+const BUDGETS: readonly Budget[] = [
+  { historyItems: 60, historyChars: 40_000, earlierResult: 600, currentResult: null, chapters: 120, entities: 200, relations: 80, outline: null, volumeSummary: null },
+  { historyItems: 30, historyChars: 16_000, earlierResult: 300, currentResult: null, chapters: 60, entities: 100, relations: 40, outline: 8_000, volumeSummary: 600 },
+  { historyItems: 12, historyChars: 6_000, earlierResult: 200, currentResult: 3_000, chapters: 30, entities: 50, relations: 20, outline: 3_000, volumeSummary: 200 },
+  { historyItems: 0, historyChars: 0, earlierResult: 0, currentResult: 1_500, chapters: 12, entities: 20, relations: 10, outline: 1_000, volumeSummary: 80 },
+];
+/**
+ * 估算请求有多少 Token：正文的字数乘以每字的 Token 数，起初按偏多的 1.3 估（中文在各家分词器里大多不超过它），
+ * 之后按服务报回的用量校准（按模型分开）。原生结构化输出时输出结构也随请求发出，它是英文与符号，按每字 0.5 估，
+ * 不参与校准。上下文留出 5% 的余量，再减去输出的上限与一次格式修正要追加的内容（上一次的输出与问题说明）。
+ */
+const DEFAULT_TOKENS_PER_CHAR = 1.3;
+const SCHEMA_TOKENS_PER_CHAR = 0.5;
+const CONTEXT_MARGIN = 0.05;
+const REPAIR_RESERVE = 2_000;
 /** 现状中作者选中的文字最多给出的字数：太长时给开头与结尾。 */
 const SELECTION_LIMIT = 2_000;
 export const ASSISTANT_OUTPUT_TOKENS = 6_000 + THINKING_ALLOWANCE;
@@ -125,6 +147,8 @@ export function assistantUseCases({
   let memory: AssistantItem[] = [];
   /** 正在进行的一轮：取消用。 */
   let running = false;
+  /** 各模型每字约多少 Token（按服务报回的用量校准）。 */
+  const tokensPerChar = new Map<string, number>();
 
   async function load(): Promise<Result<AssistantItem[], AppError>> {
     const port = project();
@@ -160,8 +184,6 @@ export function assistantUseCases({
     const lengthOf = new Map(lengths.ok ? lengths.value.map((l) => [l.chapterId, l.length]) : []);
     const volumeTitle = new Map(work.value.volumes.map((v) => [v.id, v.title]));
     const all = work.value.chapters.map((c) => ({ id: c.id, title: c.title, volume: c.volumeId === null ? '' : (volumeTitle.get(c.volumeId) ?? ''), words: lengthOf.get(c.id) ?? 0, plan: planOf.get(c.id) ?? '' }));
-    const omitted = all.length > MAX_LISTED_CHAPTERS;
-    const chapters = omitted ? [...all.slice(0, 40), ...all.slice(-(MAX_LISTED_CHAPTERS - 40))] : all;
     const p = work.value.project;
     const nameOf = new Map((entities.ok ? entities.value : []).map((e) => [e.id, e.name]));
     const titleOf = new Map(work.value.chapters.map((c) => [c.id, c.title]));
@@ -179,7 +201,7 @@ export function assistantUseCases({
       running,
       work: {
         trashed: work.value.trashed.slice(0, 30).map((c) => ({ id: c.id, title: c.title })),
-        relations: rels.slice(0, MAX_LISTED_RELATIONS).map((r) => ({
+        relations: rels.map((r) => ({
           id: r.id,
           from: nameOf.get(r.fromId) ?? '',
           to: nameOf.get(r.toId) ?? '',
@@ -197,30 +219,55 @@ export function assistantUseCases({
         synopsis: p.synopsis,
         outline: p.outline,
         volumes: work.value.volumes.map((v) => ({ id: v.id, title: v.title, summary: v.summary })),
-        chapters,
+        chapters: all,
         chapterCount: all.length,
         totalWords: all.reduce((n, c) => n + c.words, 0),
         plannedCount: all.filter((c) => c.plan !== '').length,
-        omitted,
-        entities: (entities.ok ? entities.value : []).slice(0, MAX_LISTED_ENTITIES).map((e) => ({ id: e.id, kind: ENTITY_KIND_LABEL[e.kind], name: e.name, locked: e.locked })),
+        omitted: false,
+        entities: (entities.ok ? entities.value : []).map((e) => ({ id: e.id, kind: ENTITY_KIND_LABEL[e.kind], name: e.name, locked: e.locked })),
+        entityCount: entities.ok ? entities.value.length : 0,
         current,
       },
     };
   }
 
 
+  /** 按这一级的量列出现状：章节太多时列前三分之一与后面的部分，设定与关系列前面的部分，简介、大纲与卷简介留开头与结尾。 */
+  const trimState = (full: AssistantState, budget: Budget, trimmed: boolean): AssistantState => {
+    const w = full.work;
+    if (w === null) return { ...full, trimmed };
+    const omitted = w.chapters.length > budget.chapters;
+    const head = Math.floor(budget.chapters / 3);
+    const cut = (text: string, limit: number | null) => (limit === null ? text : clip(text, limit).text);
+    return {
+      ...full,
+      trimmed,
+      work: {
+        ...w,
+        synopsis: cut(w.synopsis, budget.outline),
+        outline: cut(w.outline, budget.outline),
+        volumes: w.volumes.map((v) => ({ ...v, summary: cut(v.summary, budget.volumeSummary) })),
+        chapters: omitted ? [...w.chapters.slice(0, head), ...w.chapters.slice(-(budget.chapters - head))] : w.chapters,
+        omitted,
+        entities: w.entities.slice(0, budget.entities),
+        relations: (w.relations ?? []).slice(0, budget.relations),
+      },
+    };
+  };
+
   /** 作者是否停止了这一轮（每次都重新读取，不受前面判断的影响）。 */
   const aborted = (events: AssistantEvents): boolean => events.signal?.aborted ?? false;
 
 
-  const history = (items: readonly AssistantItem[]): AssistantHistoryItem[] => {
+  const history = (items: readonly AssistantItem[], budget: Budget): AssistantHistoryItem[] => {
     const usable = items.filter((i) => i.role !== 'pending' && i.role !== 'changes' && !(i.role === 'undo' && i.source === 'action'));
     const turnStart = usable.map((i) => i.role).lastIndexOf('user');
     const converted = usable.map((i, at): AssistantHistoryItem => {
       if (i.role === 'user') return { role: 'user', text: i.text };
       if (i.role === 'assistant') return { role: 'assistant', output: i.output };
       const results = i.role === 'results' ? i.results : i.role === 'undo' ? [{ tool: 'undo_last_turn', ok: i.ok, detail: `作者在对话框里点了撤销：${i.report}` }] : [];
-      return { role: 'results', results: at >= turnStart ? results : results.map((r) => ({ ...r, detail: clip(r.detail, EARLIER_RESULT_LIMIT).text })) };
+      const limit = at < turnStart ? budget.earlierResult : at < usable.length - 1 ? budget.currentResult : null;
+      return { role: 'results', results: limit === null ? results : results.map((r) => ({ ...r, detail: clip(r.detail, limit).text })) };
     });
     const size = (h: AssistantHistoryItem) => (h.role === 'user' ? h.text.length : h.role === 'assistant' ? JSON.stringify(h.output).length : h.results.reduce((n, r) => n + r.detail.length + r.tool.length, 0));
     // 从最近的往前数，条数或字数超出时从那一轮的开头（作者的话）截断；这一轮总是完整保留。
@@ -228,7 +275,7 @@ export function assistantUseCases({
     let chars = 0;
     while (start > 0) {
       const item = converted[start - 1]!;
-      if (start - 1 < turnStart && (converted.length - (start - 1) > HISTORY_LIMIT || chars + size(item) > HISTORY_CHARS)) break;
+      if (start - 1 < turnStart && (converted.length - (start - 1) > budget.historyItems || chars + size(item) > budget.historyChars)) break;
       chars += size(item);
       start--;
     }
@@ -344,12 +391,45 @@ export function assistantUseCases({
     return { ok, detail: report };
   }
 
+  /**
+   * 按模型的上下文上限挑一级的量渲染这一步的请求：第一级放得下就用它，放不下依次换更少的一级（最后一级仍放不下时照发，
+   * 由服务报错）。缩减过时现状里写明，模型知道要用读取动作重新查看。不知道上限时用第一级。
+   */
+  function fitPrompt(items: readonly AssistantItem[], full: AssistantState, limits: Limits) {
+    const room =
+      limits === null || limits.contextWindow <= 0
+        ? Infinity
+        : limits.contextWindow * (1 - CONTEXT_MARGIN) - Math.min(ASSISTANT_OUTPUT_TOKENS, limits.maxOutputTokens) - REPAIR_RESERVE;
+    let rendered = renderAssistantTurn({ history: history(items, BUDGETS[0]!), state: trimState(full, BUDGETS[0]!, false) });
+    for (const budget of BUDGETS.slice(1)) {
+      if (!rendered.ok || estimateTokens(rendered.value, limits) <= room) break;
+      rendered = renderAssistantTurn({ history: history(items, budget), state: trimState(full, budget, true) });
+    }
+    return rendered;
+  }
+
+  /** 这一步的请求约有多少 Token（见 DEFAULT_TOKENS_PER_CHAR）。 */
+  const estimateTokens = (prompt: RenderedPrompt, limits: Limits): number => {
+    const size = promptSize(prompt);
+    const perChar = (limits === null ? undefined : tokensPerChar.get(limits.model)) ?? DEFAULT_TOKENS_PER_CHAR;
+    return size.text * perChar + (limits?.nativeSchema === true ? size.schema * SCHEMA_TOKENS_PER_CHAR : 0);
+  };
+
+  /** 按第一次请求（修正之前）服务报回的输入 Token 数校准这个模型每字的 Token 数（扣掉输出结构的估计）。 */
+  const calibrate = (prompt: RenderedPrompt, limits: Limits, usage: LlmUsage | null) => {
+    if (limits === null || usage === null) return;
+    const size = promptSize(prompt);
+    const input = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens - (limits.nativeSchema ? size.schema * SCHEMA_TOKENS_PER_CHAR : 0);
+    if (size.text > 0 && input > 0) tokensPerChar.set(limits.model, Math.min(3, Math.max(0.3, input / size.text)));
+  };
+
   /** 从当前的对话往下走，直到办完、需要作者确认、出错或走满步数。 */
   async function proceed(items: AssistantItem[], events: AssistantEvents): Promise<Result<AssistantOutcome, AppError>> {
     const turn = turnState(items);
+    const limits = await runner.modelLimits();
     for (let step = 0; step < MAX_ASSISTANT_STEPS; step++) {
       if (aborted(events)) break;
-      const prompt = renderAssistantTurn({ history: history(items), state: await state(events) });
+      const prompt = fitPrompt(items, await state(events), limits);
       if (!prompt.ok) return err(settings(prompt.error));
       // 流式到达时把给作者的话逐字交给界面；只用于显示，动作在整步输出通过校验后才执行。
       let streamed = '';
@@ -377,6 +457,7 @@ export function assistantUseCases({
       }
       const usage = result.value.attempts.at(-1)?.usage ?? null;
       if (usage !== null) events.onUsage?.({ promptTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens, contextWindow: result.value.contextWindow });
+      calibrate(prompt.value, limits, result.value.attempts[0]?.usage ?? null);
       const output = result.value.value;
       await append(items, [{ id: deps.ids.next(), role: 'assistant', output }], events);
       events.onDraft?.(null);
@@ -476,6 +557,14 @@ export function assistantUseCases({
     },
   };
 }
+
+type Limits = Awaited<ReturnType<ReturnType<typeof modelRunner>['modelLimits']>>;
+
+/** 一次请求的字数：系统提示与各条消息（text）、输出结构的 JSON（schema）。 */
+const promptSize = (prompt: RenderedPrompt): { readonly text: number; readonly schema: number } => ({
+  text: prompt.system.reduce((n, s) => n + s.text.length, 0) + prompt.messages.reduce((n, m) => n + m.content.length, 0),
+  schema: prompt.output === undefined ? 0 : JSON.stringify(prompt.output.schema).length,
+});
 
 // —— 存储的形状 ——
 

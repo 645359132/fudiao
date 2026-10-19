@@ -24,6 +24,7 @@ export const FORESHADOW_STATUSES_FOR_ASSISTANT = ['planned', 'planted', 'paid_of
 export const AssistantAction = z.discriminatedUnion('tool', [
   // 读取
   z.object({ tool: z.literal('list_chapters'), volume: opt }),
+  z.object({ tool: z.literal('get_work') }),
   z.object({ tool: z.literal('read_chapter'), chapter: text }),
   z.object({ tool: z.literal('search_text'), query: text }),
   z.object({ tool: z.literal('get_entity'), entity: text }),

@@ -5,7 +5,8 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/src-tauri/target/**', '**/src-tauri/gen/**', 'tools/**/fixtures/**'],
+    // .claude/worktrees 下是整个仓库的工作树副本，一并检查会重复且耗尽内存。
+    ignores: ['.claude/**', '**/node_modules/**', '**/dist/**', '**/coverage/**', '**/src-tauri/target/**', '**/src-tauri/gen/**', 'tools/**/fixtures/**'],
   },
   js.configs.recommended,
   {

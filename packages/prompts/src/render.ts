@@ -788,6 +788,8 @@ export type AssistantState = {
   readonly works: readonly string[];
   /** 正在后台进行的任务（写手、审核、推演等），一句话一项；没有时为空。 */
   readonly running?: readonly string[];
+  /** 为了放进模型的上下文，这一步缩减了对话与现状。 */
+  readonly trimmed?: boolean;
   readonly work: null | {
     readonly title: string;
     readonly genre: string;
@@ -802,6 +804,8 @@ export type AssistantState = {
     /** 章节太多时只列出前后部分。 */
     readonly omitted: boolean;
     readonly entities: readonly { readonly id: string; readonly kind: string; readonly name: string; readonly locked: boolean }[];
+    /** 设定的总数（只列出一部分时）。 */
+    readonly entityCount?: number;
     /** 回收站里的章节。 */
     readonly trashed: readonly { readonly id: string; readonly title: string }[];
     /**
@@ -844,6 +848,7 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
     works: [...input.state.works],
     running: [...(input.state.running ?? [])],
     hasRunning: (input.state.running ?? []).length > 0,
+    trimmed: input.state.trimmed === true,
     work:
       input.state.work === null
         ? null
@@ -858,9 +863,11 @@ export function renderAssistantTurn(input: { readonly history: readonly Assistan
             preferences: [...(input.state.work.preferences ?? [])],
             hasPreferences: (input.state.work.preferences ?? []).length > 0,
             relations: [...(input.state.work.relations ?? [])],
-            hasRelations: (input.state.work.relations ?? []).length > 0,
+            hasRelations: (input.state.work.relationCount ?? (input.state.work.relations ?? []).length) > 0,
             relationCount: input.state.work.relationCount ?? (input.state.work.relations ?? []).length,
             relationsOmitted: (input.state.work.relationCount ?? 0) > (input.state.work.relations ?? []).length,
+            entityCount: input.state.work.entityCount ?? input.state.work.entities.length,
+            entitiesOmitted: (input.state.work.entityCount ?? 0) > input.state.work.entities.length,
             selection: input.state.work.selection === null ? null : { ...input.state.work.selection },
           },
     hasResults: last.role === 'results',

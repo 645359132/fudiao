@@ -176,6 +176,8 @@ const PROTOCOL_LABEL = { simultaneous: '同时行动', turn_based: '轮流对话
 
 /** 读一章时最多给出的字数：太长时给开头与结尾。 */
 const READ_LIMIT = 6_000;
+/** 作品信息（简介、大纲、卷简介、人物关系）最多给出的字数。 */
+const WORK_INFO_LIMIT = 20_000;
 /** 审核结果在对话里列出的问题数。 */
 const LISTED_ISSUES = 6;
 /** list_review_issues 一次最多列出的问题数，与全书时最多看的章数。 */
@@ -447,6 +449,28 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       }
       const title = new Map(work.value.volumes.map((v) => [v.id, v.title]));
       return done(list.length === 0 ? '没有章节。' : list.map((c) => `[${c.id}] ${c.title}${c.volumeId === null ? '' : `（${title.get(c.volumeId) ?? ''}）`}，${lengthOf.get(c.id) ?? 0} 字`).join('\n'));
+    },
+  },
+  get_work: {
+    label: '查看作品信息',
+    undo: 'read',
+    async run(_action, env) {
+      const work = await env.work();
+      if (!work.ok) return failWith(work.error);
+      const view = await env.host.relationsView();
+      if (!view.ok) return failWith(view.error);
+      const p = work.value.project;
+      const nameOf = new Map(view.value.members.map((m) => [m.id, m.name]));
+      const volumes = work.value.volumes.map((v) => `- [${v.id}] ${v.title}：${v.summary || '（没有简介）'}`);
+      const relations = view.value.relationships.map((r) => `- [${r.id}] ${relationText(r, nameOf)}（${RELATION_CATEGORY_LABEL[r.category]}${r.secret ? '，隐秘' : ''}）`);
+      const text = [
+        `《${p.title}》${p.genre === '' ? '' : `（${p.genre}）`}`,
+        `简介：${p.synopsis || '还没有'}`,
+        `大纲：${p.outline || '还没有'}`,
+        volumes.length === 0 ? '没有分卷。' : `分卷：\n${volumes.join('\n')}`,
+        relations.length === 0 ? '没有人物关系。' : `人物关系（共 ${relations.length} 条）：\n${relations.join('\n')}`,
+      ].join('\n');
+      return done(clip(text, WORK_INFO_LIMIT).text);
     },
   },
   read_chapter: {

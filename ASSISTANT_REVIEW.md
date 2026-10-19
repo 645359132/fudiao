@@ -14,17 +14,17 @@
 
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
-| 输出结构 | `packages/prompts/src/assistant.ts` | 每一步输出 `message`、`actions`（以 `tool` 区分的可辨识联合，共 58 个动作）、`done`；结构化输出管线校验 |
-| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 12）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
+| 输出结构 | `packages/prompts/src/assistant.ts` | 每一步输出 `message`、`actions`（以 `tool` 区分的可辨识联合，共 59 个动作）、`done`；结构化输出管线校验 |
+| 提示词 | `packages/prompts/templates/assistant_turn.md`（版本 13）与 `partials/assistant_tools.md`、`assistant_state.md`、`assistant_results.md`、`assistant_request.md` | 系统提示（规则与动作说明）不变、可缓存；之前的对话只追加；最后一条消息是现状与最新的请求或动作结果 |
 | 对话循环 | `apps/desktop/src/app/assistant.ts` | 一轮最多 12 步；须确认的动作停下，排在后面的动作随它保存（`rest`），确认后接着执行；走满步数或停止时说明；之前几轮的动作结果截到 600 字，对话超过 60 条或 4 万字时从最早的一轮截断；对话按作品存进 `assistant_message` |
 | 撤销 | `apps/desktop/src/app/assistant-undo.ts` | 改结构的动作前后取现状、记下差别（对话里的 `changes` 记录），撤销时倒着改回；之后又改过的不动 |
 | 动作的命令表 | `apps/desktop/src/app/assistant-tools.ts` | 每个动作：界面名称、是否须确认、撤销方式、执行（只调用现有用例，锁定设定、快照、版本守卫、回收站照常生效）；`BackgroundJobs` 由状态层实现（写手队列、依次审核、推演、停下） |
 | 界面 | `apps/desktop/src/ui/AssistantPanel.tsx`，状态层 `src/state/store.ts` 的 `assistantTurn` | 逐字显示、进展、选区条、确认卡片、模型与思考深度选择、上下文用量；每一轮登记为任务 |
 | 试用脚本 | `tools/assistant-eval/`（`pnpm assistant:eval`） | 14 句作者会说的话，真实模型，报告写在 `m3/runs/`（不入库） |
 
-### 动作一览（58 个）
+### 动作一览（59 个）
 
-- 读取：`list_chapters`、`read_chapter`、`search_text`、`get_entity`、`list_facts`、`get_chapter_plan`、`build_chapter_memory`、`get_chapter_memory`、`list_foreshadows`、`list_review_issues`、`list_skills`
+- 读取：`list_chapters`、`get_work`、`read_chapter`、`search_text`、`get_entity`、`list_facts`、`get_chapter_plan`、`build_chapter_memory`、`get_chapter_memory`、`list_foreshadows`、`list_review_issues`、`list_skills`
 - 作品与卷：`create_work`、`open_work`、`update_work`（替换已有大纲须确认）、`create_volume`、`update_volume`、`move_volume`、`delete_volume`（须确认）
 - 章节：`create_chapter`、`update_chapter`、`move_chapter`、`trash_chapter`（须确认）、`open_chapter`、`restore_chapter`、`save_snapshot`
 - 设定与事实：`create_entity`、`update_entity`、`delete_entity`（须确认）、`add_fact`（候选，作者在事实页接受）
@@ -78,7 +78,7 @@ pnpm assistant:eval --base-url https://example.com/v1
 3. **改动没有统一的撤销。** 已处理（M5-20）：对话框的“撤销这一轮的改动”与 `undo_last_turn`。原来的描述： 正文有快照，但设定、关系、计划、伏笔、作品信息被助手改了以后不能一键回到改之前。建议给助手的每一轮记下改动前的值（或在一轮开始前给相关表做轻量快照），提供“撤销助手刚才的改动”。
 4. **单章审核与修订挡住对话。** `review_chapter`、`revise_review_issue`、`write_chapter` 在对话里同步等待，期间作者不能再说话。可以考虑统一走后台，对话里只汇报“已排上”，完成时在下一句话的现状里看到结果。
 5. **模型偶尔编造细节。** 第二次试用第 13 句说这本书“约 30 章”，大纲里没有。已处理（M5-17）：现状给出全书字数与有计划的章数，`assistant_turn` 版本 10 要求数字与事实只用现状与动作结果里有的。没有经过真实模型验证。
-6. **发出请求前不检查上下文上限。** 现在只靠条数与字数截断对话，现状部分（章节、设定、关系列表）在大部头作品里可能很长。建议按模型的 `contextWindow` 估算，超出时进一步缩减现状与历史。
+6. **发出请求前不检查上下文上限。** 已处理（M5-21）：按模型的 `contextWindow` 估算，放不下时分四级缩减对话与现状，现状里写明缩减过，作品信息全文用 `get_work` 查看；没有经过真实模型验证。原来的描述： 现在只靠条数与字数截断对话，现状部分（章节、设定、关系列表）在大部头作品里可能很长。建议按模型的 `contextWindow` 估算，超出时进一步缩减现状与历史。
 7. **作品建好之前的调用没有记进作品库。** 用量页与试用报告的统计因此偏低。可以把这些调用记进应用设置库，或在作品建好时补记。
 8. **写手的文笔。** 第一次写第一章时玉佩只含糊带过，靠审核与修订补上。按作者决定（先做完软件，正文质量以后再磨），暂不处理。
 9. **“停下后台任务”的界面层没有自动测试。** 已处理（M5-18）：`src/ui/app.test.tsx` 用挂起的模型回复让写手停在第一章，经助手的 `stop_background` 停下，核对没写完的一段不写入、第二章不开写、任务记为已取消、没有多发请求。

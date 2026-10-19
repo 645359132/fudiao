@@ -1,6 +1,6 @@
 ---
 id: assistant_turn
-version: 12
+version: 13
 task: assistant
 output: AssistantTurnOutput
 ---

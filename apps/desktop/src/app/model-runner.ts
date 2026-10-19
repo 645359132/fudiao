@@ -158,6 +158,17 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
   }
 
   return {
+    /**
+     * 默认模型的上下文上限与最大输出（AI 助手发请求前估算放不放得下）；没有默认模型时为 null。
+     * nativeSchema：输出结构是否随请求发出（原生结构化输出），发出时也占输入。
+     */
+    async modelLimits(): Promise<{ readonly model: string; readonly contextWindow: number; readonly maxOutputTokens: number; readonly nativeSchema: boolean } | null> {
+      const choice = await defaultModel();
+      if (!choice.ok || choice.value === null) return null;
+      const { contextWindow, maxOutputTokens, structuredOutput } = choice.value.model.capabilities;
+      return { model: choice.value.model.id, contextWindow, maxOutputTokens, nativeSchema: structuredOutput === 'native' };
+    },
+
     /** 纯文本任务（续写、改写等）：不需要通过能力自检。 */
     async text(request: RunRequest, options: CallOptions = {}): Promise<Result<LlmResult, AppError>> {
       const prepared = await prepare(request, false);
