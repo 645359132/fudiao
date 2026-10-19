@@ -41,7 +41,7 @@ import type { SkillsView } from './writing-skills';
 import type { ReviewIssueView, ReviewOutcome, RevisionOutcome } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
-import type { WorkflowKey, WorkflowUseCases, WorkflowView } from './workflows';
+import type { AUTHOR_STARTED_WORKFLOWS, WorkflowKey, WorkflowUseCases, WorkflowView } from './workflows';
 import type { ASSISTANT_WORKFLOWS } from '@fudiao/prompts';
 
 /** 助手要界面做的事：打开章节或页面；打开一章旁的候选稿或审核问题；作品换了（新建或打开了另一部）；作品内容变了。 */
@@ -124,8 +124,9 @@ export type WorkSnapshot = {
 /** 写作工作流的用例（B78）；没有时（例如较早的试用脚本）工作流动作说明不能用。 */
 export type AssistantWorkflows = Pick<WorkflowUseCases, 'workflowCatalog' | 'quoteWorkflow' | 'startWorkflow' | 'listWorkflows' | 'workflowRun' | 'adoptWorkflowStep'>;
 
-// 提示词里可发起的工作流与应用层命令表的键须相同：两边漏了一项都会在这里报错。
-const SAME_WORKFLOWS: [WorkflowKey, (typeof ASSISTANT_WORKFLOWS)[number]] extends [(typeof ASSISTANT_WORKFLOWS)[number], WorkflowKey] ? true : never = true;
+// 提示词里可发起的工作流须正是应用层命令表里助手能发起的那些（去掉要作者先导入材料的）：两边漏了一项都会在这里报错。
+type AssistantStartable = Exclude<WorkflowKey, (typeof AUTHOR_STARTED_WORKFLOWS)[number]>;
+const SAME_WORKFLOWS: [AssistantStartable, (typeof ASSISTANT_WORKFLOWS)[number]] extends [(typeof ASSISTANT_WORKFLOWS)[number], AssistantStartable] ? true : never = true;
 void SAME_WORKFLOWS;
 
 /** 助手用到的现有用例（由应用服务提供）。 */
@@ -1712,7 +1713,9 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
     async run(_action, env) {
       const flows = env.host.workflows;
       if (flows === undefined) return failed('这里不能用写作工作流');
-      const catalog = flows.workflowCatalog().map((w) => `- ${w.key}：${w.title}——${w.description}（${w.steps.length} 步：${w.steps.map((s) => s.label).join(' → ')}）`);
+      const catalog = flows.workflowCatalog().map(
+        (w) => `- ${w.key}：${w.title}——${w.description}（${w.steps.length} 步：${w.steps.map((s) => s.label).join(' → ')}）${w.key === 'benchmark' ? '。要作者在成书页粘贴或导入榜单与样章后开始，你不能直接发起' : ''}`,
+      );
       const runs = await flows.listWorkflows();
       if (!runs.ok) return failWith(runs.error);
       const listed = runs.value.slice(0, 10).map((v) => `- ${workflowLine(v)}`);

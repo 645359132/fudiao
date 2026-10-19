@@ -325,6 +325,30 @@ export const CastCompletionOutput = z.object({
 });
 export type CastCompletionOutput = z.infer<typeof CastCompletionOutput>;
 
+/** 扫榜拆书（B79）：一本对标作品的拆解，只有结构与技法；引文由应用层做复述检查。 */
+export const BenchmarkBookOutput = z.object({
+  genre: z.string(),
+  sellingPoints: z.array(z.string()),
+  hook: z.string(),
+  pacing: z.array(z.object({ chapter: z.string(), role: z.string(), beats: z.string() })),
+  cast: z.array(z.object({ role: z.string(), description: z.string() })),
+  conflict: z.string(),
+  chapterHooks: z.string(),
+  techniques: z.array(z.string()),
+  quotes: z.array(z.object({ text: z.string(), why: z.string() })),
+});
+export type BenchmarkBookOutput = z.infer<typeof BenchmarkBookOutput>;
+
+/** 扫榜拆书（B79）：几本对标作品的横向对比与开书方向；skill 是给规划用的指令。 */
+export const BenchmarkCompareOutput = z.object({
+  common: z.array(z.string()),
+  gaps: z.array(z.string()),
+  borrow: z.array(z.string()),
+  directions: z.array(z.object({ idea: z.string(), why: z.string() })),
+  skill: z.string(),
+});
+export type BenchmarkCompareOutput = z.infer<typeof BenchmarkCompareOutput>;
+
 /** 事件梗概：按发生顺序的若干条，每条一两句。 */
 export const SynopsisOutput = z.object({ synopsis: z.array(z.string()) });
 export type SynopsisOutput = z.infer<typeof SynopsisOutput>;

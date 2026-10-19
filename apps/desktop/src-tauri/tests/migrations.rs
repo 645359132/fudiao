@@ -280,6 +280,8 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "evaluation",
         "workflow_run",
         "workflow_step",
+        // 扫榜拆书的样章（schema.ts 的 LOCAL_TABLES，不导出）。
+        "benchmark_sample",
         "schema_migrations",
         // 全文查找的派生表（schema.ts 的 DERIVED_TABLES）。
         "paragraph_search_key",

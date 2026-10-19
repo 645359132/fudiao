@@ -19,6 +19,14 @@
     "version": "7",
     "sha256": "31dbf4b01127e8821f526fef2e2d4fb527fd245f085cd8dd387d5b13da70d454"
   },
+  "benchmark_book": {
+    "version": "1",
+    "sha256": "f752da556e8b6ce04c6b53aad22edfcd829e39330f6ee6a330d9cb8565787de8"
+  },
+  "benchmark_compare": {
+    "version": "1",
+    "sha256": "39eff4318d9d6ef269dd9caec8b80bf1b534a29cffdb7cc930a72e4fbb9a7880"
+  },
   "book_audit": {
     "version": "1",
     "sha256": "c91df9851e4dc0b613638b84113b2c7a0dff5f819dc0aedd8e33ff2867584b1b"

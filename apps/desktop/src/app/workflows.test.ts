@@ -537,3 +537,80 @@ describe('人物小传与关系网补全（B83）', () => {
     expect(value(await app.relationsView()).relationships).toEqual([]);
   });
 });
+
+describe('扫榜拆书（B79）', () => {
+  // 金丝雀：样章原文里的标记只能出现在逐本拆解的请求里。
+  const CANARY = '金丝雀样章七号';
+  const sample = `第一章 雨夜\n${`林舟推开当铺沉重的木门时，雨水顺着衣角落在青石板上，${CANARY}。`.repeat(8)}`;
+  const analysis = {
+    genre: '古风悬疑',
+    // 模型抄了一长段样章：复述检查截短。
+    sellingPoints: ['身份反差', `开头：${sample.slice(7, 50)}`],
+    hook: '雨夜当玉，主角第一段就出场',
+    pacing: [{ chapter: '第一章', role: '亮出困境', beats: '被压价' }],
+    cast: [{ role: '主角', description: '落魄书生' }],
+    conflict: '身世之谜',
+    chapterHooks: '章末留下疑问',
+    techniques: ['先抑后扬'],
+    quotes: [{ text: '这一段引文写得太长了超过了三十个字的上限所以要截短才行，还要再多写几个字', why: '环境与人物同时出场' }],
+  };
+  const compare = {
+    common: ['开局即困境'],
+    gaps: ['女性视角的当铺故事'],
+    borrow: ['章末留疑问'],
+    directions: [{ idea: '女掌柜收下一件会说话的旧物', why: '补了女性视角的空位' }],
+    skill: '开局三百字内让主角陷入困境；每章末留一个疑问；人物按主角、对手、引路人配置。',
+  };
+
+  it('导入、逐本拆解（复述检查）、对标分析（只读拆解）、存为规划技能、删除样章；样章原文不出现在之后的任何请求与导出里', async () => {
+    const { deps, app } = await setup();
+    expect(await app.startWorkflow({ workflow: 'benchmark', params: { idea: '', entries: 1 }, mode: 'step', budgetUsd: null })).toMatchObject({ ok: false });
+    expect(await app.startBenchmark({ rankText: '1. 夜当', books: [{ title: '夜当', text: '太短' }], idea: '', mode: 'step', budgetUsd: null })).toMatchObject({ ok: false, error: { code: 'settings' } });
+
+    const run = value(await app.startBenchmark({ rankText: '1. 夜当\n标签：古风\n简介：落魄书生当玉。\n\n2. 剑来\n标签：仙侠', books: [{ title: '夜当', text: sample }], idea: '女掌柜', mode: 'step', budgetUsd: null }));
+    expect(run.run.params).toEqual({ idea: '女掌柜', entries: 2 });
+    expect(JSON.stringify(run)).not.toContain(CANARY);
+    deps.llmResponses.push(reply(JSON.stringify(analysis)), reply(JSON.stringify(compare)));
+    deps.llmRequests.length = 0;
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'awaiting_author', 'pending']);
+    expect(out.view.steps[0]?.note).toBe(`榜单 2 条，其中 1 本有样章（共 ${sample.trim().length.toLocaleString('en-US')} 字）`);
+    const analyzed = out.view.steps[1]?.output as { analyses: { analysis: typeof analysis; trimmed: number }[] };
+    expect(analyzed.analyses[0]?.trimmed).toBe(2);
+    expect(analyzed.analyses[0]?.analysis.sellingPoints[1]).toBe(`开头：${sample.slice(7, 37)}……`);
+    expect(analyzed.analyses[0]?.analysis.quotes[0]?.text).toHaveLength(32);
+    expect(JSON.stringify(out.view.steps[1]?.output)).not.toContain(CANARY);
+    // 逐本拆解的请求带样章；对比的请求只有拆解。
+    const [book, compared] = deps.llmRequests.map((r) => JSON.stringify(r.body));
+    expect(book).toContain(CANARY);
+    expect(compared).not.toContain(CANARY);
+    expect(compared).toContain('作者自己的想法：女掌柜');
+
+    value(await app.adoptWorkflowStep(run.run.id, 2));
+    const skills = value(await app.listWritingSkills()).skills.find((s) => s.skill.name === '对标分析');
+    expect(skills?.skill).toMatchObject({ stages: ['planning'] });
+    const done = value(await app.advanceWorkflow(run.run.id));
+    expect(done.view.state).toBe('done');
+    expect(value(await app.benchmarkBooks(run.run.id))).toEqual([]);
+
+    // 之后的规划请求带对标分析的规划技能，不带样章。
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ title: '旧物', genre: '', synopsis: '', outline: '大纲', characters: [], relationships: [] })));
+    value(await app.draftBookSeed({ idea: '女掌柜收旧物', genre: '', chapterCount: 3, wordsPerChapter: 2000 }));
+    const seedBody = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    expect(seedBody).toContain('开局三百字内让主角陷入困境');
+    expect(seedBody).not.toContain(CANARY);
+    value(await app.exportProject());
+    expect(JSON.stringify(deps.exportedPackages.at(-1)?.files ?? [])).not.toContain(CANARY);
+  });
+
+  it('放弃时删除样章；作品包导出时样章不在里面', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startBenchmark({ rankText: '', books: [{ title: '夜当', text: sample }], idea: '', mode: 'step', budgetUsd: null }));
+    value(await app.exportProject());
+    expect(JSON.stringify(deps.exportedPackages.at(-1)?.files ?? [])).not.toContain(CANARY);
+    expect(value(await app.benchmarkBooks(run.run.id))).toHaveLength(1);
+    value(await app.abandonWorkflow(run.run.id));
+    expect(value(await app.benchmarkBooks(run.run.id))).toEqual([]);
+  });
+});

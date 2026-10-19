@@ -3,7 +3,7 @@ import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import type { VolumeOutline } from '../app/planning';
-import { castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { benchmarkAnalysesOf, benchmarkResultOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
@@ -22,6 +22,10 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const [to, setTo] = useState<string>('');
   const [rereview, setRereview] = useState(false);
   const [instruction, setInstruction] = useState('');
+  const [rankText, setRankText] = useState('');
+  const [samples, setSamples] = useState<readonly { readonly title: string; readonly text: string }[]>([{ title: '', text: '' }]);
+  const startBenchmark = useApp((s) => s.startBenchmark);
+  const pickSampleText = useApp((s) => s.pickSampleText);
   const [mode, setMode] = useState<'step' | 'auto'>('step');
   const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<WorkflowQuote | null>(null);
@@ -36,7 +40,9 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
           ? { chapters }
           : key === 'cast_completion'
             ? {}
-            : { idea, genre, chapters, wordsPerChapter: words };
+            : key === 'benchmark'
+              ? { idea, entries: Math.max(1, samples.filter((x) => x.text.trim() !== '').length) }
+              : { idea, genre, chapters, wordsPerChapter: words };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   return (
@@ -45,10 +51,56 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
       aria-label={`开始${info.title}`}
       onSubmit={(e) => {
         e.preventDefault();
-        void startWorkflow({ workflow: key, params, mode, budgetUsd });
+        if (key === 'benchmark') void startBenchmark({ rankText, books: samples, idea, mode, budgetUsd });
+        else void startWorkflow({ workflow: key, params, mode, budgetUsd });
       }}
     >
-      {key === 'cast_completion' ? (
+      {key === 'benchmark' ? (
+        <>
+          <p className="muted">软件不会去任何网站抓取：把榜单与几本对标作品开头几章的样章粘贴进来，或从 TXT 读入。样章只用来拆结构与技法，不随作品导出，拆完就从作品库删除。</p>
+          <label>
+            榜单（可不填；一本一段，空行分开，可以写“书名：”“标签：”“字数：”）
+            <textarea rows={4} value={rankText} onChange={(e) => setRankText(e.currentTarget.value)} />
+          </label>
+          {samples.map((x, i) => (
+            <fieldset key={i}>
+              <legend>样章 {i + 1}</legend>
+              <label>
+                书名
+                <input value={x.title} onChange={(e) => setSamples(samples.map((y, j) => (j === i ? { ...y, title: e.currentTarget.value } : y)))} />
+              </label>
+              <label>
+                样章原文（开头几章）
+                <textarea rows={4} value={x.text} onChange={(e) => setSamples(samples.map((y, j) => (j === i ? { ...y, text: e.currentTarget.value } : y)))} />
+              </label>
+              <div className="form-actions">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void pickSampleText().then((picked) => {
+                      if (picked !== null) setSamples(samples.map((y, j) => (j === i ? { title: y.title || picked.fileName.replace(/\.(txt|md)$/i, ''), text: picked.text } : y)));
+                    })
+                  }
+                >
+                  从 TXT 读入
+                </button>
+                {samples.length > 1 ? (
+                  <button type="button" className="ghost" onClick={() => setSamples(samples.filter((_, j) => j !== i))}>
+                    删去这一本
+                  </button>
+                ) : null}
+              </div>
+            </fieldset>
+          ))}
+          <button type="button" onClick={() => setSamples([...samples, { title: '', text: '' }])}>
+            再加一本
+          </button>
+          <label>
+            你自己的想法（可不填，开书方向会围绕它）
+            <input value={idea} onChange={(e) => setIdea(e.currentTarget.value)} />
+          </label>
+        </>
+      ) : key === 'cast_completion' ? (
         <p className="muted">从各章的长篇记忆里找：说明为空的人物、出场却没有关系的人物，以及正文里有、还没建卡的人物；写成小传与关系的草稿，你勾选后再加进设定与人物关系网。只增不改：锁定的人物不动，已有的说明只在后面补充。</p>
       ) : key === 'opening_polish' ? (
         <>
@@ -180,7 +232,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         </label>
         <label className="check">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          {key === 'cast_completion' ? '一路做完（草稿全部采用）' : key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
+          {key === 'benchmark' ? '一路做完（对标分析直接存为规划技能）' : key === 'cast_completion' ? '一路做完（草稿全部采用）' : key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
         </label>
       </fieldset>
       <label>
@@ -339,6 +391,95 @@ function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly st
         <div className="form-actions">
           <button type="button" className="primary" disabled={busy} onClick={() => void act(view.run.id, step.idx, 'adopt')}>
             确认，逐条核对
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 逐本拆解：每本的题材、卖点、开篇钩子、节奏、人物配置与写法。 */
+function AnalysesView({ step }: { readonly step: WorkflowStepView }) {
+  const analyses = benchmarkAnalysesOf(step);
+  if (analyses === null || analyses.length === 0) return null;
+  return (
+    <div role="group" className="workflow-analyses" aria-label="逐本拆解">
+      {analyses.map(({ idx, title, analysis: a }) => (
+        <details key={idx} open={analyses.length === 1}>
+          <summary>
+            《{title}》：{a.genre}
+          </summary>
+          <p>卖点：{a.sellingPoints.join('；')}</p>
+          <p>开篇钩子：{a.hook}</p>
+          <p>节奏：{a.pacing.map((p) => `${p.chapter}（${p.role}）`).join(' → ')}</p>
+          <p>人物配置：{a.cast.map((c) => `${c.role}：${c.description}`).join('；')}</p>
+          <p>核心冲突：{a.conflict}</p>
+          <p>章末钩子：{a.chapterHooks}</p>
+          <p>写法：{a.techniques.join('；')}</p>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+/** 对标分析：共性、空位、可借鉴的写法、开书方向（可以直接用一个方向开一键成书）与给规划用的指令。 */
+function CompareView({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
+  const result = benchmarkResultOf(step);
+  const act = useApp((s) => s.workflowStepAction);
+  const startWorkflow = useApp((s) => s.startWorkflow);
+  const advancing = useApp((s) => s.workflowAdvancing);
+  const busy = useApp((s) => s.busy);
+  if (result === null) return null;
+  const list = (label: string, items: readonly string[]) =>
+    items.length === 0 ? null : (
+      <>
+        <h4>{label}</h4>
+        <ul>
+          {items.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+      </>
+    );
+  return (
+    <div role="group" aria-label="对标分析">
+      {list('共性的套路', result.common)}
+      {list('没被占住的空位', result.gaps)}
+      {list('可以借鉴的写法', result.borrow)}
+      {result.directions.length === 0 ? null : (
+        <>
+          <h4>开书方向</h4>
+          <ul className="workflow-report">
+            {result.directions.map((d, i) => (
+              <li key={i}>
+                <span>
+                  {d.idea}
+                  <span className="muted"> · {d.why}</span>
+                </span>
+                <button
+                  type="button"
+                  className="link"
+                  disabled={busy || advancing !== null}
+                  onClick={() => void startWorkflow({ workflow: 'quick_book', params: { idea: d.idea, genre: '', chapters: 20, wordsPerChapter: 3000 }, mode: 'step', budgetUsd: null })}
+                >
+                  用这个方向开一键成书
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {result.skill.trim() === '' ? null : (
+        <>
+          <h4>给规划用的指令</h4>
+          <p>{result.skill}</p>
+        </>
+      )}
+      {result.trimmed > 0 ? <p className="muted">{result.trimmed} 处与样章相同的长段文字已截短。</p> : null}
+      {step.status === 'awaiting_author' ? (
+        <div className="form-actions">
+          <button type="button" className="primary" disabled={busy || advancing === view.run.id} onClick={() => void act(view.run.id, step.idx, 'adopt')}>
+            存为规划技能
           </button>
         </div>
       ) : null}
@@ -541,6 +682,8 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {step.key === 'handle' ? <DiagnosisView step={view.steps.find((x) => x.key === 'diagnose') ?? step} /> : null}
       {step.key === 'compare' ? <OpeningCompareView step={step} /> : null}
       {view.run.workflow === 'cast_completion' && step.key === 'draft' ? <CastStep view={view} step={step} /> : null}
+      {step.key === 'analyze' ? <AnalysesView step={step} /> : null}
+      {view.run.workflow === 'benchmark' && step.key === 'compare' ? <CompareView view={view} step={step} /> : null}
       {step.key === 'write' ? (
         <>
           <p className="muted">
@@ -553,7 +696,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </>
       ) : null}
       <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') ? button('采用', 'adopt', true) : null}
+        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}

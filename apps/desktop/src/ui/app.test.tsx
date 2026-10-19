@@ -2189,6 +2189,39 @@ describe('人物补全的界面（B83）', () => {
   });
 });
 
+describe('扫榜拆书的界面（B79）', () => {
+  it('粘贴样章开始：逐本拆解与对标分析显示出来，存为规划技能，最后删除样章', async () => {
+    const { deps, service, user } = start();
+    await createWork(user, '新书');
+    await addTestedModel(service, deps);
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的扫榜拆书' }));
+    const form = within(page).getByRole('form', { name: '开始扫榜拆书' });
+    await user.type(within(form).getByRole('textbox', { name: '书名' }), '夜当');
+    fireEvent.change(within(form).getByRole('textbox', { name: '样章原文（开头几章）' }), { target: { value: '林舟推开当铺的门，雨水顺着衣角往下滴。'.repeat(12) } });
+    const analysis = { genre: '古风悬疑', sellingPoints: ['身份反差'], hook: '雨夜当玉', pacing: [{ chapter: '第一章', role: '亮出困境', beats: '被压价' }], cast: [{ role: '主角', description: '书生' }], conflict: '身世', chapterHooks: '留疑问', techniques: ['先抑后扬'], quotes: [] };
+    const compare = { common: ['开局即困境'], gaps: ['女性视角'], borrow: ['章末留疑问'], directions: [{ idea: '女掌柜收旧物', why: '补空位' }], skill: '开局三百字内让主角陷入困境。' };
+    deps.llmResponses.push(reply(JSON.stringify(analysis)), reply(JSON.stringify(compare)));
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const compared = await within(page).findByRole('group', { name: '对标分析' }, { timeout: 10_000 });
+    expect(compared.textContent).toContain('女掌柜收旧物');
+    // 逐本拆解在上一步里。
+    const steps = within(page).getByRole('list', { name: '步骤' });
+    await user.click(within(steps).getByText('逐本拆解'));
+    expect((await within(page).findByRole('group', { name: '逐本拆解' })).textContent).toContain('《夜当》：古风悬疑');
+    await user.click(within(steps).getByText('对标分析'));
+    await user.click(within(page).getByRole('button', { name: '存为规划技能' }));
+    await waitFor(async () => {
+      const skills = await service.listWritingSkills();
+      expect(skills.ok && skills.value.skills.some((s) => s.skill.name === '对标分析')).toBe(true);
+    });
+    await user.click(await within(page).findByRole('button', { name: '继续' }));
+    await waitFor(() => expect(within(page).getByRole('region', { name: /^运行：/ }).textContent).toContain('已完成'));
+  });
+});
+
 describe('分卷的界面（B68）', () => {
   it('新建卷后目录按卷分组；在卷里新建章节；上移越过卷的边界时移到上一卷；编辑卷名与简介；卷里还有章节时不能删除', async () => {
     const { user, store } = start();

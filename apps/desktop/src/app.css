@@ -3405,6 +3405,14 @@ body.resizing .assistant {
   text-align: left;
 }
 
+.workflow-analyses details {
+  margin-bottom: 6px;
+}
+
+.workflow-analyses p {
+  margin: 4px 0;
+}
+
 .workflow-detail h3 {
   margin-top: 0;
 }

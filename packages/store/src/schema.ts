@@ -288,6 +288,12 @@ export const TABLES: readonly TableSpec[] = [
 ];
 
 /**
+ * 只留在本机作品库里、不导出的表：扫榜拆书的样章原文（迁移 0022，别人的作品，只用于拆解，用完即删）。
+ * 备份（作品库文件的副本）照常包含，作品包与数据导出不含。
+ */
+export const LOCAL_TABLES: readonly string[] = ['benchmark_sample'];
+
+/**
  * 派生的表：由触发器维护的索引（全文查找），不导出，导入数据时随之重建。
  * 含 FTS5 自动建立的影子表。表结构清单的测试据此确认库中没有遗漏的表。
  */

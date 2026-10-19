@@ -7,6 +7,6 @@ export { backupFileName, normalizeMigration, parseMigrationName } from './sql';
 export type { DataError, ExportedData, ExportedRow } from './data-export';
 export { exportData, fromJsonl, importData, toJsonl, UPGRADES } from './data-export';
 export type { TableSpec } from './schema';
-export { DERIVED_TABLES, TABLES } from './schema';
+export { DERIVED_TABLES, LOCAL_TABLES, TABLES } from './schema';
 export * from './repos';
 export * from './app/model-services';

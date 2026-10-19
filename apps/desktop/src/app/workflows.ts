@@ -3,7 +3,7 @@
 // 这里是命令表（每个工作流一项：参数、预计用量与步骤）与执行器；步骤的状态转换在 packages/writing（纯函数）。
 // 步骤只调用现有的用例，所以锁定设定、写入前快照、版本守卫与段落来源照常生效。
 import { costOf, type CallOptions, type LlmUsage, type Prices } from '@fudiao/llm';
-import { BookSeedOutput, PlanDraftOutput, VolumeOutlineOutput } from '@fudiao/prompts';
+import { BenchmarkBookOutput, BenchmarkCompareOutput, BookSeedOutput, PlanDraftOutput, VolumeOutlineOutput } from '@fudiao/prompts';
 import { err, ok, type Result, type WorkflowMode } from '@fudiao/shared';
 import {
   abandonWorkflowRun,
@@ -28,6 +28,9 @@ import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOut
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
 import type { OpeningSurvey } from './opening';
 import { CastDraft } from './cast-completion';
+import { MIN_SAMPLE_CHARS, mergeSamples, type BenchmarkAnalysis, type BenchmarkBookInputForm, type BenchmarkCompare } from './benchmark';
+import type { BenchmarkSampleInput } from '@fudiao/store';
+import type { SkillStage } from '@fudiao/shared';
 import type { CastGap } from '@fudiao/writing';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
 import { chapterLengths, type Chapter } from '@fudiao/store';
@@ -35,7 +38,9 @@ import type { AppDeps } from './ports';
 import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion', 'benchmark'] as const;
+/** 要作者先导入材料、AI 助手不能直接发起的工作流（扫榜拆书要粘贴或导入榜单与样章）。 */
+export const AUTHOR_STARTED_WORKFLOWS = ['benchmark'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
 
 /**
@@ -67,6 +72,7 @@ export type AdvanceEnv = {
 
 /** 执行一步时能用到的：参数、步骤键、调用选项、前面各步的结果与环境。 */
 type StepContext<P> = {
+  readonly runId: string;
   readonly params: P;
   readonly stepKey: string;
   readonly options: CallOptions;
@@ -240,6 +246,10 @@ export type NextVolumeParams = z.infer<typeof NextVolumeParams>;
 export const OpeningParams = z.object({ chapters: z.number().int().min(1).max(10) });
 export type OpeningParams = z.infer<typeof OpeningParams>;
 
+/** 扫榜拆书的参数：作者自己的想法（可为空）与导入了几条。榜单与样章不在参数里（参数随作品导出，样章不导出）。 */
+export const BenchmarkParams = z.object({ idea: z.string(), entries: z.number().int().min(1) });
+export type BenchmarkParams = z.infer<typeof BenchmarkParams>;
+
 /** 人物补全没有参数。 */
 export const CastParams = z.object({});
 export type CastParams = z.infer<typeof CastParams>;
@@ -250,6 +260,7 @@ type ParamsOf = {
   readonly next_volume: NextVolumeParams;
   readonly opening_polish: OpeningParams;
   readonly cast_completion: CastParams;
+  readonly benchmark: BenchmarkParams;
 };
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
@@ -276,6 +287,18 @@ export type WorkflowHost = {
   castSurvey(): Promise<Result<readonly CastGap[], AppError>>;
   draftCastCompletion(gaps: readonly CastGap[], stepKey: string, options?: CallOptions): Promise<Result<CastDraft, AppError>>;
   applyCastCompletion(draft: CastDraft): Promise<Result<{ readonly created: number; readonly updated: number; readonly relations: number; readonly skipped: readonly string[] }, AppError>>;
+  saveBenchmarkSamples(runId: string, rows: readonly BenchmarkSampleInput[]): Promise<Result<number, AppError>>;
+  benchmarkBooks(runId: string): Promise<Result<readonly { readonly idx: number; readonly title: string; readonly tags: string; readonly words: string; readonly chars: number }[], AppError>>;
+  analyzeBook(runId: string, idx: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly analysis: BenchmarkAnalysis; readonly trimmed: number }, AppError>>;
+  compareBooks(
+    runId: string,
+    analyses: readonly { readonly title: string; readonly analysis: BenchmarkAnalysis }[],
+    idea: string,
+    stepKey: string,
+    options?: CallOptions,
+  ): Promise<Result<{ readonly compare: BenchmarkCompare; readonly trimmed: number }, AppError>>;
+  clearBenchmark(runId: string): Promise<Result<number, AppError>>;
+  addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<unknown, AppError>>;
 };
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
@@ -405,6 +428,9 @@ export function planDraftOf(step: Pick<WorkflowStepView, 'output'>): PlanDraft |
   const parsed = PlanDraftOutput.safeParse(step.output);
   return parsed.success ? parsed.data : null;
 }
+
+/** 扫榜拆书估算时每本样章按多少字算（样章最多给 15,000 字）。 */
+const BENCHMARK_CHARS_FOR_ESTIMATE = 12_000;
 
 /** 一章约多少字（体检估算没有字数时用）。 */
 const AUDIT_WORDS_PER_CHAPTER = 3_000;
@@ -945,6 +971,104 @@ function castCompletion(host: WorkflowHost): WorkflowDef<CastParams> {
   };
 }
 
+const BenchmarkImport = z.object({ books: z.array(z.object({ idx: z.number().int(), title: z.string(), tags: z.string(), words: z.string(), chars: z.number().int() })) });
+const BenchmarkAnalyses = z.object({ analyses: z.array(z.object({ idx: z.number().int(), title: z.string(), analysis: BenchmarkBookOutput, trimmed: z.number().int() })) });
+const BenchmarkResult = BenchmarkCompareOutput.extend({ trimmed: z.number().int() });
+
+function benchmark(host: WorkflowHost): WorkflowDef<BenchmarkParams> {
+  return {
+    title: '扫榜拆书',
+    description: '粘贴或导入榜单与样章 → 逐本拆出结构与技法 → 横向对比与开书方向 → 存为规划技能 → 删除样章原文',
+    params: BenchmarkParams,
+    runTitle: (p) => `扫榜拆书：${p.entries} 本${p.idea.trim() === '' ? '' : `（${p.idea.trim().slice(0, 12)}）`}`,
+    estimate(p) {
+      const books = Math.max(1, Math.min(p.entries, 10));
+      return { calls: books + 1, inputTokens: Math.round(books * (BENCHMARK_CHARS_FOR_ESTIMATE * TOKENS_PER_CHAR + 1_500) + 8_000), outputTokens: books * 2_500 + 3_500 };
+    },
+    steps: [
+      step<BenchmarkParams, z.infer<typeof BenchmarkImport>>({
+        key: 'import',
+        label: '榜单与样章',
+        kind: 'check',
+        output: BenchmarkImport,
+        async run({ runId }) {
+          const books = await host.benchmarkBooks(runId);
+          if (!books.ok) return books;
+          const withText = books.value.filter((b) => b.chars >= MIN_SAMPLE_CHARS);
+          if (withText.length === 0) return err(invalid('样章已经删掉了，或一本也没有样章：重新开始一次扫榜拆书'));
+          return ok({ output: { books: [...books.value] }, note: `榜单 ${books.value.length} 条，其中 ${withText.length} 本有样章（共 ${withText.reduce((n, b) => n + b.chars, 0).toLocaleString('en-US')} 字）` });
+        },
+      }),
+      step<BenchmarkParams, z.infer<typeof BenchmarkAnalyses>>({
+        key: 'analyze',
+        label: '逐本拆解',
+        kind: 'act',
+        output: BenchmarkAnalyses,
+        async run({ runId, stepKey, options, onProgress, output }) {
+          const imported = BenchmarkImport.safeParse(output('import'));
+          const books = imported.success ? imported.data.books.filter((b) => b.chars >= MIN_SAMPLE_CHARS) : [];
+          const analyses: z.infer<typeof BenchmarkAnalyses>['analyses'] = [];
+          for (const [i, b] of books.entries()) {
+            onProgress(`拆解第 ${i + 1} / ${books.length} 本《${b.title}》`);
+            // 每本一个步骤键：中断后接着做时，拆过的不再请求。
+            const done = await host.analyzeBook(runId, b.idx, `${stepKey}:${b.idx}`, options);
+            if (!done.ok) return done;
+            analyses.push({ idx: b.idx, title: b.title, analysis: done.value.analysis, trimmed: done.value.trimmed });
+          }
+          const trimmed = analyses.reduce((n, a) => n + a.trimmed, 0);
+          return ok({ output: { analyses }, note: `拆解了 ${analyses.length} 本${trimmed > 0 ? `；${trimmed} 处与样章相同的长段文字已截短` : ''}` });
+        },
+      }),
+      step<BenchmarkParams, z.infer<typeof BenchmarkResult>>({
+        key: 'compare',
+        label: '对标分析',
+        kind: 'draft',
+        output: BenchmarkResult,
+        async run({ runId, params, stepKey, options, onProgress, output }) {
+          const parsed = BenchmarkAnalyses.safeParse(output('analyze'));
+          if (!parsed.success || parsed.data.analyses.length === 0) return err(invalid('先拆解至少一本'));
+          onProgress('横向对比几本的结构与技法，找空位与开书方向');
+          const done = await host.compareBooks(
+            runId,
+            parsed.data.analyses.map((a) => ({ title: a.title, analysis: a.analysis })),
+            params.idea,
+            stepKey,
+            options,
+          );
+          if (!done.ok) return done;
+          return ok({ output: { ...done.value.compare, trimmed: done.value.trimmed }, note: `共性 ${done.value.compare.common.length} 条、空位 ${done.value.compare.gaps.length} 条、开书方向 ${done.value.compare.directions.length} 个；采用后存为一项规划技能` });
+        },
+        async adopt(_c, result) {
+          if (result.skill.trim() === '') return err(invalid('对标分析里没有给规划用的指令：可以先改一改再采用'));
+          const added = await host.addCustomSkill('对标分析', result.skill.trim(), '扫榜拆书得出的开局、卖点、节奏与人物配置的要求，生成大纲与章节计划时参考', '', ['planning']);
+          if (!added.ok) return added;
+          return ok('已存为规划技能“对标分析”（在“写作技能”里可以修改或停用）');
+        },
+      }),
+      step<BenchmarkParams, { readonly cleared: number }>({
+        key: 'clear',
+        label: '删除样章原文',
+        kind: 'check',
+        output: z.object({ cleared: z.number().int() }),
+        async run({ runId }) {
+          const cleared = await host.clearBenchmark(runId);
+          if (!cleared.ok) return cleared;
+          return ok({ output: { cleared: cleared.value }, note: '样章原文已从作品库删除；拆解与对标分析只留结构与技法' });
+        },
+      }),
+    ],
+  };
+}
+
+export const benchmarkAnalysesOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = BenchmarkAnalyses.safeParse(step.output);
+  return parsed.success ? parsed.data.analyses : null;
+};
+export const benchmarkResultOf = (step: Pick<WorkflowStepView, 'output'>) => {
+  const parsed = BenchmarkResult.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+
 export const castDraftOf = (step: Pick<WorkflowStepView, 'output'>): CastDraft | null => {
   const parsed = CastDraft.safeParse(step.output);
   return parsed.success ? parsed.data : null;
@@ -1048,9 +1172,11 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     next_volume: nextVolume(host),
     opening_polish: openingPolish(host),
     cast_completion: castCompletion(host),
+    benchmark: benchmark(host),
   };
   const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume), opening_polish: erase(WORKFLOWS.opening_polish),
     cast_completion: erase(WORKFLOWS.cast_completion),
+    benchmark: erase(WORKFLOWS.benchmark),
   };
   const isKey = (key: string): key is WorkflowKey => (WORKFLOW_KEYS as readonly string[]).includes(key);
   const defOf = (key: string): AnyWorkflow | null => (isKey(key) ? ERASED[key] : null);
@@ -1103,6 +1229,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       },
     };
     return {
+      runId: data.run.id,
       params: data.run.params,
       stepKey: `workflow:${data.run.id}:${s.key}:${s.attempt}`,
       options,
@@ -1218,6 +1345,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     /** 新建一次运行（步骤都为待做）；推进由调用方在后台进行。 */
     startWorkflow(request: StartWorkflowRequest): Promise<Result<WorkflowView, AppError>> {
       return withPort(async (port) => {
+        if (request.workflow === 'benchmark') return err(invalid('扫榜拆书要先在成书页粘贴或导入榜单与样章'));
         const def = ERASED[request.workflow];
         const p = def.parseParams(request.params);
         if (!p.ok) return err(invalid(p.error));
@@ -1236,6 +1364,31 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
           ctx(),
         );
         return created.ok ? ok(viewOf(created.value)) : err(repo(created.error));
+      });
+    },
+
+    /**
+     * 开始一次扫榜拆书：榜单（粘贴的文字）与样章（书名与原文）存进本机的样章表，不进运行的参数；
+     * 至少一本样章不少于 200 字。推进由调用方在后台进行。
+     */
+    startBenchmark(request: { readonly rankText: string; readonly books: readonly BenchmarkBookInputForm[]; readonly idea: string; readonly mode: WorkflowMode; readonly budgetUsd: number | null }): Promise<Result<WorkflowView, AppError>> {
+      return withPort(async (port) => {
+        const rows = mergeSamples(request.rankText, request.books);
+        if (rows.length === 0) return err(invalid('先粘贴榜单，或至少导入一本对标作品的样章'));
+        if (!rows.some((r) => r.text.trim().length >= MIN_SAMPLE_CHARS)) return err(invalid(`至少粘贴或导入一本对标作品的样章（不少于 ${MIN_SAMPLE_CHARS} 字）`));
+        const def = ERASED.benchmark;
+        const created = await createWorkflowRun(
+          port,
+          { id: deps.ids.next(), workflow: 'benchmark', title: def.runTitle({ idea: request.idea, entries: rows.length }), params: { idea: request.idea, entries: rows.length }, mode: request.mode, budgetUsd: request.budgetUsd, steps: def.steps.map((s) => s.key) },
+          ctx(),
+        );
+        if (!created.ok) return err(repo(created.error));
+        const saved = await host.saveBenchmarkSamples(created.value.run.id, rows);
+        if (!saved.ok) {
+          await abandonWorkflowRun(port, created.value.run, ctx());
+          return saved;
+        }
+        return ok(viewOf(created.value));
       });
     },
 
@@ -1371,6 +1524,11 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         if (data.value.steps.some((s) => s.status === 'running')) return err(invalid('还有一步在进行：先停下'));
         const abandoned = await abandonWorkflowRun(port, data.value.run, ctx());
         if (!abandoned.ok) return err(repo(abandoned.error));
+        // 扫榜拆书的样章是别人的作品：放弃时一并删掉。
+        if (data.value.run.workflow === 'benchmark') {
+          const cleared = await host.clearBenchmark(runId);
+          if (!cleared.ok) return cleared;
+        }
         return ok(viewOf({ run: abandoned.value, steps: data.value.steps }));
       });
     },

@@ -13,13 +13,15 @@ import {
   ChapterMemoryOutput,
   ChapterReviewOutput,
   BookAuditOutput,
+  BenchmarkBookOutput,
+  BenchmarkCompareOutput,
   VolumeOutlineOutput,
   CastCompletionOutput,
   PlanDraftOutput,
   SemanticRulingOutput,
 } from './schemas';
 
-const all = { StalemateJudgementOutput, DirectorProposalOutput, BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput, PlanDraftOutput, ChapterMemoryOutput, ChapterReviewOutput, BookAuditOutput, VolumeOutlineOutput, CastCompletionOutput };
+const all = { StalemateJudgementOutput, DirectorProposalOutput, BaselineOutput, SynopsisOutput, ActionProposal, SemanticRulingOutput, BeliefUpdateOutput, EvidenceJudgementOutput, BeatSheetOutput, SceneDraftOutput, PlanDraftOutput, ChapterMemoryOutput, ChapterReviewOutput, BookAuditOutput, VolumeOutlineOutput, CastCompletionOutput, BenchmarkBookOutput, BenchmarkCompareOutput };
 
 function walk(node: unknown, visit: (n: Readonly<Record<string, unknown>>) => void): void {
   if (Array.isArray(node)) node.forEach((n) => walk(n, visit));

@@ -27,6 +27,8 @@ import {
   BaselineOutput,
   BeatSheetOutput,
   BeliefUpdateOutput,
+  BenchmarkBookOutput,
+  BenchmarkCompareOutput,
   BookAuditOutput,
   BookSeedOutput,
   CastCompletionOutput,
@@ -72,6 +74,8 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   BookAuditOutput,
   VolumeOutlineOutput,
   CastCompletionOutput,
+  BenchmarkBookOutput,
+  BenchmarkCompareOutput,
   AssistantTurnOutput,
 };
 
@@ -813,6 +817,63 @@ export function renderCastCompletion(input: CastCompletionInput): Result<Rendere
     relations: [...input.relations],
     hasRelations: input.relations.length > 0,
     chapters: input.chapters.map((c) => ({ label: c.label, title: c.title, summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(), cast: c.cast.join('、') })),
+  });
+}
+
+/** 拆书结果里每处引文最多多少字（与 packages/writing 的复述检查一致）。 */
+export const BENCHMARK_QUOTE_CHARS = 30;
+
+export type BenchmarkBookInput = {
+  readonly title: string;
+  readonly author: string;
+  readonly tags: string;
+  readonly words: string;
+  readonly blurb: string;
+  /** 样章原文（已按上限截取）。 */
+  readonly text: string;
+  readonly clipped: boolean;
+};
+
+/** 拆解一本对标作品（B79）：材料是作者导入的榜单信息与样章。 */
+export function renderBenchmarkBook(input: BenchmarkBookInput): Result<RenderedPrompt, string> {
+  return renderTemplate('benchmark_book', {
+    title: input.title,
+    author: input.author.trim(),
+    tags: input.tags.trim(),
+    words: input.words.trim(),
+    blurb: input.blurb.trim(),
+    text: input.text,
+    clipped: input.clipped,
+    maxQuote: BENCHMARK_QUOTE_CHARS,
+  });
+}
+
+export type BenchmarkCompareInput = {
+  /** 榜单：只有书名、标签与字数（不带简介，简介是别人写的文字）。 */
+  readonly rank: readonly { readonly title: string; readonly tags: string; readonly words: string }[];
+  /** 各本的拆解（结构与技法），已读成一行一项。 */
+  readonly books: readonly {
+    readonly title: string;
+    readonly genre: string;
+    readonly sellingPoints: string;
+    readonly hook: string;
+    readonly pacing: string;
+    readonly cast: string;
+    readonly conflict: string;
+    readonly chapterHooks: string;
+    readonly techniques: string;
+  }[];
+  /** 作者自己的想法，可为空。 */
+  readonly idea: string;
+};
+
+/** 对标分析（B79）：只读各本的拆解，不读样章原文。 */
+export function renderBenchmarkCompare(input: BenchmarkCompareInput): Result<RenderedPrompt, string> {
+  return renderTemplate('benchmark_compare', {
+    rank: input.rank.map((r) => ({ title: r.title, tags: r.tags.trim(), words: r.words.trim() })),
+    hasRank: input.rank.length > 0,
+    books: input.books.map((b) => ({ ...b })),
+    idea: input.idea.trim(),
   });
 }
 

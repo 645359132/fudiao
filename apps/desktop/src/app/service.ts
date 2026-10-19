@@ -90,6 +90,7 @@ import { workflowUseCases } from './workflows';
 import { bookAuditUseCases } from './book-audit';
 import { openingUseCases } from './opening';
 import { castCompletionUseCases } from './cast-completion';
+import { benchmarkUseCases } from './benchmark';
 import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
 import { reviewUseCases } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
@@ -795,12 +796,16 @@ export function createAppService(deps: AppDeps) {
     updateWorkInfo: (patch) => app.updateWorkInfo(patch),
   });
 
+  // 扫榜拆书（B79）的样章与拆解：工作流用，作品里也能查这次运行还留着几本样章。
+  const benchmark = benchmarkUseCases(deps, () => session?.port ?? null, runner);
+
   // 写作工作流（B78）：步骤调用上面的用例；写章节默认就地依次写，桌面端由状态层经写手队列做。
   const workflows = workflowUseCases({
     deps,
     project: () => session?.port ?? null,
     host: { ...app, ...quickBook, ...bookAuditUseCases(deps, () => session?.port ?? null, runner), ...openingUseCases(deps, () => session?.port ?? null, runner),
       ...castCompletionUseCases(deps, () => session?.port ?? null, runner),
+      ...benchmark,
     },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {
@@ -854,6 +859,7 @@ export function createAppService(deps: AppDeps) {
     ...app,
     ...assistant,
     ...workflows,
+    benchmarkBooks: benchmark.benchmarkBooks,
 
     /**
      * 这部作品里 AI 助手最近一步的上下文用量（取自调用记录）：重新打开作品或重启之后，对话还在时照样显示。

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { exportData, fromJsonl, importData, toJsonl, UPGRADES, type ExportedData } from './data-export';
 import { loadMigrations, openProjectDb, type ProjectDb } from './node/sqlite';
-import { DERIVED_TABLES, TABLES } from './schema';
+import { DERIVED_TABLES, LOCAL_TABLES, TABLES } from './schema';
 import type { Statement } from './sql';
 
 const NOW = '2026-10-07T00:00:00.000Z';
@@ -399,6 +399,30 @@ describe('跨章连贯检查的审核问题（迁移 0020）', () => {
   });
 });
 
+describe('扫榜拆书的样章（迁移 0022）', () => {
+  it('书名不能为空；删除运行时样章一并删除；样章不导出', async () => {
+    const db = await seeded();
+    const sample = 'INSERT INTO benchmark_sample (run_id, idx, title, text, created_at) VALUES';
+    await rejects(db, `${sample} ('01W1', 0, '', '正文', ?)`, NOW);
+    await rejects(db, `${sample} ('none', 0, '书', '正文', ?)`, NOW);
+    expect((await db.transaction([s(`${sample} ('01W1', 0, '别人的书', '别人的样章原文', ?)`, NOW)])).ok).toBe(true);
+    const data = await exportData(db);
+    if (!data.ok) throw new Error('导出失败');
+    expect(Object.keys(data.value.tables)).not.toContain('benchmark_sample');
+    expect(JSON.stringify(data.value)).not.toContain('别人的样章原文');
+    // 逐本拆解的模型输出也不导出（可能抄了样章）。
+    const call = "INSERT INTO llm_call (id, step_key, task_kind, provider, model, params, template_id, template_version, request_hash, status, response, started_at, finished_at) VALUES ('01LB', NULL, 'plan_draft', 'p', 'm', '{}', 'benchmark_book', '1', 'h', 'completed', '{\"text\":\"抄来的别人的样章原文\"}', ?, ?)";
+    expect((await db.transaction([s(call, ...T)])).ok).toBe(true);
+    const again = await exportData(db);
+    if (!again.ok) throw new Error('导出失败');
+    expect(JSON.stringify(again.value)).not.toContain('抄来的');
+    expect(again.value.tables['llm_call']?.find((r) => r['id'] === '01LB')).toMatchObject({ response: null, template_id: 'benchmark_book' });
+    expect((await db.transaction([s("DELETE FROM workflow_run WHERE id = '01W1'")])).ok).toBe(true);
+    const left = await db.query('SELECT count(*) AS n FROM benchmark_sample');
+    expect(left.ok && left.value[0]).toEqual({ n: 0 });
+  });
+});
+
 describe('写作工作流（迁移 0019）', () => {
   it('模式、状态与步骤的状态只能取规定的值；参数须是对象；同一运行里步骤的键不重复；删除运行时步骤一并删除', async () => {
     const db = await seeded();
@@ -422,7 +446,7 @@ describe('表结构清单', () => {
   it('与迁移后的实际结构一致，库中没有清单以外的表', async () => {
     const db = fresh();
     const tables = await db.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-    expect(tables.ok && tables.value.map((r) => r['name'])).toEqual([...TABLES.map((t) => t.name), ...DERIVED_TABLES, 'schema_migrations'].sort());
+    expect(tables.ok && tables.value.map((r) => r['name'])).toEqual([...TABLES.map((t) => t.name), ...DERIVED_TABLES, ...LOCAL_TABLES, 'schema_migrations'].sort());
     for (const t of TABLES) {
       const info = await db.query(`SELECT name, pk FROM pragma_table_info('${t.name}') ORDER BY cid`);
       if (!info.ok) throw new Error(t.name);

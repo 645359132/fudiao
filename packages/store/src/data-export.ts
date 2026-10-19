@@ -70,12 +70,17 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   20: (tables) => tables,
   // 0021：审核问题的来源增加开篇诊断（opening），表重建只放宽了取值，旧数据原样有效。
   21: (tables) => tables,
+  // 0022：扫榜拆书的样章原文，只留在本机、不导出，导出的表不变。
+  22: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,
     writing_skill: (tables['writing_skill'] ?? []).map((row) => ({ stages: row['key'] === 'author-preferences' && row['builtin_version'] === null ? 'planning writing' : 'writing', ...row })),
   }),
 };
+
+/** 导出时去掉模型输出原文的模板（扫榜拆书的逐本拆解，B79）。 */
+export const BENCHMARK_BOOK_TEMPLATE = 'benchmark_book';
 
 export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {
   const version = await schemaVersion(port);
@@ -90,6 +95,8 @@ export async function exportData(port: SqlPort): Promise<Result<ExportedData, Da
         const value = row[column];
         if (typeof value === 'string') out[column] = parseJson(value);
       }
+      // 扫榜拆书逐本拆解的模型输出可能抄了样章（别人的作品）：原文只留在本机，导出时去掉，用量与费用照旧。
+      if (t.name === 'llm_call' && out['template_id'] === BENCHMARK_BOOK_TEMPLATE) out['response'] = null;
       return out;
     });
   }

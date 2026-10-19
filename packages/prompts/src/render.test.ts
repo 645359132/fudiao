@@ -38,6 +38,8 @@ import {
   renderChapterMemory,
   renderChapterReview,
   renderBookAudit,
+  renderBenchmarkBook,
+  renderBenchmarkCompare,
   renderCastCompletion,
   renderContinuityCheck,
   renderOpeningReview,
@@ -768,5 +770,22 @@ describe('人物补全的模板（B83）', () => {
     const text = fullText(prompt);
     for (const part of ['最多列 20 个人物', '- 钱四（又名四爷）〔缺口：说明为空〕', '- 钱四是林舟的债主', '[C1] 第一章：林舟当玉。（出场：钱四）']) expect(text).toContain(part);
     expect(fullText(unwrap(renderCastCompletion({ title: 't', genre: '', characters: [], relations: [], chapters: [] })))).toContain('人物：还没有人物卡片');
+  });
+});
+
+describe('扫榜拆书的模板（B79）', () => {
+  it('benchmark_book：写明只写结构与技法、引文的上限，带上榜单信息与样章', () => {
+    const prompt = unwrap(renderBenchmarkBook({ title: '夜当', author: '某甲', tags: '古风', words: '120 万', blurb: '落魄书生当玉。', text: '第一章 夜叩\n林舟推门。', clipped: true }));
+    expect(prompt.output?.name).toBe('BenchmarkBookOutput');
+    const text = fullText(prompt);
+    for (const part of ['只写结构与技法', '每处引文不超过 30 字', '书名：夜当', '作者：某甲', '标签：古风', '简介：落魄书生当玉。', '样章（较长，只给出开头与结尾）：\n第一章 夜叩']) expect(text).toContain(part);
+  });
+
+  it('benchmark_compare：榜单只有书名、标签与字数，拆解一本一段，作者的想法写进要求', () => {
+    const book = { title: '夜当', genre: '古风悬疑', sellingPoints: '身份反差', hook: '雨夜当玉', pacing: '第一章：亮出困境', cast: '主角：书生', conflict: '身世之谜', chapterHooks: '章末留疑问', techniques: '先抑后扬' };
+    const prompt = unwrap(renderBenchmarkCompare({ rank: [{ title: '夜当', tags: '古风', words: '120 万' }], books: [book], idea: '女掌柜收旧物' }));
+    expect(prompt.output?.name).toBe('BenchmarkCompareOutput');
+    const text = fullText(prompt);
+    for (const part of ['- 夜当（古风），120 万', '【夜当】\n题材：古风悬疑\n卖点：身份反差', '作者自己的想法：女掌柜收旧物']) expect(text).toContain(part);
   });
 });

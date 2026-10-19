@@ -305,6 +305,10 @@ export type AppState = {
   readonly startWorkflow: (request: StartWorkflowRequest) => Promise<string | null>;
   /** 在后台接着推进（到需要作者、出错、预算用完或做完为止）；已有一个在推进时返回原因，否则为 null。onEnd 给出停在哪里的一句话。 */
   readonly continueWorkflow: (runId: string, onEnd?: (summary: string) => void) => string | null;
+  /** 开始一次扫榜拆书（B79）：榜单与样章存进本机的样章表（不导出），然后在后台推进；返回新运行的标识。 */
+  readonly startBenchmark: (request: { readonly rankText: string; readonly books: readonly { readonly title: string; readonly text: string }[]; readonly idea: string; readonly mode: 'step' | 'auto'; readonly budgetUsd: number | null }) => Promise<string | null>;
+  /** 选一个 TXT 读入样章（按识别出的编码解码）；取消时为 null。 */
+  readonly pickSampleText: () => Promise<{ readonly fileName: string; readonly text: string } | null>;
   readonly stopWorkflow: () => void;
   /** 修改等作者处理的草稿。 */
   readonly editWorkflowStep: (runId: string, idx: number, output: unknown) => Promise<boolean>;
@@ -1835,6 +1839,28 @@ export function createAppStore(service: AppService): AppStore {
           }
         })();
         return null;
+      },
+      async startBenchmark(request) {
+        const started = await service.startBenchmark(request);
+        if (!started.ok) {
+          set({ message: describeError(started.error) });
+          return null;
+        }
+        putWorkflow(started.value);
+        set({ workflowId: started.value.run.id, message: null });
+        const refused = get().continueWorkflow(started.value.run.id);
+        if (refused !== null) set({ message: refused });
+        return started.value.run.id;
+      },
+      async pickSampleText() {
+        const picked = await service.pickText();
+        if (!picked.ok) {
+          set({ message: picked.error });
+          return null;
+        }
+        if (picked.value === null) return null;
+        await service.releaseImport(picked.value.token);
+        return { fileName: picked.value.fileName, text: picked.value.text };
       },
       stopWorkflow: () => workflowAbort?.abort(),
       async editWorkflowStep(runId, idx, output) {
