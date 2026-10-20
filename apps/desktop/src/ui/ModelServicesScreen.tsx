@@ -200,6 +200,10 @@ function ProviderCard({ provider }: { readonly provider: ProviderView }) {
 
 /** 搜索服务的凭据状态。 */
 function searchCredentialText(s: SearchServiceView): string {
+  if (s.credentialRef !== null) {
+    if (s.credentialName === null) return '沿用的模型服务已删除，请重新设置 Key';
+    return s.credential.hasSecret ? `沿用模型服务“${s.credentialName}”的 API Key` : `沿用模型服务“${s.credentialName}”的 API Key（它还没有填 Key）`;
+  }
   if (!s.credential.hasSecret) return '还没有填写 API Key';
   let origin: string | null = null;
   try {
@@ -213,11 +217,23 @@ function searchCredentialText(s: SearchServiceView): string {
 function SearchServiceEditor({ service, onDone }: { readonly service: SearchServiceView | null; readonly onDone: () => void }) {
   const save = useApp((s) => s.saveSearchService);
   const busy = useApp((s) => s.busy);
-  const [kind, setKind] = useState<SearchKind>(service?.kind ?? 'tavily');
-  const [name, setName] = useState(service?.name ?? SEARCH_PRESETS.tavily.label);
-  const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? SEARCH_PRESETS.tavily.baseUrl);
+  const providers = useApp((s) => s.modelServices?.providers ?? []);
+  const [kind, setKind] = useState<SearchKind>(service?.kind ?? 'deepseek');
+  const [name, setName] = useState(service?.name ?? SEARCH_PRESETS.deepseek.label);
+  const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? SEARCH_PRESETS.deepseek.baseUrl);
   // API Key 只在提交时交给凭据端口，不进入应用状态；提交后清空。
   const [apiKey, setApiKey] = useState('');
+  // 沿用哪个模型服务的 Key：只列出地址与搜索服务同一个源、且填过 Key 的模型服务。
+  const [credentialRef, setCredentialRef] = useState<string | null>(service?.credentialRef ?? null);
+  const origin = (() => {
+    try {
+      return new URL(baseUrl).origin;
+    } catch {
+      return null;
+    }
+  })();
+  const reusable = providers.filter((p) => p.authMethod === 'api_key' && p.credential.hasSecret && p.credential.origin === origin);
+  const reuse = credentialRef !== null && reusable.some((p) => p.id === credentialRef) ? credentialRef : null;
   const choose = (next: SearchKind) => {
     if (name === SEARCH_PRESETS[kind].label || name.trim() === '') setName(SEARCH_PRESETS[next].label);
     if (baseUrl === SEARCH_PRESETS[kind].baseUrl || baseUrl.trim() === '') setBaseUrl(SEARCH_PRESETS[next].baseUrl);
@@ -229,7 +245,7 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
       aria-label={service === null ? '添加搜索服务' : `编辑搜索服务 ${service.name}`}
       onSubmit={(e) => {
         e.preventDefault();
-        const form: SearchServiceForm = { kind, name, baseUrl, apiKey: apiKey.trim() === '' ? null : apiKey };
+        const form: SearchServiceForm = { kind, name, baseUrl, apiKey: apiKey.trim() === '' ? null : apiKey, credentialRef: reuse };
         void save(service, form).then((done) => {
           setApiKey('');
           if (done) onDone();
@@ -255,10 +271,25 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
         服务地址
         <input value={baseUrl} onChange={(e) => setBaseUrl(e.currentTarget.value)} />
       </label>
-      <label>
-        API Key{service?.credential.hasSecret === true ? '（留空表示不改）' : ''}
-        <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
-      </label>
+      {reusable.length > 0 ? (
+        <label>
+          API Key 来源
+          <select value={reuse ?? ''} onChange={(e) => setCredentialRef(e.currentTarget.value === '' ? null : e.currentTarget.value)}>
+            <option value="">单独填写</option>
+            {reusable.map((p) => (
+              <option key={p.id} value={p.id}>
+                沿用模型服务“{p.name}”的 Key
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {reuse === null ? (
+        <label>
+          API Key{service !== null && service.credentialRef === null && service.credential.hasSecret ? '（留空表示不改）' : ''}
+          <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
+        </label>
+      ) : null}
       <div className="form-actions">
         <button type="submit" className="primary" disabled={busy}>
           保存
@@ -322,7 +353,7 @@ function SearchServicesSection() {
   return (
     <section aria-label="联网搜索">
       <h3>联网搜索</h3>
-      <p className="muted">AI 助手与扫榜拆书可以联网搜索公开的网页（榜单、简介、评论、资料）。搜索服务由你自己填 API Key，Tavily 与 Brave Search 都有免费额度；读网页不带任何凭据，只读公网地址，网页里的文字只当材料。</p>
+      <p className="muted">AI 助手与扫榜拆书可以联网搜索公开的网页（榜单、简介、评论、资料）。搜索服务由你自己填 API Key：DeepSeek 搜索可以直接沿用已配好的 DeepSeek 模型服务的 Key（每千次成功请求 5 元），Tavily 与 Brave Search 有免费额度。读网页不带任何凭据，只读公网地址；直接读不到时用 DeepSeek 的抓取接口再试。网页里的文字只当材料。</p>
       {view?.services.map((s) => (
         <SearchServiceCard key={s.id} service={s} isDefault={s.id === view.defaultServiceId} />
       ))}

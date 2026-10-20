@@ -324,6 +324,16 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     web: {
       searchFetch: (serviceId) => createProxyFetch(searchProxy, serviceId, () => 'search'),
       readPage: (url) => {
+        // 与 Rust 的读取器一样：本机地址不读；其余按预设页面，没有的当作 404。
+        const host = (() => {
+          try {
+            return new URL(url).hostname;
+          } catch {
+            return null;
+          }
+        })();
+        if (host === null) return Promise.resolve(err('invalid_url:网址无效'));
+        if (['127.0.0.1', 'localhost', '[::1]'].includes(host)) return Promise.resolve(err(`host_not_allowed:${host}`));
         const page = webPages.get(url);
         return Promise.resolve(page === undefined ? err('status:404') : ok(page));
       },

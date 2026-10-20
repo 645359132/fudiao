@@ -1,10 +1,12 @@
 // 联网搜索与读网页（需求 B84，施工文档 M7-01）。
-// 搜索服务（Tavily、Brave Search）由作者自填 API Key，请求经凭据代理发出（服务标识即凭据条目名，WebView 拿不到密钥，
-// 凭据只发往该服务的源）；读网页由 Rust 命令 web_fetch 做，不带任何凭据，只读公网主机。
+// 搜索服务（Tavily、Brave Search、DeepSeek 搜索）由作者自填 API Key，请求经凭据代理发出（凭据条目名是服务标识，
+// 或沿用某个模型服务的条目；WebView 拿不到密钥，凭据只发往该服务的源）；读网页由 Rust 命令 web_fetch 做，不带任何凭据，
+// 只读公网主机；读不到时若有 DeepSeek 搜索服务，再用它的 Fetch 接口在服务端抓一次（有的网站拦截直接读取）。
 // 搜到的摘要与网页正文只是材料：交给 AI 助手与扫榜拆书的榜单，不进作品，怎样对待由提示词规定。
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createSearchService,
+  listProviders,
   deleteSearchService,
   getDefaultSearchServiceId,
   listSearchServices,
@@ -23,7 +25,16 @@ import type { AppDeps, CredentialStatus, KeyHeader, WebPage } from './ports';
 export const SEARCH_PRESETS: Readonly<Record<SearchKind, { readonly label: string; readonly baseUrl: string; readonly keyHeader: KeyHeader; readonly hint: string }>> = {
   tavily: { label: 'Tavily', baseUrl: 'https://api.tavily.com', keyHeader: 'bearer', hint: '面向 AI 的搜索接口，有免费额度；Key 以 tvly- 开头' },
   brave: { label: 'Brave Search', baseUrl: 'https://api.search.brave.com', keyHeader: 'x_subscription_token', hint: 'Brave 的网页搜索接口，有免费额度' },
+  deepseek: {
+    label: 'DeepSeek 搜索',
+    baseUrl: 'https://api.deepseek.com',
+    keyHeader: 'bearer',
+    hint: 'DeepSeek 开放平台的 Search 与 Fetch 接口（2026 年 10 月 17 日起开放）：每千次成功请求 5 元，无结果不计费；可以直接沿用已配好的 DeepSeek 模型服务的 Key。中转站一般转发不了这两个接口，地址要填官方的',
+  },
 };
+
+/** DeepSeek 搜索的搜索词上限（接口要求 1 到 128 个字符）。 */
+const DEEPSEEK_QUERY_CHARS = 128;
 
 /** 每次搜索最多要几条结果。 */
 export const MAX_SEARCH_HITS = 10;
@@ -31,12 +42,23 @@ export const MAX_SEARCH_HITS = 10;
 export const PAGE_CHARS = 6_000;
 
 export type SearchHit = { readonly title: string; readonly url: string; readonly snippet: string };
-export type SearchServiceView = SearchService & { readonly credential: CredentialStatus };
+/** 搜索服务连同凭据状态；沿用模型服务的 Key 时 credentialName 是那个模型服务的名称（找不到时为 null）。 */
+export type SearchServiceView = SearchService & { readonly credential: CredentialStatus; readonly credentialName: string | null };
 export type SearchServicesView = { readonly services: readonly SearchServiceView[]; readonly defaultServiceId: string | null };
-export type SearchServiceForm = { readonly kind: SearchKind; readonly name: string; readonly baseUrl: string; readonly enabled?: boolean; readonly apiKey: string | null };
+export type SearchServiceForm = {
+  readonly kind: SearchKind;
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly enabled?: boolean;
+  readonly apiKey: string | null;
+  /** 沿用这个模型服务的 API Key（两者的源须相同）；null 或省略为用自己填的 Key。 */
+  readonly credentialRef?: string | null;
+};
 
 const Tavily = z.object({ results: z.array(z.object({ title: z.string().default(''), url: z.string(), content: z.string().default('') })) });
 const Brave = z.object({ web: z.object({ results: z.array(z.object({ title: z.string().default(''), url: z.string(), description: z.string().default('') })) }).optional() });
+const DeepSeek = z.object({ results: z.array(z.object({ title: z.string().default(''), url: z.string(), snippet: z.string().default(''), summary: z.string().default('') })) });
+const DeepSeekPage = z.object({ title: z.string().default(''), content: z.string().default('') });
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
@@ -58,20 +80,27 @@ const plain = (text: string) => text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' '
  */
 export async function runSearch(kind: SearchKind, baseUrl: string, fetch: typeof globalThis.fetch, query: string, count: number): Promise<Result<SearchHit[], string>> {
   const n = Math.max(1, Math.min(MAX_SEARCH_HITS, count));
+  const json = { 'content-type': 'application/json', accept: 'application/json' };
   let response: Response;
   try {
     response =
       kind === 'tavily'
         ? await fetch(`${baseUrl}/search`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            headers: json,
             body: JSON.stringify({ query, max_results: n, search_depth: 'basic', include_answer: false, include_raw_content: false }),
           })
-        : await fetch(`${baseUrl}/res/v1/web/search?q=${encodeURIComponent(query)}&count=${n}`, { headers: { accept: 'application/json' } });
+        : kind === 'deepseek'
+          ? await fetch(`${baseUrl}/v1/tools/search`, {
+              method: 'POST',
+              headers: json,
+              body: JSON.stringify({ query: [...query].slice(0, DEEPSEEK_QUERY_CHARS).join(''), count: n, need_content: false }),
+            })
+          : await fetch(`${baseUrl}/res/v1/web/search?q=${encodeURIComponent(query)}&count=${n}`, { headers: { accept: 'application/json' } });
   } catch (e) {
     return err(`连不上搜索服务：${e instanceof Error ? e.message : String(e)}`);
   }
-  if (!response.ok) return err(response.status === 401 || response.status === 403 ? `搜索服务拒绝了请求（${response.status}）：请检查 API Key` : `搜索服务返回 ${response.status}`);
+  if (!response.ok) return err(describeSearchStatus(response.status));
   let body: unknown;
   try {
     body = await response.json();
@@ -83,9 +112,46 @@ export async function runSearch(kind: SearchKind, baseUrl: string, fetch: typeof
     if (!parsed.success) return err('搜索服务返回的格式不认识');
     return ok(parsed.data.results.map((r) => ({ title: plain(r.title) || r.url, url: r.url, snippet: plain(r.content) })));
   }
+  if (kind === 'deepseek') {
+    const parsed = DeepSeek.safeParse(body);
+    if (!parsed.success) return err('搜索服务返回的格式不认识');
+    // snippet 是给人看的短摘要，summary 是给模型读的长摘要；短的够用，没有时退到长的。
+    return ok(parsed.data.results.map((r) => ({ title: plain(r.title) || r.url, url: r.url, snippet: plain(r.snippet) || plain(r.summary) })));
+  }
   const parsed = Brave.safeParse(body);
   if (!parsed.success) return err('搜索服务返回的格式不认识');
   return ok((parsed.data.web?.results ?? []).map((r) => ({ title: plain(r.title) || r.url, url: r.url, snippet: plain(r.description) })));
+}
+
+function describeSearchStatus(status: number): string {
+  if (status === 401 || status === 403) return `搜索服务拒绝了请求（${status}）：请检查 API Key`;
+  if (status === 402) return '搜索服务返回 402：账户余额不足';
+  if (status === 429) return '搜索服务返回 429：请求太频繁，稍后再试';
+  return `搜索服务返回 ${status}`;
+}
+
+/** DeepSeek 的 Fetch 接口：在服务端抓一个网页，返回标题与 Markdown 正文；404 表示抓不到可用的正文。 */
+export async function deepseekFetch(baseUrl: string, fetch: typeof globalThis.fetch, url: string): Promise<Result<WebPage, string>> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/v1/tools/fetch`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ url }) });
+  } catch (e) {
+    return err(`连不上 DeepSeek：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (response.status === 404) return err('DeepSeek 也抓不到这个网页的正文');
+  if (response.status === 403) return err('DeepSeek 按安全策略拒绝抓取这个地址');
+  if (!response.ok) return err(describeSearchStatus(response.status));
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return err('DeepSeek 返回的不是 JSON');
+  }
+  const parsed = DeepSeekPage.safeParse(body);
+  if (!parsed.success) return err('DeepSeek 返回的格式不认识');
+  const text = parsed.data.content.trim();
+  if (text === '') return err('DeepSeek 抓到的网页没有正文');
+  return ok({ url, title: parsed.data.title.trim() === '' ? null : parsed.data.title.trim(), text, truncated: false });
 }
 
 /** 太长的网页只留开头与结尾。 */
@@ -115,10 +181,14 @@ export function webUseCases(deps: AppDeps) {
     if (!services.ok) return err(repo(services.error));
     const defaultServiceId = await getDefaultSearchServiceId(p.value);
     if (!defaultServiceId.ok) return err(repo(defaultServiceId.error));
+    const providers = await listProviders(p.value);
+    if (!providers.ok) return err(repo(providers.error));
     const withStatus: SearchServiceView[] = [];
     for (const s of services.value) {
-      const status = await deps.credentials.status(s.id);
-      withStatus.push({ ...s, credential: status.ok ? status.value : { stored: false, origin: null, hasSecret: false } });
+      // 沿用模型服务的 Key 时看那个条目；模型服务已删除就当没有凭据。
+      const ref = s.credentialRef === null ? null : (providers.value.find((x) => x.id === s.credentialRef) ?? null);
+      const status = s.credentialRef !== null && ref === null ? null : await deps.credentials.status(s.credentialRef ?? s.id);
+      withStatus.push({ ...s, credential: status?.ok === true ? status.value : { stored: false, origin: null, hasSecret: false }, credentialName: ref?.name ?? null });
     }
     return ok({ services: withStatus, defaultServiceId: defaultServiceId.value });
   }
@@ -128,27 +198,61 @@ export function webUseCases(deps: AppDeps) {
     const current = await view();
     if (!current.ok) return current;
     const service = current.value.services.find((s) => s.id === current.value.defaultServiceId) ?? current.value.services.find((s) => s.enabled);
-    if (service === undefined) return err(settings('还没有配置联网搜索服务：在“模型服务”页的“联网搜索”里添加 Tavily 或 Brave Search 并填 API Key'));
+    if (service === undefined) return err(settings('还没有配置联网搜索服务：在“模型服务”页的“联网搜索”里添加 DeepSeek 搜索（可沿用模型服务的 Key）、Tavily 或 Brave Search'));
     if (!service.enabled) return err(settings(`搜索服务“${service.name}”已停用`));
-    if (!service.credential.hasSecret || service.credential.origin !== originOf(service.baseUrl)) return err(settings(`搜索服务“${service.name}”还没有填 API Key（或地址改过）：在“模型服务”页重新填写`));
+    if (!usable(service)) {
+      return err(
+        settings(
+          service.credentialRef === null
+            ? `搜索服务“${service.name}”还没有填 API Key（或地址改过）：在“模型服务”页重新填写`
+            : `搜索服务“${service.name}”沿用的模型服务没有 Key 或地址对不上：在“模型服务”页检查`,
+        ),
+      );
+    }
     return ok(service);
   }
 
-  async function saveCredential(id: string, form: SearchServiceForm, current: CredentialStatus | null): Promise<Result<void, AppError>> {
+  /** 凭据在、且绑定的源与搜索服务的地址一致。 */
+  const usable = (service: SearchServiceView) => service.credential.hasSecret && service.credential.origin === originOf(service.baseUrl);
+
+  /**
+   * 写凭据：沿用模型服务的 Key 时不存自己的条目（原来有就删掉），只核对那个模型服务的凭据在、且源相同；
+   * 否则给出了密钥就保存；没给且地址的源没变就沿用。
+   */
+  async function saveCredential(id: string, form: SearchServiceForm, current: SearchServiceView | null): Promise<Result<void, AppError>> {
+    const origin = originOf(form.baseUrl.trim());
+    if (form.credentialRef !== undefined && form.credentialRef !== null) {
+      const status = await deps.credentials.status(form.credentialRef);
+      if (!status.ok || !status.value.hasSecret) return err(settings('沿用的模型服务还没有填 API Key'));
+      if (status.value.origin !== origin) return err(settings(`沿用的模型服务地址与搜索服务不是同一个源（${status.value.origin ?? ''}），不能共用 Key：改成相同的地址，或者单独填 Key`));
+      if (current !== null && current.credentialRef === null) await deps.credentials.remove(id);
+      return ok(undefined);
+    }
     const key = form.apiKey?.trim() ?? '';
     if (key === '') {
-      if (current?.hasSecret === true && current.origin === originOf(form.baseUrl.trim())) return ok(undefined);
-      return err(settings(current?.hasSecret === true ? '更改服务地址后须重新填写 API Key' : '请填写 API Key'));
+      const own = current === null || current.credentialRef !== null ? null : current.credential;
+      if (own?.hasSecret === true && own.origin === origin) return ok(undefined);
+      return err(settings(own?.hasSecret === true ? '更改服务地址后须重新填写 API Key' : '请填写 API Key'));
     }
     const saved = await deps.credentials.set(id, form.baseUrl, SEARCH_PRESETS[form.kind].keyHeader, key);
     return saved.ok ? ok(undefined) : err(settings(describeCredentialError(saved.error)));
   }
 
+  const fetchFor = (service: SearchService) => deps.web.searchFetch(service.credentialRef ?? service.id);
+
   async function search(service: SearchServiceView, query: string, count: number): Promise<Result<SearchHit[], AppError>> {
     const q = query.trim();
     if (q === '') return err(settings('搜索词不能为空'));
-    const hits = await runSearch(service.kind, service.baseUrl, deps.web.searchFetch(service.id), q, count);
+    const hits = await runSearch(service.kind, service.baseUrl, fetchFor(service), q, count);
     return hits.ok ? hits : err(settings(hits.error));
+  }
+
+  /** 可用的 DeepSeek 搜索服务（默认的优先）：读网页读不到时用它的 Fetch 接口再试。 */
+  async function deepseekService(): Promise<SearchServiceView | null> {
+    const current = await view();
+    if (!current.ok) return null;
+    const candidates = current.value.services.filter((s) => s.kind === 'deepseek' && s.enabled && usable(s));
+    return candidates.find((s) => s.id === current.value.defaultServiceId) ?? candidates[0] ?? null;
   }
 
   return {
@@ -159,7 +263,7 @@ export function webUseCases(deps: AppDeps) {
       const p = await port();
       if (!p.ok) return p;
       const id = service?.id ?? deps.ids.next();
-      const credential = await saveCredential(id, form, service?.credential ?? null);
+      const credential = await saveCredential(id, form, service);
       if (!credential.ok) return credential;
       const saved = service === null ? await createSearchService(p.value, id, form, ctx()) : await updateSearchService(p.value, id, service.version, form, ctx());
       if (!saved.ok) {
@@ -177,8 +281,11 @@ export function webUseCases(deps: AppDeps) {
       if (!p.ok) return p;
       const removed = await deleteSearchService(p.value, service.id, service.version);
       if (!removed.ok) return err(repo(removed.error));
-      const credential = await deps.credentials.remove(service.id);
-      if (!credential.ok) return err(settings(`服务已删除，但凭据管理器中的条目没有删掉：${credential.error}`));
+      // 沿用模型服务的 Key 时没有自己的条目，模型服务的条目不动。
+      if (service.credentialRef === null) {
+        const credential = await deps.credentials.remove(service.id);
+        if (!credential.ok) return err(settings(`服务已删除，但凭据管理器中的条目没有删掉：${credential.error}`));
+      }
       return view();
     },
 
@@ -207,11 +314,22 @@ export function webUseCases(deps: AppDeps) {
       return hits.ok ? ok({ service: service.value.name, hits: hits.value }) : hits;
     },
 
-    /** 读一个公开网页的正文（不带凭据，由 Rust 校验地址）；太长时只给开头与结尾。 */
+    /**
+     * 读一个公开网页的正文（不带凭据，由 Rust 校验地址）；太长时只给开头与结尾。
+     * 直接读不到（网站拦截、不是文字、超时）而有 DeepSeek 搜索服务时，再用它的 Fetch 接口在服务端抓一次；
+     * 地址本身不许读（本机、局域网、格式不对）的不再试。
+     */
     async readWebPage(url: string, limit = PAGE_CHARS): Promise<Result<WebPage & { readonly clipped: boolean }, AppError>> {
-      const page = await deps.web.readPage(url.trim());
-      if (!page.ok) return err(settings(describeWebError(page.error)));
-      return ok(clipPage(page.value, limit));
+      const target = url.trim();
+      const page = await deps.web.readPage(target);
+      if (page.ok) return ok(clipPage(page.value, limit));
+      const kind = page.error.split(':', 1)[0];
+      if (kind === 'host_not_allowed' || kind === 'invalid_url') return err(settings(describeWebError(page.error)));
+      const deepseek = await deepseekService();
+      if (deepseek === null) return err(settings(describeWebError(page.error)));
+      const fetched = await deepseekFetch(deepseek.baseUrl, fetchFor(deepseek), target);
+      if (!fetched.ok) return err(settings(`${describeWebError(page.error)}；${fetched.error}`));
+      return ok(clipPage(fetched.value, limit));
     },
   };
 }

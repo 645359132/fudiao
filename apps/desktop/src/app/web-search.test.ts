@@ -107,6 +107,70 @@ describe('联网搜索的服务（B84）', () => {
   });
 });
 
+describe('DeepSeek 搜索（B84）', () => {
+  const deepseekBody = JSON.stringify({
+    results: [
+      { rerank_score: 2.1, title: '起点中文网月票榜', url: 'https://www.qidian.com/rank/yuepiao/', snippet: '', summary: '起点月票榜：夜当、剑来……', content: '', site_name: '起点', site_icon: null, date: null, authority: 3 },
+      { rerank_score: 1.2, title: '榜单解读', url: 'https://example.com/a', snippet: '短摘要', summary: '长摘要', content: '', site_name: null, site_icon: null, date: '2026-10-19T00:00:00Z', authority: -1 },
+    ],
+  });
+
+  it('自己填 Key：请求打到 /v1/tools/search，搜索词截到 128 字，snippet 为空时用 summary；402 与 429 有说明', async () => {
+    const { deps, app } = setup();
+    value(await app.saveSearchService(null, { kind: 'deepseek', name: 'DeepSeek 搜索', baseUrl: 'https://api.deepseek.com', apiKey: 'sk-ds' }));
+    deps.searchResponses.push({ status: 200, body: deepseekBody });
+    const found = value(await app.webSearch(`起点 月票榜 ${'榜'.repeat(200)}`, 5));
+    expect(found.hits).toEqual([
+      { title: '起点中文网月票榜', url: 'https://www.qidian.com/rank/yuepiao/', snippet: '起点月票榜：夜当、剑来……' },
+      { title: '榜单解读', url: 'https://example.com/a', snippet: '短摘要' },
+    ]);
+    const request = deps.searchRequests[0]!;
+    expect(request.url).toBe('https://api.deepseek.com/v1/tools/search');
+    expect(request.headers['authorization']).toBe('Bearer sk-ds');
+    expect(request.body).toMatchObject({ count: 5, need_content: false });
+    expect([...(request.body as { query: string }).query]).toHaveLength(128);
+    deps.searchResponses.push({ status: 402, body: '{"error":{"message":"Insufficient Balance"}}' });
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('余额不足') } });
+    deps.searchResponses.push({ status: 429, body: '{}' });
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('太频繁') } });
+  });
+
+  it('沿用模型服务的 Key：不另存条目，请求带模型服务的密钥；源不同或模型服务没有 Key 时拒绝；删除搜索服务不动模型服务的条目', async () => {
+    const { deps, app } = setup();
+    const models = value(await app.saveProvider(null, { kind: 'openai_compatible', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', authMethod: 'api_key', apiKey: 'sk-model' }));
+    const provider = models.providers[0]!;
+    // 源不同的模型服务不能共用。
+    expect(await app.saveSearchService(null, { kind: 'deepseek', name: '搜', baseUrl: 'https://relay.example.com', apiKey: null, credentialRef: provider.id })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('不是同一个源') } });
+    const view = value(await app.saveSearchService(null, { kind: 'deepseek', name: '搜', baseUrl: 'https://api.deepseek.com', apiKey: null, credentialRef: provider.id }));
+    const service = view.services[0]!;
+    expect(service).toMatchObject({ credentialRef: provider.id, credentialName: 'DeepSeek', credential: { hasSecret: true, origin: 'https://api.deepseek.com' } });
+    expect(deps.secrets.has(service.id)).toBe(false);
+    deps.searchResponses.push({ status: 200, body: deepseekBody });
+    value(await app.webSearch('月票榜'));
+    expect(deps.searchRequests[0]?.headers['authorization']).toBe('Bearer sk-model');
+
+    // 没有填 Key 的模型服务不能沿用。
+    const bare = value(await app.saveProvider(null, { kind: 'local', name: '本地', baseUrl: 'http://127.0.0.1:11434', authMethod: 'none', apiKey: null })).providers.find((p) => p.name === '本地')!;
+    expect(await app.saveSearchService(null, { kind: 'deepseek', name: '搜二', baseUrl: 'https://api.deepseek.com', apiKey: null, credentialRef: bare.id })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('还没有填 API Key') } });
+
+    value(await app.deleteSearchService(service));
+    expect(deps.secrets.has(provider.id)).toBe(true);
+  });
+
+  it('读网页读不到时用 DeepSeek 的 Fetch 接口再试；本机地址不再试', async () => {
+    const { deps, app } = setup();
+    value(await app.saveSearchService(null, { kind: 'deepseek', name: 'DeepSeek 搜索', baseUrl: 'https://api.deepseek.com', apiKey: 'sk-ds' }));
+    deps.searchResponses.push({ status: 200, body: JSON.stringify({ title: '月票榜', content: '# 月票榜\n\n1. 夜当' }) });
+    const page = value(await app.readWebPage('https://www.qidian.com/rank/'));
+    expect(page).toMatchObject({ title: '月票榜', text: '# 月票榜\n\n1. 夜当', clipped: false });
+    expect(deps.searchRequests[0]).toMatchObject({ url: 'https://api.deepseek.com/v1/tools/fetch', body: { url: 'https://www.qidian.com/rank/' } });
+    deps.searchResponses.push({ status: 404, body: '{"error":{"message":"no content"}}' });
+    expect(await app.readWebPage('https://www.qidian.com/none')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('DeepSeek 也抓不到') } });
+    expect(await app.readWebPage('http://127.0.0.1:1430/')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('只能读公网上的网页') } });
+    expect(deps.searchRequests).toHaveLength(2);
+  });
+});
+
 describe('AI 助手联网（B84）', () => {
   const step = (deps: TestDeps, output: AssistantTurnOutput) => deps.llmResponses.push(reply(JSON.stringify(output)));
   const lastResults = (items: readonly AssistantItem[]) => items.filter((i): i is Extract<AssistantItem, { role: 'results' }> => i.role === 'results').at(-1);
