@@ -18,12 +18,14 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 use url::{Host, Url};
 
-/// 认证头的写法：Anthropic 用 `x-api-key`，OpenAI 及其兼容接口（含 Gemini 兼容模式）用 `Authorization: Bearer`。
+/// 认证头的写法：Anthropic 用 `x-api-key`，OpenAI 及其兼容接口（含 Gemini 兼容模式）用 `Authorization: Bearer`，
+/// Brave Search（B84 的搜索服务）用 `X-Subscription-Token`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyHeader {
     XApiKey,
     Bearer,
+    XSubscriptionToken,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -188,6 +190,7 @@ const DROPPED_HEADERS: &[&str] = &[
     "x-api-key",
     "api-key",
     "x-goog-api-key",
+    "x-subscription-token",
     "host",
     "content-length",
     "connection",
@@ -384,6 +387,7 @@ impl Proxy {
                     KeyHeader::Bearer => {
                         builder.header("authorization", format!("Bearer {secret}"))
                     }
+                    KeyHeader::XSubscriptionToken => builder.header("x-subscription-token", secret),
                 };
                 Some(secret.clone())
             }

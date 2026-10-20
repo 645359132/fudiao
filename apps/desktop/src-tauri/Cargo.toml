@@ -32,7 +32,8 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2-zli
 # 凭据代理（M2-01）：转发模型服务的请求。TLS 用系统的 schannel（native-tls），使用系统证书库，
 # 不需要 rustls 默认的 aws-lc-rs 构建工具；system-proxy 让请求走系统代理设置。
 reqwest = { version = "0.13", default-features = false, features = ["native-tls", "stream", "http2", "system-proxy"] }
-tokio = { version = "1", features = ["sync", "macros", "time"] }
+# net：读公开网页（M7-01）前解析域名、只连公网地址。
+tokio = { version = "1", features = ["sync", "macros", "time", "net"] }
 futures-util = { version = "0.3", default-features = false }
 url = "2"
 # 凭据存储（M2-02）：Windows 凭据管理器。

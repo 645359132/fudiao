@@ -87,6 +87,7 @@ import { memoryUseCases } from './memory';
 import { assistantUseCases, type AssistantUsage } from './assistant';
 import { narrationUseCases } from './narration';
 import { quickBookUseCases } from './quick-book';
+import { webUseCases } from './web-search';
 import { workflowUseCases } from './workflows';
 import { bookAuditUseCases } from './book-audit';
 import { openingUseCases } from './opening';
@@ -802,6 +803,11 @@ export function createAppService(deps: AppDeps) {
   // 扫榜拆书（B79）的样章与拆解：工作流用，作品里也能查这次运行还留着几本样章。
   const benchmark = benchmarkUseCases(deps, () => session?.port ?? null, runner);
 
+  // 联网搜索与读网页（B84）：搜索服务由作者配置，AI 助手与扫榜拆书的榜单用。
+  const web = webUseCases(deps);
+  // AI 助手与撤销用到的用例：作品的用例加上联网。
+  const hostBase = { ...app, ...web };
+
   // 写作工作流（B78）：步骤调用上面的用例；写章节默认就地依次写，桌面端由状态层经写手队列做。
   const workflows = workflowUseCases({
     deps,
@@ -812,9 +818,9 @@ export function createAppService(deps: AppDeps) {
     },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {
-      capture: () => captureWork(app, session?.port ?? null),
+      capture: () => captureWork(hostBase, session?.port ?? null),
       diff: (before, after) => diffWork(before, after),
-      undo: (entries) => undoChanges(app, () => session?.port ?? null, [asChangeEntries(entries)]),
+      undo: (entries) => undoChanges(hostBase, () => session?.port ?? null, [asChangeEntries(entries)]),
     },
     async pricing() {
       const choice = await services.defaultModel();
@@ -856,10 +862,11 @@ export function createAppService(deps: AppDeps) {
   });
 
   // AI 助手（B69）：工具调用上面的用例，规则与守卫照常生效。
-  const assistant = assistantUseCases({ deps, host: { ...app, workflows }, project: () => session?.port ?? null, workKey: () => session?.entry.path ?? null, runner });
+  const assistant = assistantUseCases({ deps, host: { ...hostBase, workflows }, project: () => session?.port ?? null, workKey: () => session?.entry.path ?? null, runner });
 
   return {
     ...app,
+    ...web,
     ...assistant,
     ...workflows,
     benchmarkBooks: benchmark.benchmarkBooks,

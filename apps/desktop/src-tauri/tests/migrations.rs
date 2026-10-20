@@ -358,6 +358,13 @@ fn app_settings_database_uses_its_own_migrations_and_file() {
         .unwrap();
     assert_eq!(
         json!(tables),
-        json!([{ "name": "model_profile" }, { "name": "provider" }, { "name": "schema_migrations" }, { "name": "task_routing" }])
+        json!([
+            { "name": "model_profile" },
+            { "name": "provider" },
+            { "name": "schema_migrations" },
+            { "name": "search_default" },
+            { "name": "search_service" },
+            { "name": "task_routing" }
+        ])
     );
 }

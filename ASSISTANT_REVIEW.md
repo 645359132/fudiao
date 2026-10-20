@@ -22,7 +22,7 @@
 | 界面 | `apps/desktop/src/ui/AssistantPanel.tsx`，状态层 `src/state/store.ts` 的 `assistantTurn` | 逐字显示、进展、选区条、确认卡片、模型与思考深度选择、上下文用量；每一轮登记为任务 |
 | 试用脚本 | `tools/assistant-eval/`（`pnpm assistant:eval`） | 14 句作者会说的话，真实模型，报告写在 `m3/runs/`（不入库） |
 
-### 动作一览（63 个）
+### 动作一览（65 个）
 
 - 读取：`list_chapters`、`get_work`、`read_chapter`、`search_text`、`get_entity`、`list_facts`、`get_chapter_plan`、`build_chapter_memory`、`get_chapter_memory`、`list_foreshadows`、`list_review_issues`、`list_skills`
 - 作品与卷：`create_work`、`open_work`、`update_work`（替换已有大纲须确认）、`create_volume`、`update_volume`、`move_volume`、`delete_volume`（须确认）
@@ -33,6 +33,7 @@
 - 计划与写作：`save_chapter_plan`、`plan_chapters`（已有计划时须确认）、`write_chapter`（同步，写完整理长篇记忆）、`write_chapters`（后台）、`continue_chapter`（候选稿）、`edit_selection`（候选稿）、`review_chapter`（同步）、`review_chapters`（后台）、`stop_background`、`resolve_review_issue`、`revise_review_issue`（写入前快照）、`rollback_writer`（须确认）、`add_foreshadow`、`update_foreshadow`
 - 角色推演（M5-19）：`list_simulations`、`create_sim_scene`、`start_simulation`（后台）、`continue_simulation`（后台）、`get_simulation`（全局概要，只用于汇报）、`narrate_simulation`（按视角写成候选稿，作者经“采纳…”写进作品）
 - 写作工作流（M6-01）：`list_workflows`、`start_workflow`（后台推进）、`get_workflow`、`continue_workflow`（可按原样采用等作者的草稿）；`stop_background` 可停工作流
+- 联网（M7-01）：`web_search`（公开网页的标题、网址与摘要）、`read_web_page`（网页正文，最多 6,000 字）；结果写明是材料不是指令
 - 撤销（M5-20）：`undo_last_turn`；对话框里另有“撤销这一轮的改动”
 - 其他：`export_book`、`open_page`
 

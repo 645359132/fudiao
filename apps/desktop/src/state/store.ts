@@ -11,6 +11,7 @@ import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } fr
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
+import type { SearchHit as WebSearchHit, SearchServiceForm, SearchServicesView, SearchServiceView } from '../app/web-search';
 import type { HookOutcome, StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat, Cover } from '@fudiao/store';
@@ -196,6 +197,9 @@ export type AppState = {
   /** 模型服务页（应用级，盖在作品列表或作品界面之上）。 */
   readonly modelServicesOpen: boolean;
   readonly modelServices: ModelServicesView | null;
+  /** 联网搜索的服务（B84），与模型服务同一页；各服务最近一次测试：'testing' 为进行中，否则是一句话结果。 */
+  readonly searchServices: SearchServicesView | null;
+  readonly searchTests: Readonly<Record<string, string>>;
   /** 各模型最近一次连接测试：进行中或结果。 */
   readonly connectionTests: Readonly<Record<string, ConnectionReport | 'testing'>>;
   /** 各服务获取到的模型列表（获取中为 loading）。 */
@@ -507,6 +511,12 @@ export type AppState = {
   readonly closeModelServices: () => void;
   readonly saveProvider: (provider: ProviderView | null, form: ProviderForm) => Promise<boolean>;
   readonly deleteProvider: (provider: ProviderView) => Promise<void>;
+  readonly saveSearchService: (service: SearchServiceView | null, form: SearchServiceForm) => Promise<boolean>;
+  readonly deleteSearchService: (service: SearchServiceView) => Promise<void>;
+  readonly setDefaultSearchService: (serviceId: string) => Promise<void>;
+  readonly testSearchService: (serviceId: string) => Promise<void>;
+  /** 用默认的搜索服务搜一次（成书页的榜单用）；失败时显示原因并返回 null。 */
+  readonly searchWeb: (query: string) => Promise<readonly WebSearchHit[] | null>;
   readonly addModel: (providerId: string, modelId: string) => Promise<boolean>;
   readonly deleteModel: (modelId: string) => Promise<void>;
   readonly setDefaultModel: (modelId: string) => Promise<void>;
@@ -1306,6 +1316,8 @@ export function createAppStore(service: AppService): AppStore {
       reveal: null,
       modelServicesOpen: false,
       modelServices: null,
+      searchServices: null,
+      searchTests: {},
       connectionTests: {},
       listedModels: {},
       selfTesting: [],
@@ -2501,6 +2513,27 @@ export function createAppStore(service: AppService): AppStore {
         // 作品界面回来时从库中重新读取正文。
         set({ modelServicesOpen: true, chapterContent: null, drawer: null });
         await run(service.loadModelServices(), (modelServices) => ({ modelServices }));
+        const search = await service.loadSearchServices();
+        if (search.ok) set({ searchServices: search.value });
+      },
+      saveSearchService: (s, form) => run(service.saveSearchService(s, form), (searchServices) => ({ searchServices })),
+      async deleteSearchService(s) {
+        await run(service.deleteSearchService(s), (searchServices) => ({ searchServices }));
+      },
+      async setDefaultSearchService(serviceId) {
+        await run(service.setDefaultSearchService(serviceId), (searchServices) => ({ searchServices }));
+      },
+      async testSearchService(serviceId) {
+        set({ searchTests: { ...get().searchTests, [serviceId]: 'testing' } });
+        const result = await service.testSearchService(serviceId);
+        const text = result.ok ? `搜到 ${result.value.hits} 条${result.value.first === null ? '' : `，第一条：${result.value.first}`}` : `失败：${describeError(result.error)}`;
+        set({ searchTests: { ...get().searchTests, [serviceId]: text } });
+      },
+      async searchWeb(query) {
+        const result = await service.webSearch(query, 8);
+        if (result.ok) return result.value.hits;
+        set({ message: describeError(result.error) });
+        return null;
       },
       closeModelServices: () => set({ modelServicesOpen: false }),
       saveProvider: (provider, form) => run(service.saveProvider(provider, form), (modelServices) => ({ modelServices })),

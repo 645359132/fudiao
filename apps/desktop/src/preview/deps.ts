@@ -80,6 +80,10 @@ export function previewDeps(SQL: SqlJsStatic): AppDeps {
       setLimits: () => Promise.resolve(),
     },
     llm: { forProvider: () => demoLlm() },
+    web: {
+      searchFetch: () => () => Promise.reject(new TypeError('浏览器预览不联网')),
+      readPage: () => Promise.resolve(err('network:浏览器预览不联网')),
+    },
     images: canvasImages(),
     clock: { now: () => new Date().toISOString() },
     ids: { next: () => ulid(Date.now(), crypto.getRandomValues(new Uint8Array(10))) },

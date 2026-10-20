@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { PROVIDER_KINDS, type ProviderKind } from '@fudiao/store';
+import { PROVIDER_KINDS, SEARCH_KINDS, type ProviderKind, type SearchKind } from '@fudiao/store';
 import { PROVIDER_PRESETS, type ProviderForm, type ProviderView } from '../app/model-services';
+import { SEARCH_PRESETS, type SearchServiceForm, type SearchServiceView } from '../app/web-search';
 import { ListedModels, ModelRow } from './ModelDetails';
 import { useApp } from './store-context';
 
@@ -197,6 +198,146 @@ function ProviderCard({ provider }: { readonly provider: ProviderView }) {
   );
 }
 
+/** 搜索服务的凭据状态。 */
+function searchCredentialText(s: SearchServiceView): string {
+  if (!s.credential.hasSecret) return '还没有填写 API Key';
+  let origin: string | null = null;
+  try {
+    origin = new URL(s.baseUrl).origin;
+  } catch {
+    // 地址无效时按不一致处理
+  }
+  return origin === s.credential.origin ? 'API Key 已保存在系统凭据管理器' : '服务地址已更改，须重新填写 API Key';
+}
+
+function SearchServiceEditor({ service, onDone }: { readonly service: SearchServiceView | null; readonly onDone: () => void }) {
+  const save = useApp((s) => s.saveSearchService);
+  const busy = useApp((s) => s.busy);
+  const [kind, setKind] = useState<SearchKind>(service?.kind ?? 'tavily');
+  const [name, setName] = useState(service?.name ?? SEARCH_PRESETS.tavily.label);
+  const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? SEARCH_PRESETS.tavily.baseUrl);
+  // API Key 只在提交时交给凭据端口，不进入应用状态；提交后清空。
+  const [apiKey, setApiKey] = useState('');
+  const choose = (next: SearchKind) => {
+    if (name === SEARCH_PRESETS[kind].label || name.trim() === '') setName(SEARCH_PRESETS[next].label);
+    if (baseUrl === SEARCH_PRESETS[kind].baseUrl || baseUrl.trim() === '') setBaseUrl(SEARCH_PRESETS[next].baseUrl);
+    setKind(next);
+  };
+  return (
+    <form
+      className="provider-form"
+      aria-label={service === null ? '添加搜索服务' : `编辑搜索服务 ${service.name}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const form: SearchServiceForm = { kind, name, baseUrl, apiKey: apiKey.trim() === '' ? null : apiKey };
+        void save(service, form).then((done) => {
+          setApiKey('');
+          if (done) onDone();
+        });
+      }}
+    >
+      <label>
+        搜索服务
+        <select value={kind} onChange={(e) => choose(e.currentTarget.value as SearchKind)}>
+          {SEARCH_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {SEARCH_PRESETS[k].label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted">{SEARCH_PRESETS[kind].hint}</p>
+      <label>
+        名称
+        <input value={name} onChange={(e) => setName(e.currentTarget.value)} />
+      </label>
+      <label>
+        服务地址
+        <input value={baseUrl} onChange={(e) => setBaseUrl(e.currentTarget.value)} />
+      </label>
+      <label>
+        API Key{service?.credential.hasSecret === true ? '（留空表示不改）' : ''}
+        <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
+      </label>
+      <div className="form-actions">
+        <button type="submit" className="primary" disabled={busy}>
+          保存
+        </button>
+        <button type="button" onClick={onDone}>
+          取消
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SearchServiceCard({ service, isDefault }: { readonly service: SearchServiceView; readonly isDefault: boolean }) {
+  const remove = useApp((s) => s.deleteSearchService);
+  const setDefault = useApp((s) => s.setDefaultSearchService);
+  const test = useApp((s) => s.testSearchService);
+  const result = useApp((s) => s.searchTests[service.id]);
+  const busy = useApp((s) => s.busy);
+  const [editing, setEditing] = useState(false);
+  if (editing) return <SearchServiceEditor service={service} onDone={() => setEditing(false)} />;
+  return (
+    <section className="provider-card" aria-label={`搜索服务 ${service.name}`}>
+      <header>
+        <h3>
+          {service.name}
+          {isDefault ? <span className="muted">（默认）</span> : null}
+        </h3>
+        <span className="muted">
+          {SEARCH_PRESETS[service.kind].label} · {service.baseUrl} · {searchCredentialText(service)}
+        </span>
+      </header>
+      <div className="form-actions">
+        {isDefault ? null : (
+          <button type="button" disabled={busy} onClick={() => void setDefault(service.id)}>
+            设为默认
+          </button>
+        )}
+        <button type="button" disabled={busy || result === 'testing'} onClick={() => void test(service.id)}>
+          {result === 'testing' ? '测试中…' : '测试搜索'}
+        </button>
+        <button type="button" disabled={busy} onClick={() => setEditing(true)}>
+          编辑
+        </button>
+        <button type="button" className="ghost" disabled={busy} onClick={() => void remove(service)}>
+          删除
+        </button>
+      </div>
+      {result !== undefined && result !== 'testing' ? (
+        <p className="muted" role="status">
+          {result}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** 联网搜索（需求 B84）：AI 助手与扫榜拆书的榜单用；读网页不需要服务、不带凭据。 */
+function SearchServicesSection() {
+  const view = useApp((s) => s.searchServices);
+  const [adding, setAdding] = useState(false);
+  return (
+    <section aria-label="联网搜索">
+      <h3>联网搜索</h3>
+      <p className="muted">AI 助手与扫榜拆书可以联网搜索公开的网页（榜单、简介、评论、资料）。搜索服务由你自己填 API Key，Tavily 与 Brave Search 都有免费额度；读网页不带任何凭据，只读公网地址，网页里的文字只当材料。</p>
+      {view?.services.map((s) => (
+        <SearchServiceCard key={s.id} service={s} isDefault={s.id === view.defaultServiceId} />
+      ))}
+      {view !== null && view.services.length === 0 && !adding ? <p className="muted">还没有搜索服务。</p> : null}
+      {adding ? (
+        <SearchServiceEditor service={null} onDone={() => setAdding(false)} />
+      ) : (
+        <button type="button" onClick={() => setAdding(true)}>
+          添加搜索服务
+        </button>
+      )}
+    </section>
+  );
+}
+
 /** 模型服务（需求 B15）：服务、API Key、模型、默认模型与连接测试。应用级设置，不属于某一部作品。 */
 export function ModelServicesScreen() {
   const view = useApp((s) => s.modelServices);
@@ -223,6 +364,7 @@ export function ModelServicesScreen() {
             添加服务
           </button>
         )}
+        <SearchServicesSection />
       </main>
     </div>
   );

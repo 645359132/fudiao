@@ -38,6 +38,9 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('list_foreshadows'), chapter: opt }),
   z.object({ tool: z.literal('list_review_issues'), chapter: opt }),
   z.object({ tool: z.literal('list_skills'), stage: z.enum(['planning', 'writing']).nullable() }),
+  // 联网（B84）
+  z.object({ tool: z.literal('web_search'), query: text }),
+  z.object({ tool: z.literal('read_web_page'), url: text }),
   // 作品
   z.object({ tool: z.literal('create_work'), title: text, genre: opt, synopsis: opt, outline: opt }),
   z.object({ tool: z.literal('open_work'), work: text }),

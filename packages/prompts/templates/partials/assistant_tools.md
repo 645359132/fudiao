@@ -11,6 +11,8 @@
 - list_foreshadows：列出伏笔账本（标识、内容、不得说破的内容、埋设与回收的章节、状态），以及该改状态的建议。参数 chapter：只列在这一章埋设或回收的，null 为全部。
 - list_review_issues：列出待处理的审核问题（标识、严重程度、说明、建议、原文）。参数 chapter：只列这一章的，null 为全书有问题的各章。
 - list_skills：列出写作技能（名称、阶段、是否启用、适用说明）。参数 stage：planning 规划或 writing 写章节，null 为全部。
+- web_search：联网搜索公开的网页（榜单、书的简介与评论、资料），返回标题、网址与摘要；要作者先在“模型服务”页配好搜索服务，没配时结果会说明。参数 query。
+- read_web_page：读一个公开网页的正文（太长时只给开头与结尾）。参数 url：搜索结果里的网址，或作者给的网址。
 作品：
 - create_work：新建一部作品并打开它。参数 title；genre、synopsis（简介）、outline（大纲）可为 null。
 - open_work：打开作品列表中的一部作品。参数 work（作品名）。

@@ -74,8 +74,8 @@ export interface SettingsDbPort {
   open(now: string): Promise<Result<SqlPort, string>>;
 }
 
-/** 认证头的写法：Anthropic 用 x-api-key，其余用 Authorization: Bearer；null 表示本地端点，不需要密钥。 */
-export type KeyHeader = 'x_api_key' | 'bearer';
+/** 认证头的写法：Anthropic 用 x-api-key，Brave Search 用 X-Subscription-Token，其余用 Authorization: Bearer；null 表示本地端点，不需要密钥。 */
+export type KeyHeader = 'x_api_key' | 'bearer' | 'x_subscription_token';
 
 /** 凭据在系统凭据管理器中的状态；明文从不返回。 */
 export type CredentialStatus = { readonly stored: boolean; readonly origin: string | null; readonly hasSecret: boolean };
@@ -92,6 +92,18 @@ export interface CredentialPort {
 /** 为一个服务建立模型端口：桌面端经凭据代理转发，测试中用不联网的 fetch。 */
 export interface LlmFactory {
   forProvider(provider: Provider): LlmPort;
+}
+
+/** 读到的一个公开网页（Rust 命令 `web_fetch`）：最终地址、标题与去掉标签后的文字。 */
+export type WebPage = { readonly url: string; readonly title: string | null; readonly text: string; readonly truncated: boolean };
+
+/**
+ * 联网（B84）：搜索服务的请求经凭据代理（服务标识即凭据条目名，API Key 不进 WebView）；读网页不带任何凭据，
+ * 只读公网主机，由 Rust 校验地址与解析结果。测试与浏览器预览用不联网的实现。
+ */
+export interface WebPort {
+  searchFetch(serviceId: string): typeof fetch;
+  readPage(url: string): Promise<Result<WebPage, string>>;
 }
 
 /**
@@ -122,6 +134,7 @@ export type AppDeps = {
   readonly settingsDb: SettingsDbPort;
   readonly credentials: CredentialPort;
   readonly llm: LlmFactory;
+  readonly web: WebPort;
   readonly images: ImagePort;
   /** 网络中断与服务端错误后的重试；不给时用默认（等 3 秒、10 秒各重试一次）。测试中关掉，需要时注入不真等的实现。 */
   readonly retry?: RetryPolicy;

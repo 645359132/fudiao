@@ -7,7 +7,7 @@ import { canvasImages } from '../adapters/canvas-image';
 import { tauriNet } from '../adapters/tauri-net';
 import { closeProjectDb, openAppDb, openProjectDb, tauriSqlPort } from '../adapters/tauri-sql';
 import { buildAdapter } from '../app/model-services';
-import type { AppDeps, BackupInfo, CredentialStatus, DecodedText, PackageFile, Probe } from '../app/ports';
+import type { AppDeps, BackupInfo, CredentialStatus, DecodedText, PackageFile, Probe, WebPage } from '../app/ports';
 
 /** Rust 命令失败时以 `{ code, detail }` 拒绝；转为给作者看的说明。 */
 async function call<T>(promise: Promise<T>): Promise<Result<T, string>> {
@@ -56,6 +56,19 @@ export function tauriDeps(): AppDeps {
       setLimits: (limits) => invoke<void>('net_set_limits', { limits }),
     },
     llm: { forProvider: (provider) => buildAdapter(provider, providerFetch(provider.id)) },
+    // 联网（B84）：搜索请求经凭据代理；读网页由 Rust 校验地址后不带凭据地读。
+    web: {
+      searchFetch: (serviceId) => providerFetch(serviceId),
+      readPage: async (url) => {
+        try {
+          return ok(await invoke<WebPage>('web_fetch', { url }));
+        } catch (e) {
+          const { code, detail, host, status, content_type: contentType } = e as { code?: unknown; detail?: unknown; host?: unknown; status?: unknown; content_type?: unknown };
+          const extra = [detail, host, status, contentType].find((x) => typeof x === 'string' || typeof x === 'number');
+          return err(typeof code === 'string' ? `${code}${typeof extra === 'string' || typeof extra === 'number' ? `:${extra}` : ''}` : String(e));
+        }
+      },
+    },
     images: canvasImages(),
     library: {
       read: () => call(invoke<string | null>('library_read')),

@@ -26,6 +26,18 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const [samples, setSamples] = useState<readonly { readonly title: string; readonly text: string }[]>([{ title: '', text: '' }]);
   const startBenchmark = useApp((s) => s.startBenchmark);
   const pickSampleText = useApp((s) => s.pickSampleText);
+  const searchWeb = useApp((s) => s.searchWeb);
+  const [rankQuery, setRankQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  /** 联网搜榜单：搜到的标题与摘要按“一本一段”接到榜单后面，作者再删改。 */
+  const searchRank = async () => {
+    setSearching(true);
+    const hits = await searchWeb(rankQuery);
+    setSearching(false);
+    if (hits === null || hits.length === 0) return;
+    const blocks = hits.map((h) => `${h.title}${h.snippet === '' ? '' : `\n简介：${h.snippet}`}`);
+    setRankText([rankText.trim(), ...blocks].filter((b) => b !== '').join('\n\n'));
+  };
   const [mode, setMode] = useState<'step' | 'auto'>('step');
   const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<WorkflowQuote | null>(null);
@@ -61,7 +73,16 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
     >
       {key === 'benchmark' ? (
         <>
-          <p className="muted">软件不会去任何网站抓取：把榜单与几本对标作品开头几章的样章粘贴进来，或从 TXT 读入。样章只用来拆结构与技法，不随作品导出，拆完就从作品库删除。</p>
+          <p className="muted">榜单可以粘贴，也可以联网搜（要在“模型服务”里配好搜索服务）；样章不自动抓取：把几本对标作品开头几章的样章粘贴进来，或从 TXT 读入。样章只用来拆结构与技法，不随作品导出，拆完就从作品库删除。</p>
+          <div className="form-row">
+            <label>
+              联网搜榜单（例如“起点 月票榜 2026”）
+              <input value={rankQuery} onChange={(e) => setRankQuery(e.currentTarget.value)} />
+            </label>
+            <button type="button" disabled={searching || rankQuery.trim() === ''} onClick={() => void searchRank()}>
+              {searching ? '搜索中…' : '搜索并填入榜单'}
+            </button>
+          </div>
           <label>
             榜单（可不填；一本一段，空行分开，可以写“书名：”“标签：”“字数：”）
             <textarea rows={4} value={rankText} onChange={(e) => setRankText(e.currentTarget.value)} />

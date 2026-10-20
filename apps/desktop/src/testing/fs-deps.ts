@@ -9,7 +9,7 @@ import { fakeFetch, fakeNet, type FakeResponse } from '@fudiao/llm/testing';
 import type { SqlPort, Statement } from '@fudiao/store';
 import { APP_DB_FILE, appMigrationsDir, loadMigrations, openProjectDb, PROJECT_DB_FILE, type ProjectDb } from '@fudiao/store/node';
 import { buildAdapter } from '../app/model-services';
-import type { AppDeps, BackupInfo, BackupKind, KeyHeader, PackageFile } from '../app/ports';
+import type { AppDeps, BackupInfo, BackupKind, KeyHeader, PackageFile, WebPage } from '../app/ports';
 
 /** 模拟系统凭据管理器中的条目（Rust 的 credentials.rs）。 */
 type StoredSecret = { readonly origin: string; readonly header: KeyHeader | null; readonly secret: string | null };
@@ -49,6 +49,10 @@ export type TestDeps = AppDeps & {
   readonly beforeLlm: ((() => Promise<void>) | null)[];
   /** 到达“模型服务”的请求（经模拟的凭据代理注入凭据之后）。 */
   readonly llmRequests: { url: string; headers: Record<string, string>; body: unknown }[];
+  /** 搜索服务（B84）的预设响应与到达的请求；读网页的预设页面（按网址）。 */
+  readonly searchResponses: FakeResponse[];
+  readonly searchRequests: { url: string; headers: Record<string, string>; body: unknown }[];
+  readonly webPages: Map<string, WebPage>;
   /** 作品库写入的故障注入：下一个有语句匹配的事务以 sql_error 失败（用完即去掉），模拟写到一半出错。 */
   readonly sqlFaults: RegExp[];
   readonly limits: (readonly (readonly [string, number])[])[];
@@ -84,6 +88,9 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
   const llmRequests: { url: string; headers: Record<string, string>; body: unknown }[] = [];
   const beforeLlm: ((() => Promise<void>) | null)[] = [];
   const limits: (readonly (readonly [string, number])[])[] = [];
+  const searchResponses: FakeResponse[] = [];
+  const searchRequests: { url: string; headers: Record<string, string>; body: unknown }[] = [];
+  const webPages = new Map<string, WebPage>();
   let settings: ProjectDb | null = null;
   // 模型服务：每次请求取下一个预设响应，并记下到达服务的请求。
   const service = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -94,9 +101,16 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     llmRequests.push(...requests);
     return response;
   };
+  // 搜索服务（B84）：同样取预设响应、记下请求。
+  const searchService = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const { fetch, requests } = fakeFetch([searchResponses.shift() ?? { networkError: true }]);
+    const response = fetch(input, init);
+    searchRequests.push(...requests);
+    return response;
+  };
   // 模拟凭据代理：没有凭据或目标不是绑定的源时拒绝；替换占位的认证头。
-  const proxy: NetTransport = (() => {
-    const inner = fakeNet(service);
+  const proxyOver = (target: (input: string | URL | Request, init?: RequestInit) => Promise<Response>): NetTransport => {
+    const inner = fakeNet(target);
     let n = 0;
     return {
       send(request, onEvent) {
@@ -105,14 +119,17 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
         if (stored === undefined) return Promise.reject({ code: 'unknown_provider' });
         // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- 同上
         if (new URL(request.url).origin !== stored.origin) return Promise.reject({ code: 'host_not_allowed' });
-        const headers = request.headers.filter(([k]) => !['authorization', 'x-api-key'].includes(k.toLowerCase()));
+        const headers = request.headers.filter(([k]) => !['authorization', 'x-api-key', 'x-subscription-token'].includes(k.toLowerCase()));
         if (stored.header === 'x_api_key' && stored.secret !== null) headers.push(['x-api-key', stored.secret]);
         if (stored.header === 'bearer' && stored.secret !== null) headers.push(['authorization', `Bearer ${stored.secret}`]);
+        if (stored.header === 'x_subscription_token' && stored.secret !== null) headers.push(['x-subscription-token', stored.secret]);
         return inner.send({ ...request, id: `${request.id}-${++n}`, headers }, onEvent);
       },
       cancel: (id) => inner.cancel(id),
     };
-  })();
+  };
+  const proxy = proxyOver(service);
+  const searchProxy = proxyOver(searchService);
   // 与桌面端一样，端口不绑定某一个连接：恢复备份后换了连接，同一个端口照常可用。
   const sqlFaults: RegExp[] = [];
   const port: SqlPort = {
@@ -160,6 +177,9 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     llmResponses,
     beforeLlm,
     llmRequests,
+    searchResponses,
+    searchRequests,
+    webPages,
     sqlFaults,
     limits,
     // 测试结束时关闭作品库与设置库，临时目录才能删除。
@@ -301,6 +321,13 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
       },
     },
     llm: { forProvider: (provider) => buildAdapter(provider, createProxyFetch(proxy, provider.id, () => 'req')) },
+    web: {
+      searchFetch: (serviceId) => createProxyFetch(searchProxy, serviceId, () => 'search'),
+      readPage: (url) => {
+        const page = webPages.get(url);
+        return Promise.resolve(page === undefined ? err('status:404') : ok(page));
+      },
+    },
     ...(retryPolicy !== undefined && { retry: retryPolicy }),
     // jsdom 与 Node 没有 canvas：封面原样编码，缩略图取前一段，尺寸固定为 600×800。
     images: {

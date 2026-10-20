@@ -10,3 +10,4 @@ export type { TableSpec } from './schema';
 export { DERIVED_TABLES, LOCAL_TABLES, TABLES } from './schema';
 export * from './repos';
 export * from './app/model-services';
+export * from './app/search-services';
