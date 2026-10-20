@@ -54,6 +54,28 @@ describe('文字体检（B74）', () => {
     expect(descriptions(...similes)).toEqual(['比喻用得太密：本章“仿佛、好像、如同”之类出现 8 次']);
   });
 
+  it('对照句式“不仅是……更是”“与其说……不如说”、“进行＋动词”、堆叠的限定：定位到原文，一段只报一处', () => {
+    const issues = proseChecks(paras('他不仅是她的师父，更是她的父亲。', '与其说是恨，不如说是怕。', '他进行了一次深呼吸，又进行了一番思考。', '她似乎有些犹豫，心里有某种难以言说的东西。'));
+    expect(issues.map((i) => [i.anchor.paragraphId, i.anchor.quote])).toEqual([
+      ['p0', '不仅是她的师父，更是'],
+      ['p1', '与其说是恨，不如说'],
+      ['p2', '进行了一次深呼吸'],
+      ['p3', '似乎有些'],
+    ]);
+    expect(descriptions('他说：“与其说是恨，不如说是怕。”', '他进行到第三页。')).toEqual([]);
+  });
+
+  it('接连几句以同样的开头起句时提示一次（人名三句、代词四句）；换了主语或者对白开头的句子不算；破折号太密时提示一次', () => {
+    expect(found('他推开门。他看见柜台后没有人。他叹了口气。他走了。')).toEqual([['p0', '接连 4 句都以“他”起头', '他推开门。']]);
+    expect(found('林舟推开门。林舟看见柜台后没有人。林舟叹了口气。')).toEqual([['p0', '接连 3 句都以“林舟”起头', '林舟推开门。']]);
+    expect(descriptions('他推开门。他看见柜台后没有人。他叹了口气。')).toEqual([]);
+    expect(descriptions('他推开门。她看见柜台后没有人。他叹了口气。他走了。')).toEqual([]);
+    expect(descriptions('他推开门。他看见柜台后没有人。“他来了。”他叹了口气。他走了。')).toEqual([]);
+    const dashed = Array.from({ length: 6 }, (_, i) => `第${i}天——雨还在下。`);
+    expect(descriptions(...dashed)).toEqual(['破折号用得太密：本章出现 6 处']);
+    expect(descriptions('他停了一下——门外有脚步声。', ...Array.from({ length: 10 }, (_, i) => `第${i}夜雨下了一夜，巷子里积了水，挑担子的人把裤脚卷到膝盖，一步一步踩过去，谁也没有说话，远处的更鼓敲了三下。`))).toEqual([]);
+  });
+
   it('同一规则一章最多报五处；问题按段落顺序排列', () => {
     const many = Array.from({ length: 8 }, (_, i) => `这不是第${i}次，而是最后一次。`);
     const issues = proseChecks(paras(...many));

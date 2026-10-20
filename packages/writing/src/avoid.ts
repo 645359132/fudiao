@@ -12,6 +12,16 @@ export const DEFAULT_AVOID_PHRASES: readonly string[] = [
   '宛如',
   '一抹',
   '缓缓开口',
+  // 2026-10-20 参照 Humanizer-zh 与 blader/humanizer 的思路补上的小说里常见的套话。
+  '空气仿佛凝固',
+  '时间仿佛静止',
+  '鬼使神差',
+  '涌上心头',
+  '心头一紧',
+  '一股暖流',
+  '不得不说',
+  '值得一提的是',
+  '某种意义上',
 ];
 
 export const effectiveAvoidPhrases = (own: readonly string[] | null): readonly string[] => own ?? DEFAULT_AVOID_PHRASES;
