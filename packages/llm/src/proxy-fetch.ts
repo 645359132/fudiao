@@ -60,9 +60,17 @@ export function createProxyFetch(transport: NetTransport, providerId: string, ne
       let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
       let responded = false;
       let finished = false;
+      /** 代理报告失败时还没读走的数据块：先让读取方读完它们，再报错（适配器据此得到已收到的部分，例如流开头的用量）。 */
+      let pendingError: Error | null = null;
       const stream = new ReadableStream<Uint8Array>({
         start(c) {
           controller = c;
+        },
+        pull(c) {
+          if (pendingError !== null) {
+            c.error(pendingError);
+            pendingError = null;
+          }
         },
         cancel() {
           // SDK 不再读取响应体（读到流的结束标记，或自己中止）时，让代理也停下。
@@ -79,6 +87,8 @@ export function createProxyFetch(transport: NetTransport, providerId: string, ne
         signal.removeEventListener('abort', onAbort);
         if (!responded) reject(error ?? new TypeError('凭据代理没有返回响应头'));
         else if (error === null) controller?.close();
+        // 取消时直接作废；读到一半失败时队列里还有数据块（desiredSize 不大于 0）就等读完再报错。
+        else if (error.name !== 'AbortError' && controller !== null && controller.desiredSize !== null && controller.desiredSize <= 0) pendingError = error;
         else controller?.error(error);
       };
       const onAbort = () => {

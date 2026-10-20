@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
@@ -260,10 +260,43 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   );
 }
 
+/**
+ * 草稿表单的保存：改过没保存就切到别的步骤（表单卸载）时自动保存，回来时修改还在。
+ * 返回保存函数（成功与否）；保存前先记下要保存的内容，卸载时与它比较，刚保存过的不再存一次。
+ */
+function useDraftSaver<T>(runId: string, idx: number, output: unknown, draft: T | null, payload: (draft: T) => unknown): (draft: T) => Promise<boolean> {
+  const edit = useApp((s) => s.editWorkflowStep);
+  const latest = useRef<T | null>(draft);
+  const saved = useRef(JSON.stringify(output));
+  useEffect(() => {
+    latest.current = draft;
+  }, [draft]);
+  useEffect(
+    () => () => {
+      const d = latest.current;
+      if (d === null) return;
+      const value = payload(d);
+      if (JSON.stringify(value) !== saved.current) void edit(runId, idx, value);
+    },
+    [edit, runId, idx, payload],
+  );
+  return async (d: T) => {
+    const value = payload(d);
+    const before = saved.current;
+    saved.current = JSON.stringify(value);
+    const ok = await edit(runId, idx, value);
+    if (!ok) saved.current = before;
+    return ok;
+  };
+}
+
+const seedPayload = (draft: BookSeed): BookSeed => draft;
+const outlinePayload = (draft: VolumeOutline): VolumeOutline => ({ ...draft, mainline: draft.mainline.map((m) => m.trim()).filter((m) => m !== '') });
+
 /** 等作者处理的骨架草稿：改过可以保存，采用时先存修改再采用。 */
 function SeedStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const [draft, setDraft] = useState<BookSeed | null>(() => seedDraftOf(step));
-  const edit = useApp((s) => s.editWorkflowStep);
+  const save = useDraftSaver(view.run.id, step.idx, step.output, draft, seedPayload);
   const act = useApp((s) => s.workflowStepAction);
   const busy = useApp((s) => s.busy);
   if (draft === null) return <p className="muted">骨架草稿读不出来，可以重做这一步。</p>;
@@ -272,15 +305,10 @@ function SeedStep({ view, step }: { readonly view: WorkflowView; readonly step: 
     <div className="panel-form" role="form" aria-label="作品骨架草稿">
       <BookSeedFields seed={draft} onChange={setDraft} />
       <div className="form-actions">
-        <button
-          type="button"
-          className="primary"
-          disabled={busy || draft.outline.trim() === ''}
-          onClick={() => void (async () => (changed && !(await edit(view.run.id, step.idx, draft)) ? false : act(view.run.id, step.idx, 'adopt')))()}
-        >
+        <button type="button" className="primary" disabled={busy || draft.outline.trim() === ''} onClick={() => void (async () => (changed && !(await save(draft)) ? false : act(view.run.id, step.idx, 'adopt')))()}>
           采用骨架
         </button>
-        <button type="button" disabled={busy || !changed} onClick={() => void edit(view.run.id, step.idx, draft)}>
+        <button type="button" disabled={busy || !changed} onClick={() => void save(draft)}>
           保存修改
         </button>
       </div>
@@ -291,7 +319,7 @@ function SeedStep({ view, step }: { readonly view: WorkflowView; readonly step: 
 /** 等作者处理的卷纲：卷名、梗概、主线、卷末转折可以改，新人物与新伏笔可以删去；采用时先存修改。 */
 function OutlineStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const [draft, setDraft] = useState<VolumeOutline | null>(() => volumeOutlineOf(step));
-  const edit = useApp((s) => s.editWorkflowStep);
+  const save = useDraftSaver(view.run.id, step.idx, step.output, draft, outlinePayload);
   const act = useApp((s) => s.workflowStepAction);
   const busy = useApp((s) => s.busy);
   if (draft === null) return <p className="muted">卷纲读不出来，可以重做这一步。</p>;
@@ -349,15 +377,10 @@ function OutlineStep({ view, step }: { readonly view: WorkflowView; readonly ste
       )}
       {draft.payoffs.length === 0 ? null : <p className="muted">本卷要回收的伏笔：{draft.payoffs.join('、')}</p>}
       <div className="form-actions">
-        <button
-          type="button"
-          className="primary"
-          disabled={busy || draft.title.trim() === ''}
-          onClick={() => void (async () => (changed && !(await edit(view.run.id, step.idx, { ...draft, mainline: draft.mainline.map((m) => m.trim()).filter((m) => m !== '') })) ? false : act(view.run.id, step.idx, 'adopt')))()}
-        >
+        <button type="button" className="primary" disabled={busy || draft.title.trim() === ''} onClick={() => void (async () => (changed && !(await save(draft)) ? false : act(view.run.id, step.idx, 'adopt')))()}>
           采用卷纲
         </button>
-        <button type="button" disabled={busy || !changed} onClick={() => void edit(view.run.id, step.idx, { ...draft, mainline: draft.mainline.map((m) => m.trim()).filter((m) => m !== '') })}>
+        <button type="button" disabled={busy || !changed} onClick={() => void save(draft)}>
           保存修改
         </button>
       </div>

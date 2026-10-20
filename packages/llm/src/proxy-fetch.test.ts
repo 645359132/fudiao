@@ -160,6 +160,18 @@ describe('经凭据代理的 fetch', () => {
     const reader = (await after).body?.getReader();
     sent[1]?.emit({ event: 'failed', message: '读取超时' });
     await expect(reader?.read()).rejects.toThrow('读取超时');
+
+    // 读到一半失败：失败之前已经到达、还没读走的数据块先交给读取方，读完才报错（适配器据此拿到已收到的部分）。
+    const mid = fetch('https://a.test/z');
+    await tick();
+    sent[2]?.emit({ event: 'head', status: 200, headers: [] });
+    sent[2]?.emit({ event: 'chunk', data: [1, 2] });
+    sent[2]?.emit({ event: 'chunk', data: [3] });
+    sent[2]?.emit({ event: 'failed', message: '连接断开' });
+    const midReader = (await mid).body?.getReader();
+    expect(Array.from((await midReader?.read())?.value ?? [])).toEqual([1, 2]);
+    expect(Array.from((await midReader?.read())?.value ?? [])).toEqual([3]);
+    await expect(midReader?.read()).rejects.toThrow('连接断开');
   });
 });
 

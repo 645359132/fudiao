@@ -250,6 +250,27 @@ describe('写作工作流（B78）', () => {
     expect(out.view.steps[1]?.note).toBe('没有写想法，沿用作品已有的大纲与人物');
   });
 
+  it('采用到一半失败：已写进作品的部分改回，这一步仍等作者，再采用照常', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)), reply(JSON.stringify(draft)));
+    value(await app.advanceWorkflow(run.run.id));
+    value(await app.adoptWorkflowStep(run.run.id, 1));
+    value(await app.advanceWorkflow(run.run.id));
+    // 章节建好以后写计划时出错：新建的章节移入回收站，伏笔也改回。
+    deps.sqlFaults.push(/INSERT INTO chapter_plan/);
+    const failed = await app.adoptWorkflowStep(run.run.id, 2);
+    expect(failed).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('已写入的部分已改回') } });
+    const work = value(await app.reloadWork());
+    expect(work.chapters).toEqual([]);
+    expect(work.trashed.map((c) => c.title).sort()).toEqual(['夜叩', '揭晓']);
+    expect(value(await app.planningView()).foreshadows).toEqual([]);
+    expect(value(await app.workflowRun(run.run.id)).steps[2]?.status).toBe('awaiting_author');
+    const adopted = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(adopted.steps[2]?.status).toBe('done');
+    expect(value(await app.reloadWork()).chapters.map((c) => c.title)).toEqual(['夜叩', '揭晓']);
+  });
+
   it('两处同时采用同一步（成书页与 AI 助手）：只有一处采用成，草稿只写进作品一次', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));

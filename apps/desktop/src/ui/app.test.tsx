@@ -2014,7 +2014,13 @@ describe('写作工作流的界面（B78）', () => {
     const title = within(skeleton).getByRole('textbox', { name: '作品名' });
     await user.clear(title);
     await user.type(title, '夜当');
-    await user.click(within(skeleton).getByRole('button', { name: '采用骨架' }));
+    // 没保存就去看别的步骤再回来：改过的作品名还在（切走时自动保存）。
+    await user.click(within(page).getByRole('button', { name: /检查模型/ }));
+    await within(page).findByRole('region', { name: '第 1 步：检查模型' });
+    await user.click(within(page).getByRole('button', { name: /^2大纲与人物/ }));
+    const back = await within(await within(page).findByRole('region', { name: '第 2 步：大纲与人物' })).findByRole('form', { name: '作品骨架草稿' });
+    await waitFor(() => expect(within(back).getByRole('textbox', { name: '作品名' })).toHaveProperty('value', '夜当'));
+    await user.click(within(back).getByRole('button', { name: '采用骨架' }));
     await waitFor(() => expect(store.getState().work?.project).toMatchObject({ title: '夜当', outline: seed.outline }));
 
     const plan = {

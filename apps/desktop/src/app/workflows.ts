@@ -1310,7 +1310,16 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     if (!claimed.ok) return err(claimed.error.code === 'conflict' ? invalid('这一步刚被采用或改过（可能是 AI 助手或“一路做完”）：重新打开成书页再看') : repo(claimed.error));
     const before = spec.kind === 'draft' ? await tracker.capture() : null;
     const adopted = await spec.adopt(contextFor(def, data, idx, env, { value: EMPTY_USAGE }, undefined), row.output);
-    if (!adopted.ok) return adopted;
+    if (!adopted.ok) {
+      // 采用到一半失败（例如作者同时改了某条伏笔）：已经写进作品的部分按差别改回，不留下半套章节或人物；之后又改过的不动并写明。
+      const now = before === null ? null : await tracker.capture();
+      if (before === null || now === null) return adopted;
+      const partial = tracker.diff(before, now);
+      if (partial.length === 0) return adopted;
+      const undone = await tracker.undo(partial);
+      const note = undone.ok ? `；已写入的部分已改回${undone.value.skipped.length > 0 ? `（没有改回：${undone.value.skipped.slice(0, 3).join('；')}）` : ''}` : '；已写入的部分没有改回成';
+      return err(invalid(`${describeError(adopted.error)}${note}`));
+    }
     const after = before === null ? null : await tracker.capture();
     const changes = before === null || after === null ? null : tracker.diff(before, after);
     if (typeof adopted.value === 'string') return ok({ note: adopted.value, changes });
@@ -1325,6 +1334,19 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     changes: adopted.changes,
     ...(adopted.output !== undefined && { output: adopted.output }),
   });
+
+  /**
+   * 执行结束后写回这一步：先重新读取（执行期间用量写回不改版本，但作者可能放弃了运行、助手可能动过这一步）；
+   * 版本不符时再读一次重试，不让这一步因为一次冲突留在“进行中”。
+   */
+  async function applyAfterRun(port: SqlPort, runId: string, event: StepEvent, extra: Readonly<Record<number, StepPatch>>): Promise<Result<WorkflowRunWithSteps, AppError>> {
+    for (let attempt = 0; ; attempt++) {
+      const current = await load(port, runId);
+      if (!current.ok) return current;
+      const saved = await apply(port, current.value, event, extra);
+      if (saved.ok || attempt > 0 || saved.error.code !== 'repo' || saved.error.error.code !== 'conflict') return saved;
+    }
+  }
 
   /** 执行第 idx 步（它已是下一步）：开始 → 执行 → 产出（或出错、中断）；“一路做完”时草稿直接采用。 */
   async function runStep(port: SqlPort, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv, prices: Prices | undefined): Promise<Result<WorkflowRunWithSteps, AppError>> {
@@ -1360,8 +1382,6 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       // 用例以 Result 表达预期错误；这里只兜住意外的异常，这一步记为出错，不让推进停在“进行中”。
       result = err(invalid(`意外的错误：${e instanceof Error ? e.message : String(e)}`));
     }
-    const current = await load(port, data.run.id);
-    if (!current.ok) return current;
     const finished = { finishedAt: deps.clock.now(), usage: usage.value };
     if (!result.ok) {
       const stopped = env.signal?.aborted === true;
@@ -1370,14 +1390,14 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         : budgetHit
           ? `已用 $${(spentBefore + usage.value.cost).toFixed(3)}，达到预算上限 $${budget ?? 0}，停在这一步中途；提高上限后继续`
           : describeError(result.error);
-      return apply(port, current.value, { type: stopped || budgetHit || result.error.code === 'interrupted' ? 'interrupt' : 'fail', idx }, { [idx]: { ...finished, note } });
+      return applyAfterRun(port, data.run.id, { type: stopped || budgetHit || result.error.code === 'interrupted' ? 'interrupt' : 'fail', idx }, { [idx]: { ...finished, note } });
     }
     const output = result.value.output;
-    if (spec.kind === 'manual') return apply(port, current.value, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, note: result.value.note } });
-    if (spec.kind !== 'draft' || result.value.settled === true) return apply(port, current.value, { type: 'produced', idx, waitForAuthor: false }, { [idx]: { ...finished, output, note: result.value.note } });
+    if (spec.kind === 'manual') return applyAfterRun(port, data.run.id, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, note: result.value.note } });
+    if (spec.kind !== 'draft' || result.value.settled === true) return applyAfterRun(port, data.run.id, { type: 'produced', idx, waitForAuthor: false }, { [idx]: { ...finished, output, note: result.value.note } });
     const confirmNote = spec.confirm === undefined ? null : await spec.confirm(c, output);
-    const produced = await apply(port, current.value, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, edited: false, changes: null, note: confirmNote ?? result.value.note } });
-    if (!produced.ok || current.value.run.mode !== 'auto' || confirmNote !== null) return produced;
+    const produced = await applyAfterRun(port, data.run.id, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, edited: false, changes: null, note: confirmNote ?? result.value.note } });
+    if (!produced.ok || produced.value.run.mode !== 'auto' || confirmNote !== null) return produced;
     // 一路做完：草稿直接采用；采用不成时停在这一步，草稿还在。
     const adopted = await adoptStep(port, def, produced.value, idx, env);
     const again = await load(port, data.run.id);

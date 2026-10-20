@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { err, ok, ulid, type Result } from '@fudiao/shared';
 import { createProxyFetch, type NetTransport, type RetryPolicy } from '@fudiao/llm';
 import { fakeFetch, fakeNet, type FakeResponse } from '@fudiao/llm/testing';
-import type { SqlPort } from '@fudiao/store';
+import type { SqlPort, Statement } from '@fudiao/store';
 import { APP_DB_FILE, appMigrationsDir, loadMigrations, openProjectDb, PROJECT_DB_FILE, type ProjectDb } from '@fudiao/store/node';
 import { buildAdapter } from '../app/model-services';
 import type { AppDeps, BackupInfo, BackupKind, KeyHeader, PackageFile } from '../app/ports';
@@ -49,6 +49,8 @@ export type TestDeps = AppDeps & {
   readonly beforeLlm: ((() => Promise<void>) | null)[];
   /** 到达“模型服务”的请求（经模拟的凭据代理注入凭据之后）。 */
   readonly llmRequests: { url: string; headers: Record<string, string>; body: unknown }[];
+  /** 作品库写入的故障注入：下一个有语句匹配的事务以 sql_error 失败（用完即去掉），模拟写到一半出错。 */
+  readonly sqlFaults: RegExp[];
   readonly limits: (readonly (readonly [string, number])[])[];
   dispose(): Promise<void>;
 };
@@ -112,9 +114,19 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     };
   })();
   // 与桌面端一样，端口不绑定某一个连接：恢复备份后换了连接，同一个端口照常可用。
+  const sqlFaults: RegExp[] = [];
   const port: SqlPort = {
     query: (sql, params) => (current === null ? Promise.resolve(err({ code: 'not_open' })) : current.query(sql, params)),
-    transaction: (statements) => (current === null ? Promise.resolve(err({ code: 'not_open' })) : current.transaction(statements)),
+    transaction: (statements: readonly Statement[]) => {
+      if (current === null) return Promise.resolve(err({ code: 'not_open' }));
+      const fault = sqlFaults[0];
+      const hit = fault === undefined ? -1 : statements.findIndex((s) => fault.test(s.sql));
+      if (fault !== undefined && hit >= 0) {
+        sqlFaults.shift();
+        return Promise.resolve(err({ code: 'sql_error', index: hit, detail: '测试注入的写入故障' }));
+      }
+      return current.transaction(statements);
+    },
   };
   const backupDir = () => join(currentDir, 'backups');
   const listBackups = (): BackupInfo[] => {
@@ -148,6 +160,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     llmResponses,
     beforeLlm,
     llmRequests,
+    sqlFaults,
     limits,
     // 测试结束时关闭作品库与设置库，临时目录才能删除。
     async dispose() {
