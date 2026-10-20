@@ -14,6 +14,7 @@ import {
   moveChapter,
   updateVolume,
   listVolumes,
+  trashChapter,
   createForeshadow,
   deleteChapterPlan,
   deleteForeshadow,
@@ -418,15 +419,29 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       const chapters = await listChapters(port, 'normal');
       if (!chapters.ok) return err(repo(chapters.error));
       let after: string | null = chapters.value.filter((c) => c.volumeId === volumeId).at(-1)?.id ?? null;
-      const ids: string[] = [];
+      const created: { readonly id: string; readonly version: number }[] = [];
+      // 章节建了、计划没写成（例如作者同时改了某条伏笔）：新建的章节都还没有正文，移入回收站，再采用时不会多出一套章。
+      const undo = async () => {
+        for (const c of created) await trashChapter(port, c.id, c.version, ctx());
+      };
       for (const planned of draft.chapters) {
-        const created = await createChapter(port, { id: deps.ids.next(), title: planned.title.trim() || '未命名章节', volumeId, ...(after !== null && { after }) }, ctx());
-        if (!created.ok) return err(repo(created.error));
-        ids.push(created.value.id);
-        after = created.value.id;
+        const made = await createChapter(port, { id: deps.ids.next(), title: planned.title.trim() || '未命名章节', volumeId, ...(after !== null && { after }) }, ctx());
+        if (!made.ok) {
+          await undo();
+          return err(repo(made.error));
+        }
+        created.push({ id: made.value.id, version: made.value.version });
+        after = made.value.id;
       }
-      const written = await writeDraftPlans(port, draft, ids);
-      if (!written.ok) return written;
+      const written = await writeDraftPlans(
+        port,
+        draft,
+        created.map((c) => c.id),
+      );
+      if (!written.ok) {
+        await undo();
+        return written;
+      }
       const result = await view(port);
       return result.ok ? ok({ view: result.value, unmatchedCast: written.value }) : result;
     },

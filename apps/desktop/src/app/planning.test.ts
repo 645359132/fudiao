@@ -142,6 +142,19 @@ describe('采用草稿', () => {
     expect(again.chapters[0]!.plan).toMatchObject({ goal: '林舟当玉被压价（改）', version: 2 });
   });
 
+  it('给一卷采用章节计划时计划没写成：新建的章节移入回收站，再采用不会多出一套章', async () => {
+    const { app } = await setup();
+    const volume = value(await app.createVolume('第二卷')).volumes.at(-1)!;
+    // target_words 是 STRICT 表的整数列：小数写不进去，计划在建完章节之后写入失败。
+    const broken = { ...draft, chapters: draft.chapters.map((c) => ({ ...c, targetWords: 1.5 })) };
+    expect((await app.applyVolumeDraft(broken, volume.id)).ok).toBe(false);
+    const work = value(await app.reloadWork());
+    expect(work.chapters.map((c) => c.title)).toEqual(['第一章 夜叩']);
+    expect(work.trashed.map((c) => c.title).sort()).toEqual(['夜叩', '第二章 夜雨', '第三章 揭晓'].sort());
+    const applied = value(await app.applyVolumeDraft(draft, volume.id));
+    expect(applied.view.chapters.filter((c) => c.chapter.volumeId === volume.id)).toHaveLength(3);
+  });
+
   it('账本里已有、还没有定章节的伏笔：按草稿补上埋设与回收的章节；作者定过的章节不改', async () => {
     const { app } = await setup();
     const blank = { content: '', plantAnchor: null, payoffAnchor: null, status: 'planned' as const };
