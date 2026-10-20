@@ -53,6 +53,13 @@ describe('模型审核问题的定位', () => {
     ]);
   });
 
+  it('说明与建议里的段落标签换成段落开头，依据标签按给出的称呼换（M6-08 第 5 项）', () => {
+    const named: ReviewRefs = { ...refs, names: new Map([['E1', '林舟']]) };
+    const { issues } = resolveModelIssues([draft({ description: 'P2 与 P1 衔接不上，E1 的反应没写', suggestion: '在[P1]后补一句；S1 不动' })], named);
+    expect(issues[0]?.description).toBe('“钱四说：这玉是你……”一段 与 “林舟推开当铺的门。”一段 衔接不上，林舟 的反应没写');
+    expect(issues[0]?.suggestion).toBe('在“林舟推开当铺的门。”一段后补一句；S1 不动');
+  });
+
   it('没有引文的问题针对整段，锚在段落上', () => {
     const { issues } = resolveModelIssues([draft({ quote: '', kind: 'off_plan', evidence: ['plan'] })], refs);
     expect(issues[0]?.anchor).toEqual({ paragraphId: 'pb', paragraphVersion: 1, start: 0, end: 0, quote: '' });

@@ -1,5 +1,6 @@
 // 人物小传与关系网补全（需求 B83，施工文档 M6-06）：从各章的长篇记忆找出要补的人物与关系，生成小传与关系的草稿；
 // 作者逐项勾选、修改后采用。只增不改：锁定的设定不动，已有的说明不覆盖、只在后面补充，同样的关系不重复建。
+// 模型在小传与关系说明里照抄的章节标签（C2、C3……）在草稿里就换成章节名，作者看到、采用的都是章节名。
 import type { CallOptions } from '@fudiao/llm';
 import { CastCompletionOutput, renderCastCompletion } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
@@ -17,7 +18,7 @@ import {
   type RepoError,
   type SqlPort,
 } from '@fudiao/store';
-import { castGaps, type CastGap } from '@fudiao/writing';
+import { castGaps, chapterMention, replaceLabels, type CastGap } from '@fudiao/writing';
 import { z } from 'zod';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
@@ -145,6 +146,8 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
       const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: CAST_OUTPUT_TOKENS, effort: 'medium', stepKey }, CastCompletionOutput, options);
       if (!result.ok) return result;
       const chapterOf = new Map(rows.map((r) => [r.label, r.chapter.id]));
+      const chapterNames = new Map(written.map((c, i) => [`C${i + 1}`, chapterMention(c.title, i)]));
+      const named = (text: string) => replaceLabels(text, chapterNames);
       const label = (l: string) => chapterOf.get(l.trim().toUpperCase()) ?? null;
       const known = new Map(characters.flatMap((c) => [c.name, ...c.aliases].map((n) => [n.trim(), c] as const)));
       let dropped = 0;
@@ -158,7 +161,7 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
           dropped += 1;
           continue;
         }
-        drafted.push({ name: entity?.name ?? name, entityId: entity?.id ?? null, identity: c.identity, look: c.look, personality: c.personality, motive: c.motive, voice: c.voice, firstChapterId: label(c.firstChapter), basis, selected: true });
+        drafted.push({ name: entity?.name ?? name, entityId: entity?.id ?? null, identity: named(c.identity), look: named(c.look), personality: named(c.personality), motive: named(c.motive), voice: named(c.voice), firstChapterId: label(c.firstChapter), basis, selected: true });
       }
       const people = new Set([...known.keys(), ...drafted.map((d) => d.name)]);
       const existing = new Set(relations.map((r) => relationKey(nameOf.get(r.fromId) ?? '', nameOf.get(r.toId) ?? '', r.label, r.mutual)));
@@ -172,7 +175,7 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
           dropped += 1;
           continue;
         }
-        links.push({ from, to, category: r.category, label: r.label.trim(), mutual: r.mutual, description: r.description.trim(), secret: r.secret, fromChapterId: label(r.fromChapter), basis, selected: true });
+        links.push({ from, to, category: r.category, label: r.label.trim(), mutual: r.mutual, description: named(r.description.trim()), secret: r.secret, fromChapterId: label(r.fromChapter), basis, selected: true });
       }
       return ok({ characters: drafted, relationships: links, dropped });
     },

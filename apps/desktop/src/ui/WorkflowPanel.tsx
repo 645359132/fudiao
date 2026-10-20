@@ -425,7 +425,7 @@ function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly st
         {draft.suspects.map((x, i) => (
           <li key={`${x.earlierId}-${x.laterId}-${i}`}>
             <span>
-              {title(x.earlierId)} → {title(x.laterId)}：{x.about}
+              {x.earlierId === x.laterId ? `${title(x.laterId)}之内` : `${title(x.earlierId)} → ${title(x.laterId)}`}：{x.about}
             </span>
             {waiting ? (
               <button type="button" className="ghost" disabled={busy} aria-label={`删去疑点 ${i + 1}`} onClick={() => void edit(view.run.id, step.idx, { ...draft, suspects: draft.suspects.filter((_, j) => j !== i) })}>
@@ -619,7 +619,7 @@ function DiagnosisView({ step }: { readonly step: WorkflowStepView }) {
   );
 }
 
-/** 开篇打磨前后的对比：问题数与几个数字。 */
+/** 开篇打磨前后的对比：问题数（解决、忽略、新提几条）与几个数字。 */
 function OpeningCompareView({ step }: { readonly step: WorkflowStepView }) {
   const compare = openingCompareOf(step);
   if (compare === null) return null;
@@ -641,6 +641,12 @@ function OpeningCompareView({ step }: { readonly step: WorkflowStepView }) {
             <td>{r.title}</td>
             <td>
               {r.before.issues} → {r.after.issues}
+              {r.changes === undefined ? null : (
+                <span className="muted">
+                  （解决 {r.changes.resolved}
+                  {r.changes.ignored > 0 ? `、忽略 ${r.changes.ignored}` : ''}、新提 {r.changes.added}）
+                </span>
+              )}
             </td>
             <td>
               {at(r.before.metrics.protagonistAt)} → {at(r.after.metrics.protagonistAt)}

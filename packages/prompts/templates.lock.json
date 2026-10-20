@@ -28,8 +28,8 @@
     "sha256": "39eff4318d9d6ef269dd9caec8b80bf1b534a29cffdb7cc930a72e4fbb9a7880"
   },
   "book_audit": {
-    "version": "1",
-    "sha256": "c91df9851e4dc0b613638b84113b2c7a0dff5f819dc0aedd8e33ff2867584b1b"
+    "version": "2",
+    "sha256": "73a9fd28db68622632e962b3f799ea35eb550b5eaf2114a428a87044c2e034b0"
   },
   "book_seed": {
     "version": "3",
@@ -60,8 +60,8 @@
     "sha256": "a1ac482944828fa1df440a12e5474d5943447433620738a4ab4aab6f447280b7"
   },
   "continuity_check": {
-    "version": "1",
-    "sha256": "cb6f8d9e5e997bc46af68244478b0726c971b404f5d81011659c4c723d9a8238"
+    "version": "2",
+    "sha256": "108503438d448de9e32e45c3dd9d0e42bc1bd8c48bb7b628dd31efb23d91840e"
   },
   "director_proposal": {
     "version": "4",

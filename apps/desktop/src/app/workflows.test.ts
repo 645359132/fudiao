@@ -7,7 +7,7 @@ import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import type { BookSeed } from './quick-book';
 import { createAppService } from './service';
-import type { WorkflowHooks } from './workflows';
+import { openingIssueChanges, type WorkflowHooks } from './workflows';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -391,14 +391,15 @@ describe('全书体检（B80）', () => {
     expect(first1.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'awaiting_author', 'pending', 'pending']);
     expect(first1.view.steps[0]?.note).toBe('整理了 2 章的长篇记忆');
     expect(first1.view.steps[1]?.note).toContain('审完了 2 章');
-    expect(first1.view.steps[3]?.output).toMatchObject({ suspects: [{ earlierId: first, laterId: second, kind: 'character' }], dropped: 1 });
+    // 说明里的章节标签换成章节名。
+    expect(first1.view.steps[3]?.output).toMatchObject({ suspects: [{ earlierId: first, laterId: second, kind: 'character', about: '《第一章》 钱四进了大牢，《第二章》 他却在当铺' }], dropped: 1 });
 
     value(await app.adoptWorkflowStep(run.run.id, 3));
     deps.llmResponses.push(
       reply(
         JSON.stringify({
           issues: [
-            { paragraph: 'P1', quote: '钱四在柜台后拨着算盘', kind: 'character', severity: 'high', evidence: ['A1'], description: '第一章钱四已被押进大牢', suggestion: '交代他怎么出来的' },
+            { paragraph: 'P1', quote: '钱四在柜台后拨着算盘', kind: 'character', severity: 'high', evidence: ['A1'], description: 'A1 钱四已被押进大牢，P1 却在柜台后', suggestion: '在[P1]前交代他怎么出来的' },
             // 没有前一章的段落作依据的丢弃。
             { paragraph: 'P1', quote: '招呼客人', kind: 'pacing', severity: 'low', evidence: [], description: '无关', suggestion: '' },
           ],
@@ -413,6 +414,8 @@ describe('全书体检（B80）', () => {
     const continuity = issues.filter((i) => i.source === 'continuity');
     expect(continuity).toHaveLength(1);
     expect(continuity[0]?.evidenceText).toEqual(['《第一章》的段落：官差把钱四押进了大牢。']);
+    // 说明与建议里的段落标签换成段落开头（前一章的带上章节名）。
+    expect(continuity[0]).toMatchObject({ description: '《第一章》“官差把钱四押进了……”一段 钱四已被押进大牢，“钱四在柜台后拨着……”一段 却在柜台后', suggestion: '在“钱四在柜台后拨着……”一段前交代他怎么出来的' });
 
     // 单章重新审核不冲掉体检的问题（来源不同）。
     deps.llmResponses.push(noIssues());
@@ -451,6 +454,99 @@ describe('全书体检（B80）', () => {
     deps.llmResponses.push(noIssues());
     expect(value(await app.advanceWorkflow(part.run.id)).view.state).toBe('done');
     expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toHaveLength(2);
+    void first;
+  });
+
+  it('一章之内前后对不上的疑点（前后同一章）：只读这一章，依据是这一章前文的另一段，问题记为跨章连贯检查', async () => {
+    const { deps, app } = await setup();
+    const { first } = await twoChapters(app);
+    const second = value(await app.createChapter('第三章')).chapters.find((c) => c.title === '第三章')!.id;
+    const opened = value(await app.openChapter(second));
+    value(
+      await app.saveChapter(
+        second,
+        opened.saved,
+        [
+          { id: 'p-pillow', text: '林舟把玉压在枕头底下，出了门。', source: 'handwritten' },
+          { id: 'p-pocket', text: '路上他摸了摸怀里的玉。', source: 'handwritten' },
+        ],
+        { splits: [], merges: [] },
+      ),
+    );
+    const run = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: null, to: null, rereview: false }, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(
+      memory('钱四被押进大牢。'),
+      memory('钱四在当铺招呼客人。'),
+      memory('林舟出门。'),
+      noIssues(),
+      noIssues(),
+      noIssues(),
+      reply(JSON.stringify({ suspects: [{ earlier: 'C3', later: 'C3', kind: 'setting_conflict', about: 'C3 玉压在枕头底下，后文又在怀里', severity: 'medium' }] })),
+    );
+    const drafted = value(await app.advanceWorkflow(run.run.id));
+    expect(drafted.view.steps[3]?.output).toMatchObject({ suspects: [{ earlierId: second, laterId: second, about: '《第三章》 玉压在枕头底下，后文又在怀里' }], dropped: 0 });
+
+    value(await app.adoptWorkflowStep(run.run.id, 3));
+    deps.llmResponses.push(
+      reply(
+        JSON.stringify({
+          issues: [
+            { paragraph: 'P2', quote: '摸了摸怀里的玉', kind: 'setting_conflict', severity: 'medium', evidence: ['P1'], description: 'P1 玉压在枕头底下', suggestion: '改成摸了摸空空的怀里' },
+            // 依据只有自己这一段的丢弃。
+            { paragraph: 'P2', quote: '路上', kind: 'timeline', severity: 'low', evidence: ['P2'], description: '自相矛盾', suggestion: '' },
+          ],
+        }),
+      ),
+    );
+    const done = value(await app.advanceWorkflow(run.run.id));
+    expect(done.view.steps[4]?.output).toMatchObject({ issues: 1, dropped: 1 });
+    const body = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
+    for (const part of ['一章之内的一处疑点', '本章：第三章', '[P1] 林舟把玉压在枕头底下，出了门。']) expect(body).toContain(part);
+    for (const part of ['前一章：', '官差把钱四押进了大牢']) expect(body).not.toContain(part);
+    const continuity = value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity');
+    expect(continuity).toHaveLength(1);
+    expect(continuity[0]).toMatchObject({ description: '“林舟把玉压在枕头……”一段 玉压在枕头底下', evidenceText: ['本章段落：林舟把玉压在枕头底下，出了门。'] });
+    expect(value(await app.reviewIssues(first)).filter((i) => i.source === 'continuity')).toEqual([]);
+
+    // 前文那一段改过：问题过期。
+    const again = value(await app.openChapter(second));
+    value(await app.saveChapter(second, again.saved, [{ id: 'p-pillow', text: '林舟把玉揣进怀里，出了门。', source: 'handwritten' }, again.saved[1]!].map((p) => ({ id: p.id, text: p.text, source: 'handwritten' as const })), { splits: [], merges: [] }));
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toEqual([]);
+  });
+
+  it('只体检后面的章节时，范围首章之内的疑点定位出的问题补进去，首章原有的跨章问题不换', async () => {
+    const { deps, app } = await setup();
+    const { first, second } = await twoChapters(app);
+    const third = value(await app.createChapter('第三章')).chapters.find((c) => c.title === '第三章')!.id;
+    const openedThird = value(await app.openChapter(third));
+    value(await app.saveChapter(third, openedThird.saved, [{ id: 'p-third', text: '钱四锁了铺门。', source: 'handwritten' }], { splits: [], merges: [] }));
+    // 第二章再加一段：一章之内才有前后文。
+    const opened = value(await app.openChapter(second));
+    value(
+      await app.saveChapter(
+        second,
+        opened.saved,
+        [...opened.saved.map((p) => ({ id: p.id, text: p.text, source: 'handwritten' as const })), { id: 'p-fresh', text: '他从牢里出来还不到一天。', source: 'handwritten' }],
+        { splits: [], merges: [] },
+      ),
+    );
+    // 全书体检：第二章记下一条跨章问题。
+    const full = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: null, to: null, rereview: false }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(memory('钱四被押进大牢。'), memory('钱四在当铺招呼客人。'), memory('钱四锁门。'), noIssues(), noIssues(), noIssues());
+    deps.llmResponses.push(reply(JSON.stringify({ suspects: [{ earlier: 'C1', later: 'C2', kind: 'character', about: '大牢与当铺', severity: 'high' }] })));
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [{ paragraph: 'P1', quote: '钱四在柜台后', kind: 'character', severity: 'high', evidence: ['A1'], description: '第一章钱四已被押进大牢', suggestion: '' }] })));
+    expect(value(await app.advanceWorkflow(full.run.id)).view.state).toBe('done');
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toHaveLength(1);
+
+    // 只体检第二、三章：第二章是范围首章，它与第一章那一对这次没有查，原有的问题不换；一章之内的疑点定位出的问题补进去。
+    const part = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: second, to: third, rereview: false }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(noIssues(), noIssues(), reply(JSON.stringify({ suspects: [{ earlier: 'C1', later: 'C1', kind: 'timeline', about: 'C1 招呼客人，后文又说刚出牢', severity: 'medium' }] })));
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [{ paragraph: 'P2', quote: '还不到一天', kind: 'timeline', severity: 'medium', evidence: ['P1'], description: 'P1 已在招呼客人', suggestion: '' }] })));
+    expect(value(await app.advanceWorkflow(part.run.id)).view.state).toBe('done');
+    expect(deps.llmResponses).toHaveLength(0);
+    const issues = value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity');
+    expect(issues.map((i) => i.kind).sort()).toEqual(['character', 'timeline']);
+    expect(issues.find((i) => i.kind === 'timeline')).toMatchObject({ description: '“钱四在柜台后拨着……”一段 已在招呼客人' });
     void first;
   });
 
@@ -583,9 +679,23 @@ describe('开篇打磨（B81）', () => {
     deps.llmResponses.push(reply(JSON.stringify({ issues: [] })), reply(JSON.stringify({ issues: [] })));
     const done = value(await app.advanceWorkflow(run.run.id));
     expect(done.view.state).toBe('done');
-    expect(done.view.steps[4]?.note).toBe('开篇问题从 1 个变为 0 个');
-    expect(done.view.steps[4]?.output).toMatchObject({ rows: [{ title: '第一章', before: { issues: 1, metrics: { protagonistAt: 10 } }, after: { issues: 0, metrics: { protagonistAt: 0 } } }, { title: '第二章' }] });
+    expect(done.view.steps[4]?.note).toBe('开篇问题从 1 个变为 0 个：解决 1 个，复诊新提 0 个');
+    expect(done.view.steps[4]?.output).toMatchObject({
+      rows: [
+        { title: '第一章', before: { issues: 1, metrics: { protagonistAt: 10 } }, after: { issues: 0, metrics: { protagonistAt: 0 } }, changes: { resolved: 1, ignored: 0, kept: 0, added: 0 } },
+        { title: '第二章', changes: { resolved: 0, added: 0 } },
+      ],
+    });
     expect(value(await app.reviewIssues(first)).filter((i) => i.source === 'opening')).toEqual([]);
+  });
+
+  it('对比前后：同一段落、同一种类算同一条；复诊没再提的算解决（作者忽略的单算），诊断时没有的算新提', () => {
+    const issue = (paragraphId: string, kind: string, description = '说明') => ({ paragraphId, kind, description });
+    const before = [issue('p1', 'pacing', '突然插入'), issue('p2', 'pacing'), issue('p3', 'character'), issue('p4', 'ai_tone', '章末总结')];
+    // p1 写手改过、不再提；p2 换了说法仍提；p3 作者忽略；p4 拆成了别的段落，说明相同仍提。复诊新提 p9。
+    const after = [issue('p2', 'pacing', '换了说法'), issue('p5', 'ai_tone', '章末总结'), issue('p9', 'pacing', '结尾来回犹豫')];
+    expect(openingIssueChanges(before, after, [issue('p3', 'character')])).toEqual({ resolved: 1, ignored: 1, kept: 2, added: 1 });
+    expect(openingIssueChanges([], [], [])).toEqual({ resolved: 0, ignored: 0, kept: 0, added: 0 });
   });
 
   it('最前面的几章还没有正文时第一步说明原因', async () => {
@@ -624,7 +734,7 @@ describe('人物小传与关系网补全（B83）', () => {
       reply(
         JSON.stringify({
           characters: [
-            { name: '钱四', isNew: false, identity: '当铺掌柜', look: '正文未交代', personality: '精明', motive: '想弄清玉的来历', voice: '说话慢', firstChapter: 'C1', basis: ['C1'] },
+            { name: '钱四', isNew: false, identity: '当铺掌柜', look: '正文未交代', personality: '精明', motive: 'C2 想弄清玉的来历', voice: '说话慢', firstChapter: 'C1', basis: ['C1'] },
             { name: '阿青', isNew: true, identity: '林舟的同乡', look: '', personality: '直爽', motive: '', voice: '', firstChapter: 'C2', basis: ['C2'] },
             { name: '王掌柜', isNew: false, identity: '改不得', look: '', personality: '', motive: '', voice: '', firstChapter: '', basis: ['C1'] },
             { name: '林舟', isNew: false, identity: '书生', look: '', personality: '', motive: '', voice: '', firstChapter: 'C1', basis: ['C9'] },
@@ -632,7 +742,7 @@ describe('人物小传与关系网补全（B83）', () => {
             { name: '钱掌柜', isNew: false, identity: '掌柜', look: '', personality: '', motive: '', voice: '', firstChapter: 'C1', basis: ['C1'] },
           ],
           relationships: [
-            { from: '钱四', to: '林舟', category: 'other', label: '债主', mutual: false, description: '林舟押玉欠了钱', secret: false, fromChapter: 'C1', basis: ['C1'] },
+            { from: '钱四', to: '林舟', category: 'other', label: '债主', mutual: false, description: '林舟在C1押玉欠了钱', secret: false, fromChapter: 'C1', basis: ['C1'] },
             { from: '阿青', to: '林舟', category: 'ally', label: '同乡', mutual: true, description: '', secret: false, fromChapter: '', basis: ['C2'] },
             // 互为的关系反过来写是同一条：丢弃。
             { from: '林舟', to: '阿青', category: 'ally', label: '同乡', mutual: true, description: '', secret: false, fromChapter: '', basis: ['C2'] },
@@ -651,6 +761,8 @@ describe('人物小传与关系网补全（B83）', () => {
       ['阿青', true],
     ]);
     expect(draft.relationships.map((r) => r.from)).toEqual(['钱四', '阿青']);
+    // 小传与关系说明里的章节标签换成章节名。
+    expect((draft.relationships[0] as { description?: string }).description).toBe('林舟在《第一章》押玉欠了钱');
     expect(draft.dropped).toBe(5);
 
     // 不要阿青：她的关系也建不了，写明原因。
@@ -659,7 +771,7 @@ describe('人物小传与关系网补全（B83）', () => {
     expect(adopted.steps[2]?.note).toContain('补充说明 1 个，新建关系 1 条');
     expect(adopted.steps[2]?.note).toContain('阿青与林舟的关系');
     const qian = value(await app.listEntities()).find((e) => e.name === '钱四')!;
-    expect(qian.description).toBe('身份：当铺掌柜；性格：精明；动机与目标：想弄清玉的来历；说话方式：说话慢；首次出场：《第一章》');
+    expect(qian.description).toBe('身份：当铺掌柜；性格：精明；动机与目标：《第二章》 想弄清玉的来历；说话方式：说话慢；首次出场：《第一章》');
     expect(value(await app.listEntities()).map((e) => e.name).sort()).toEqual(['林舟', '王掌柜', '钱四'].sort());
     const relations = value(await app.relationsView()).relationships;
     expect(relations.map((r) => [r.label, r.validFromChapterId])).toEqual([['债主', c1]]);

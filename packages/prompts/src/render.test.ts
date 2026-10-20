@@ -741,6 +741,30 @@ describe('全书体检的模板（B80）', () => {
     for (const part of ['只核对这一处疑点：C1 钱四被带走，C2 他却在柜台后', '- [E1] 钱四（人物）', '前一章：第一章 夜叩（较长，只给出开头与结尾）\n[A1] 官差把钱四押走了。', '后一章：第二章 夜雨\n[P1] 钱四在柜台后拨着算盘。']) {
       expect(text).toContain(part);
     }
+    expect(text).not.toContain('本章：');
+  });
+
+  it('continuity_check：同一章之内的疑点只给出这一章，依据是这一章前文的段落', () => {
+    const prompt = unwrap(
+      renderContinuityCheck({
+        title: '当铺夜谈',
+        about: '玉压在枕头底下出了门，后面又从怀里摸出玉',
+        entities: [],
+        same: true,
+        earlierTitle: '第二章 夜雨',
+        earlier: [],
+        earlierClipped: false,
+        laterTitle: '第二章 夜雨',
+        later: [
+          { label: 'P1', text: '林舟把玉压在枕头底下，出了门。' },
+          { label: 'P2', text: '他摸了摸怀里的玉。' },
+        ],
+        laterClipped: false,
+      }),
+    );
+    const text = fullText(prompt);
+    for (const part of ['一章之内的一处疑点', '这一章前文里与之矛盾的段落（P1、P2……，不能是 paragraph 那一段）', '本章：第二章 夜雨\n[P1] 林舟把玉压在枕头底下，出了门。\n[P2] 他摸了摸怀里的玉。']) expect(text).toContain(part);
+    for (const part of ['前一章：', '后一章：', 'A1、A2']) expect(text).not.toContain(part);
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 id: book_audit
-version: 1
+version: 2
 task: review
 output: BookAuditOutput
 ---
@@ -14,7 +14,7 @@ output: BookAuditOutput
   - 人物（character）：人物的身份、状态、能力、所知、与别人的关系前后对不上，而前文没有交代原因。例如已经死去或离开的人又出现，伤还没好就动武，已经知道的事又当作不知道，称呼与关系突然变了。
   - 时间线（timeline）：时间、先后顺序、人物所在的地点前后对不上。
   - 设定（setting_conflict）：与设定或已确认的事实矛盾，或前后两章对同一样东西、同一条规矩、同一个地方写得不一样。标了“锁定”的设定不能被正文改写。
-- 每条疑点：earlier 是前面那一章的标签（C1、C2……），later 是后面出现矛盾的那一章的标签（不能与 earlier 相同）；kind；about 写清哪里对不上，一两句，写具体的人、物与事，例如“C3 写钱四被关进大牢，C5 他却在当铺里招呼客人”；severity：high（会推翻后文的硬伤）、medium、low。
+- 每条疑点：earlier 是前面那一章的标签（C1、C2……），later 是后面出现矛盾的那一章的标签；同一章之内前后对不上（例如前面写玉压在枕头底下出了门，后面又从怀里摸出玉），earlier 与 later 写同一章的标签；kind；about 写清哪里对不上，一两句，写具体的人、物与事，例如“C3 写钱四被关进大牢，C5 他却在当铺里招呼客人”；severity：high（会推翻后文的硬伤）、medium、low。
 - 同一处矛盾只报一次，最多 {{limit}} 条，严重的在前。没有疑点时 suspects 为空数组。
 输出一个 JSON 对象：suspects 为疑点的数组。
 @@system cache

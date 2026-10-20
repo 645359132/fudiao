@@ -1,6 +1,8 @@
 // 全书体检的跨章连贯检查（需求 B80，施工文档 M6-03）：先由各章的长篇记忆找出可疑的两章（book_audit），
 // 再逐条读这两章的原文定位到段落（continuity_check），问题记为跨章连贯检查（continuity）的审核问题，
 // 锚在后一章的段落上，依据是前一章的段落（带当时的版本，那一段改过后问题过期）。
+// 前后是同一章的疑点（一章之内前后对不上）只读这一章，依据是这一章前文的另一段。
+// 模型在说明里照抄的章节与段落标签，写进作品前换成章节名与段落开头。
 import { createEntityMatcher } from '@fudiao/editor';
 import type { CallOptions } from '@fudiao/llm';
 import { BookAuditOutput, ChapterReviewOutput, renderBookAudit, renderContinuityCheck } from '@fudiao/prompts';
@@ -22,8 +24,10 @@ import {
   type RepoError,
   type SavedParagraph,
   type SqlPort,
+  addIssues,
+  type ReviewIssue,
 } from '@fudiao/store';
-import { dropHandled, paragraphLabel, resolveModelIssues, type ProgramIssue } from '@fudiao/writing';
+import { chapterMention, dropHandled, paragraphLabel, paragraphMention, replaceLabels, resolveModelIssues, type ProgramIssue } from '@fudiao/writing';
 import { z } from 'zod';
 import type { AppError } from './errors';
 import { ENTITY_KIND_LABEL } from './labels';
@@ -40,7 +44,7 @@ const MAX_CONTINUITY_ENTITIES = 30;
 const AUDIT_OUTPUT_TOKENS = 4_000 + THINKING_ALLOWANCE;
 const CONTINUITY_OUTPUT_TOKENS = 3_000 + THINKING_ALLOWANCE;
 
-/** 一处疑点：前后两章（标识）、类别、哪里对不上与严重程度。 */
+/** 一处疑点：前后两章（标识，一章之内的疑点两者相同）、类别、哪里对不上与严重程度。 */
 export const AuditSuspect = z.object({
   earlierId: z.string(),
   laterId: z.string(),
@@ -120,7 +124,7 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
 
     /**
      * 由各章的长篇记忆找出跨章的疑点（不写入作品）。没有长篇记忆的章节用作者写的章节梗概。
-     * 模型给的章节标签对不上、或前后颠倒的疑点丢弃，丢弃的条数一并返回。
+     * 模型给的章节标签对不上、或前后颠倒的疑点丢弃，丢弃的条数一并返回；前后是同一章的保留（一章之内的矛盾）。
      */
     async draftSuspects(chapterIds: readonly string[], stepKey: string, options: CallOptions = {}): Promise<Result<{ readonly suspects: AuditSuspect[]; readonly dropped: number }, AppError>> {
       const port = project();
@@ -180,27 +184,30 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
       const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: AUDIT_OUTPUT_TOKENS, effort: 'medium', stepKey }, BookAuditOutput, options);
       if (!result.ok) return result;
       const order = new Map(audited.map((c, i) => [c.id, i]));
+      const chapterNames = new Map(audited.map((c, i) => [`C${i + 1}`, chapterMention(c.title, i)]));
       const suspects: AuditSuspect[] = [];
       let dropped = 0;
       for (const s of result.value.value.suspects) {
         const earlierId = labels.get(s.earlier.trim().toUpperCase());
         const laterId = labels.get(s.later.trim().toUpperCase());
-        if (earlierId === undefined || laterId === undefined || (order.get(earlierId) ?? 0) >= (order.get(laterId) ?? 0) || s.about.trim() === '') {
+        if (earlierId === undefined || laterId === undefined || (order.get(earlierId) ?? 0) > (order.get(laterId) ?? 0) || s.about.trim() === '') {
           dropped += 1;
           continue;
         }
-        suspects.push({ earlierId, laterId, kind: s.kind, about: s.about.trim(), severity: s.severity });
+        suspects.push({ earlierId, laterId, kind: s.kind, about: replaceLabels(s.about.trim(), chapterNames), severity: s.severity });
       }
       return ok({ suspects, dropped });
     },
 
     /**
      * 读前后两章的原文核对一处疑点，定位到后一章的段落；依据须有前一章的段落，没有的丢弃。
+     * 前后是同一章时只读这一章，依据须有这一章里另一段（前文）。
      * 不写入作品，由 saveContinuityIssues 一并写。
      */
     async locateSuspect(suspect: AuditSuspect, stepKey: string, options: CallOptions = {}): Promise<Result<LocatedSuspect, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
+      const same = suspect.earlierId === suspect.laterId;
       const [work, chapters, entities, earlierParagraphs, laterParagraphs] = await Promise.all([
         getProject(port),
         listChapters(port, 'normal'),
@@ -216,15 +223,18 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
       const earlierChapter = chapters.value.find((c) => c.id === suspect.earlierId);
       const laterChapter = chapters.value.find((c) => c.id === suspect.laterId);
       if (earlierChapter === undefined || laterChapter === undefined) return err(settings('疑点涉及的章节已经不在了'));
-      const earlier = clipParagraphs(
-        earlierParagraphs.value.filter((p) => p.text.trim() !== ''),
-        CONTINUITY_CHAPTER_CHARS,
-      );
+      const earlier = same
+        ? { kept: [], clipped: false }
+        : clipParagraphs(
+            earlierParagraphs.value.filter((p) => p.text.trim() !== ''),
+            CONTINUITY_CHAPTER_CHARS,
+          );
+      // 一章之内的疑点：这一章给两倍的字数（只给一章）。
       const later = clipParagraphs(
         laterParagraphs.value.filter((p) => p.text.trim() !== ''),
-        CONTINUITY_CHAPTER_CHARS,
+        same ? CONTINUITY_CHAPTER_CHARS * 2 : CONTINUITY_CHAPTER_CHARS,
       );
-      if (later.kept.length === 0 || earlier.kept.length === 0) return ok({ laterId: suspect.laterId, issues: [], dropped: 0, llmCallId: null });
+      if (later.kept.length === 0 || (same ? later.kept.length < 2 : earlier.kept.length === 0)) return ok({ laterId: suspect.laterId, issues: [], dropped: 0, llmCallId: null });
       // 设定：两章正文里提到的，按提到的次数。
       const text = [...earlier.kept, ...later.kept].map((p) => p.text).join('\n');
       const mentions = new Map<string, number>();
@@ -238,10 +248,16 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
       const evidence = new Map<string, IssueEvidence>();
       mentioned.forEach((e, i) => evidence.set(`E${i + 1}`, { type: 'entity', id: e.id }));
       earlier.kept.forEach((p, i) => evidence.set(`A${i + 1}`, { type: 'paragraph', id: p.id, chapterId: suspect.earlierId, version: p.version }));
+      if (same) later.kept.forEach((p, i) => evidence.set(paragraphLabel(i), { type: 'paragraph', id: p.id, chapterId: suspect.laterId, version: p.version }));
+      const names = new Map([
+        ...mentioned.map((e, i) => [`E${i + 1}`, e.name] as const),
+        ...earlier.kept.map((p, i) => [`A${i + 1}`, paragraphMention(p.text, i, chapterMention(earlierChapter.title, chapters.value.indexOf(earlierChapter)))] as const),
+      ]);
       const prompt = renderContinuityCheck({
         title: work.value?.title ?? '',
         about: suspect.about,
         entities: mentioned.map((e, i) => ({ label: `E${i + 1}`, name: e.name, kind: ENTITY_KIND_LABEL[e.kind], locked: e.locked, description: e.description })),
+        same,
         earlierTitle: earlierChapter.title,
         earlier: earlier.kept.map((p, i) => ({ label: `A${i + 1}`, text: p.text })),
         earlierClipped: earlier.clipped,
@@ -252,40 +268,53 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
       if (!prompt.ok) return err(settings(prompt.error));
       const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: CONTINUITY_OUTPUT_TOKENS, effort: 'medium', stepKey }, ChapterReviewOutput, options);
       if (!result.ok) return result;
-      const resolved = resolveModelIssues(result.value.value.issues, { paragraphs: later.kept, evidence });
-      // 跨章的问题须有前一章的段落作依据。
-      const issues = resolved.issues.filter((i) => i.evidence.some((e) => e.type === 'paragraph' && e.chapterId === suspect.earlierId));
+      const resolved = resolveModelIssues(result.value.value.issues, { paragraphs: later.kept, evidence, names });
+      // 跨章的问题须有前一章的段落作依据；一章之内的须有这一章另一段作依据。
+      const issues = resolved.issues.filter((i) => i.evidence.some((e) => e.type === 'paragraph' && e.chapterId === suspect.earlierId && e.id !== i.anchor.paragraphId));
       const dropped = resolved.dropped.filter((d) => d.reason !== 'duplicate').length + (resolved.issues.length - issues.length);
       return ok({ laterId: suspect.laterId, issues, dropped, llmCallId: await callId(port, result.value.attempts) });
     },
 
     /**
      * 把这次体检确认的问题写进各章：同一章仍待处理的连贯问题换成这一次的；作者处理过的同一处问题不再提出。
-     * 体检范围内这次没有问题的章节，旧的待处理连贯问题同样换掉（标为过期）。返回写入的条数。
+     * 体检范围内这次没有问题的章节，旧的待处理连贯问题同样换掉（标为过期）。append 里的章节只补、不换：
+     * 范围首章前面的章节不在范围里，它旧的跨章问题这次没有查，不能换掉；一章之内的疑点定位出的问题补进去，
+     * 与仍待处理的同一处问题不重复。返回写入的条数。
      */
-    async saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[]): Promise<Result<number, AppError>> {
+    async saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[], append: readonly string[] = []): Promise<Result<number, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       let saved = 0;
+      const inputsFor = (chapterId: string, existing: readonly ReviewIssue[]) =>
+        located
+          .filter((l) => l.laterId === chapterId)
+          .flatMap((l) =>
+            dropHandled(l.issues, existing).map((i) => ({
+              id: deps.ids.next(),
+              chapterId,
+              kind: i.kind,
+              severity: i.severity,
+              anchor: i.anchor,
+              evidence: i.evidence,
+              description: i.description,
+              suggestion: i.suggestion,
+              source: 'continuity' as const,
+              llmCallId: l.llmCallId,
+            })),
+          );
       for (const chapterId of chapterIds) {
         const handled = await listIssues(port, chapterId, HANDLED);
         if (!handled.ok) return err(repo(handled.error));
-        const mine = located.filter((l) => l.laterId === chapterId);
-        const inputs = mine.flatMap((l) =>
-          dropHandled(l.issues, handled.value).map((i) => ({
-            id: deps.ids.next(),
-            chapterId,
-            kind: i.kind,
-            severity: i.severity,
-            anchor: i.anchor,
-            evidence: i.evidence,
-            description: i.description,
-            suggestion: i.suggestion,
-            source: 'continuity' as const,
-            llmCallId: l.llmCallId,
-          })),
-        );
+        const inputs = inputsFor(chapterId, handled.value);
         const done = await replacePendingIssues(port, chapterId, 'continuity', inputs, ctx());
+        if (!done.ok) return err(repo(done.error));
+        saved += inputs.length;
+      }
+      for (const chapterId of append) {
+        const existing = await listIssues(port, chapterId, ['pending', ...HANDLED]);
+        if (!existing.ok) return err(repo(existing.error));
+        const inputs = inputsFor(chapterId, existing.value);
+        const done = await addIssues(port, inputs, ctx());
         if (!done.ok) return err(repo(done.error));
         saved += inputs.length;
       }

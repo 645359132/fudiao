@@ -24,3 +24,4 @@ export type { CastGap, CastGapInput } from './cast';
 export { castGaps } from './cast';
 export { MAX_QUOTE_CHARS, overlapTrimmer, parseRankList, sliceChars, trimOverlap } from './benchmark';
 export type { OverlapResult, RankEntry } from './benchmark';
+export { chapterMention, MENTION_HEAD_CHARS, paragraphMention, replaceLabels } from './labels';

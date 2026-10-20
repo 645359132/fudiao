@@ -1,5 +1,7 @@
 // 模型审核输出的定位（需求 B64）：模型用标签指代段落与依据，这里换回段落标识、版本与依据标识。
 // 定位不到原文、依据不存在的问题丢弃（模型编出来的引文与依据不能交给作者），并给出原因。
+// 说明与建议里照抄的标签换成段落开头与依据的名称（M6-08 第 5 项），作者读到的不是 P29、E3。
+import { paragraphMention, replaceLabels } from './labels';
 import type { IssueAnchor, IssueEvidence, IssueKind, ParagraphText, ProgramIssue } from './types';
 
 /** 模型写出的一条问题：paragraph 是段落标签（P1、P2……），evidence 是依据的标签。 */
@@ -20,6 +22,8 @@ export type ReviewRefs = {
   readonly paragraphs: readonly ParagraphText[];
   /** 提示词中列出的依据：标签 → 依据。段落标签不必列入。 */
   readonly evidence: ReadonlyMap<string, IssueEvidence>;
+  /** 依据标签在说明里的称呼（例如 E1 → 钱四）；本章段落的标签自动换成段落开头，不必列入。 */
+  readonly names?: ReadonlyMap<string, string>;
 };
 
 export type DroppedIssue = {
@@ -57,6 +61,7 @@ const sameSpot = (a: { kind: IssueKind; anchor: IssueAnchor }, b: { kind: IssueK
 
 export function resolveModelIssues(drafts: readonly ModelIssueDraft[], refs: ReviewRefs): { issues: ProgramIssue[]; dropped: DroppedIssue[] } {
   const byLabel = new Map(refs.paragraphs.map((p, i) => [paragraphLabel(i), p]));
+  const names = new Map([...refs.paragraphs.map((p, i) => [paragraphLabel(i), paragraphMention(p.text, i)] as const), ...(refs.names ?? [])]);
   const issues: ProgramIssue[] = [];
   const dropped: DroppedIssue[] = [];
   for (const draft of drafts) {
@@ -101,8 +106,8 @@ export function resolveModelIssues(drafts: readonly ModelIssueDraft[], refs: Rev
         quote: located.quote,
       },
       evidence,
-      description: draft.description.trim(),
-      suggestion: draft.suggestion.trim(),
+      description: replaceLabels(draft.description.trim(), names),
+      suggestion: replaceLabels(draft.suggestion.trim(), names),
     };
     if (issues.some((i) => sameSpot(i, issue) && (issue.anchor.quote !== '' || i.description === issue.description))) {
       dropped.push({ reason: 'duplicate', draft });

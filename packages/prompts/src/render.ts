@@ -739,6 +739,8 @@ export type ContinuityCheckInput = {
   /** 这一处疑点（book_audit 的 about）。 */
   readonly about: string;
   readonly entities: readonly { readonly label: string; readonly name: string; readonly kind: string; readonly locked: boolean; readonly description: string }[];
+  /** 疑点在同一章之内：只给出 later（这一章），依据是这一章前文的段落；earlier 不用。 */
+  readonly same?: boolean;
   readonly earlierTitle: string;
   readonly earlier: readonly { readonly label: string; readonly text: string }[];
   readonly earlierClipped: boolean;
@@ -753,6 +755,7 @@ export function renderContinuityCheck(input: ContinuityCheckInput): Result<Rende
     about: input.about.trim(),
     entities: input.entities.map((e) => ({ label: e.label, name: e.name, kind: e.kind, locked: e.locked, description: e.description.trim() })),
     hasEntities: input.entities.length > 0,
+    same: input.same === true,
     earlierTitle: input.earlierTitle,
     earlier: input.earlier.map((p) => ({ label: p.label, text: p.text })),
     earlierClipped: input.earlierClipped,

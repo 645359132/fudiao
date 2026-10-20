@@ -27,6 +27,16 @@ const OPENING_OUTPUT_TOKENS = 4_000 + THINKING_ALLOWANCE;
 const HANDLED = ['ignored', 'fixed', 'sent_to_writer'] as const;
 
 export type OpeningChapter = { readonly chapterId: string; readonly title: string; readonly metrics: OpeningMetrics };
+/** 诊断出的一条问题，用于前后对比：同一段落、同一种类算同一条（段落改过版本也算）。 */
+export type OpeningIssueKey = { readonly paragraphId: string; readonly kind: string; readonly description: string };
+export type OpeningDiagnosis = {
+  readonly issues: number;
+  readonly dropped: number;
+  /** 这次写入的问题。 */
+  readonly found: readonly OpeningIssueKey[];
+  /** 作者忽略过的开篇问题（复诊不再提出，对比时不算解决）。 */
+  readonly ignored: readonly OpeningIssueKey[];
+};
 export type OpeningSurvey = { readonly protagonist: { readonly id: string; readonly name: string } | null; readonly chapters: readonly OpeningChapter[] };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
@@ -74,7 +84,7 @@ export function openingUseCases(deps: AppDeps, project: () => SqlPort | null, ru
       index: number,
       stepKey: string,
       options: CallOptions = {},
-    ): Promise<Result<{ readonly issues: number; readonly dropped: number }, AppError>> {
+    ): Promise<Result<OpeningDiagnosis, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       const chapter = survey.chapters[index];
@@ -126,7 +136,13 @@ export function openingUseCases(deps: AppDeps, project: () => SqlPort | null, ru
         ctx(),
       );
       if (!saved.ok) return err(repo(saved.error));
-      return ok({ issues: issues.length, dropped: resolved.dropped.filter((d) => d.reason !== 'duplicate').length });
+      const key = (i: { readonly anchor: { readonly paragraphId: string }; readonly kind: string; readonly description: string }) => ({ paragraphId: i.anchor.paragraphId, kind: i.kind, description: i.description });
+      return ok({
+        issues: issues.length,
+        dropped: resolved.dropped.filter((d) => d.reason !== 'duplicate').length,
+        found: issues.map(key),
+        ignored: handled.value.filter((i) => i.source === 'opening' && i.status === 'ignored').map(key),
+      });
     },
 
   };

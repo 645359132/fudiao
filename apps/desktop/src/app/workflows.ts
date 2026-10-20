@@ -27,7 +27,7 @@ import { z } from 'zod';
 import { describeError, type AppError } from './errors';
 import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOutline, VolumeOutlineRequest } from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
-import type { OpeningSurvey } from './opening';
+import type { OpeningDiagnosis, OpeningSurvey } from './opening';
 import { CastDraft } from './cast-completion';
 import { MIN_SAMPLE_CHARS, mergeSamples, type BenchmarkAnalysis, type BenchmarkBookInputForm, type BenchmarkCompare } from './benchmark';
 import type { BenchmarkSampleInput } from '@fudiao/store';
@@ -292,13 +292,13 @@ export type WorkflowHost = {
   auditChapters(from: string | null, to: string | null): Promise<Result<readonly Chapter[], AppError>>;
   draftSuspects(chapterIds: readonly string[], stepKey: string, options?: CallOptions): Promise<Result<{ readonly suspects: AuditSuspect[]; readonly dropped: number }, AppError>>;
   locateSuspect(suspect: AuditSuspect, stepKey: string, options?: CallOptions): Promise<Result<LocatedSuspect, AppError>>;
-  saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[]): Promise<Result<number, AppError>>;
+  saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[], append?: readonly string[]): Promise<Result<number, AppError>>;
   draftVolumeOutline(request: VolumeOutlineRequest, options?: CallOptions): Promise<Result<VolumeOutline, AppError>>;
   applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: { readonly id: string; readonly title: string }; readonly characters: number; readonly foreshadows: number }, AppError>>;
   draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string; readonly payoffs?: readonly string[] }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
   applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
   openingSurvey(count: number): Promise<Result<OpeningSurvey, AppError>>;
-  diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly issues: number; readonly dropped: number }, AppError>>;
+  diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<OpeningDiagnosis, AppError>>;
   castSurvey(): Promise<Result<readonly CastGap[], AppError>>;
   draftCastCompletion(gaps: readonly CastGap[], stepKey: string, options?: CallOptions): Promise<Result<CastDraft, AppError>>;
   applyCastCompletion(draft: CastDraft): Promise<Result<{ readonly created: number; readonly updated: number; readonly relations: number; readonly skipped: readonly string[] }, AppError>>;
@@ -601,10 +601,16 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
           }
           // 有没核对成的先不写入：继续时接着做同一次，核对成的调用不再请求，也不会把这些章旧的问题换掉。
           if (failed > 0) return err(interrupted(`${failed} 处疑点没有核对成（调用失败），已核对的 ${located.length} 处保留；点“继续”再试没核对成的`));
-          // 范围的第一章不会是任何疑点的后一章（它前面的章节不在范围里）：它的旧问题不换，那一对章节这次没有查。
+          // 范围的首章：它前面的章节不在范围里，那一对章节这次没有查，旧的跨章问题不换；一章之内的疑点（前后同一章）定位出的问题补进去。
+          // 范围从全书第一章起时它前面没有章节，照常换。
+          const all = await host.auditChapters(null, null);
+          if (!all.ok) return all;
+          const head = chapters.value[0];
+          const partial = head !== undefined && all.value[0]?.id !== head.id;
           const saved = await host.saveContinuityIssues(
-            chapters.value.slice(1).map((c) => c.id),
+            chapters.value.slice(partial ? 1 : 0).map((c) => c.id),
             located,
+            partial ? [head.id] : [],
           );
           if (!saved.ok) return saved;
           const unconfirmed = located.filter((l) => l.issues.length === 0).length;
@@ -813,7 +819,25 @@ const Survey = z.object({
   protagonist: z.object({ id: z.string(), name: z.string() }).nullable(),
   chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), metrics: Metrics })),
 });
-const Diagnosis = z.object({ chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), issues: z.number().int() })), dropped: z.number().int() });
+const IssueKey = z.object({ paragraphId: z.string(), kind: z.string(), description: z.string() });
+// found、ignored 在 M6-08 之后才记下；之前的运行没有，对比时只比条数。
+const Diagnosis = z.object({
+  chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), issues: z.number().int(), found: z.array(IssueKey).optional(), ignored: z.array(IssueKey).optional() })),
+  dropped: z.number().int(),
+});
+type IssueKey = z.infer<typeof IssueKey>;
+/** 同一条问题：同一段落、同一种类；段落换了（例如被改写拆合）时说明相同也算。 */
+const sameIssue = (a: IssueKey, b: IssueKey) => a.kind === b.kind && (a.paragraphId === b.paragraphId || a.description === b.description);
+
+/**
+ * 开篇的前后对比（M6-08 第 7 项）：诊断出的问题复诊时不再出现的算解决（作者忽略的单算），复诊里诊断时没有的算新提。
+ */
+export function openingIssueChanges(before: readonly IssueKey[], after: readonly IssueKey[], ignored: readonly IssueKey[]): { readonly resolved: number; readonly ignored: number; readonly kept: number; readonly added: number } {
+  const kept = before.filter((b) => after.some((a) => sameIssue(a, b)));
+  const gone = before.filter((b) => !kept.includes(b));
+  const skipped = gone.filter((b) => ignored.some((i) => sameIssue(i, b))).length;
+  return { resolved: gone.length - skipped, ignored: skipped, kept: kept.length, added: after.filter((a) => !before.some((b) => sameIssue(a, b))).length };
+}
 const OpeningCompare = z.object({
   rows: z.array(
     z.object({
@@ -821,6 +845,8 @@ const OpeningCompare = z.object({
       title: z.string(),
       before: z.object({ issues: z.number().int(), metrics: Metrics }),
       after: z.object({ issues: z.number().int(), metrics: Metrics }),
+      /** 解决、忽略、仍在与新提的条数；之前的运行没有记下问题时为空。 */
+      changes: z.object({ resolved: z.number().int(), ignored: z.number().int(), kept: z.number().int(), added: z.number().int() }).optional(),
     }),
   ),
 });
@@ -829,13 +855,13 @@ export type OpeningCompare = z.infer<typeof OpeningCompare>;
 function openingPolish(host: WorkflowHost): WorkflowDef<OpeningParams> {
   /** 逐章诊断，每章一个步骤键：中断后接着做时，诊断过的不再请求。 */
   const diagnose = async (survey: OpeningSurvey, stepKey: string, options: CallOptions, onProgress: (note: string) => void): Promise<Result<StepResult<z.infer<typeof Diagnosis>>, AppError>> => {
-    const rows: { chapterId: string; title: string; issues: number }[] = [];
+    const rows: z.infer<typeof Diagnosis>['chapters'] = [];
     let dropped = 0;
     for (const [i, c] of survey.chapters.entries()) {
       onProgress(`按开篇的要求诊断第 ${i + 1} / ${survey.chapters.length} 章《${c.title}》`);
       const done = await host.diagnoseOpening(survey, i, `${stepKey}:${i}`, options);
       if (!done.ok) return options.signal?.aborted === true ? done : err(interrupted(`《${c.title}》没有诊断成：${describeError(done.error)}${rows.length > 0 ? `（已诊断 ${rows.length} 章，继续时接着诊断）` : ''}`));
-      rows.push({ chapterId: c.chapterId, title: c.title, issues: done.value.issues });
+      rows.push({ chapterId: c.chapterId, title: c.title, issues: done.value.issues, found: [...done.value.found], ignored: [...done.value.ignored] });
       dropped += done.value.dropped;
     }
     const total = rows.reduce((n, r) => n + r.issues, 0);
@@ -913,13 +939,16 @@ function openingPolish(host: WorkflowHost): WorkflowDef<OpeningParams> {
           const rows = now.value.chapters.flatMap((c) => {
             const was = before.success ? before.data.chapters.find((x) => x.chapterId === c.chapterId) : undefined;
             if (was === undefined) return [];
-            const issuesBefore = first.success ? (first.data.chapters.find((x) => x.chapterId === c.chapterId)?.issues ?? 0) : 0;
-            const issuesAfter = second.success ? (second.data.chapters.find((x) => x.chapterId === c.chapterId)?.issues ?? 0) : 0;
-            return [{ chapterId: c.chapterId, title: c.title, before: { issues: issuesBefore, metrics: was.metrics }, after: { issues: issuesAfter, metrics: c.metrics } }];
+            const one = first.success ? first.data.chapters.find((x) => x.chapterId === c.chapterId) : undefined;
+            const two = second.success ? second.data.chapters.find((x) => x.chapterId === c.chapterId) : undefined;
+            const changes = one?.found === undefined || two?.found === undefined ? undefined : openingIssueChanges(one.found, two.found, two.ignored ?? []);
+            return [{ chapterId: c.chapterId, title: c.title, before: { issues: one?.issues ?? 0, metrics: was.metrics }, after: { issues: two?.issues ?? 0, metrics: c.metrics }, ...(changes === undefined ? {} : { changes }) }];
           });
           const b = rows.reduce((n, r) => n + r.before.issues, 0);
           const a = rows.reduce((n, r) => n + r.after.issues, 0);
-          return ok({ output: { rows }, note: `开篇问题从 ${b} 个变为 ${a} 个` });
+          const sum = (k: 'resolved' | 'ignored' | 'added') => rows.reduce((n, r) => n + (r.changes?.[k] ?? 0), 0);
+          const detail = rows.every((r) => r.changes !== undefined) ? `：解决 ${sum('resolved')} 个${sum('ignored') > 0 ? `、忽略 ${sum('ignored')} 个` : ''}，复诊新提 ${sum('added')} 个` : '';
+          return ok({ output: { rows }, note: `开篇问题从 ${b} 个变为 ${a} 个${detail}` });
         },
       }),
     ],

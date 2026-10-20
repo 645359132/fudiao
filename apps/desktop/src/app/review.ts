@@ -179,10 +179,11 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
         }
         case 'paragraph': {
           const clip = (text: string) => (text.length > 40 ? `${text.slice(0, 40)}…` : text);
-          if (e.chapterId !== undefined) {
-            const other = elsewhere.get(e.id);
+          // 带章节的依据可能就在本章（一章之内的连贯问题），这时按本章段落写。
+          const other = e.chapterId === undefined ? undefined : elsewhere.get(e.id);
+          if (other !== undefined) {
             const title = m.chapters?.find((c) => c.id === e.chapterId)?.title ?? '前文';
-            return other === undefined ? [] : [`《${title}》的段落：${clip(other.text)}`];
+            return [`《${title}》的段落：${clip(other.text)}`];
           }
           const p = m.paragraphs.find((x) => x.id === e.id);
           return p === undefined ? [] : [`本章段落：${clip(p.text)}`];
@@ -380,7 +381,13 @@ export function reviewUseCases(deps: AppDeps, session: () => { readonly port: Sq
       const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: REVIEW_OUTPUT_TOKENS, effort: 'medium' }, ChapterReviewOutput, options);
       if (!result.ok) return finish(false, result.error.code === 'settings' ? result.error.detail : '调用模型失败', 0);
 
-      const resolved = resolveModelIssues(result.value.value.issues, { paragraphs, evidence });
+      const clip = (text: string) => (text.trim().length > 16 ? `${text.trim().slice(0, 16)}……` : text.trim());
+      const names = new Map([
+        ...entityRefs.map(({ label, item }) => [label, item.name] as const),
+        ...factRefs.map(({ label, item }) => [label, `事实“${clip(item.content)}”`] as const),
+        ...foreshadowRefs.map(({ label, item }) => [label, `伏笔“${item.f.title}”`] as const),
+      ]);
+      const resolved = resolveModelIssues(result.value.value.issues, { paragraphs, evidence, names });
       // 程序检查已经指出的同一处问题不再重复。
       const model = dropHandled(dropHandled(resolved.issues, handled), program);
       const hash = result.value.attempts.at(-1)?.requestHash;
