@@ -17,6 +17,8 @@ export type TaskKind =
   | 'motive_check'
   | 'self_test'
   | 'connection_test'
+  /** 模型自带的联网搜索（B84，M7-02）：只搜不写 JSON 的一次调用。 */
+  | 'web_search'
   /** 写手与审核（M3）。 */
   | 'plan_draft'
   /** AI 助手（M5）。 */
@@ -43,6 +45,11 @@ export type ModelCapabilities = {
   readonly contextWindow: number;
   readonly maxOutputTokens: number;
   readonly selfTestPassed: boolean;
+  /**
+   * 模型自带的联网搜索（服务端工具）：Anthropic Messages API 的 web_search 与 OpenAI Responses API 的 web_search。
+   * 为真时适配器才声明搜索工具；Chat Completions 写法的服务不支持。
+   */
+  readonly webSearch: boolean;
 };
 
 export const CONSERVATIVE_CAPABILITIES: ModelCapabilities = {
@@ -53,14 +60,16 @@ export const CONSERVATIVE_CAPABILITIES: ModelCapabilities = {
   contextWindow: 32_000,
   maxOutputTokens: 4_096,
   selfTestPassed: false,
+  webSearch: false,
 };
 
-/** 每百万 Token 的美元价格。 */
+/** 每百万 Token 的美元价格；webSearch 为模型自带联网搜索每千次的美元价（在 Token 费用之外另计）。 */
 export type Prices = {
   readonly input: number;
   readonly output: number;
   readonly cacheRead?: number;
   readonly cacheWrite?: number;
+  readonly webSearch?: number;
 };
 
 export type ModelProfile = {
@@ -80,6 +89,21 @@ export type LlmMessage = { readonly role: 'user' | 'assistant'; readonly content
 /** 结构化输出所需的 JSON Schema，由 packages/prompts 从 Zod 定义生成。 */
 export type OutputSchema = { readonly name: string; readonly schema: { readonly [key: string]: JsonValue } };
 
+/**
+ * 请求里声明的服务端工具（由模型服务在服务端执行，不经本机）。目前只有联网搜索一种；
+ * maxUses 为这次请求里最多搜几次（没写时为 1）。
+ */
+export type ServerTool = { readonly type: 'web_search'; readonly maxUses?: number };
+
+/** 模型自带联网搜索搜到的一条结果：标题可能为空，摘要来自引用或模型的转述，没有时为空串。 */
+export type WebSearchHit = { readonly url: string; readonly title: string; readonly snippet: string };
+
+/**
+ * 一次调用里模型自带联网搜索的结果：requests 为实际搜了几次（计费按它），results 为程序从结果块与引用里整理出的条目，
+ * error 为搜索工具报的错误码（例如限流、不可用）；没有声明搜索工具的调用没有这一项。
+ */
+export type WebSearchOutcome = { readonly requests: number; readonly results: readonly WebSearchHit[]; readonly error?: string };
+
 export type LlmRequest = {
   readonly task: TaskKind;
   readonly model: ModelProfile;
@@ -87,6 +111,8 @@ export type LlmRequest = {
   readonly system: readonly PromptBlock[];
   readonly messages: readonly LlmMessage[];
   readonly output?: OutputSchema;
+  /** 服务端工具；与 output 不同时使用（M7-02：搜索是只搜不写 JSON 的单独一次调用）。 */
+  readonly tools?: readonly ServerTool[];
   readonly maxOutputTokens: number;
   readonly effort?: Effort;
   /** 确定的步骤键；有完成记录时直接复用，不再调用（硬性规则 10）。 */
@@ -119,6 +145,8 @@ export type LlmResult = {
   readonly refusal?: { readonly category: string | null; readonly explanation: string | null };
   readonly fallbackUsed: boolean;
   readonly requestHash: string;
+  /** 请求声明了联网搜索时，这次调用的搜索结果。 */
+  readonly webSearch?: WebSearchOutcome;
 };
 
 export type LlmErrorCode =

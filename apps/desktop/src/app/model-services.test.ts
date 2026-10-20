@@ -179,6 +179,10 @@ describe('模型服务', () => {
       capabilities: { structuredOutput: 'native', contextWindow: 128_000 },
     });
     expect(resolveModel('anthropic', 'known', null, table).source).toBe('user');
+    // 内置表给 Anthropic 与 OpenAI 官方接口的主流模型标上了模型自带的联网搜索，来源记为内置。
+    expect(resolveModel('anthropic', 'claude-sonnet-5-5', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, promptCaching: true }, prices: { input: 2, output: 10, webSearch: 10 } });
+    expect(resolveModel('openai', 'gpt-4.1', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, reasoningControl: 'none', contextWindow: 1_047_576 } });
+    expect(resolveModel('openai_compatible', 'deepseek-flash', null).capabilities.webSearch).toBe(false);
   });
 
   it('获取模型列表并从中添加：带上服务返回的能力', async () => {

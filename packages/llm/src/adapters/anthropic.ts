@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages';
+import type { BetaMessage, BetaMessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
-import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
+import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage, WebSearchOutcome } from '../types';
 import { mapSdkError, streamError } from './errors';
+import { HitCollector, unsupportedTools, webSearchTool } from './server-tools';
 
 export type AnthropicAdapterOptions = {
   readonly apiKey: string;
@@ -64,6 +65,8 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
+    const unsupported = unsupportedTools(request);
+    if (unsupported !== null) return err(unsupported);
     const hash = requestHash(request);
     const base = { provider: request.model.provider, requestHash: hash };
     let text = '';
@@ -146,6 +149,7 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
             explanation: message.stop_details?.explanation ?? null,
           },
         }),
+        ...(webSearchTool(request) !== null && { webSearch: webSearchOutcome(message) }),
       });
     } catch (error) {
       if (options.signal?.aborted === true || error instanceof Anthropic.APIUserAbortError) {
@@ -157,10 +161,17 @@ export class AnthropicAdapter implements LlmPort, ModelLister {
   }
 }
 
+/**
+ * 联网搜索用基础版的工具（web_search_20250305）：所有支持联网搜索的模型与平台都接受它，结果块直接返回；
+ * 带动态过滤的版本（20260209 起）要经代码执行、只有部分模型与平台支持，对“搜一次、列结果”的用途没有好处。
+ */
+const WEB_SEARCH_TOOL_TYPE = 'web_search_20250305';
+
 function buildParams(request: LlmRequest): BetaMessageStreamParams {
   const caps = request.model.capabilities;
   const format = request.output !== undefined && caps.structuredOutput === 'native';
   const effort = request.effort !== undefined && caps.reasoningControl === 'effort';
+  const search = webSearchTool(request);
   return {
     model: request.model.model,
     max_tokens: request.maxOutputTokens,
@@ -170,6 +181,7 @@ function buildParams(request: LlmRequest): BetaMessageStreamParams {
       ...(block.cache === true && caps.promptCaching && { cache_control: { type: 'ephemeral' as const } }),
     })),
     messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+    ...(search !== null && { tools: [{ type: WEB_SEARCH_TOOL_TYPE, name: 'web_search' as const, max_uses: search.maxUses }] }),
     ...((format || effort) && {
       output_config: {
         ...(format && request.output && { format: { type: 'json_schema' as const, schema: request.output.schema } }),
@@ -181,6 +193,33 @@ function buildParams(request: LlmRequest): BetaMessageStreamParams {
       betas: [SERVER_FALLBACK_BETA],
     }),
   };
+}
+
+/**
+ * 从完整回复里整理搜索结果：web_search_tool_result 块给出网址与标题（正文是加密的，本机读不到），
+ * 正文块的引用（web_search_result_location）给出被引用网页的原文片段，作为摘要；工具报错时记下错误码。
+ * 搜索次数取用量里的 server_tool_use.web_search_requests（服务按它计费），没有时按结果块数。
+ */
+function webSearchOutcome(message: BetaMessage): WebSearchOutcome {
+  const hits = new HitCollector();
+  let error: string | undefined;
+  let resultBlocks = 0;
+  for (const block of message.content) {
+    if (block.type === 'web_search_tool_result') {
+      resultBlocks++;
+      if (Array.isArray(block.content)) {
+        for (const r of block.content) hits.add(r.url, r.title, null);
+      } else {
+        error ??= block.content.error_code;
+      }
+    } else if (block.type === 'text') {
+      for (const c of block.citations ?? []) {
+        if (c.type === 'web_search_result_location') hits.add(c.url, c.title, c.cited_text);
+      }
+    }
+  }
+  const requests = message.usage.server_tool_use?.web_search_requests ?? resultBlocks;
+  return { requests, results: hits.list(), ...(error !== undefined && { error }) };
 }
 
 type SdkUsage = {

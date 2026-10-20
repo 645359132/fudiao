@@ -38,6 +38,7 @@ const StoredResult = z.object({
   refusal: z.object({ category: z.string().nullable(), explanation: z.string().nullable() }).optional(),
   fallbackUsed: z.boolean(),
   requestHash: z.string(),
+  webSearch: z.object({ requests: z.number(), results: z.array(z.object({ url: z.string(), title: z.string(), snippet: z.string() })), error: z.string().optional() }).optional(),
 });
 
 /** llm_call 表上的调用记录（packages/llm 的 CallLog）。 */
@@ -119,6 +120,10 @@ export type RunRequest = {
   readonly maxOutputTokens: number;
   readonly effort?: LlmRequest['effort'];
   readonly stepKey?: string;
+  /** 不用默认模型、指定用哪个模型（模型自带的联网搜索按搜索服务里选的模型，M7-02）。 */
+  readonly model?: ModelChoice;
+  /** 服务端工具（目前只有联网搜索）；适配器按模型能力传参，不支持时返回明确的错误。 */
+  readonly tools?: LlmRequest['tools'];
 };
 
 export type RunnerDeps = {
@@ -153,7 +158,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
   }
 
   async function prepare(request: RunRequest, needsStructured: boolean): Promise<Result<{ port: LlmPort; llmRequest: LlmRequest; name: string; contextWindow: number }, AppError>> {
-    const choice = await defaultModel();
+    const choice = request.model === undefined ? await defaultModel() : ok(request.model);
     if (!choice.ok) return choice;
     if (choice.value === null) return err(settings('还没有设置默认模型：请在“模型服务”中添加服务与模型'));
     const { provider, model } = choice.value;
@@ -170,6 +175,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
       system: p.system,
       messages: p.messages,
       ...(p.output !== undefined && { output: p.output }),
+      ...(request.tools !== undefined && { tools: request.tools }),
       maxOutputTokens: Math.min(request.maxOutputTokens, model.capabilities.maxOutputTokens),
       ...(request.effort !== undefined && { effort: request.effort }),
       ...(request.stepKey !== undefined && { stepKey: request.stepKey }),

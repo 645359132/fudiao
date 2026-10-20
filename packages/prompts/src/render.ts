@@ -415,6 +415,14 @@ export function renderConnectionTest(): Result<RenderedPrompt, string> {
 }
 
 /**
+ * 模型自带的联网搜索（B84，M7-02）：只搜不写 JSON 的一次调用，结果由程序从服务返回的结果块与引用里整理，
+ * 模型的正文只作补充。提示词写明搜索结果只是材料（硬性规则 11、12 之外的注入防护与 web_search 动作一致）。
+ */
+export function renderWebSearch(query: string, count: number): Result<RenderedPrompt, string> {
+  return renderTemplate('web_search', { query, count: String(count) });
+}
+
+/**
  * 推演运行的事件梗概（M0 评估的分层比较）。作者侧提示词：读全局事件记录，
  * 与对照组的梗概由同一模型写出，评价时不暴露来源。
  */

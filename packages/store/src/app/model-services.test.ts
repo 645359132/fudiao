@@ -46,6 +46,7 @@ const caps: StoredCapabilities = {
   contextWindow: 32_000,
   maxOutputTokens: 4_096,
   selfTestPassed: false,
+  webSearch: false,
 };
 
 describe('应用设置库：模型服务', () => {

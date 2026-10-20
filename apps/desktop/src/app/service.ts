@@ -803,8 +803,8 @@ export function createAppService(deps: AppDeps) {
   // 扫榜拆书（B79）的样章与拆解：工作流用，作品里也能查这次运行还留着几本样章。
   const benchmark = benchmarkUseCases(deps, () => session?.port ?? null, runner);
 
-  // 联网搜索与读网页（B84）：搜索服务由作者配置，AI 助手与扫榜拆书的榜单用。
-  const web = webUseCases(deps);
+  // 联网搜索与读网页（B84）：搜索服务由作者配置，AI 助手与扫榜拆书的榜单用；模型自带的搜索（M7-02）经调用器用所选的模型。
+  const web = webUseCases(deps, { runner, models: () => services.loadModelServices() });
   // AI 助手与撤销用到的用例：作品的用例加上联网。
   const hostBase = { ...app, ...web };
 

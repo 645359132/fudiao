@@ -1,8 +1,9 @@
-// 联网搜索与读网页（需求 B84，施工文档 M7-01）。
-// 搜索服务（Tavily、Brave Search、DeepSeek 搜索）由作者自填 API Key，请求经凭据代理发出（凭据条目名是服务标识，
-// 或沿用某个模型服务的条目；WebView 拿不到密钥，凭据只发往该服务的源）；读网页由 Rust 命令 web_fetch 做，不带任何凭据，
-// 只读公网主机；读不到时若有 DeepSeek 搜索服务，再用它的 Fetch 接口在服务端抓一次（有的网站拦截直接读取）。
-// 搜到的摘要与网页正文只是材料：交给 AI 助手与扫榜拆书的榜单，不进作品，怎样对待由提示词规定。
+// 联网搜索与读网页（需求 B84，施工文档 M7-01、M7-02）。
+// 外部搜索服务（Tavily、Brave Search、DeepSeek 搜索）由作者自填 API Key，请求经凭据代理发出（凭据条目名是服务标识，
+// 或沿用某个模型服务的条目；WebView 拿不到密钥，凭据只发往该服务的源）；“模型自带的联网搜索”（provider）用一个已配置的模型的
+// 服务端搜索工具（Anthropic 与 OpenAI 官方接口），走该模型服务的凭据与调用器，记进调用记录。
+// 读网页由 Rust 命令 web_fetch 做，不带任何凭据，只读公网主机；读不到时若有 DeepSeek 搜索服务，再用它的 Fetch 接口在服务端抓一次
+// （有的网站拦截直接读取）。搜到的摘要与网页正文只是材料：交给 AI 助手与扫榜拆书的榜单，不进作品，怎样对待由提示词规定。
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createSearchService,
@@ -17,12 +18,18 @@ import {
   type SearchService,
   type SqlPort,
 } from '@fudiao/store';
+import { renderWebSearch } from '@fudiao/prompts';
 import { z } from 'zod';
 import type { AppError } from './errors';
-import { describeCredentialError } from './model-services';
+import { describeCredentialError, type ModelServicesView } from './model-services';
+import type { ModelChoice, modelRunner } from './model-runner';
 import type { AppDeps, CredentialStatus, KeyHeader, WebPage } from './ports';
+import { THINKING_ALLOWANCE } from './thinking';
 
-export const SEARCH_PRESETS: Readonly<Record<SearchKind, { readonly label: string; readonly baseUrl: string; readonly keyHeader: KeyHeader; readonly hint: string }>> = {
+/** 外部搜索服务的种类（要 API Key，经凭据代理）。 */
+export type ExternalSearchKind = Exclude<SearchKind, 'provider'>;
+
+export const SEARCH_PRESETS: Readonly<Record<SearchKind, { readonly label: string; readonly baseUrl: string; readonly keyHeader: KeyHeader | null; readonly hint: string }>> = {
   tavily: { label: 'Tavily', baseUrl: 'https://api.tavily.com', keyHeader: 'bearer', hint: '面向 AI 的搜索接口，有免费额度；Key 以 tvly- 开头' },
   brave: { label: 'Brave Search', baseUrl: 'https://api.search.brave.com', keyHeader: 'x_subscription_token', hint: 'Brave 的网页搜索接口，有免费额度' },
   deepseek: {
@@ -30,6 +37,12 @@ export const SEARCH_PRESETS: Readonly<Record<SearchKind, { readonly label: strin
     baseUrl: 'https://api.deepseek.com',
     keyHeader: 'bearer',
     hint: 'DeepSeek 开放平台的 Search 与 Fetch 接口（2026 年 10 月 17 日起开放）：每千次成功请求 5 元，无结果不计费；可以直接沿用已配好的 DeepSeek 模型服务的 Key。中转站一般转发不了这两个接口，地址要填官方的',
+  },
+  provider: {
+    label: '模型自带的联网搜索',
+    baseUrl: '',
+    keyHeader: null,
+    hint: '用 Anthropic 或 OpenAI 官方接口的模型自己联网搜索，不用另外的 API Key；按模型服务计费（两家都是每千次搜索约 10 美元，另计搜到内容的输入 Token），每次搜索记进“用量与费用”。只能选登记了联网搜索能力的模型。',
   },
 };
 
@@ -40,6 +53,9 @@ const DEEPSEEK_QUERY_CHARS = 128;
 export const MAX_SEARCH_HITS = 10;
 /** 读到的网页交给调用方的字数上限（太长时给开头与结尾）。 */
 export const PAGE_CHARS = 6_000;
+/** 模型自带的搜索：一次最多搜几次（模型可以换个说法再搜），回答只列结果所以输出不多（另留思考的余量）。 */
+export const PROVIDER_SEARCH_MAX_USES = 3;
+const PROVIDER_SEARCH_OUTPUT_TOKENS = 1_500;
 
 export type SearchHit = { readonly title: string; readonly url: string; readonly snippet: string };
 /** 搜索服务连同凭据状态；沿用模型服务的 Key 时 credentialName 是那个模型服务的名称（找不到时为 null）。 */
@@ -53,6 +69,14 @@ export type SearchServiceForm = {
   readonly apiKey: string | null;
   /** 沿用这个模型服务的 API Key（两者的源须相同）；null 或省略为用自己填的 Key。 */
   readonly credentialRef?: string | null;
+  /** kind 为 provider 时用哪个模型（模型记录的标识）。 */
+  readonly modelId?: string | null;
+};
+
+/** 模型自带的搜索要用到的：按所选模型调用，模型与服务从模型服务里查。 */
+export type WebSearchDeps = {
+  readonly runner: Pick<ReturnType<typeof modelRunner>, 'text'>;
+  readonly models: () => Promise<Result<ModelServicesView, AppError>>;
 };
 
 const Tavily = z.object({ results: z.array(z.object({ title: z.string().default(''), url: z.string(), content: z.string().default('') })) });
@@ -62,6 +86,7 @@ const DeepSeekPage = z.object({ title: z.string().default(''), content: z.string
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
+const NO_CREDENTIAL: CredentialStatus = { stored: false, origin: null, hasSecret: false };
 
 const originOf = (url: string): string | null => {
   try {
@@ -75,10 +100,10 @@ const originOf = (url: string): string | null => {
 const plain = (text: string) => text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
 /**
- * 向搜索服务发请求并解析结果。请求里不带密钥：凭据代理按服务标识注入。
- * 两家的接口都是公开文档里的写法；结果统一成标题、网址与摘要。
+ * 向外部搜索服务发请求并解析结果。请求里不带密钥：凭据代理按服务标识注入。
+ * 三家的接口都是公开文档里的写法；结果统一成标题、网址与摘要。模型自带的搜索不走这里（见 providerSearch）。
  */
-export async function runSearch(kind: SearchKind, baseUrl: string, fetch: typeof globalThis.fetch, query: string, count: number): Promise<Result<SearchHit[], string>> {
+export async function runSearch(kind: ExternalSearchKind, baseUrl: string, fetch: typeof globalThis.fetch, query: string, count: number): Promise<Result<SearchHit[], string>> {
   const n = Math.max(1, Math.min(MAX_SEARCH_HITS, count));
   const json = { 'content-type': 'application/json', accept: 'application/json' };
   let response: Response;
@@ -162,7 +187,20 @@ export function clipPage(page: WebPage, limit = PAGE_CHARS): WebPage & { readonl
   return { ...page, text: `${chars.slice(0, half).join('')}\n……\n${chars.slice(-half).join('')}`, clipped: true };
 }
 
-export function webUseCases(deps: AppDeps) {
+/** 模型自带的搜索用的模型与服务；模型删掉或没登记能力时说明怎么办。 */
+export function providerSearchModel(service: SearchService, view: ModelServicesView): Result<ModelChoice, AppError> {
+  const model = view.models.find((m) => m.id === service.modelId);
+  const provider = view.providers.find((p) => p.id === model?.providerId);
+  if (service.modelId === null || model === undefined || provider === undefined) {
+    return err(settings(`搜索服务“${service.name}”用的模型已删除：请在“模型服务”页的“联网搜索”里重新选择模型`));
+  }
+  if (!model.capabilities.webSearch) {
+    return err(settings(`模型“${model.displayName}”没有登记“模型自带的联网搜索”能力：请在它的“能力与价格”里勾选，或给搜索服务换一个模型`));
+  }
+  return ok({ provider, model });
+}
+
+export function webUseCases(deps: AppDeps, search: WebSearchDeps) {
   let db: SqlPort | null = null;
   const ctx = () => ({ now: deps.clock.now() });
 
@@ -185,21 +223,29 @@ export function webUseCases(deps: AppDeps) {
     if (!providers.ok) return err(repo(providers.error));
     const withStatus: SearchServiceView[] = [];
     for (const s of services.value) {
+      if (s.kind === 'provider') {
+        // 模型自带的搜索没有自己的凭据：用的是模型服务的。
+        withStatus.push({ ...s, credential: NO_CREDENTIAL, credentialName: null });
+        continue;
+      }
       // 沿用模型服务的 Key 时看那个条目；模型服务已删除就当没有凭据。
       const ref = s.credentialRef === null ? null : (providers.value.find((x) => x.id === s.credentialRef) ?? null);
       const status = s.credentialRef !== null && ref === null ? null : await deps.credentials.status(s.credentialRef ?? s.id);
-      withStatus.push({ ...s, credential: status?.ok === true ? status.value : { stored: false, origin: null, hasSecret: false }, credentialName: ref?.name ?? null });
+      withStatus.push({ ...s, credential: status?.ok === true ? status.value : NO_CREDENTIAL, credentialName: ref?.name ?? null });
     }
     return ok({ services: withStatus, defaultServiceId: defaultServiceId.value });
   }
 
-  /** 默认的搜索服务（启用且有凭据）；没有时说明怎么配。 */
+  /** 默认的搜索服务（启用且配置完整）；没有时说明怎么配。 */
   async function defaultService(): Promise<Result<SearchServiceView, AppError>> {
     const current = await view();
     if (!current.ok) return current;
     const service = current.value.services.find((s) => s.id === current.value.defaultServiceId) ?? current.value.services.find((s) => s.enabled);
-    if (service === undefined) return err(settings('还没有配置联网搜索服务：在“模型服务”页的“联网搜索”里添加 DeepSeek 搜索（可沿用模型服务的 Key）、Tavily 或 Brave Search'));
+    if (service === undefined) {
+      return err(settings('还没有配置联网搜索服务：在“模型服务”页的“联网搜索”里添加 DeepSeek 搜索（可沿用模型服务的 Key）、Tavily、Brave Search，或选一个自带联网搜索的模型'));
+    }
     if (!service.enabled) return err(settings(`搜索服务“${service.name}”已停用`));
+    if (service.kind === 'provider') return ok(service);
     if (!usable(service)) {
       return err(
         settings(
@@ -216,10 +262,15 @@ export function webUseCases(deps: AppDeps) {
   const usable = (service: SearchServiceView) => service.credential.hasSecret && service.credential.origin === originOf(service.baseUrl);
 
   /**
-   * 写凭据：沿用模型服务的 Key 时不存自己的条目（原来有就删掉），只核对那个模型服务的凭据在、且源相同；
-   * 否则给出了密钥就保存；没给且地址的源没变就沿用。
+   * 写凭据：模型自带的搜索不需要凭据（从别的种类改过来时把原来自己的条目删掉）；沿用模型服务的 Key 时不存自己的条目（原来有就删掉），
+   * 只核对那个模型服务的凭据在、且源相同；否则给出了密钥就保存；没给且地址的源没变就沿用。
    */
   async function saveCredential(id: string, form: SearchServiceForm, current: SearchServiceView | null): Promise<Result<void, AppError>> {
+    const header = SEARCH_PRESETS[form.kind].keyHeader;
+    if (header === null) {
+      if (current !== null && current.kind !== 'provider' && current.credentialRef === null) await deps.credentials.remove(id);
+      return ok(undefined);
+    }
     const origin = originOf(form.baseUrl.trim());
     if (form.credentialRef !== undefined && form.credentialRef !== null) {
       const status = await deps.credentials.status(form.credentialRef);
@@ -230,20 +281,50 @@ export function webUseCases(deps: AppDeps) {
     }
     const key = form.apiKey?.trim() ?? '';
     if (key === '') {
-      const own = current === null || current.credentialRef !== null ? null : current.credential;
+      const own = current === null || current.kind === 'provider' || current.credentialRef !== null ? null : current.credential;
       if (own?.hasSecret === true && own.origin === origin) return ok(undefined);
       return err(settings(own?.hasSecret === true ? '更改服务地址后须重新填写 API Key' : '请填写 API Key'));
     }
-    const saved = await deps.credentials.set(id, form.baseUrl, SEARCH_PRESETS[form.kind].keyHeader, key);
+    const saved = await deps.credentials.set(id, form.baseUrl, header, key);
     return saved.ok ? ok(undefined) : err(settings(describeCredentialError(saved.error)));
   }
 
   const fetchFor = (service: SearchService) => deps.web.searchFetch(service.credentialRef ?? service.id);
 
-  async function search(service: SearchServiceView, query: string, count: number): Promise<Result<SearchHit[], AppError>> {
+  /**
+   * 模型自带的搜索：只搜不写 JSON 的一次调用（搜索工具的结果块与引用由适配器整理成标题、网址、摘要；
+   * 模型的正文只是给作者看的转述，程序不解析它）。调用经调用器记进当前作品的调用记录。
+   */
+  async function providerSearch(service: SearchService, query: string, count: number): Promise<Result<SearchHit[], AppError>> {
+    const models = await search.models();
+    if (!models.ok) return models;
+    const choice = providerSearchModel(service, models.value);
+    if (!choice.ok) return choice;
+    const prompt = renderWebSearch(query, count);
+    if (!prompt.ok) return err(settings(prompt.error));
+    const result = await search.runner.text({
+      prompt: prompt.value,
+      maxOutputTokens: PROVIDER_SEARCH_OUTPUT_TOKENS + THINKING_ALLOWANCE,
+      effort: 'low',
+      model: choice.value,
+      tools: [{ type: 'web_search', maxUses: PROVIDER_SEARCH_MAX_USES }],
+    });
+    if (!result.ok) return result;
+    const r = result.value;
+    if (r.outcome === 'refused') return err(settings(`模型拒绝了这次搜索${r.refusal?.explanation ? `：${r.refusal.explanation}` : ''}`));
+    if (r.outcome === 'cancelled') return err(settings('搜索已取消'));
+    const found = r.webSearch;
+    if (found === undefined) return err(settings(`模型“${choice.value.model.displayName}”没有执行搜索`));
+    if (found.results.length === 0 && found.error !== undefined) return err(settings(`模型的搜索工具出错（${found.error}），没有搜到结果`));
+    return ok(found.results.slice(0, count).map((h) => ({ title: h.title || h.url, url: h.url, snippet: h.snippet })));
+  }
+
+  async function doSearch(service: SearchServiceView, query: string, count: number): Promise<Result<SearchHit[], AppError>> {
     const q = query.trim();
     if (q === '') return err(settings('搜索词不能为空'));
-    const hits = await runSearch(service.kind, service.baseUrl, fetchFor(service), q, count);
+    const n = Math.max(1, Math.min(MAX_SEARCH_HITS, count));
+    if (service.kind === 'provider') return providerSearch(service, q, n);
+    const hits = await runSearch(service.kind, service.baseUrl, fetchFor(service), q, n);
     return hits.ok ? hits : err(settings(hits.error));
   }
 
@@ -281,8 +362,8 @@ export function webUseCases(deps: AppDeps) {
       if (!p.ok) return p;
       const removed = await deleteSearchService(p.value, service.id, service.version);
       if (!removed.ok) return err(repo(removed.error));
-      // 沿用模型服务的 Key 时没有自己的条目，模型服务的条目不动。
-      if (service.credentialRef === null) {
+      // 沿用模型服务的 Key 或模型自带的搜索都没有自己的条目，模型服务的条目不动。
+      if (service.kind !== 'provider' && service.credentialRef === null) {
         const credential = await deps.credentials.remove(service.id);
         if (!credential.ok) return err(settings(`服务已删除，但凭据管理器中的条目没有删掉：${credential.error}`));
       }
@@ -296,13 +377,13 @@ export function webUseCases(deps: AppDeps) {
       return done.ok ? view() : err(repo(done.error));
     },
 
-    /** 用一个固定的搜索词试一次：凭据、地址与接口格式都对才算通过。返回搜到几条与第一条的标题。 */
+    /** 用一个固定的搜索词试一次：凭据、地址与接口格式（或所选模型的搜索工具）都对才算通过。返回搜到几条与第一条的标题。 */
     async testSearchService(serviceId: string): Promise<Result<{ readonly hits: number; readonly first: string | null }, AppError>> {
       const current = await view();
       if (!current.ok) return current;
       const service = current.value.services.find((s) => s.id === serviceId);
       if (service === undefined) return err({ code: 'not_found' });
-      const hits = await search(service, '中文网络小说 月票榜', 3);
+      const hits = await doSearch(service, '中文网络小说 月票榜', 3);
       return hits.ok ? ok({ hits: hits.value.length, first: hits.value[0]?.title ?? null }) : hits;
     },
 
@@ -310,7 +391,7 @@ export function webUseCases(deps: AppDeps) {
     async webSearch(query: string, count = 8): Promise<Result<{ readonly service: string; readonly hits: readonly SearchHit[] }, AppError>> {
       const service = await defaultService();
       if (!service.ok) return service;
-      const hits = await search(service.value, query, count);
+      const hits = await doSearch(service.value, query, count);
       return hits.ok ? ok({ service: service.value.name, hits: hits.value }) : hits;
     },
 

@@ -57,6 +57,7 @@ export type EvalConfig = {
       readonly refusalFallback: 'server_default' | 'none';
       readonly contextWindow: number;
       readonly maxOutputTokens: number;
+      readonly webSearch: boolean;
     };
     /** 美元 / 百万 Token；为 null 时费用显示为未知。 */
     readonly prices: EvalPrices | null;
@@ -176,6 +177,7 @@ export function parseConfig(text: string): Parsed<EvalConfig> {
           refusalFallback: r.oneOf(c['refusalFallback'], 'model.capabilities.refusalFallback', ['server_default', 'none'] as const, 'none'),
           contextWindow: r.integer(c['contextWindow'], 'model.capabilities.contextWindow', 1, 100_000_000),
           maxOutputTokens: r.integer(c['maxOutputTokens'], 'model.capabilities.maxOutputTokens', 1, 100_000_000),
+          webSearch: r.flag(c['webSearch'], 'model.capabilities.webSearch', false),
         },
         prices:
           prices === null

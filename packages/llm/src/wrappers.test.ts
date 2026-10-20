@@ -125,6 +125,13 @@ describe('结构化输出管线', () => {
 
   it('修正原因不计入请求哈希（原因已在修正消息中），录制回放样本照常匹配', () => {
     expect(requestHash(baseRequest({ repairOf: ['kind: 无效'] }))).toBe(requestHash(baseRequest({})));
+    // 能力里的 webSearch 只在声明了服务端工具时影响请求：没有工具的请求不把它算进哈希（M7-02 之前的记录照旧对得上）。
+    const plain = baseRequest({});
+    const searchable = { ...plain, model: { ...plain.model, capabilities: { ...plain.model.capabilities, webSearch: !plain.model.capabilities.webSearch } } };
+    expect(requestHash(searchable)).toBe(requestHash(plain));
+    const tools = [{ type: 'web_search' as const }];
+    expect(requestHash({ ...searchable, tools })).not.toBe(requestHash({ ...plain, tools }));
+    expect(requestHash({ ...plain, tools })).not.toBe(requestHash(plain));
   });
 
   it('超过修正次数时返回 invalid_output 与最后的错误', async () => {
@@ -161,6 +168,14 @@ describe('预算守卫', () => {
   it('价格或用量未知时费用为未知', () => {
     expect(costOf(usage(1, 1), undefined)).toBeNull();
     expect(costOf(null, { input: 1, output: 1 })).toBeNull();
+  });
+
+  it('模型自带的联网搜索按每千次另计；价格表没有这一项时搜索按 0 计；最坏估计按最多搜几次', () => {
+    const prices = { input: 1, output: 1, webSearch: 10 };
+    expect(costOf(usage(0, 0), prices, 3)).toBeCloseTo(0.03);
+    expect(costOf(usage(0, 0), { input: 1, output: 1 }, 3)).toBe(0);
+    const searching = baseRequest({ tools: [{ type: 'web_search', maxUses: 2 }], model: { ...baseRequest().model, prices } });
+    expect((worstCase(searching).usd ?? 0) - (worstCase(baseRequest({ model: { ...baseRequest().model, prices } })).usd ?? 0)).toBeCloseTo(0.02);
   });
 
   it('估算输入规模时计入系统提示、消息与输出格式', () => {

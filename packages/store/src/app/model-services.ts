@@ -28,6 +28,8 @@ export const StoredCapabilities = z.object({
   contextWindow: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
   selfTestPassed: z.boolean(),
+  // 模型自带的联网搜索（M7-02）。早先保存的记录没有这一项，读出来按不支持处理。
+  webSearch: z.boolean().default(false),
 });
 export type StoredCapabilities = z.infer<typeof StoredCapabilities>;
 
@@ -36,6 +38,8 @@ export const StoredPrices = z.object({
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative().optional(),
   cacheWrite: z.number().nonnegative().optional(),
+  /** 模型自带联网搜索每千次的美元价（M7-02）。 */
+  webSearch: z.number().nonnegative().optional(),
 });
 export type StoredPrices = z.infer<typeof StoredPrices>;
 

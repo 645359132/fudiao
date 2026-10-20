@@ -10,6 +10,8 @@ const Capabilities = z.object({
   contextWindow: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
   selfTestPassed: z.boolean(),
+  /** 模型自带的联网搜索（M7-02）；推演不用它，实验配置可以不写。 */
+  webSearch: z.boolean().default(false),
 });
 
 export const ModelProfileSchema = z.object({

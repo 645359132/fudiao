@@ -5,6 +5,7 @@ import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import { mapSdkError, streamError } from './errors';
+import { unsupportedTools } from './server-tools';
 import { ThinkFilter } from './think-filter';
 import { OPENAI_DIALECT, type ChatDialect } from './dialect';
 
@@ -61,6 +62,9 @@ export class OpenAIChatAdapter implements LlmPort, ModelLister {
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
+    // Chat Completions 没有服务端的联网搜索工具（OpenAI 只在 Responses API 提供）：声明了就明确拒绝，不发请求。
+    const unsupported = unsupportedTools(request, 'Chat Completions 写法的服务不支持模型自带的联网搜索：请改用 OpenAI 官方服务（Responses API）或 Anthropic 的模型');
+    if (unsupported !== null) return err(unsupported);
     const base = { provider: request.model.provider, requestHash: requestHash(request), fallbackUsed: false };
     let text = '';
     let refusalText = '';

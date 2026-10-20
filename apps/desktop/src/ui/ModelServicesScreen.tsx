@@ -218,9 +218,13 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
   const save = useApp((s) => s.saveSearchService);
   const busy = useApp((s) => s.busy);
   const providers = useApp((s) => s.modelServices?.providers ?? []);
+  // 模型自带的联网搜索（M7-02）只能选登记了这项能力的模型。选择器返回状态中的原数组，过滤放在外面。
+  const allModels = useApp((s) => s.modelServices?.models);
+  const searchable = allModels?.filter((m) => m.capabilities.webSearch) ?? [];
   const [kind, setKind] = useState<SearchKind>(service?.kind ?? 'deepseek');
   const [name, setName] = useState(service?.name ?? SEARCH_PRESETS.deepseek.label);
   const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? SEARCH_PRESETS.deepseek.baseUrl);
+  const [modelId, setModelId] = useState(service?.modelId ?? searchable[0]?.id ?? '');
   // API Key 只在提交时交给凭据端口，不进入应用状态；提交后清空。
   const [apiKey, setApiKey] = useState('');
   // 沿用哪个模型服务的 Key：只列出地址与搜索服务同一个源、且填过 Key 的模型服务。
@@ -239,13 +243,16 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
     if (baseUrl === SEARCH_PRESETS[kind].baseUrl || baseUrl.trim() === '') setBaseUrl(SEARCH_PRESETS[next].baseUrl);
     setKind(next);
   };
+  const byModel = kind === 'provider';
   return (
     <form
       className="provider-form"
       aria-label={service === null ? '添加搜索服务' : `编辑搜索服务 ${service.name}`}
       onSubmit={(e) => {
         e.preventDefault();
-        const form: SearchServiceForm = { kind, name, baseUrl, apiKey: apiKey.trim() === '' ? null : apiKey, credentialRef: reuse };
+        const form: SearchServiceForm = byModel
+          ? { kind, name, baseUrl: '', modelId, apiKey: null, credentialRef: null }
+          : { kind, name, baseUrl, modelId: null, apiKey: apiKey.trim() === '' ? null : apiKey, credentialRef: reuse };
         void save(service, form).then((done) => {
           setApiKey('');
           if (done) onDone();
@@ -267,28 +274,47 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
         名称
         <input value={name} onChange={(e) => setName(e.currentTarget.value)} />
       </label>
-      <label>
-        服务地址
-        <input value={baseUrl} onChange={(e) => setBaseUrl(e.currentTarget.value)} />
-      </label>
-      {reusable.length > 0 ? (
+      {byModel ? (
         <label>
-          API Key 来源
-          <select value={reuse ?? ''} onChange={(e) => setCredentialRef(e.currentTarget.value === '' ? null : e.currentTarget.value)}>
-            <option value="">单独填写</option>
-            {reusable.map((p) => (
-              <option key={p.id} value={p.id}>
-                沿用模型服务“{p.name}”的 Key
+          用来搜索的模型
+          <select value={modelId} onChange={(e) => setModelId(e.currentTarget.value)}>
+            {searchable.length === 0 ? <option value="">（没有登记联网搜索能力的模型）</option> : null}
+            {searchable.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName}
               </option>
             ))}
           </select>
         </label>
-      ) : null}
-      {reuse === null ? (
-        <label>
-          API Key{service !== null && service.credentialRef === null && service.credential.hasSecret ? '（留空表示不改）' : ''}
-          <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
-        </label>
+      ) : (
+        <>
+          <label>
+            服务地址
+            <input value={baseUrl} onChange={(e) => setBaseUrl(e.currentTarget.value)} />
+          </label>
+          {reusable.length > 0 ? (
+            <label>
+              API Key 来源
+              <select value={reuse ?? ''} onChange={(e) => setCredentialRef(e.currentTarget.value === '' ? null : e.currentTarget.value)}>
+                <option value="">单独填写</option>
+                {reusable.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    沿用模型服务“{p.name}”的 Key
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {reuse === null ? (
+            <label>
+              API Key{service !== null && service.credentialRef === null && service.credential.hasSecret ? '（留空表示不改）' : ''}
+              <input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.currentTarget.value)} />
+            </label>
+          ) : null}
+        </>
+      )}
+      {byModel && searchable.length === 0 ? (
+        <p className="muted">还没有登记联网搜索能力的模型：先在上面添加 Anthropic 或 OpenAI 官方服务的模型（内置表里的会自动标上），或在模型的“能力与价格”里勾选。</p>
       ) : null}
       <div className="form-actions">
         <button type="submit" className="primary" disabled={busy}>
@@ -302,12 +328,19 @@ function SearchServiceEditor({ service, onDone }: { readonly service: SearchServ
   );
 }
 
+/** 模型自带的搜索：显示用的是哪个模型；模型已删除时提示重新选择。 */
+function searchModelText(s: SearchServiceView, models: readonly { readonly id: string; readonly displayName: string }[] | undefined): string {
+  const model = models?.find((m) => m.id === s.modelId);
+  return model === undefined ? '所用的模型已删除，请编辑后重新选择' : `模型：${model.displayName}`;
+}
+
 function SearchServiceCard({ service, isDefault }: { readonly service: SearchServiceView; readonly isDefault: boolean }) {
   const remove = useApp((s) => s.deleteSearchService);
   const setDefault = useApp((s) => s.setDefaultSearchService);
   const test = useApp((s) => s.testSearchService);
   const result = useApp((s) => s.searchTests[service.id]);
   const busy = useApp((s) => s.busy);
+  const models = useApp((s) => s.modelServices?.models);
   const [editing, setEditing] = useState(false);
   if (editing) return <SearchServiceEditor service={service} onDone={() => setEditing(false)} />;
   return (
@@ -318,7 +351,7 @@ function SearchServiceCard({ service, isDefault }: { readonly service: SearchSer
           {isDefault ? <span className="muted">（默认）</span> : null}
         </h3>
         <span className="muted">
-          {SEARCH_PRESETS[service.kind].label} · {service.baseUrl} · {searchCredentialText(service)}
+          {SEARCH_PRESETS[service.kind].label} · {service.kind === 'provider' ? searchModelText(service, models) : `${service.baseUrl} · ${searchCredentialText(service)}`}
         </span>
       </header>
       <div className="form-actions">
@@ -353,7 +386,9 @@ function SearchServicesSection() {
   return (
     <section aria-label="联网搜索">
       <h3>联网搜索</h3>
-      <p className="muted">AI 助手与扫榜拆书可以联网搜索公开的网页（榜单、简介、评论、资料）。搜索服务由你自己填 API Key：DeepSeek 搜索可以直接沿用已配好的 DeepSeek 模型服务的 Key（每千次成功请求 5 元），Tavily 与 Brave Search 有免费额度。读网页不带任何凭据，只读公网地址；直接读不到时用 DeepSeek 的抓取接口再试。网页里的文字只当材料。</p>
+      <p className="muted">
+        AI 助手与扫榜拆书可以联网搜索公开的网页（榜单、简介、评论、资料）。搜索服务由你自己填 API Key：DeepSeek 搜索可以直接沿用已配好的 DeepSeek 模型服务的 Key（每千次成功请求 5 元），Tavily 与 Brave Search 有免费额度；Anthropic 与 OpenAI 官方接口的模型也可以自己联网搜索（按模型服务计费）。读网页不带任何凭据，只读公网地址；直接读不到时用 DeepSeek 的抓取接口再试。网页里的文字只当材料。
+      </p>
       {view?.services.map((s) => (
         <SearchServiceCard key={s.id} service={s} isDefault={s.id === view.defaultServiceId} />
       ))}

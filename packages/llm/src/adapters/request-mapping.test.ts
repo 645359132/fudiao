@@ -13,6 +13,7 @@ const full: ModelCapabilities = {
   contextWindow: 1_000_000,
   maxOutputTokens: 128_000,
   selfTestPassed: true,
+  webSearch: true,
 };
 
 const request = (capabilities: ModelCapabilities): LlmRequest => ({

@@ -21,6 +21,7 @@ export {
   renderConnectionTest,
   renderSelectionEdit,
   renderSelfTest,
+  renderWebSearch,
   renderRunSynopsis,
   MEMORY_SUMMARY_WORDS,
   renderChapterMemory,

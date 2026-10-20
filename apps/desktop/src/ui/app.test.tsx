@@ -684,6 +684,41 @@ describe('模型服务', () => {
     expect(await screen.findByRole('button', { name: '新建作品' })).toBeTruthy();
   });
 
+  it('联网搜索可以选模型自带的搜索：只列登记了能力的模型，卡片显示所用模型，测试搜索走模型调用', async () => {
+    const { deps, user } = start();
+    await user.click(await screen.findByRole('button', { name: '模型服务' }));
+    await user.click(await screen.findByRole('button', { name: '添加服务' }));
+    const form = screen.getByRole('form', { name: '添加服务' });
+    await user.type(within(form).getByLabelText('API Key'), 'sk-ant-secret-123');
+    await user.click(within(form).getByRole('button', { name: '保存' }));
+    const card = await screen.findByRole('region', { name: 'Anthropic' });
+    // 内置表里的模型带联网搜索能力；手填的 model-a 没有。
+    await user.type(within(card).getByRole('textbox', { name: 'Anthropic 的模型名称' }), 'claude-sonnet-5-5{Enter}');
+    expect(await within(card).findByText('默认模型')).toBeTruthy();
+    await user.type(within(card).getByRole('textbox', { name: 'Anthropic 的模型名称' }), 'model-a{Enter}');
+    expect(await within(card).findByRole('note', { name: 'model-a 的能力' })).toBeTruthy();
+    expect(within(card).getByRole('note', { name: 'Claude Sonnet 5.5 的能力' }).textContent).toContain('自带联网搜索');
+
+    await user.click(screen.getByRole('button', { name: '添加搜索服务' }));
+    const search = screen.getByRole('form', { name: '添加搜索服务' });
+    await user.selectOptions(within(search).getByRole('combobox', { name: '搜索服务' }), 'provider');
+    expect(within(search).queryByLabelText(/API Key/)).toBeNull();
+    const models = within(search).getByRole('combobox', { name: '用来搜索的模型' });
+    expect(within(models).getAllByRole('option').map((o) => o.textContent)).toEqual(['Claude Sonnet 5.5']);
+    await user.click(within(search).getByRole('button', { name: '保存' }));
+    const service = await screen.findByRole('region', { name: '搜索服务 模型自带的联网搜索' });
+    expect(service.textContent).toContain('模型：Claude Sonnet 5.5');
+    expect(service.textContent).toContain('（默认）');
+
+    deps.llmResponses.push({
+      chunks: anthropicChunks('claude-sonnet-5-5', { text: ['1. 起点月票榜'], end: 'stop', usage: { input: 9, output: 1, cacheRead: 0 }, search: { query: '月票榜', results: [{ url: 'https://example.com/rank', title: '起点月票榜', snippet: '榜单' }] } }),
+    });
+    await user.click(within(service).getByRole('button', { name: '测试搜索' }));
+    await waitFor(() => expect(within(service).getByRole('status').textContent).toBe('搜到 1 条，第一条：起点月票榜'));
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).toContain('web_search_20250305');
+    expect(deps.secrets.size).toBe(1);
+  });
+
   it('获取模型列表并添加；能力自检通过后显示结果', async () => {
     const { deps, user } = start();
     await user.click(await screen.findByRole('button', { name: '模型服务' }));

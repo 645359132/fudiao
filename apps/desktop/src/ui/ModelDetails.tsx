@@ -35,7 +35,9 @@ function selfTestText(m: StoredModel): string {
 }
 
 const priceText = (m: StoredModel) =>
-  m.prices === null ? '价格未配置，费用记为未知' : `每百万 Token：输入 ${m.prices.input} 美元，输出 ${m.prices.output} 美元`;
+  m.prices === null
+    ? '价格未配置，费用记为未知'
+    : `每百万 Token：输入 ${m.prices.input} 美元，输出 ${m.prices.output} 美元${m.prices.webSearch === undefined ? '' : `；联网搜索每千次 ${m.prices.webSearch} 美元`}`;
 
 const optionalNumber = (v: string) => (v.trim() === '' ? undefined : Number(v));
 
@@ -49,27 +51,37 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
   const [structuredOutput, setStructured] = useState<StructuredMode>(c.structuredOutput);
   const [promptCaching, setCaching] = useState(c.promptCaching);
   const [reasoning, setReasoning] = useState(c.reasoningControl === 'effort');
+  const [webSearch, setWebSearch] = useState(c.webSearch);
   const [contextWindow, setContext] = useState(String(c.contextWindow));
   const [maxOutput, setMaxOutput] = useState(String(c.maxOutputTokens));
   const [input, setInput] = useState(p === null ? '' : String(p.input));
   const [output, setOutput] = useState(p === null ? '' : String(p.output));
   const [cacheRead, setCacheRead] = useState(p?.cacheRead === undefined ? '' : String(p.cacheRead));
   const [cacheWrite, setCacheWrite] = useState(p?.cacheWrite === undefined ? '' : String(p.cacheWrite));
+  const [searchPrice, setSearchPrice] = useState(p?.webSearch === undefined ? '' : String(p.webSearch));
 
   const submit = () => {
     const inputPrice = optionalNumber(input);
     const outputPrice = optionalNumber(output);
     const read = optionalNumber(cacheRead);
     const write = optionalNumber(cacheWrite);
+    const perSearch = optionalNumber(searchPrice);
     const prices =
       inputPrice === undefined || outputPrice === undefined
         ? null
-        : { input: inputPrice, output: outputPrice, ...(read !== undefined && { cacheRead: read }), ...(write !== undefined && { cacheWrite: write }) };
+        : {
+            input: inputPrice,
+            output: outputPrice,
+            ...(read !== undefined && { cacheRead: read }),
+            ...(write !== undefined && { cacheWrite: write }),
+            ...(perSearch !== undefined && { webSearch: perSearch }),
+          };
     const capabilities: StoredCapabilities = {
       ...c,
       structuredOutput,
       promptCaching,
       reasoningControl: reasoning ? 'effort' : 'none',
+      webSearch,
       contextWindow: Number(contextWindow),
       maxOutputTokens: Number(maxOutput),
     };
@@ -110,6 +122,10 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
           <input type="checkbox" checked={reasoning} onChange={(e) => setReasoning(e.currentTarget.checked)} />
           支持思考深度控制
         </label>
+        <label className="check">
+          <input type="checkbox" checked={webSearch} onChange={(e) => setWebSearch(e.currentTarget.checked)} />
+          模型自带的联网搜索（Anthropic 与 OpenAI 官方接口的服务端搜索工具）
+        </label>
         <label>
           上下文长度（Token）
           <input type="number" min={1} value={contextWindow} onChange={(e) => setContext(e.currentTarget.value)} />
@@ -135,6 +151,10 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
           <label>
             缓存写入
             <input type="number" min={0} step="any" value={cacheWrite} onChange={(e) => setCacheWrite(e.currentTarget.value)} />
+          </label>
+          <label>
+            联网搜索（每千次）
+            <input type="number" min={0} step="any" value={searchPrice} onChange={(e) => setSearchPrice(e.currentTarget.value)} />
           </label>
         </fieldset>
         {structuredOutput !== c.structuredOutput && <p className="muted">改了结构化输出方式，保存后需要重新自检。</p>}
@@ -197,7 +217,8 @@ export function ModelRow({ model, isDefault }: { readonly model: StoredModel; re
         删除
       </button>
       <span className="model-facts" role="note" aria-label={`${model.displayName} 的能力`}>
-        {model.modelId === model.displayName ? '' : `${model.modelId} · `}结构化输出：{STRUCTURED[model.capabilities.structuredOutput]} · {selfTestText(model)} · {priceText(model)}
+        {model.modelId === model.displayName ? '' : `${model.modelId} · `}结构化输出：{STRUCTURED[model.capabilities.structuredOutput]}
+        {model.capabilities.webSearch ? ' · 自带联网搜索' : ''} · {selfTestText(model)} · {priceText(model)}
       </span>
       {report !== undefined && (
         <span className={report !== 'testing' && !report.ok ? 'report failed' : 'report'} role="status" aria-label={`${model.displayName} 的连接测试`}>

@@ -461,9 +461,9 @@ packages/llm（TypeScript）                          src-tauri（Rust）
 | 表 | 关键字段 | 相关需求 |
 | --- | --- | --- |
 | `provider` | id、kind（anthropic、openai、gemini、openai_compatible、local）、name、base_url、credential_ref、auth_method、concurrency、enabled | B15 |
-| `model_profile` | provider_id、model_id、display_name、capabilities（结构化输出方式、提示词缓存、思考深度控制、上下文长度、最大输出）、prices（输入、输出、缓存读、缓存写）、source（服务返回、内置能力表、用户编辑）、self_test（状态、时间、失败原因） | B56、B57、B19 |
+| `model_profile` | provider_id、model_id、display_name、capabilities（结构化输出方式、提示词缓存、思考深度控制、上下文长度、最大输出、模型自带的联网搜索）、prices（输入、输出、缓存读、缓存写、联网搜索每千次）、source（服务返回、内置能力表、用户编辑）、self_test（状态、时间、失败原因） | B56、B57、B19、B84 |
 | `task_routing` | task（角色行动、语义裁决、认知更新、判断、场景配置草稿、节拍表、候选稿正文、选区操作、导演提议、读者代理、动机检验）、model_ref、params（effort 等）、fallback_model_ref | B58 |
-| `search_service` | id、kind（tavily、brave、deepseek）、name、base_url（只能 https）、credential_ref（沿用哪个模型服务的 API Key，为空时用自己的条目）、enabled；联网搜索的服务，API Key 在系统凭据管理器中；app 迁移 0002、0003 | B84 |
+| `search_service` | id、kind（tavily、brave、deepseek、provider）、name、base_url（外部服务只能 https，provider 为空串）、credential_ref（沿用哪个模型服务的 API Key，为空时用自己的条目）、model_id（provider 用哪个模型，模型删除后置空）、enabled；联网搜索的服务，外部服务的 API Key 在系统凭据管理器中，provider 走模型服务的凭据；app 迁移 0002、0003、0004 | B84 |
 | `search_default` | key（只有 default 一行）、service_id（随服务删除）；默认的搜索服务 | B84 |
 | `routing_preset` | name（质量优先、均衡、省钱）、routes（JSON） | B58 |
 
@@ -932,6 +932,7 @@ M6-07 的设计（扫榜拆书）：
 | 编号 | 任务 | 相关需求 |
 | --- | --- | --- |
 | M7-01 | 联网搜索：搜索服务（Tavily、Brave Search）的配置与凭据、`web_search` 与 `read_web_page` 两个助手动作、扫榜拆书的榜单联网搜索、Rust 的 `web_fetch`（不带凭据、只读公网、只取文字） | B84，验收“联网搜索” |
+| M7-02 | 模型自带的联网搜索：第四种搜索服务 `provider`，用 Anthropic（Messages API 的 `web_search` 服务端工具）或 OpenAI 官方接口（Responses API 的 `web_search` 工具）的模型自己搜索；模型能力表增加 `webSearch`，内置表标上两家的主流模型；适配器声明工具并整理结果块；不支持的模型照旧用 Tavily、Brave、DeepSeek 搜索 | B84，验收“联网搜索” |
 
 M7-01 的设计（联网搜索）：
 
@@ -941,6 +942,18 @@ M7-01 的设计（联网搜索）：
 - 扫榜拆书：开始表单增加“联网搜榜单”——搜到的标题与摘要按一本一段接到榜单文本后面，作者删改后再开始；样章仍由作者粘贴或从 TXT 读入（B79 的说明相应改写）。助手仍不能发起扫榜拆书。
 - 界面：“模型服务”页下方增加“联网搜索”一节：添加服务（种类、名称、地址、API Key）、设为默认、测试搜索、编辑、删除。浏览器预览与测试里的实现不联网：预览的搜索与读网页都说明不联网；测试依赖有预设的搜索响应（`searchResponses`、`searchRequests`）与按网址的假页面（`webPages`）。
 - 测试：Rust 单元测试（公网地址判断、地址校验、HTML 转文字、实体与空白）与 `tests/web.rs`（本机服务：HTML 与 GBK 页面、纯文本、重定向、跳转过多、非文字响应、404、2 MB 上限、真实读取器拒绝本机地址、请求不带凭据头）；TypeScript 测试覆盖服务的增删改与凭据、两家接口的请求与解析、错误说明、助手的两个动作。
+
+M7-02 的设计（模型自带的联网搜索）：
+
+- 两家服务端搜索工具的现状（按 platform.claude.com 与 developers.openai.com 的文档核实，2026-10-20）：
+  - Anthropic Messages API：请求的 `tools` 里声明 `{ type: "web_search_20250305", name: "web_search", max_uses }`（可选 `allowed_domains` 或 `blocked_domains` 二选一、`user_location`）；`web_search_20260209` 起带动态过滤（搜索改在代码执行里跑、只把相关内容放进上下文，不支持代码执行的模型要设 `allowed_callers: ["direct"]`，Google Cloud 与 Azure 托管的 Foundry 只有基础版），`web_search_20260318` 再加 `response_inclusion`。回复里依次是 `server_tool_use`（`name: "web_search"`，`input.query`）、`web_search_tool_result`（`content` 为 `web_search_result` 列表：`url`、`title`、`page_age`、加密的 `encrypted_content`，本机读不到正文；出错时 `content` 是一个 `web_search_tool_result_error` 对象，`error_code` 有 `too_many_requests`、`invalid_tool_input`、`max_uses_exceeded`、`query_too_long`、`request_too_large`、`unavailable`，HTTP 仍是 200）与带引用的正文块（`citations` 里的 `web_search_result_location`：`url`、`title`、`cited_text` 最多 150 字、`encrypted_index`）；用量里 `server_tool_use.web_search_requests` 是搜索次数，长搜索可能以 `pause_turn` 停下。流式时搜索块先于正文到达，SDK 的 `finalMessage()` 把它们都收齐。价格：每千次搜索 10 美元，搜到的内容按输入 Token 另计，出错的搜索不计费；不需要 beta 头。文档没有写它与 `output_config.format`（结构化输出）能否同时开，而引用在文档引用那里写明与结构化输出不兼容、搜索的引用又总是开着，所以不把两者放进同一次请求。
+  - OpenAI Responses API：`tools: [{ type: "web_search" }]`（正式版，可选 `search_context_size`、`user_location`、`filters.allowed_domains`，最多 100 个域名；旧的 `web_search_preview` 不支持 filters），`tool_choice` 默认 auto，`include: ["web_search_call.action.sources"]` 才返回查过的来源列表。输出项里是 `web_search_call`（`status`、`action.type` 为 search、open_page 或 find_in_page，search 带 `query`/`queries` 与 `sources[].url`）与 `message`，正文 `output_text` 的 `annotations` 里 `url_citation` 给出 `url`、`title`、`start_index`、`end_index`；流式有 `response.web_search_call.in_progress/searching/completed` 与 `response.output_text.annotation.added`，结束事件的 `response.output` 带全部项。支持的模型：gpt-5.5（推荐）、gpt-5.4、gpt-5、gpt-4.1、gpt-4.1-mini 等（gpt-5 不能配 minimal 推理；Chat Completions 只有专门的 search 模型，一般模型没有这项工具）。价格：正式版工具每千次调用 10 美元（预览版非推理模型 25 美元），搜到的内容按模型输入价计（gpt-4.1-mini 等按固定 8,000 Token 计）；搜索上下文最多 128k。文档没有写与 `text.format`（json_schema）同时使用的限制。
+  - DeepSeek：Responses API 的内置 web_search 工具只在 deepseek-v4-pro 上生效、flash 上被忽略；它的独立 Search 与 Fetch 接口已作为“DeepSeek 搜索”接入（M7-01 补充），所以 provider 种类不覆盖 DeepSeek，兼容接口（Chat Completions）的模型一律不能选。
+  - 结论：两家都没有明确保证搜索工具与结构化输出同时开启，Anthropic 一侧还有引用与结构化输出不兼容的记载，所以搜索做成单独一次“只搜不写 JSON”的调用：模板 `web_search`（版本 1，任务 `web_search`）只要求模型先搜再按结果列条目，结果由程序从服务返回的结果块与引用里整理成标题、网址、摘要，模型的正文不解析（硬性规则 11 不受影响：没有 `JSON.parse`）。
+- `packages/llm`：`LlmRequest.tools`（`ServerTool`，只有 `{ type: 'web_search', maxUses }` 一种，计入请求哈希；没有声明工具的请求不把能力里的 `webSearch` 算进哈希，加这项能力之前的调用记录与录制样本照旧对得上）；`ModelCapabilities.webSearch`（保守能力为 false）与 `Prices.webSearch`（每千次美元）；`LlmResult.webSearch`（`WebSearchOutcome`：`requests` 搜索次数、`results` 标题网址摘要、`error` 工具的错误码）。`AnthropicAdapter` 按能力声明 `web_search_20250305`（基础版：所有支持搜索的模型与平台都接受，结果块直接返回；动态过滤的版本要经代码执行，对“搜一次、列结果”没有好处），从 `finalMessage()` 的 `web_search_tool_result` 块取网址与标题、从正文的 `web_search_result_location` 引用取摘要（`cited_text`），次数取 `usage.server_tool_use.web_search_requests`；`OpenAIAdapter` 声明 `{ type: 'web_search' }` 并 `include` 来源列表，从结束事件的 `response.output` 里取 `url_citation`（摘要为被引用的那段正文）与 `web_search_call` 的来源，次数按 completed 的调用计，有 failed 的调用记为错误；`OpenAIChatAdapter` 收到工具声明时不发请求、返回 `bad_request` 说明不支持。两个适配器在模型没有登记 `webSearch` 时同样不发请求（硬性规则 13）。费用：`costOf` 增加搜索次数参数，按 `prices.webSearch` 每千次另计；`worstCase` 按 `maxUses` 预留。契约测试（`contract.test.ts`）用不联网的 fake fetch 覆盖正常（去重、摘要、次数）、无结果、工具不可用、能力未登记、Chat Completions 拒绝，直连与经凭据代理各一遍；夹具 `Scenario.search` 由 `anthropicChunks`、`responsesChunks` 翻译成两家的线上格式。
+- 能力表：`StoredCapabilities.webSearch`（旧记录读出来按 false）、`StoredPrices.webSearch`；内置表（`builtin-models.ts`）加入 Anthropic 的 Fable 5.1、Fable 5、Opus 5.5、Opus 5、Opus 4.8、4.7、4.6、Sonnet 5.5、Sonnet 5、Sonnet 4.6、Haiku 5.5 与 OpenAI 的 gpt-5.5、gpt-5.4、gpt-5、gpt-4.1（能力与价格按官方价格页与模型页核实，gpt-5.5 的上下文与最大输出没有读到、沿用保守值，来源记为内置）；“能力与价格”编辑增加“模型自带的联网搜索”勾选与“联网搜索（每千次）”价格；Anthropic 的 Models API（SDK 0.131）还没有返回 `server_tools`，所以服务返回的能力里没有这一项。
+- 应用层：app 迁移 `0004_search_provider.sql` 在 0003 的结构上重建 `search_service`（`kind` 增加 provider、`base_url` 对 provider 为空串、`credential_ref` 保留但 provider 不用、`model_id` 引用 `model_profile` 且模型删除后置空；`search_default` 引用它，开着外键时 DROP TABLE 会级联删掉默认项，所以先把 `search_default` 也重建到新表上再删旧表、改名）。`web-search.ts`：provider 种类不要凭据（从别的种类改过来时删掉原来自己的条目，删除时不碰模型服务的条目）；`webSearch` 与 `testSearchService` 对 provider 种类经调用器（`RunRequest.model` 指定所选模型、`tools` 声明搜索，`effort` 为 low，输出上限 1,500 加思考余量，最多搜 3 次）调用，调用记进当前作品的 `llm_call`（任务种类 `web_search`，费用含搜索费），结果取 `LlmResult.webSearch`：没有结果且工具报错时说明错误码，模型没登记能力或已删除时说明怎么改。模型服务页的“联网搜索”里可以选“模型自带的联网搜索”，只列登记了能力的模型，卡片显示所用模型；AI 助手、扫榜拆书与读网页的 DeepSeek 兜底不改（默认服务是哪种都一样）。浏览器预览的演示模型不搜索，结果为“没有搜到”。
+- 测试：存储层的升级测试（0003 的数据升到 0004 后服务、沿用的 Key 与默认项保留）与 provider 种类的约束；应用层经两家适配器的搜索（请求带工具与模型服务的凭据、不走搜索通道、调用记录与费用）、无结果、工具出错、能力未登记、模型删除；界面测试走完添加与测试搜索。真实模型没有调用，待作者在手工清单里验证。
 
 ## 九 测试策略
 

@@ -20,6 +20,7 @@ const TASKS: Readonly<Record<string, string>> = {
   motive_check: '动机检验',
   self_test: '能力自检',
   connection_test: '连接测试',
+  web_search: '联网搜索',
 };
 
 const STATUS: Readonly<Record<LlmCallRow['status'], string>> = {

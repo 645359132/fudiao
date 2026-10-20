@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import { anthropicChunks, responsesChunks, type SearchScenario } from '@fudiao/llm/testing';
 import type { AssistantTurnOutput } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
@@ -168,6 +169,103 @@ describe('DeepSeek 搜索（B84）', () => {
     expect(await app.readWebPage('https://www.qidian.com/none')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('DeepSeek 也抓不到') } });
     expect(await app.readWebPage('http://127.0.0.1:1430/')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('只能读公网上的网页') } });
     expect(deps.searchRequests).toHaveLength(2);
+  });
+});
+
+describe('模型自带的联网搜索（B84，M7-02）', () => {
+  const found: SearchScenario = {
+    query: '起点 月票榜',
+    requests: 2,
+    results: [
+      { url: 'https://example.com/rank', title: '起点月票榜', snippet: '榜首是《夜当》。' },
+      { url: 'https://example.com/jianlai', title: '剑来' },
+    ],
+  };
+
+  /** 配一个 Anthropic 服务与内置表里的模型（内置表标了联网搜索能力），再建一个用它搜索的服务。 */
+  async function setupProvider(app: ReturnType<typeof setup>['app'], kind: 'anthropic' | 'openai' = 'anthropic') {
+    const preset = kind === 'anthropic' ? { baseUrl: 'https://api.anthropic.com', modelId: 'claude-sonnet-5-5' } : { baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.4' };
+    const providers = value(await app.saveProvider(null, { kind, name: kind, baseUrl: preset.baseUrl, authMethod: 'api_key', apiKey: `key-${kind}` }));
+    const providerId = providers.providers.find((p) => p.kind === kind)?.id ?? '';
+    const models = value(await app.addModel(providerId, preset.modelId));
+    const model = models.models.find((m) => m.modelId === preset.modelId)!;
+    expect(model.capabilities.webSearch).toBe(true);
+    const view = value(await app.saveSearchService(null, { kind: 'provider', name: `${kind} 搜索`, baseUrl: '', modelId: model.id, apiKey: null }));
+    return { model, service: view.services.find((s) => s.kind === 'provider')! };
+  }
+
+  it('Anthropic：经调用器用所选模型搜索，请求带搜索工具与模型服务的凭据，结果整理成标题、网址与摘要，调用记进 llm_call 并按每千次计搜索费', async () => {
+    const { deps, app } = setup();
+    value(await app.loadLibrary());
+    value(await app.createWork('新作品'));
+    const { service } = await setupProvider(app);
+    expect(service).toMatchObject({ kind: 'provider', baseUrl: '', credentialRef: null, credentialName: null, credential: { stored: false, hasSecret: false } });
+    deps.llmResponses.push({ chunks: anthropicChunks('claude-sonnet-5-5', { text: ['1. 起点月票榜…'], end: 'stop', usage: { input: 300, output: 60, cacheRead: 0 }, search: found }) });
+    const result = value(await app.webSearch('起点 月票榜', 5));
+    expect(result).toEqual({
+      service: 'anthropic 搜索',
+      hits: [
+        { title: '起点月票榜', url: 'https://example.com/rank', snippet: '榜首是《夜当》。' },
+        { title: '剑来', url: 'https://example.com/jianlai', snippet: '' },
+      ],
+    });
+    const sent = deps.llmRequests.at(-1)!;
+    expect(sent.url).toBe('https://api.anthropic.com/v1/messages?beta=true');
+    expect(sent.headers['x-api-key']).toBe('key-anthropic');
+    expect(sent.body).toMatchObject({ model: 'claude-sonnet-5-5', tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] });
+    expect(JSON.stringify(sent.body)).toContain('请搜索：起点 月票榜');
+    expect(sent.body).not.toHaveProperty('output_config.format');
+    // 没有搜索服务的请求（不走凭据代理的搜索通道）。
+    expect(deps.searchRequests).toHaveLength(0);
+    const { recent } = value(await app.usage());
+    const call = recent.find((c) => c.taskKind === 'web_search')!;
+    expect(call).toMatchObject({ templateId: 'web_search', status: 'completed', model: 'claude-sonnet-5-5' });
+    // Sonnet 5.5：输入 2 美元、输出 10 美元每百万，搜索每千次 10 美元，搜了两次。
+    expect(call.cost).toBeCloseTo((300 * 2 + 60 * 10) / 1_000_000 + 0.02, 9);
+  });
+
+  it('OpenAI 官方接口（Responses API）：同样可用；测试搜索也走模型', async () => {
+    const { deps, app } = setup();
+    value(await app.loadLibrary());
+    value(await app.createWork('新作品'));
+    const { service } = await setupProvider(app, 'openai');
+    deps.llmResponses.push({ chunks: responsesChunks('gpt-5.4', { text: ['榜首是《夜当》。'], end: 'stop', usage: { input: 300, output: 60, cacheRead: 0 }, search: found }) });
+    expect(value(await app.testSearchService(service.id))).toEqual({ hits: 2, first: '起点月票榜' });
+    const sent = deps.llmRequests.at(-1)!;
+    expect(sent.url).toBe('https://api.openai.com/v1/responses');
+    expect(sent.headers['authorization']).toBe('Bearer key-openai');
+    expect(sent.body).toMatchObject({ model: 'gpt-5.4', tools: [{ type: 'web_search' }], include: ['web_search_call.action.sources'] });
+  });
+
+  it('没搜到与工具出错的说明；模型没有登记能力或已删除时说明怎么办；删除服务不动模型服务的凭据', async () => {
+    const { deps, app } = setup();
+    value(await app.loadLibrary());
+    value(await app.createWork('新作品'));
+    const { model, service } = await setupProvider(app);
+    deps.llmResponses.push({ chunks: anthropicChunks('claude-sonnet-5-5', { text: ['没有搜到'], end: 'stop', search: { query: 'q', results: [] } }) });
+    expect(value(await app.webSearch('没有的书')).hits).toEqual([]);
+    deps.llmResponses.push({ chunks: anthropicChunks('claude-sonnet-5-5', { text: ['搜索失败'], end: 'stop', search: { query: 'q', results: [], error: 'too_many_requests' } }) });
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('too_many_requests') } });
+
+    // 去掉能力登记：不发请求就说明。
+    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, webSearch: false }, prices: model.prices }));
+    const before = deps.llmRequests.length;
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('没有登记') } });
+    expect(deps.llmRequests).toHaveLength(before);
+
+    // 换成兼容接口的模型（没有这项能力，界面不会列出它）；模型删掉后服务的 model_id 置空，搜索时说明。
+    const sp = value(await app.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk-s' }));
+    const compatible = value(await app.addModel(sp.providers.find((p) => p.kind === 'openai_compatible')?.id ?? '', 'm')).models.find((m) => m.modelId === 'm')!;
+    expect(await app.saveSearchService(service, { kind: 'provider', name: 'x', baseUrl: '', modelId: compatible.id, apiKey: null })).toMatchObject({ ok: true });
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('没有登记') } });
+    value(await app.deleteModel(compatible));
+    const after = value(await app.loadSearchServices()).services[0]!;
+    expect(after.modelId).toBeNull();
+    expect(await app.webSearch('x')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已删除') } });
+    expect(await app.saveSearchService(after, { kind: 'provider', name: 'x', baseUrl: '', modelId: null, apiKey: null })).toMatchObject({ ok: false, error: { error: { detail: '请选择用来搜索的模型' } } });
+    // 删除这种服务不碰模型服务的凭据条目。
+    value(await app.deleteSearchService(after));
+    expect(deps.secrets.size).toBe(2);
   });
 });
 

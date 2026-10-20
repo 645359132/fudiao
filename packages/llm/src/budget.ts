@@ -3,17 +3,24 @@ import type { CallOptions, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage, P
 
 const PER_MILLION = 1_000_000;
 
-/** 按价格表计算一次调用的费用（美元）。价格或用量未知时返回 null（B19）。 */
-export function costOf(usage: LlmUsage | null, prices: Prices | undefined): number | null {
+/**
+ * 按价格表计算一次调用的费用（美元）。价格或用量未知时返回 null（B19）。
+ * webSearches 为模型自带联网搜索的次数，按每千次的价格另计；价格表没有这一项时搜索费用按 0 计。
+ */
+export function costOf(usage: LlmUsage | null, prices: Prices | undefined, webSearches = 0): number | null {
   if (usage === null || prices === undefined) return null;
   return (
     (usage.inputTokens * prices.input +
       usage.outputTokens * prices.output +
       usage.cacheReadTokens * (prices.cacheRead ?? prices.input) +
       usage.cacheWriteTokens * (prices.cacheWrite ?? prices.input)) /
-    PER_MILLION
+      PER_MILLION +
+    (webSearches * (prices.webSearch ?? 0)) / 1_000
   );
 }
+
+/** 请求声明的联网搜索最多搜几次（没有声明时为 0）：预算的最坏估计按它计搜索费用。 */
+const maxSearches = (request: LlmRequest): number => (request.tools ?? []).reduce((n, t) => (t.type === 'web_search' ? n + (t.maxUses ?? 1) : n), 0);
 
 /**
  * 粗略估算输入的 Token 数：按字符计，对中文偏保守。只用于调用前的预算检查，
@@ -38,7 +45,7 @@ export function worstCase(request: LlmRequest, known: LlmUsage | null = null): {
     known === null
       ? { inputTokens: estimateInputTokens(request), outputTokens: request.maxOutputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }
       : { ...known, outputTokens: Math.max(known.outputTokens, request.maxOutputTokens) };
-  return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices) };
+  return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices, maxSearches(request)) };
 }
 
 /**
@@ -49,8 +56,8 @@ export type Charge = { readonly tokens: number; readonly usd: number | null; rea
 
 export function chargeOf(request: LlmRequest, result: Result<LlmResult, LlmError>): Charge | null {
   if (result.ok) {
-    const { usage } = result.value;
-    if (usage !== null) return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices), estimated: false };
+    const { usage, webSearch } = result.value;
+    if (usage !== null) return { tokens: tokensOf(usage), usd: costOf(usage, request.model.prices, webSearch?.requests ?? 0), estimated: false };
     return { ...worstCase(request), estimated: true };
   }
   const partial = result.error.partial;

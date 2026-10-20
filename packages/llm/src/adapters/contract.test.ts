@@ -22,6 +22,7 @@ const capabilities: ModelCapabilities = {
   contextWindow: 200_000,
   maxOutputTokens: 8_000,
   selfTestPassed: true,
+  webSearch: true,
 };
 
 const request = (provider: string): LlmRequest => ({
@@ -219,5 +220,83 @@ describe.each(routes)('$name（$via）', (subject) => {
     const ok = await subject.build(fakeFetch([{ chunks: subject.chunks(MODEL, normal) }]).fetch).complete(req);
     const failed = await subject.build(fakeFetch([{ status: 401, body: errorBody(401) }]).fetch).complete(req);
     expect(canonicalJson(JSON.parse(JSON.stringify([ok, failed])) as never)).not.toContain(KEY);
+  });
+});
+
+// 模型自带的联网搜索（M7-02）：Anthropic 与 OpenAI Responses 各自的结果形式整理成同样的标题、网址与摘要。
+const searchRequest = (provider: string, webSearch = true): LlmRequest => ({
+  task: 'web_search',
+  model: { provider, model: MODEL, capabilities: { ...capabilities, webSearch } },
+  template: { id: 'web_search', version: '1' },
+  system: [{ text: '先搜索，再按结果作答' }],
+  messages: [{ role: 'user', content: '请搜索：起点 月票榜' }],
+  tools: [{ type: 'web_search', maxUses: 2 }],
+  maxOutputTokens: 1_000,
+});
+
+const found: Scenario = {
+  text: ['榜首是《夜当》，', '其次是《剑来》。'],
+  end: 'stop',
+  usage: { input: 300, output: 60, cacheRead: 0 },
+  search: {
+    query: '起点 月票榜',
+    requests: 2,
+    results: [
+      { url: 'https://example.com/rank', title: '起点月票榜', snippet: '榜首是《夜当》，' },
+      { url: 'https://example.com/jianlai', title: '剑来 - 百科' },
+      { url: 'https://example.com/rank', title: '起点月票榜', snippet: '其次是《剑来》。' },
+    ],
+  },
+};
+
+describe.each(routes.filter((r) => r.name !== 'OpenAIChatAdapter'))('$name（$via）的联网搜索', (subject) => {
+  it('正常：请求里声明搜索工具，结果整理成标题、网址与摘要，同一网址只留一条，记下搜索次数', async () => {
+    const { fetch, requests } = fakeFetch([{ chunks: subject.chunks(MODEL, found) }]);
+    const result = await subject.build(fetch).complete(searchRequest(subject.provider));
+    expect(JSON.stringify(requests[0]?.body)).toContain('web_search');
+    expect(result.ok && result.value.text).toBe('榜首是《夜当》，其次是《剑来》。');
+    expect(result.ok && result.value.webSearch).toEqual({
+      requests: 2,
+      results: [
+        { url: 'https://example.com/rank', title: '起点月票榜', snippet: '榜首是《夜当》，…其次是《剑来》。' },
+        { url: 'https://example.com/jianlai', title: '剑来 - 百科', snippet: '' },
+      ],
+    });
+  });
+
+  it('没搜到：结果为空、搜索次数照记', async () => {
+    const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, { ...found, text: ['没有搜到。'], search: { query: 'q', results: [] } }) }]);
+    const result = await subject.build(fetch).complete(searchRequest(subject.provider));
+    expect(result.ok && result.value.webSearch).toEqual({ requests: 1, results: [] });
+  });
+
+  it('搜索工具不可用：调用照常完成，带上错误码', async () => {
+    const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, { ...found, text: ['搜索失败。'], search: { query: 'q', results: [], error: 'unavailable' } }) }]);
+    const result = await subject.build(fetch).complete(searchRequest(subject.provider));
+    expect(result.ok && result.value.outcome).toBe('completed');
+    expect(result.ok && result.value.webSearch).toMatchObject({ results: [], error: expect.any(String) });
+  });
+
+  it('模型没有登记联网搜索能力：不发请求，返回 bad_request', async () => {
+    const { fetch, requests } = fakeFetch([{ chunks: subject.chunks(MODEL, found) }]);
+    const result = await subject.build(fetch).complete(searchRequest(subject.provider, false));
+    expect(result).toEqual({ ok: false, error: { code: 'bad_request', message: expect.stringContaining('没有登记') } });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('没有声明搜索工具的调用不带 webSearch', async () => {
+    const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, normal) }]);
+    const result = await subject.build(fetch).complete(request(subject.provider));
+    expect(result.ok && 'webSearch' in result.value).toBe(false);
+  });
+});
+
+describe('OpenAIChatAdapter 的联网搜索', () => {
+  it('Chat Completions 不支持服务端搜索：明确拒绝，不发请求', async () => {
+    const { fetch, requests } = fakeFetch([{ chunks: openaiChunks(MODEL, normal) }]);
+    const adapter = new OpenAIChatAdapter({ apiKey: KEY, baseURL: 'https://llm.example.test/v1', fetch, maxRetries: 0 });
+    const result = await adapter.complete(searchRequest('compatible'));
+    expect(result).toEqual({ ok: false, error: { code: 'bad_request', message: expect.stringContaining('不支持模型自带的联网搜索') } });
+    expect(requests).toHaveLength(0);
   });
 });

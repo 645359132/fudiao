@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
-import type { ResponseCreateParamsStreaming } from 'openai/resources/responses/responses';
+import type { Response as OpenAIResponse, ResponseCreateParamsStreaming } from 'openai/resources/responses/responses';
 import { err, ok, type Result } from '@fudiao/shared';
 import { requestHash } from '../request-hash';
-import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
+import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage, WebSearchOutcome } from '../types';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import { mapSdkError, streamError } from './errors';
+import { HitCollector, unsupportedTools, webSearchTool } from './server-tools';
 
 export type OpenAIAdapterOptions = {
   readonly apiKey: string;
@@ -49,6 +50,8 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
   }
 
   async complete(request: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
+    const unsupported = unsupportedTools(request);
+    if (unsupported !== null) return err(unsupported);
     const base = { provider: request.model.provider, requestHash: requestHash(request), fallbackUsed: false };
     let text = '';
     let refusalText = '';
@@ -57,6 +60,7 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
     let status: string | null = null;
     let incomplete: string | null = null;
     let failure: LlmError | null = null;
+    let webSearch: WebSearchOutcome | undefined;
     // 收到第一个事件后服务就开始回复了，之后出错可能已经计费（LlmError.partial）。
     let started = false;
     let ended = false;
@@ -86,6 +90,7 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
             usage = { inputTokens: r.usage.input_tokens - cached, outputTokens: r.usage.output_tokens, cacheReadTokens: cached, cacheWriteTokens: 0 };
             options.onEvent?.({ type: 'usage', usage });
           }
+          if (webSearchTool(request) !== null) webSearch = webSearchOutcome(r);
         } else if (event.type === 'response.failed') {
           failure = { code: 'server', message: event.response.error?.message ?? '服务返回失败' };
         } else if (event.type === 'error') {
@@ -113,8 +118,35 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
       servedModel,
       stopReason: incomplete ?? status,
       ...(refused && { refusal: { category: null, explanation: refusalText || null } }),
+      ...(webSearch !== undefined && { webSearch }),
     });
   }
+}
+
+/**
+ * 从完整回复里整理搜索结果：正文的 url_citation 注释给出网址、标题与被引用的那一段正文（作为摘要），
+ * web_search_call 的来源列表（请求时 include 了 web_search_call.action.sources）给出查过但没引用的网址。
+ * 搜索次数按状态为 completed 的 web_search_call 计（服务按调用次数计费）；有调用失败时记下错误。
+ */
+function webSearchOutcome(response: OpenAIResponse): WebSearchOutcome {
+  const hits = new HitCollector();
+  let requests = 0;
+  let error: string | undefined;
+  for (const item of response.output) {
+    if (item.type === 'message') {
+      for (const part of item.content) {
+        if (part.type !== 'output_text') continue;
+        for (const a of part.annotations) {
+          if (a.type === 'url_citation') hits.add(a.url, a.title, part.text.slice(a.start_index, a.end_index));
+        }
+      }
+    } else if (item.type === 'web_search_call') {
+      if (item.status === 'completed') requests++;
+      else if (item.status === 'failed') error ??= 'failed';
+      if (item.action.type === 'search') for (const s of item.action.sources ?? []) hits.add(s.url, null, null);
+    }
+  }
+  return { requests, results: hits.list(), ...(error !== undefined && { error }) };
 }
 
 /** Responses API 的 reasoning.effort 只保证 low、medium、high；更高的深度按 high 发送。 */
@@ -124,6 +156,7 @@ export function buildResponseParams(request: LlmRequest): ResponseCreateParamsSt
   const caps = request.model.capabilities;
   const instructions = request.system.map((b) => b.text).join('\n\n');
   const output = request.output;
+  const search = webSearchTool(request);
   return {
     model: request.model.model,
     stream: true,
@@ -132,6 +165,8 @@ export function buildResponseParams(request: LlmRequest): ResponseCreateParamsSt
     max_output_tokens: request.maxOutputTokens,
     ...(instructions !== '' && { instructions }),
     input: request.messages.map((m) => ({ role: m.role, content: m.content })),
+    // 联网搜索（正式版工具 web_search；搜几次由模型决定，Responses API 没有次数上限的参数）。来源列表要 include 才返回。
+    ...(search !== null && { tools: [{ type: 'web_search' as const }], include: ['web_search_call.action.sources' as const] }),
     ...(output !== undefined &&
       caps.structuredOutput === 'native' && {
         text: { format: { type: 'json_schema' as const, name: output.name, schema: { ...output.schema }, strict: true } },

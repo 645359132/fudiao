@@ -43,6 +43,9 @@ export type {
   OutputSchema,
   Prices,
   PromptBlock,
+  ServerTool,
   TaskKind,
+  WebSearchHit,
+  WebSearchOutcome,
 } from './types';
 export { CONSERVATIVE_CAPABILITIES } from './types';
