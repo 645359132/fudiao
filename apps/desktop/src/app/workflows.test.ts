@@ -163,6 +163,18 @@ describe('写作工作流（B78）', () => {
     expect(again.view.steps[3]).toMatchObject({ status: 'done', attempt: 2 });
   });
 
+  it('就地写章节（没有状态层的钩子）：一章的审核重试后仍没完成时记下，接着写后面的，这一步照常完成', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'auto', budgetUsd: null }));
+    const failed = () => [reply('不是 JSON'), reply('不是 JSON'), reply('不是 JSON')];
+    const memo = (summary: string) => reply(JSON.stringify({ summary, cast: [], foreshadows: [], openThreads: [] }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)), reply(JSON.stringify(draft)), reply('林舟叩门。'), memo('叩门。'), ...failed(), ...failed(), reply('真相揭晓。'), memo('揭晓。'), reply(JSON.stringify({ issues: [] })));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(deps.llmResponses).toHaveLength(0);
+    expect(out.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'done', 'awaiting_author']);
+    expect(out.view.steps[3]?.note).toMatch(/^写完了 2 章并审核；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：《夜叩》（/);
+  });
+
   it('关掉应用时进行中的一步：重新打开后为中断，继续时接着做同一次，已完成的模型调用不再请求', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));

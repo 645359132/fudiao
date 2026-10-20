@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import { createAppService, type AppService } from './service';
+import { REVIEW_RETRIES, reviewWithRetry, type ReviewOutcome } from './review';
+import { err, ok } from '@fudiao/shared';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -244,5 +246,41 @@ describe('交给写手修订（B64）', () => {
     value(await deps.drafts.remove(value(await app.reloadWork()).entry.path, c1));
     expect(value(await app.listSnapshots(c1))).toEqual([]);
     expect(value(await app.reviewIssues(c1)).some((i) => i.id === conflict.id)).toBe(true);
+  });
+});
+
+describe('连续处理多章时的审核重试（M6-08 之后）', () => {
+  const outcome = (modelReviewed: boolean): ReviewOutcome => ({ issues: [], modelReviewed, reason: modelReviewed ? null : '输出被截断', dropped: 0 });
+
+  it('模型审核没完成时重试一次；第二次完成即完成，仍没完成时交回原因', async () => {
+    expect(REVIEW_RETRIES).toBe(1);
+    const second = [ok(outcome(false)), ok(outcome(true))];
+    const done = await reviewWithRetry(() => Promise.resolve(second.shift()!));
+    expect(done).toMatchObject({ complete: true, retries: 1, reason: null });
+    let calls = 0;
+    const never = await reviewWithRetry(() => {
+      calls += 1;
+      return Promise.resolve(ok(outcome(false)));
+    });
+    expect(calls).toBe(2);
+    expect(never).toMatchObject({ complete: false, retries: 1, reason: '输出被截断' });
+  });
+
+  it('调用失败与取消不重试', async () => {
+    let calls = 0;
+    const failed = await reviewWithRetry(() => {
+      calls += 1;
+      return Promise.resolve(err({ code: 'no_work' as const }));
+    });
+    expect(calls).toBe(1);
+    expect(failed.complete).toBe(false);
+    const stop = new AbortController();
+    stop.abort();
+    calls = 0;
+    await reviewWithRetry(() => {
+      calls += 1;
+      return Promise.resolve(ok(outcome(false)));
+    }, stop.signal);
+    expect(calls).toBe(1);
   });
 });

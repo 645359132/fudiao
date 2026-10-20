@@ -49,7 +49,7 @@ import {
   type PlanItem,
   type ProgramIssue,
 } from '@fudiao/writing';
-import type { AppError } from './errors';
+import { describeError, type AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 
@@ -76,7 +76,30 @@ export type ReviewOutcome = {
   readonly dropped: number;
 };
 
-export type RevisionOutcome = { readonly chapterId: string; readonly issues: readonly ReviewIssueView[]; readonly paragraphs: readonly SavedParagraph[] };
+/**
+ * 连续处理多章（写手依次写完并审核、依次审核、写作工作流）时，模型审核没有完成（例如思考用满输出上限被截断）先重试的次数。
+ * 仍没完成时这一章记为“审核没有完成”，接着处理后面的章节（作者决定，2026-10-20，M6-08 试用之后）。
+ */
+export const REVIEW_RETRIES = 1;
+
+/**
+ * 审核一章，模型审核没有完成时重试（取消时不重试）。返回最后一次的结果；complete 为模型审核是否完成，
+ * 没完成时 reason 写明原因（取消、调用失败或模型审核没有完成），由调用方记下后接着做。
+ */
+export async function reviewWithRetry(
+  review: () => Promise<Result<ReviewOutcome, AppError>>,
+  signal?: AbortSignal,
+): Promise<{ readonly result: Result<ReviewOutcome, AppError>; readonly complete: boolean; readonly reason: string | null; readonly retries: number }> {
+  for (let retries = 0; ; retries++) {
+    const result = await review();
+    if (result.ok && result.value.modelReviewed) return { result, complete: true, reason: null, retries };
+    const reason = result.ok ? (result.value.reason ?? '模型审核没有完成') : describeError(result.error);
+    // 调用失败（网络中断已由调用器重试过）与取消不再重试。
+    if (!result.ok || signal?.aborted === true || retries >= REVIEW_RETRIES) return { result, complete: false, reason, retries };
+  }
+}
+
+export type RevisionOutcome ={ readonly chapterId: string; readonly issues: readonly ReviewIssueView[]; readonly paragraphs: readonly SavedParagraph[] };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });

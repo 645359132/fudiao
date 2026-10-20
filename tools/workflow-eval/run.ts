@@ -3,7 +3,7 @@
 // 只经应用服务层的用例；写章节的钩子与服务层默认的就地实现相同（依次写、整理长篇记忆、审核），另外记下每章的数字。
 // 工作流以“一路做完”运行；须作者动手的步骤（导出、处理开篇问题）由这里代作者做，草稿等确认时代作者采用。
 import { countWords } from '@fudiao/shared';
-import type { ReviewIssueView } from '../../apps/desktop/src/app/review';
+import { reviewWithRetry, type ReviewIssueView } from '../../apps/desktop/src/app/review';
 import type { AppService } from '../../apps/desktop/src/app/service';
 import type { BookSize, WorkflowHooks, WorkflowView } from '../../apps/desktop/src/app/workflows';
 import type { EvalBook } from '../m3-eval/book';
@@ -52,8 +52,10 @@ export type ChapterRecord = {
   readonly segments: string;
   readonly issues: number;
   readonly dropped: number;
-  /** 模型审核没有完成的原因；完成或没有审核时为 null。 */
+  /** 模型审核重试后仍没有完成的原因；完成或没有审核时为 null。 */
   readonly reviewIncomplete: string | null;
+  /** 模型审核没完成后重试的次数。 */
+  readonly reviewRetries: number;
   readonly writeMs: number;
   readonly reviewMs: number;
 };
@@ -145,6 +147,7 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
   const writing: WorkflowHooks = {
     async writeChapters(ids, review, options) {
       const done: string[] = [];
+      const incomplete: string[] = [];
       for (const id of ids) {
         const title = await titleOf(id);
         log(`  写《${title}》…`);
@@ -156,7 +159,8 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
         const memory = await app.buildMemory(id, options);
         if (!memory.ok) return { ok: false, summary: `已写完 ${done.length + 1} 章，长篇记忆没有整理成：${describe(memory.error)}` };
         at = now();
-        const reviewed = review ? await app.reviewChapter(id, options) : null;
+        const attempt = review ? await reviewWithRetry(() => app.reviewChapter(id, options), options.signal) : null;
+        const reviewed = attempt?.result ?? null;
         const reviewMs = now() - at;
         const saved = await textOf(id);
         const text = saved.map((p) => p.text).join('\n');
@@ -168,29 +172,32 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
           segments: `${written.value.segmentsDone}/${written.value.segmentsTotal}`,
           issues: reviewed?.ok === true ? reviewed.value.issues.length : 0,
           dropped: reviewed?.ok === true ? reviewed.value.dropped : 0,
-          reviewIncomplete: reviewed === null ? null : !reviewed.ok ? describe(reviewed.error) : reviewed.value.modelReviewed ? null : (reviewed.value.reason ?? '原因不明'),
+          reviewIncomplete: attempt === null || attempt.complete ? null : (attempt.reason ?? '原因不明'),
+          reviewRetries: attempt?.retries ?? 0,
           writeMs,
           reviewMs,
         });
         log(`    ${countWords(text)} 字${reviewed === null ? '' : reviewed.ok ? `，审核 ${reviewed.value.issues.length} 条问题` : `，审核失败：${describe(reviewed.error)}`}`);
-        if (reviewed !== null && (!reviewed.ok || !reviewed.value.modelReviewed)) {
-          return { ok: false, summary: `已写完 ${done.length + 1} 章，审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describe(reviewed.error)}` };
-        }
+        if (options.signal?.aborted === true) return { ok: false, summary: `已写完 ${done.length + 1} 章，审核时停下` };
+        // 与服务层默认的钩子相同：审核重试后仍没完成时记下这一章，接着写后面的。
+        if (attempt !== null && !attempt.complete) incomplete.push(`《${title}》（${attempt.reason ?? ''}）`);
         done.push(id);
       }
-      return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}` };
+      return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}${incomplete.length === 0 ? '' : `；这些章的审核没有完成：${incomplete.join('、')}`}` };
     },
     async reviewChapters(ids, options) {
-      const done: string[] = [];
+      let done = 0;
+      const incomplete: string[] = [];
       for (const id of ids) {
-        const reviewed = await app.reviewChapter(id, options);
-        if (!reviewed.ok || !reviewed.value.modelReviewed) {
-          return { ok: false, summary: `${done.length > 0 ? `已审完 ${done.length} 章；` : ''}审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describe(reviewed.error)}` };
-        }
-        log(`  审核《${await titleOf(id)}》：${reviewed.value.issues.length} 条问题`);
-        done.push(id);
+        const attempt = await reviewWithRetry(() => app.reviewChapter(id, options), options.signal);
+        if (options.signal?.aborted === true) return { ok: false, summary: `${done > 0 ? `已审完 ${done} 章；` : ''}已停下` };
+        const title = await titleOf(id);
+        if (attempt.complete && attempt.result.ok) {
+          log(`  审核《${title}》：${attempt.result.value.issues.length} 条问题`);
+          done += 1;
+        } else incomplete.push(`《${title}》（${attempt.reason ?? ''}）`);
       }
-      return { ok: true, summary: `审完了 ${done.length} 章` };
+      return { ok: true, summary: `审完了 ${done} 章${incomplete.length === 0 ? '' : `；这些章的审核没有完成：${incomplete.join('、')}`}` };
     },
   };
 
@@ -493,7 +500,7 @@ export function renderReport(result: EvalResult, meta: { readonly model: string;
   }
   if (result.chapters.length > 0) {
     out.push('', '## 写出的章节', '', '| 工作流 | 章节 | 字数 | 段数 | 分段 | 写作 | 审核 | 问题 | 丢弃 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
-    for (const c of result.chapters) out.push(`| ${c.flow} | ${cell(c.title)} | ${c.words} | ${c.paragraphs} | ${c.segments} | ${seconds(c.writeMs)} | ${seconds(c.reviewMs)} | ${c.reviewIncomplete === null ? c.issues : `${c.issues}（模型审核没有完成：${cell(c.reviewIncomplete)}）`} | ${c.dropped} |`);
+    for (const c of result.chapters) out.push(`| ${c.flow} | ${cell(c.title)} | ${c.words} | ${c.paragraphs} | ${c.segments} | ${seconds(c.writeMs)} | ${seconds(c.reviewMs)}${c.reviewRetries > 0 ? `（重试 ${c.reviewRetries} 次）` : ''} | ${c.reviewIncomplete === null ? c.issues : `${c.issues}（模型审核没有完成：${cell(c.reviewIncomplete)}）`} | ${c.dropped} |`);
   }
   for (const f of result.flows) {
     out.push('', `## ${f.title}`, '', `- 状态：${f.state}；${f.summary}${f.error === null ? '' : `；出错：${f.error}`}`, `- 用量：输入 ${fmt(f.spent.input)}、输出 ${fmt(f.spent.output)} Token，${money(f.spent)}${f.spent.unknown > 0 ? `（${f.spent.unknown} 次费用未知）` : ''}；用时 ${seconds(f.ms)}`, `- 丢弃（或截短）：${f.dropped} 条`);

@@ -94,7 +94,7 @@ import { openingUseCases } from './opening';
 import { castCompletionUseCases } from './cast-completion';
 import { benchmarkUseCases } from './benchmark';
 import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
-import { reviewUseCases } from './review';
+import { reviewUseCases, reviewWithRetry } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
 import { writerUseCases } from './writer';
@@ -808,6 +808,12 @@ export function createAppService(deps: AppDeps) {
   // AI 助手与撤销用到的用例：作品的用例加上联网。
   const hostBase = { ...app, ...web };
 
+  const chapterTitle = async (id: string) => {
+    const work = await app.reloadWork();
+    return work.ok ? (work.value.chapters.find((c) => c.id === id)?.title ?? '') : '';
+  };
+  const incompleteNote = (incomplete: readonly string[]) => (incomplete.length === 0 ? '' : `；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：${incomplete.join('、')}`);
+
   // 写作工作流（B78）：步骤调用上面的用例；写章节默认就地依次写，桌面端由状态层经写手队列做。
   const workflows = workflowUseCases({
     deps,
@@ -829,19 +835,21 @@ export function createAppService(deps: AppDeps) {
       return { model: model.displayName, prices: model.prices ?? undefined };
     },
     hooks: {
+      // 审核没完成时重试一次，仍没完成就记下这一章、接着审后面的（REVIEW_RETRIES）；被停下时这一步记为中断（cancelled）。
       async reviewChapters(chapterIds, options) {
-        const done: string[] = [];
+        let done = 0;
+        const incomplete: string[] = [];
         for (const id of chapterIds) {
-          const reviewed = await app.reviewChapter(id, options);
-          if (!reviewed.ok || !reviewed.value.modelReviewed) {
-            return { ok: false, summary: `${done.length > 0 ? `已审完 ${done.length} 章；` : ''}审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}` };
-          }
-          done.push(id);
+          const reviewed = await reviewWithRetry(() => app.reviewChapter(id, options), options.signal);
+          if (options.signal?.aborted === true) return { ok: false, summary: `${done > 0 ? `已审完 ${done} 章；` : ''}已停下`, cancelled: true };
+          if (reviewed.complete) done += 1;
+          else incomplete.push(`《${await chapterTitle(id)}》（${reviewed.reason ?? ''}）`);
         }
-        return { ok: true, summary: `审完了 ${done.length} 章` };
+        return { ok: true, summary: `审完了 ${done} 章${incompleteNote(incomplete)}` };
       },
       async writeChapters(chapterIds, review, options) {
         const done: string[] = [];
+        const incomplete: string[] = [];
         for (const id of chapterIds) {
           const written = await app.writeChapter(id, options);
           if (!written.ok) return { ok: false, summary: `${done.length > 0 ? `已写完 ${done.length} 章；` : ''}停在这一章：${describeError(written.error)}` };
@@ -849,14 +857,13 @@ export function createAppService(deps: AppDeps) {
           const memory = await app.buildMemory(id, options);
           if (!memory.ok) return { ok: false, summary: `已写完 ${done.length + 1} 章，长篇记忆没有整理成：${describeError(memory.error)}` };
           if (review) {
-            const reviewed = await app.reviewChapter(id, options);
-            if (!reviewed.ok || !reviewed.value.modelReviewed) {
-              return { ok: false, summary: `已写完 ${done.length + 1} 章，审核没有完成：${reviewed.ok ? (reviewed.value.reason ?? '') : describeError(reviewed.error)}` };
-            }
+            const reviewed = await reviewWithRetry(() => app.reviewChapter(id, options), options.signal);
+            if (options.signal?.aborted === true) return { ok: false, summary: `已写完 ${done.length + 1} 章，审核时停下`, cancelled: true };
+            if (!reviewed.complete) incomplete.push(`《${await chapterTitle(id)}》（${reviewed.reason ?? ''}）`);
           }
           done.push(id);
         }
-        return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}` };
+        return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}${incompleteNote(incomplete)}` };
       },
     },
   });

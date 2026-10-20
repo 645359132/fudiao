@@ -1344,15 +1344,18 @@ describe('成书流程看板（B65）', () => {
     expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('林舟叩响了门。');
   });
 
-  it('审核没有完成时说明原因，不接着写后面的章节', async () => {
+  it('审核没有完成时重试一次；仍没完成就记下这一章，接着写后面的章节，结束时说明哪几章没审完', async () => {
     const { deps, store, user } = await ready(['第一章', '第二章']);
     await user.click(screen.getByRole('checkbox', { name: '写完后审核' }));
-    deps.llmResponses.push(reply('第一章的正文。'), memory('梗概。'), reply('不是 JSON'), reply('不是 JSON'), reply('不是 JSON'));
+    // 一次审核：首次加两次修正都不合格。第一章两次都没完成；第二章照常。
+    const failed = () => [reply('不是 JSON'), reply('不是 JSON'), reply('不是 JSON')];
+    deps.llmResponses.push(reply('第一章的正文。'), memory('梗概。'), ...failed(), ...failed(), reply('第二章的正文。'), memory('梗概二。'), reply(JSON.stringify({ issues: [] })));
     await user.click(screen.getByRole('button', { name: '依次写完待写的 2 章' }));
-    expect(await screen.findByText(/“第一章”已写完，但审核没有完成.*后面的 1 章没有接着写/)).toBeTruthy();
+    expect(await screen.findByText(/这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：《第一章》/)).toBeTruthy();
     await waitFor(() => expect(store.getState().writerJob).toBeNull());
+    expect(deps.llmResponses).toHaveLength(0);
     expect(cells('第一章').slice(0, 4)).toEqual(['有', '已写', '有效', '未审核']);
-    expect(cells('第二章').slice(0, 4)).toEqual(['有', '待写', '—', '—']);
+    expect(cells('第二章').slice(0, 4)).toEqual(['有', '已写', '有效', '已审核']);
   });
 
   it('在看板上审核一章手写的正文：没有模型时只做程序检查，并说明原因', async () => {
