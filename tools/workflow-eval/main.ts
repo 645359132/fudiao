@@ -13,7 +13,7 @@ import { planFlows, quoteFlows, renderReport, runWorkflowEval } from './run';
 
 const USAGE = `用法：pnpm workflow:eval --config <模型配置.json> [--workflow 工作流] [--book m3/eval/book.json] [--out m3/runs] [--yes]
    或：pnpm workflow:eval --base-url <OpenAI 兼容服务的地址> [--model 模型名] [--max-output Token 数] [--workflow 工作流] [--yes]
-  --config    模型服务的配置（示例见 m3/eval/config.example.json）；API Key 从其中指定的环境变量读取
+  --config    模型服务的配置（示例见 m3/eval/config.example.json）；API Key 从其中指定的环境变量读取，没有设置时取 FUDIAO_EVAL_KEY
   --base-url  OpenAI 兼容的服务，API Key 取自环境变量 FUDIAO_EVAL_KEY；不给 --model 时列出服务的模型让你选
   --workflow  all（默认），或用逗号分开的 ${EVAL_ORDER.join('、')}；扫榜拆书以外都会先用一键成书写出 3 章
   --yes       不询问，直接开始（仍会显示预计费用）`;
@@ -81,8 +81,9 @@ async function main(): Promise<number> {
   if (!book.ok) return fail(book.error);
 
   const provider = config?.provider ?? { kind: 'openai_compatible' as const, name: '中转站', baseUrl: args.baseUrl ?? '', apiKeyEnv: 'FUDIAO_EVAL_KEY' };
-  const apiKey = provider.apiKeyEnv === null ? null : (process.env[provider.apiKeyEnv] ?? '');
-  if (apiKey === '') return fail(`环境变量 ${provider.apiKeyEnv ?? ''} 没有设置。请在自己的终端里设置后再运行，不要把 API Key 写进文件。`);
+  // 配置里指定的环境变量没有设置时，退回 FUDIAO_EVAL_KEY（与 --base-url 相同）。
+  const apiKey = provider.apiKeyEnv === null ? null : process.env[provider.apiKeyEnv] || (process.env['FUDIAO_EVAL_KEY'] ?? '');
+  if (apiKey === '') return fail(`环境变量 ${provider.apiKeyEnv === 'FUDIAO_EVAL_KEY' ? 'FUDIAO_EVAL_KEY' : `${provider.apiKeyEnv ?? ''} 与 FUDIAO_EVAL_KEY 都`}没有设置。请在运行这条命令的同一个终端里设置（例如 $env:FUDIAO_EVAL_KEY = '…'）后再运行，不要把 API Key 写进文件。`);
 
   const startedAt = new Date().toISOString();
   const dir = resolve(args.out, `workflow-${startedAt.replace(/[:.]/g, '-')}`);
