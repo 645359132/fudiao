@@ -85,6 +85,10 @@ describe('写作工作流（B78）', () => {
     expect(quote.inputTokens).toBeGreaterThan(0);
     expect(quote).toMatchObject({ costUsd: null, model: 'm' });
     expect(await app.quoteWorkflow('quick_book', { ...params, chapters: 0 })).toMatchObject({ ok: false, error: { code: 'settings' } });
+    // 假定的作品规模（试用脚本在章节写出来之前估算）：章数多，体检的预计随之增加。
+    const empty = value(await app.quoteWorkflow('book_audit', { from: null, to: null, rereview: false }));
+    const assumed = value(await app.quoteWorkflow('book_audit', { from: null, to: null, rereview: false }, { chapters: 6, written: 6, words: 12_000 }));
+    expect(assumed.calls).toBeGreaterThan(empty.calls);
   });
 
   it('每步停下：检查模型后停在骨架草稿；作者改过再采用，作品里是改过的内容；计划同样；写章节交给钩子；导出须作者动手', async () => {

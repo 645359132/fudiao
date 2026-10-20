@@ -90,6 +90,30 @@ export function detectionRates(plants: readonly PlantResult[]): DetectionRates {
   };
 }
 
+/** 把短篇的材料建成一部作品：作品信息、设定（锁定的照样锁定）与伏笔账本。不调用模型；出错时返回原因。 */
+export async function importBook(app: AppService, book: Pick<EvalBook, 'title' | 'genre' | 'synopsis' | 'outline' | 'entities' | 'foreshadows'>): Promise<string | null> {
+  const created = await app.createWork(book.title);
+  if (!created.ok) return `新建作品失败：${describe(created.error)}`;
+  const info = await app.updateWorkInfo({ genre: book.genre, synopsis: book.synopsis, outline: book.outline });
+  if (!info.ok) return `写入作品信息失败：${describe(info.error)}`;
+  for (const e of book.entities) {
+    const entity = await app.createEntity(e.kind, e.name);
+    if (!entity.ok) return `新建设定“${e.name}”失败：${describe(entity.error)}`;
+    const updated = await app.updateEntity(entity.value.created, { aliases: [...e.aliases], description: e.description });
+    if (!updated.ok) return `写入设定“${e.name}”失败：${describe(updated.error)}`;
+    const current = updated.value.find((x) => x.id === entity.value.created.id);
+    if (e.locked && current !== undefined) {
+      const locked = await app.setEntityLocked(current, true);
+      if (!locked.ok) return `锁定设定“${e.name}”失败：${describe(locked.error)}`;
+    }
+  }
+  for (const f of book.foreshadows) {
+    const added = await app.addForeshadow({ title: f.title, content: f.content, reveal: f.reveal, plantChapterId: null, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' });
+    if (!added.ok) return `记入伏笔“${f.title}”失败：${describe(added.error)}`;
+  }
+  return null;
+}
+
 /** 模型审核没有完成（例如思考用完了输出上限）时重试的次数。 */
 export const REVIEW_RETRIES = 1;
 
@@ -125,25 +149,8 @@ export async function runEvaluation(app: AppService, book: EvalBook, hooks: Eval
   };
 
   // 一、作品、设定与伏笔。
-  const created = await app.createWork(book.title);
-  if (!created.ok) return finish(`新建作品失败：${describe(created.error)}`);
-  const info = await app.updateWorkInfo({ genre: book.genre, synopsis: book.synopsis, outline: book.outline });
-  if (!info.ok) return finish(`写入作品信息失败：${describe(info.error)}`);
-  for (const e of book.entities) {
-    const entity = await app.createEntity(e.kind, e.name);
-    if (!entity.ok) return finish(`新建设定“${e.name}”失败：${describe(entity.error)}`);
-    const updated = await app.updateEntity(entity.value.created, { aliases: [...e.aliases], description: e.description });
-    if (!updated.ok) return finish(`写入设定“${e.name}”失败：${describe(updated.error)}`);
-    const current = updated.value.find((x) => x.id === entity.value.created.id);
-    if (e.locked && current !== undefined) {
-      const locked = await app.setEntityLocked(current, true);
-      if (!locked.ok) return finish(`锁定设定“${e.name}”失败：${describe(locked.error)}`);
-    }
-  }
-  for (const f of book.foreshadows) {
-    const added = await app.addForeshadow({ title: f.title, content: f.content, reveal: f.reveal, plantChapterId: null, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' });
-    if (!added.ok) return finish(`记入伏笔“${f.title}”失败：${describe(added.error)}`);
-  }
+  const imported = await importBook(app, book);
+  if (imported !== null) return finish(imported);
 
   // 二、章节计划：由大纲生成草稿并采用。
   log(`生成 ${book.chapterCount} 章的计划草稿…`);

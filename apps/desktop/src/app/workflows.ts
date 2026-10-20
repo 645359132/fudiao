@@ -1416,6 +1416,15 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
   }
 
   /** 作者对一步的操作：按状态机改状态，extra 为一并写的字段。 */
+  /** 作品现在的规模（估算用）。 */
+  async function currentSize(): Promise<BookSize> {
+    const view = await host.planningView();
+    const port = project();
+    const lengths = port === null ? null : await chapterLengths(port);
+    const words = lengths?.ok === true ? lengths.value.reduce((n, c) => n + c.length, 0) : 0;
+    return view.ok ? { chapters: view.value.chapters.length, written: view.value.chapters.filter((c) => c.hasText).length, words } : { chapters: 0, written: 0, words: 0 };
+  }
+
   const act = (runId: string, event: StepEvent, extra: Readonly<Record<number, StepPatch>> = {}) =>
     withPort(async (port) => {
       const data = await load(port, runId);
@@ -1434,16 +1443,15 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       });
     },
 
-    /** 开始前的预计用量与费用（按默认模型的价格；价格未知时费用为 null）。 */
-    async quoteWorkflow(workflow: WorkflowKey, params: unknown): Promise<Result<WorkflowQuote, AppError>> {
+    /**
+     * 开始前的预计用量与费用（按默认模型的价格；价格未知时费用为 null）。
+     * assumed 是假定的作品规模：试用脚本（tools/workflow-eval）在章节写出来之前估算后面的工作流时用；不给时按作品现状。
+     */
+    async quoteWorkflow(workflow: WorkflowKey, params: unknown, assumed?: BookSize): Promise<Result<WorkflowQuote, AppError>> {
       const def = ERASED[workflow];
       const p = def.parseParams(params);
       if (!p.ok) return err(invalid(p.error));
-      const view = await host.planningView();
-      const port = project();
-      const lengths = port === null ? null : await chapterLengths(port);
-      const words = lengths?.ok === true ? lengths.value.reduce((n, c) => n + c.length, 0) : 0;
-      const book: BookSize = view.ok ? { chapters: view.value.chapters.length, written: view.value.chapters.filter((c) => c.hasText).length, words } : { chapters: 0, written: 0, words: 0 };
+      const book = assumed ?? (await currentSize());
       const estimate = def.estimate(p.value, book);
       const price = await pricing();
       const cost = costOf({ inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }, price?.prices);
