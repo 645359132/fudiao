@@ -359,7 +359,7 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
       }
     }
     r.ms = now() - started;
-    log(`  用量：输入 ${r.spent.input.toLocaleString('en-US')}、输出 ${r.spent.output.toLocaleString('en-US')} Token，$${r.spent.cost.toFixed(4)}${r.error === null ? '' : `；出错：${r.error}`}`);
+    log(`  用量：输入 ${r.spent.input.toLocaleString('en-US')}、输出 ${r.spent.output.toLocaleString('en-US')} Token，${money(r.spent)}${r.error === null ? '' : `；出错：${r.error}`}`);
   }
   return finish();
 
@@ -469,6 +469,8 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
 
 const STATUS: Readonly<Record<string, string>> = { pending: '待做', running: '进行中', awaiting_author: '等作者', done: '已完成', failed: '出错', skipped: '已跳过', interrupted: '中断', stale: '可能过时' };
 const cell = (text: string) => text.replace(/\|/g, '｜').replace(/\n/g, ' ');
+/** 费用：有调用的价格未知时写明（中转站等没有价格的服务全部未知）。 */
+const money = (u: { readonly cost: number; readonly unknown: number }) => (u.unknown > 0 ? (u.cost > 0 ? `至少 $${u.cost.toFixed(4)}` : '未知') : `$${u.cost.toFixed(4)}`);
 const seconds = (ms: number) => `${Math.round(ms / 1000)} 秒`;
 
 /** 试用报告（Markdown）：预计与实际用量、每个工作流各步的状态与说明、丢弃的条数、发现的问题、植入矛盾的检出。 */
@@ -477,13 +479,13 @@ export function renderReport(result: EvalResult, meta: { readonly model: string;
   const fmt = (n: number) => n.toLocaleString('en-US');
   if (result.usage !== null) {
     const u = result.usage;
-    out.push(`- 实际用量：${u.calls} 次调用，输入 ${fmt(u.inputTokens)} Token，输出 ${fmt(u.outputTokens)} Token，${u.unknownCost > 0 ? `至少 $${u.cost.toFixed(4)}（${u.unknownCost} 次费用未知）` : `$${u.cost.toFixed(4)}`}`);
+    out.push(`- 实际用量：${u.calls} 次调用，输入 ${fmt(u.inputTokens)} Token，输出 ${fmt(u.outputTokens)} Token，${money({ cost: u.cost, unknown: u.unknownCost })}${u.unknownCost > 0 ? `（${u.unknownCost} 次费用未知）` : ''}`);
   }
   if (meta.quote !== null) {
     out.push('', '## 预计与实际', '', '| 工作流 | 预计调用 | 预计输入 | 预计输出 | 预计费用 | 实际输入 | 实际输出 | 实际费用 | 用时 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
     for (const q of meta.quote.rows) {
       const f = result.flows.find((x) => x.key === q.key);
-      out.push(`| ${q.title} | ${q.calls} | ${fmt(q.inputTokens)} | ${fmt(q.outputTokens)} | ${q.costUsd === null ? '未知' : `$${q.costUsd.toFixed(3)}`} | ${f === undefined ? '—' : fmt(f.spent.input)} | ${f === undefined ? '—' : fmt(f.spent.output)} | ${f === undefined ? '—' : `$${f.spent.cost.toFixed(4)}`} | ${f === undefined ? '—' : seconds(f.ms)} |`);
+      out.push(`| ${q.title} | ${q.calls} | ${fmt(q.inputTokens)} | ${fmt(q.outputTokens)} | ${q.costUsd === null ? '未知' : `$${q.costUsd.toFixed(3)}`} | ${f === undefined ? '—' : fmt(f.spent.input)} | ${f === undefined ? '—' : fmt(f.spent.output)} | ${f === undefined ? '—' : money(f.spent)} | ${f === undefined ? '—' : seconds(f.ms)} |`);
     }
     const t = meta.quote.total;
     out.push(`| 合计 | ${t.calls} | ${fmt(t.inputTokens)} | ${fmt(t.outputTokens)} | ${t.costUsd === null ? '未知' : `$${t.costUsd.toFixed(3)}`} | | | | |`);
@@ -494,10 +496,10 @@ export function renderReport(result: EvalResult, meta: { readonly model: string;
     for (const c of result.chapters) out.push(`| ${c.flow} | ${cell(c.title)} | ${c.words} | ${c.paragraphs} | ${c.segments} | ${seconds(c.writeMs)} | ${seconds(c.reviewMs)} | ${c.reviewIncomplete === null ? c.issues : `${c.issues}（模型审核没有完成：${cell(c.reviewIncomplete)}）`} | ${c.dropped} |`);
   }
   for (const f of result.flows) {
-    out.push('', `## ${f.title}`, '', `- 状态：${f.state}；${f.summary}${f.error === null ? '' : `；出错：${f.error}`}`, `- 用量：输入 ${fmt(f.spent.input)}、输出 ${fmt(f.spent.output)} Token，$${f.spent.cost.toFixed(4)}${f.spent.unknown > 0 ? `（${f.spent.unknown} 次费用未知）` : ''}；用时 ${seconds(f.ms)}`, `- 丢弃（或截短）：${f.dropped} 条`);
+    out.push('', `## ${f.title}`, '', `- 状态：${f.state}；${f.summary}${f.error === null ? '' : `；出错：${f.error}`}`, `- 用量：输入 ${fmt(f.spent.input)}、输出 ${fmt(f.spent.output)} Token，${money(f.spent)}${f.spent.unknown > 0 ? `（${f.spent.unknown} 次费用未知）` : ''}；用时 ${seconds(f.ms)}`, `- 丢弃（或截短）：${f.dropped} 条`);
     if (f.steps.length > 0) {
       out.push('', '| 步骤 | 状态 | 说明 | 输入 | 输出 | 费用 |', '| --- | --- | --- | --- | --- | --- |');
-      for (const s of f.steps) out.push(`| ${s.label}${s.attempt > 1 ? `（第 ${s.attempt} 次）` : ''} | ${STATUS[s.status] ?? s.status} | ${cell(s.note)} | ${s.usage === null ? '—' : fmt(s.usage.input)} | ${s.usage === null ? '—' : fmt(s.usage.output)} | ${s.usage === null ? '—' : `$${s.usage.cost.toFixed(4)}`} |`);
+      for (const s of f.steps) out.push(`| ${s.label}${s.attempt > 1 ? `（第 ${s.attempt} 次）` : ''} | ${STATUS[s.status] ?? s.status} | ${cell(s.note)} | ${s.usage === null ? '—' : fmt(s.usage.input)} | ${s.usage === null ? '—' : fmt(s.usage.output)} | ${s.usage === null ? '—' : money(s.usage)} |`);
     }
     if (f.findings.length > 0) out.push('', ...f.findings.map((x) => `- ${x}`));
   }

@@ -319,6 +319,11 @@ export type WorkflowHost = {
 
 /** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
 const TOKENS_PER_CHAR = 1.5;
+/**
+ * 每次调用另计的思考 Token（先思考的模型思考计入输出）。M6-08 的真实试用（DeepSeek flash）里各工作流平均每次调用输出约 5,700，
+ * 一键成书约 7,400，按各步正文估算的输出只有实际的三到五成；加上这一项后预计不再低于实际。
+ */
+const THINKING_TOKENS_PER_CALL = 6_000;
 
 function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowDef<QuickBookParams> {
   return {
@@ -1452,7 +1457,8 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       const p = def.parseParams(params);
       if (!p.ok) return err(invalid(p.error));
       const book = assumed ?? (await currentSize());
-      const estimate = def.estimate(p.value, book);
+      const base = def.estimate(p.value, book);
+      const estimate = { ...base, outputTokens: base.outputTokens + base.calls * THINKING_TOKENS_PER_CALL };
       const price = await pricing();
       const cost = costOf({ inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }, price?.prices);
       return ok({ ...estimate, costUsd: cost, model: price?.model ?? null });

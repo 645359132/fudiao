@@ -171,6 +171,10 @@ describe('写作工作流试用（M6-08）', () => {
     for (const part of ['# 写作工作流试用报告：《当铺夜谈》', '## 全书体检', '- 读原文定位到植入的那一段：是', '- 依据是前一章植入的那一段：是', '| 跨章疑点 | 已完成 |', '## 扫榜拆书']) {
       expect(report).toContain(part);
     }
+    // 没有价格：调用过模型的写“未知”，不写 $0.0000（没有调用的步骤照常是 $0）。
+    expect(report).toContain('（33 次费用未知）');
+    const row = report.split('\n').find((l) => l.startsWith('| 跨章疑点 |')) ?? '';
+    expect(row).toMatch(/\| 未知 \|$/);
   });
 
   it('一键成书没有写出章节时，后面的工作流写明跳过，不再调用模型', async () => {

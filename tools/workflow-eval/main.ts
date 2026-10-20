@@ -90,7 +90,8 @@ async function main(): Promise<number> {
   mkdirSync(dir, { recursive: true });
   const deps = fsDeps(dir, { fetch: globalThis.fetch, realTime: true });
   const app = createAppService(deps);
-  let cancelled = false;
+  // 没有开始试用（取消或出错）时删掉这次的目录，只留跑过的。
+  let started = false;
   try {
     const library = await app.loadLibrary();
     if (!library.ok) return fail(`作品库没有打开：${JSON.stringify(library.error)}`);
@@ -136,7 +137,6 @@ async function main(): Promise<number> {
       const answer = (await ask('这会调用真实的模型服务并产生费用，是否继续？(y/N) ')).toLowerCase();
       if (answer !== 'y' && answer !== 'yes') {
         console.log('已取消。');
-        cancelled = true;
         return 0;
       }
     }
@@ -146,6 +146,7 @@ async function main(): Promise<number> {
     if (!tested.ok) return fail(`能力自检没有完成：${JSON.stringify(tested.error)}`);
     if (!tested.value.report.passed) return fail(`能力自检没有通过，结构化任务不能用这个模型：${JSON.stringify(tested.value.report)}`);
 
+    started = true;
     const result = await runWorkflowEval(app, book.value, args.workflows, { log: (line) => console.log(line), now: () => Date.now() });
     writeFileSync(join(dir, 'report.md'), renderReport(result, { model: `${provider.name} / ${modelId}`, startedAt, quote }));
     writeFileSync(join(dir, 'result.json'), JSON.stringify({ ...result, bookText: undefined }, null, 2));
@@ -156,7 +157,7 @@ async function main(): Promise<number> {
     return result.flows.every((f) => f.error === null) ? 0 : 1;
   } finally {
     await deps.dispose();
-    if (cancelled) rmSync(dir, { recursive: true, force: true });
+    if (!started) rmSync(dir, { recursive: true, force: true });
   }
 }
 
