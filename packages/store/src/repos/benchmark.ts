@@ -29,6 +29,21 @@ export function listBenchmarkSamples(port: SqlPort, runId: string): Promise<Resu
   return queryAll(port, SampleRow, 'SELECT run_id, idx, title, author, tags, words, blurb, text FROM benchmark_sample WHERE run_id = ? ORDER BY idx', [runId]);
 }
 
+/**
+ * 删掉用完了的样章原文（打开作品时兜底）：运行已放弃、或对标分析这一步已完成或跳过（样章在那一步用完）的。
+ * 正常流程在对比结束与放弃时就删；这里管的是崩溃、或作者停在对标分析的草稿处再也没有回来的情形。返回删了几本。
+ */
+export async function purgeBenchmarkSamples(port: SqlPort): Promise<Result<number, RepoError>> {
+  const done = await port.transaction([
+    {
+      sql: `DELETE FROM benchmark_sample WHERE run_id IN (SELECT id FROM workflow_run WHERE status = 'abandoned')
+        OR run_id IN (SELECT run_id FROM workflow_step WHERE key = 'compare' AND status IN ('done', 'skipped'))`,
+      params: [],
+    },
+  ]);
+  return done.ok ? ok(done.value[0]?.changes ?? 0) : err({ code: 'sql', error: done.error });
+}
+
 /** 删掉一次运行的样章原文。返回删了几本。 */
 export async function clearBenchmarkSamples(port: SqlPort, runId: string): Promise<Result<number, RepoError>> {
   const done = await port.transaction([{ sql: 'DELETE FROM benchmark_sample WHERE run_id = ?', params: [runId] }]);

@@ -11,6 +11,7 @@ import {
   getWorkflowRun,
   listChapterPlans,
   listWorkflowRuns,
+  setWorkflowStepUsage,
   updateWorkflowSteps,
   type RepoError,
   type SqlPort,
@@ -53,12 +54,20 @@ export type StepKind = 'draft' | 'act' | 'check' | 'manual';
 export type WorkflowHooks = {
   /**
    * 写手依次写这些章（每章写完整理长篇记忆，review 时再审核）。状态层经写手队列做，与成书进度、助手的后台写作同一批规则。
-   * ok 为是否全部写完；summary 是怎样结束的一句话。
+   * ok 为是否全部写完；summary 是怎样结束的一句话；cancelled 为被停下（成书进度的“停下”、助手的 stop_background），这一步记为中断而不是出错。
    */
-  writeChapters(chapterIds: readonly string[], review: boolean, options: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }>;
+  writeChapters(chapterIds: readonly string[], review: boolean, options: CallOptions): Promise<HookOutcome>;
   /** 依次审核这些章（状态层经依次审核做，与成书进度、助手的后台审核同一时间只有一批）。ok 为是否全部审完。 */
-  reviewChapters(chapterIds: readonly string[], options: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }>;
+  reviewChapters(chapterIds: readonly string[], options: CallOptions): Promise<HookOutcome>;
 };
+
+export type HookOutcome = { readonly ok: boolean; readonly summary: string; readonly cancelled?: boolean };
+
+/** 钩子没有做完：被停下记为中断（继续时接着做），其余记为出错。 */
+const hookFailure = (done: HookOutcome): AppError => (done.cancelled === true ? { code: 'interrupted', detail: done.summary } : invalid(done.summary));
+
+/** 一步里的一件事（整理记忆、核对疑点、拆解一本）没有做成：这一步记为中断，继续时接着做同一次，做成的调用不再请求。 */
+const interrupted = (detail: string): AppError => ({ code: 'interrupted', detail });
 
 /** 推进时的环境：取消信号、用量回调由执行器包好交给步骤。 */
 export type AdvanceEnv = {
@@ -92,8 +101,11 @@ type StepSpec<P, O> = {
   readonly kind: StepKind;
   readonly output: z.ZodType<O>;
   readonly run: (ctx: StepContext<P>) => Promise<Result<StepResult<O>, AppError>>;
-  /** 采用（draft 写进作品；manual 是作者动手的那件事）。返回给作者看的一句话。 */
-  readonly adopt?: (ctx: StepContext<P>, output: O) => Promise<Result<string, AppError>>;
+  /**
+   * 采用（draft 写进作品；manual 是作者动手的那件事）。返回给作者看的一句话；写进作品后要记下什么
+   * （例如新建的那一卷的标识）时连同改过的结果一起返回，存回这一步。
+   */
+  readonly adopt?: (ctx: StepContext<P>, output: O) => Promise<Result<Adopted<O>, AppError>>;
   /** 采用会覆盖或删除作品内容时给作者看的说明（“一路做完”时也停下等作者确认）；没有时为 null。 */
   readonly confirm?: (ctx: StepContext<P>, output: O) => Promise<string | null>;
   /** 这一步用不着做时（例如没写想法而作品已有大纲）给出原因，执行器直接跳过它；要做时为 null。 */
@@ -106,10 +118,13 @@ type Step<P> = {
   readonly kind: StepKind;
   readonly parse: (value: unknown) => Result<unknown, string>;
   readonly run: (ctx: StepContext<P>) => Promise<Result<StepResult<unknown>, AppError>>;
-  readonly adopt?: (ctx: StepContext<P>, output: unknown) => Promise<Result<string, AppError>>;
+  readonly adopt?: (ctx: StepContext<P>, output: unknown) => Promise<Result<Adopted<unknown>, AppError>>;
   readonly confirm?: (ctx: StepContext<P>, output: unknown) => Promise<string | null>;
   readonly skipIf?: (ctx: StepContext<P>) => Promise<string | null>;
 };
+
+/** 采用的结果：一句话，或一句话加存回这一步的结果。 */
+type Adopted<O> = string | { readonly note: string; readonly output: O };
 
 const invalid = (detail: string): AppError => ({ code: 'settings', detail });
 
@@ -292,6 +307,7 @@ export type WorkflowHost = {
   analyzeBook(runId: string, idx: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly analysis: BenchmarkAnalysis; readonly trimmed: number }, AppError>>;
   compareBooks(
     runId: string,
+    rank: readonly { readonly title: string; readonly tags: string; readonly words: string }[],
     analyses: readonly { readonly title: string; readonly analysis: BenchmarkAnalysis }[],
     idea: string,
     stepKey: string,
@@ -397,7 +413,7 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
           onProgress(`写手依次写 ${todo.length} 章，每章写完整理长篇记忆并审核`);
           const ids = todo.map((c) => c.chapter.id);
           const written = await hooks.writeChapters(ids, true, options);
-          if (!written.ok) return err(invalid(written.summary));
+          if (!written.ok) return err(hookFailure(written));
           return ok({ output: { chapters: ids, summary: written.summary }, note: written.summary });
         },
       }),
@@ -485,7 +501,7 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
           for (const [i, c] of todo.entries()) {
             onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
             const built = await host.buildMemory(c.chapter.id, options);
-            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，重做时接着整理）` : ''}`));
+            if (!built.ok) return err(interrupted(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，继续时接着整理）` : ''}`));
             done.push(c.chapter.id);
           }
           return ok({ output: { chapters: done, note: '' }, note: done.length === 0 ? `范围内 ${chapters.value.length} 章的长篇记忆都是最新的` : `整理了 ${done.length} 章的长篇记忆` });
@@ -506,7 +522,7 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
           if (targets.length === 0) return ok({ output: { chapters: [], note: '' }, note: '范围内的章节都审核过了（要重新审核，开始时勾选“已审过的也重新审核”）' });
           onProgress(`依次审核 ${targets.length} 章`);
           const done = await hooks.reviewChapters(targets, options);
-          if (!done.ok) return err(invalid(done.summary));
+          if (!done.ok) return err(hookFailure(done));
           return ok({ output: { chapters: targets, note: done.summary }, note: done.summary });
         },
       }),
@@ -578,8 +594,11 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
             }
             located.push(one.value);
           }
+          // 有没核对成的先不写入：继续时接着做同一次，核对成的调用不再请求，也不会把这些章旧的问题换掉。
+          if (failed > 0) return err(interrupted(`${failed} 处疑点没有核对成（调用失败），已核对的 ${located.length} 处保留；点“继续”再试没核对成的`));
+          // 范围的第一章不会是任何疑点的后一章（它前面的章节不在范围里）：它的旧问题不换，那一对章节这次没有查。
           const saved = await host.saveContinuityIssues(
-            chapters.value.map((c) => c.id),
+            chapters.value.slice(1).map((c) => c.id),
             located,
           );
           if (!saved.ok) return saved;
@@ -587,7 +606,7 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
           const dropped = located.reduce((n, l) => n + l.dropped, 0);
           return ok({
             output: { issues: saved.value, unconfirmed, dropped, failed },
-            note: `${suspects.length === 0 ? '没有要核对的疑点' : `核对了 ${suspects.length - failed} 处疑点，定位出 ${saved.value} 个问题`}${unconfirmed > 0 ? `；${unconfirmed} 处读了原文没有发现矛盾` : ''}${failed > 0 ? `；${failed} 处没有核对成（调用失败），重做这一步时再试` : ''}`,
+            note: `${suspects.length === 0 ? '没有要核对的疑点' : `核对了 ${suspects.length} 处疑点，定位出 ${saved.value} 个问题`}${unconfirmed > 0 ? `；${unconfirmed} 处读了原文没有发现矛盾` : ''}`,
           });
         },
       }),
@@ -622,15 +641,20 @@ const VOLUME_BOUNDARY_CHAPTERS = 2;
 
 const VolumeAuditReport = z.object({ suspects: z.number().int(), issues: z.number().int(), failed: z.number().int() });
 
+/** 卷纲这一步的结果：模型给的卷纲，采用后记下新建的那一卷的标识（作者之后改卷名也找得到）。 */
+const VolumeOutlineStep = VolumeOutlineOutput.extend({ volumeId: z.string().nullable().default(null) });
+type VolumeOutlineStep = z.infer<typeof VolumeOutlineStep>;
+
 function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
-  /** 采用卷纲时新建的那一卷：按卷名找最后一个同名的（作者之后改了卷名时找不到，说明原因）。 */
+  /** 采用卷纲时新建的那一卷：按记下的标识找；没有记下（旧的运行）时按卷名找最后一个同名的。 */
   const volumeOf = async (outline: unknown): Promise<Result<{ readonly id: string; readonly title: string }, AppError>> => {
-    const parsed = VolumeOutlineOutput.safeParse(outline);
+    const parsed = VolumeOutlineStep.safeParse(outline);
     if (!parsed.success) return err(invalid('先采用卷纲：这一卷还没有建'));
     const work = await host.reloadWork();
     if (!work.ok) return work;
-    const found = work.value.volumes.filter((v) => v.title === parsed.data.title.trim()).at(-1);
-    return found === undefined ? err(invalid(`找不到卷“${parsed.data.title.trim()}”（可能改了卷名或删掉了）：重做“卷纲”这一步，或把卷名改回来`)) : ok(found);
+    const found = work.value.volumes.find((v) => v.id === parsed.data.volumeId) ?? (parsed.data.volumeId === null ? work.value.volumes.filter((v) => v.title === parsed.data.title.trim()).at(-1) : undefined);
+    if (found !== undefined) return ok(found);
+    return err(invalid(parsed.data.volumeId === null ? '先采用卷纲：这一卷还没有建' : `卷纲建的那一卷“${parsed.data.title.trim()}”已经删掉了：撤回“卷纲”的采用后再采用一次`));
   };
   const volumeChapters = async (volumeId: string) => {
     const view = await host.planningView();
@@ -667,27 +691,30 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
           for (const [i, c] of todo.entries()) {
             onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
             const built = await host.buildMemory(c.chapter.id, options);
-            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}`));
+            if (!built.ok) return err(interrupted(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，继续时接着整理）` : ''}`));
             done.push(c.chapter.id);
           }
           return ok({ output: { chapters: done }, note: done.length === 0 ? '最近几章的长篇记忆都是最新的' : `整理了 ${done.length} 章的长篇记忆` });
         },
       }),
-      step<NextVolumeParams, VolumeOutline>({
+      step<NextVolumeParams, VolumeOutlineStep>({
         key: 'outline',
         label: '卷纲',
         kind: 'draft',
-        output: VolumeOutlineOutput,
+        output: VolumeOutlineStep,
         async run({ params, stepKey, options, onProgress }) {
           onProgress('正在规划下一卷：卷名、主线、新人物与伏笔');
           const outline = await host.draftVolumeOutline({ chapterCount: params.chapters, instruction: params.instruction, stepKey }, options);
           if (!outline.ok) return outline;
-          return ok({ output: outline.value, note: `${outline.value.title}：${outline.value.summary}` });
+          return ok({ output: { ...outline.value, volumeId: null }, note: `${outline.value.title}：${outline.value.summary}` });
         },
         async adopt(_ctx, outline) {
           const applied = await host.applyVolumeOutline(outline);
           if (!applied.ok) return applied;
-          return ok(`已新建“${applied.value.volume.title}”，新人物 ${applied.value.characters} 个，新伏笔 ${applied.value.foreshadows} 条`);
+          return ok({
+            note: `已新建“${applied.value.volume.title}”，新人物 ${applied.value.characters} 个，新伏笔 ${applied.value.foreshadows} 条`,
+            output: { ...outline, volumeId: applied.value.volume.id },
+          });
         },
       }),
       step<NextVolumeParams, PlanDraft>({
@@ -727,7 +754,7 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
           onProgress(`写手依次写“${volume.value.title}”的 ${todo.length} 章，每章写完整理长篇记忆并审核`);
           const ids = todo.map((c) => c.chapter.id);
           const written = await hooks.writeChapters(ids, true, options);
-          if (!written.ok) return err(invalid(written.summary));
+          if (!written.ok) return err(hookFailure(written));
           return ok({ output: { chapters: ids, summary: written.summary }, note: written.summary });
         },
       }),
@@ -762,11 +789,12 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
             }
             located.push(one.value);
           }
+          if (failed > 0) return err(interrupted(`${failed} 处疑点没有核对成（调用失败），已核对的 ${located.length} 处保留；点“继续”再试没核对成的`));
           const saved = await host.saveContinuityIssues(inVolume, located);
           if (!saved.ok) return saved;
           return ok({
             output: { suspects: suspects.length, issues: saved.value, failed },
-            note: suspects.length === 0 ? '本卷没有找到跨章的疑点' : `核对了 ${suspects.length - failed} 处疑点，定位出 ${saved.value} 个问题（列在各章的“审核”里）${failed > 0 ? `；${failed} 处没有核对成，重做这一步时再试` : ''}`,
+            note: suspects.length === 0 ? '本卷没有找到跨章的疑点' : `核对了 ${suspects.length} 处疑点，定位出 ${saved.value} 个问题（列在各章的“审核”里）`,
           });
         },
       }),
@@ -800,7 +828,7 @@ function openingPolish(host: WorkflowHost): WorkflowDef<OpeningParams> {
     for (const [i, c] of survey.chapters.entries()) {
       onProgress(`按开篇的要求诊断第 ${i + 1} / ${survey.chapters.length} 章《${c.title}》`);
       const done = await host.diagnoseOpening(survey, i, `${stepKey}:${i}`, options);
-      if (!done.ok) return done;
+      if (!done.ok) return options.signal?.aborted === true ? done : err(interrupted(`《${c.title}》没有诊断成：${describeError(done.error)}${rows.length > 0 ? `（已诊断 ${rows.length} 章，继续时接着诊断）` : ''}`));
       rows.push({ chapterId: c.chapterId, title: c.title, issues: done.value.issues });
       dropped += done.value.dropped;
     }
@@ -923,7 +951,7 @@ function castCompletion(host: WorkflowHost): WorkflowDef<CastParams> {
           for (const [i, c] of todo.entries()) {
             onProgress(`整理长篇记忆：第 ${i + 1} / ${todo.length} 章《${c.chapter.title}》`);
             const built = await host.buildMemory(c.chapter.id, options);
-            if (!built.ok) return err(invalid(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，重做时接着整理）` : ''}`));
+            if (!built.ok) return err(interrupted(`《${c.chapter.title}》的长篇记忆没有整理成：${describeError(built.error)}${done.length > 0 ? `（已整理 ${done.length} 章，继续时接着整理）` : ''}`));
             done.push(c.chapter.id);
           }
           return ok({ output: { chapters: done }, note: done.length === 0 ? `${written.length} 章的长篇记忆都是最新的` : `整理了 ${done.length} 章的长篇记忆` });
@@ -1012,7 +1040,7 @@ function benchmark(host: WorkflowHost): WorkflowDef<BenchmarkParams> {
             onProgress(`拆解第 ${i + 1} / ${books.length} 本《${b.title}》`);
             // 每本一个步骤键：中断后接着做时，拆过的不再请求。
             const done = await host.analyzeBook(runId, b.idx, `${stepKey}:${b.idx}`, options);
-            if (!done.ok) return done;
+            if (!done.ok) return options.signal?.aborted === true ? done : err(interrupted(`《${b.title}》没有拆解成：${describeError(done.error)}${analyses.length > 0 ? `（已拆解 ${analyses.length} 本，继续时接着拆）` : ''}`));
             analyses.push({ idx: b.idx, title: b.title, analysis: done.value.analysis, trimmed: done.value.trimmed });
           }
           const trimmed = analyses.reduce((n, a) => n + a.trimmed, 0);
@@ -1027,16 +1055,21 @@ function benchmark(host: WorkflowHost): WorkflowDef<BenchmarkParams> {
         async run({ runId, params, stepKey, options, onProgress, output }) {
           const parsed = BenchmarkAnalyses.safeParse(output('analyze'));
           if (!parsed.success || parsed.data.analyses.length === 0) return err(invalid('先拆解至少一本'));
+          const imported = BenchmarkImport.safeParse(output('import'));
           onProgress('横向对比几本的结构与技法，找空位与开书方向');
           const done = await host.compareBooks(
             runId,
+            (imported.success ? imported.data.books : []).map((b) => ({ title: b.title, tags: b.tags, words: b.words })),
             parsed.data.analyses.map((a) => ({ title: a.title, analysis: a.analysis })),
             params.idea,
             stepKey,
             options,
           );
           if (!done.ok) return done;
-          return ok({ output: { ...done.value.compare, trimmed: done.value.trimmed }, note: `共性 ${done.value.compare.common.length} 条、空位 ${done.value.compare.gaps.length} 条、开书方向 ${done.value.compare.directions.length} 个；采用后存为一项规划技能` });
+          // 样章原文到这里用完（B79“用完即删”）：对比一结束就删，不等作者采用或再点“继续”；后面的“删除样章原文”一步只作兜底。
+          const cleared = await host.clearBenchmark(runId);
+          if (!cleared.ok) return cleared;
+          return ok({ output: { ...done.value.compare, trimmed: done.value.trimmed }, note: `共性 ${done.value.compare.common.length} 条、空位 ${done.value.compare.gaps.length} 条、开书方向 ${done.value.compare.directions.length} 个；样章原文已从作品库删除；采用后存为一项规划技能` });
         },
         async adopt(_c, result) {
           if (result.skill.trim() === '') return err(invalid('对标分析里没有给规划用的指令：可以先改一改再采用'));
@@ -1053,7 +1086,7 @@ function benchmark(host: WorkflowHost): WorkflowDef<BenchmarkParams> {
         async run({ runId }) {
           const cleared = await host.clearBenchmark(runId);
           if (!cleared.ok) return cleared;
-          return ok({ output: { cleared: cleared.value }, note: '样章原文已从作品库删除；拆解与对标分析只留结构与技法' });
+          return ok({ output: { cleared: cleared.value }, note: `样章原文${cleared.value > 0 ? '已从作品库删除' : '已经删除'}；拆解与对标分析只留结构与技法` });
         },
       }),
     ],
@@ -1212,10 +1245,25 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     return saved.ok ? ok(saved.value) : err(repo(saved.error));
   }
 
-  function contextFor(def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv, usage: { value: StepUsage }, prices: Prices | undefined): StepContext<unknown> {
+  /**
+   * 执行一步时的控制：预算上限与这一步之前已用的费用（达到上限后这一步不再开始新的调用，进行中的照常做完）；
+   * 用量每收到一次就写回作品库（不带版本守卫），中途崩溃时已发生的费用不丢。
+   */
+  type StepControl = {
+    readonly budget: number | null;
+    readonly spentBefore: number;
+    /** 这一步的用量使总费用达到上限。 */
+    readonly onBudget: () => void;
+    /** 下一次调用开始前问：达到上限时给出原因。 */
+    readonly beforeCall: () => string | null;
+    readonly port: SqlPort;
+  };
+
+  function contextFor(def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv, usage: { value: StepUsage }, prices: Prices | undefined, control?: StepControl): StepContext<unknown> {
     const s = data.steps[idx]!;
     const options: CallOptions = {
       ...(env.signal !== undefined && { signal: env.signal }),
+      ...(control !== undefined && { beforeCall: control.beforeCall }),
       onEvent: (e) => {
         if (e.type !== 'usage') return;
         const u: LlmUsage = e.usage;
@@ -1226,6 +1274,9 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
           cost: usage.value.cost + (cost ?? 0),
           unknown: usage.value.unknown + (cost === null ? 1 : 0),
         };
+        if (control === undefined) return;
+        void setWorkflowStepUsage(control.port, data.run.id, idx, usage.value, ctx());
+        if (control.budget !== null && control.spentBefore + usage.value.cost >= control.budget) control.onBudget();
       },
     };
     return {
@@ -1245,17 +1296,34 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     };
   }
 
-  /** 采用一步：draft 写进作品并记下改动（撤回用），manual 做作者要做的那件事。返回给作者看的一句话与改动。 */
-  async function adoptStep(port: SqlPort, def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv): Promise<Result<{ readonly note: string; readonly changes: readonly unknown[] | null }, AppError>> {
+  /**
+   * 采用一步：draft 写进作品并记下改动（撤回用），manual 做作者要做的那件事。返回给作者看的一句话、改动与要存回的结果。
+   * 动作品之前先以版本守卫在这一步上记一笔：两处同时采用（成书页与 AI 助手、“一路做完”与作者）时后到的在动作品之前就失败，
+   * 草稿不会写进作品两遍。
+   */
+  async function adoptStep(port: SqlPort, def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv): Promise<Result<{ readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown }, AppError>> {
     const spec = def.steps[idx];
     const row = data.steps[idx];
     if (spec?.adopt === undefined || row === undefined) return err(invalid('这一步没有要采用的结果'));
+    const claimed = await updateWorkflowSteps(port, data.run.id, [{ step: row, patch: {} }], ctx());
+    if (!claimed.ok) return err(claimed.error.code === 'conflict' ? invalid('这一步刚被采用或改过（可能是 AI 助手或“一路做完”）：重新打开成书页再看') : repo(claimed.error));
     const before = spec.kind === 'draft' ? await tracker.capture() : null;
     const adopted = await spec.adopt(contextFor(def, data, idx, env, { value: EMPTY_USAGE }, undefined), row.output);
     if (!adopted.ok) return adopted;
     const after = before === null ? null : await tracker.capture();
-    return ok({ note: adopted.value, changes: before === null || after === null ? null : tracker.diff(before, after) });
+    const changes = before === null || after === null ? null : tracker.diff(before, after);
+    if (typeof adopted.value === 'string') return ok({ note: adopted.value, changes });
+    const output = spec.parse(adopted.value.output);
+    if (!output.ok) return err(invalid(`采用后的结果不完整：${output.error}`));
+    return ok({ note: adopted.value.note, changes, output: output.value });
   }
+
+  /** 采用后写回这一步：状态、说明、改动，以及采用时改过的结果。 */
+  const adoptPatch = (adopted: { readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown }): StepPatch => ({
+    note: adopted.note,
+    changes: adopted.changes,
+    ...(adopted.output !== undefined && { output: adopted.output }),
+  });
 
   /** 执行第 idx 步（它已是下一步）：开始 → 执行 → 产出（或出错、中断）；“一路做完”时草稿直接采用。 */
   async function runStep(port: SqlPort, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv, prices: Prices | undefined): Promise<Result<WorkflowRunWithSteps, AppError>> {
@@ -1269,7 +1337,21 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     if (!started.ok) return started;
     env.onStep?.(viewOf(started.value));
     const usage = { value: started.value.steps[idx]?.usage ?? EMPTY_USAGE };
-    const c = contextFor(def, started.value, idx, env, usage, prices);
+    // 预算（B78）：这一步里每次调用的用量都和上限比较，达到后不再开始新的调用（写章节的一步占去大半费用，不能只在步与步之间看）；
+    // 进行中的调用照常做完、结果照常记下，一步只剩这一次调用时这一步照常完成。
+    const budget = started.value.run.budgetUsd;
+    const spentBefore = viewOf(started.value).spent.cost - usage.value.cost;
+    let budgetHit = false;
+    const control: StepControl = {
+      budget,
+      spentBefore,
+      onBudget: () => {
+        budgetHit = true;
+      },
+      beforeCall: () => (budgetHit ? `已用 $${(spentBefore + usage.value.cost).toFixed(3)}，达到预算上限 $${budget ?? 0}` : null),
+      port,
+    };
+    const c = contextFor(def, started.value, idx, env, usage, prices, control);
     let result: Result<StepResult<unknown>, AppError>;
     try {
       result = await spec.run(c);
@@ -1282,7 +1364,12 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     const finished = { finishedAt: deps.clock.now(), usage: usage.value };
     if (!result.ok) {
       const stopped = env.signal?.aborted === true;
-      return apply(port, current.value, { type: stopped ? 'interrupt' : 'fail', idx }, { [idx]: { ...finished, note: stopped ? '已停下，继续时从这一步重做' : describeError(result.error) } });
+      const note = stopped
+        ? '已停下，继续时接着做这一步'
+        : budgetHit
+          ? `已用 $${(spentBefore + usage.value.cost).toFixed(3)}，达到预算上限 $${budget ?? 0}，停在这一步中途；提高上限后继续`
+          : describeError(result.error);
+      return apply(port, current.value, { type: stopped || budgetHit || result.error.code === 'interrupted' ? 'interrupt' : 'fail', idx }, { [idx]: { ...finished, note } });
     }
     const output = result.value.output;
     if (spec.kind === 'manual') return apply(port, current.value, { type: 'produced', idx, waitForAuthor: true }, { [idx]: { ...finished, output, note: result.value.note } });
@@ -1292,14 +1379,14 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     if (!produced.ok || current.value.run.mode !== 'auto' || confirmNote !== null) return produced;
     // 一路做完：草稿直接采用；采用不成时停在这一步，草稿还在。
     const adopted = await adoptStep(port, def, produced.value, idx, env);
+    const again = await load(port, data.run.id);
+    if (!again.ok) return again;
     if (!adopted.ok) {
-      const again = await load(port, data.run.id);
-      if (!again.ok) return again;
       const s = again.value.steps[idx]!;
       const noted = await updateWorkflowSteps(port, data.run.id, [{ step: s, patch: { note: `没有采用成：${describeError(adopted.error)}` } }], ctx());
       return noted.ok ? ok(noted.value) : err(repo(noted.error));
     }
-    return apply(port, produced.value, { type: 'adopt', idx }, { [idx]: { note: adopted.value.note, changes: adopted.value.changes } });
+    return apply(port, again.value, { type: 'adopt', idx }, { [idx]: adoptPatch(adopted.value) });
   }
 
   function withPort<T>(f: (port: SqlPort) => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
@@ -1447,7 +1534,11 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
           const budget = data.value.run.budgetUsd;
           if (budget !== null && view.spent.cost >= budget) return stop(`已用 $${view.spent.cost.toFixed(3)}，达到预算上限 $${budget}，停在${label(next.idx)}之前`);
           data = await runStep(port, data.value, next.idx, env, price?.prices);
-          if (data.ok) env.onStep?.(viewOf(data.value));
+          if (!data.ok) return data;
+          env.onStep?.(viewOf(data.value));
+          // 这一步没做完就停了（作者停下、预算用完、其中几件事没做成）：不接着做，说明停在哪里；继续时接着做同一次。
+          const after = data.value.steps[next.idx];
+          if (after?.status === 'interrupted') return ok({ view: viewOf(data.value), summary: `停在${label(next.idx)}中途：${after.note}` });
         }
       });
     },
@@ -1483,13 +1574,37 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         if (!adopted.ok) return adopted;
         const again = await load(port, runId);
         if (!again.ok) return again;
-        const saved = await apply(port, again.value, { type: 'adopt', idx }, { [idx]: { note: adopted.value.note, changes: adopted.value.changes } });
+        const saved = await apply(port, again.value, { type: 'adopt', idx }, { [idx]: adoptPatch(adopted.value) });
         return saved.ok ? ok(viewOf(saved.value)) : saved;
       });
     },
 
+    /** 等作者处理的一步采用前要作者确认的说明（会覆盖或删除作品内容）；不需要确认、或这一步不在等作者时为 null。 */
+    stepConfirmNote(runId: string, idx: number): Promise<Result<string | null, AppError>> {
+      return withPort(async (port) => {
+        const data = await load(port, runId);
+        if (!data.ok) return data;
+        const def = defOf(data.value.run.workflow);
+        const spec = def?.steps[idx];
+        const row = data.value.steps[idx];
+        if (def === null || spec === undefined || row === undefined) return err({ code: 'not_found' });
+        if (row.status !== 'awaiting_author' || spec.confirm === undefined) return ok(null);
+        return ok(await spec.confirm(contextFor(def, data.value, idx, {}, { value: EMPTY_USAGE }, undefined), row.output));
+      });
+    },
+
     skipWorkflowStep: (runId: string, idx: number) => act(runId, { type: 'skip', idx }, { [idx]: { note: '已跳过' } }),
-    redoWorkflowStep: (runId: string, idx: number) => act(runId, { type: 'redo', idx }, { [idx]: { note: '' } }),
+    /** 重做一步。已经采用进作品的草稿先撤回再重做：不然撤回的记录会被新的结果冲掉，再采用时又在旧内容上叠一遍（例如建出两卷）。 */
+    redoWorkflowStep(runId: string, idx: number): Promise<Result<WorkflowView, AppError>> {
+      return withPort(async (port) => {
+        const data = await load(port, runId);
+        if (!data.ok) return data;
+        const row = data.value.steps[idx];
+        const spec = defOf(data.value.run.workflow)?.steps[idx];
+        if (row?.status === 'done' && spec?.kind === 'draft' && row.changes !== null) return err(invalid('这一步的草稿已经采用进作品：先“撤回这次采用”，再重做'));
+        return act(runId, { type: 'redo', idx }, { [idx]: { note: '' } });
+      });
+    },
     keepWorkflowStep: (runId: string, idx: number) => act(runId, { type: 'keep', idx }),
 
     /**
@@ -1516,19 +1631,26 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
       });
     },
 
-    /** 放弃这次运行：不再推进，记录与已经写进作品的内容都保留。 */
+    /**
+     * 放弃这次运行：不再推进，记录与已经写进作品的内容都保留。调用方（状态层）保证它没有在后台推进；
+     * 还标着进行中的一步（写回失败时留下的）改为中断，不让这次运行放弃不了。
+     */
     abandonWorkflow(runId: string): Promise<Result<WorkflowView, AppError>> {
       return withPort(async (port) => {
-        const data = await load(port, runId);
+        let data = await load(port, runId);
         if (!data.ok) return data;
-        if (data.value.steps.some((s) => s.status === 'running')) return err(invalid('还有一步在进行：先停下'));
-        const abandoned = await abandonWorkflowRun(port, data.value.run, ctx());
-        if (!abandoned.ok) return err(repo(abandoned.error));
-        // 扫榜拆书的样章是别人的作品：放弃时一并删掉。
+        const running = data.value.steps.findIndex((s) => s.status === 'running');
+        if (running >= 0) {
+          data = await apply(port, data.value, { type: 'interrupt', idx: running }, { [running]: { finishedAt: deps.clock.now(), note: '放弃时还在进行' } });
+          if (!data.ok) return data;
+        }
+        // 扫榜拆书的样章是别人的作品：先删掉再放弃，删不成时这次运行还能再放弃一次。
         if (data.value.run.workflow === 'benchmark') {
           const cleared = await host.clearBenchmark(runId);
           if (!cleared.ok) return cleared;
         }
+        const abandoned = await abandonWorkflowRun(port, data.value.run, ctx());
+        if (!abandoned.ok) return err(repo(abandoned.error));
         return ok(viewOf({ run: abandoned.value, steps: data.value.steps }));
       });
     },

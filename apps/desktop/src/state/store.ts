@@ -1,6 +1,6 @@
 // 界面状态（Zustand）。动作只调用应用服务层的用例，把结果放进状态；组件订阅状态、调用动作。
 import type { Result, SkillStage } from '@fudiao/shared';
-import type { CallOptions } from '@fudiao/llm';
+import type { CallOptions, LlmStreamEvent } from '@fudiao/llm';
 import type { Chapter, ChapterTarget, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
@@ -11,7 +11,7 @@ import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } fr
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
-import type { StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
+import type { HookOutcome, StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -708,9 +708,9 @@ export function createAppStore(service: AppService): AppStore {
     async function writeQueue(
       chapterIds: readonly string[],
       options: { readonly review?: boolean; readonly listen?: CallOptions },
-    ): Promise<{ readonly summary: string; readonly complete: boolean }> {
+    ): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean }> {
       // 先保存编辑器里的内容：写手不会覆盖未保存的修改。
-      if (!(await get().leaveChapter())) return { summary: '本章正文没有保存成功，写手没有开始', complete: false };
+      if (!(await get().leaveChapter())) return { summary: '本章正文没有保存成功，写手没有开始', complete: false, cancelled: false };
       const written: string[] = [];
       /** 停在哪里、为什么（显示给作者的那句话）；写完全部时为 null。 */
       let stop: string | null = null;
@@ -724,16 +724,16 @@ export function createAppStore(service: AppService): AppStore {
       const listen = options.listen;
       if (listen?.signal?.aborted === true) abort.abort();
       listen?.signal?.addEventListener('abort', () => abort.abort(), { once: true });
-      const tee = (o: CallOptions): CallOptions =>
-        listen?.onEvent === undefined
-          ? o
-          : {
-              ...o,
-              onEvent: (e) => {
-                o.onEvent?.(e);
-                listen.onEvent?.(e);
-              },
-            };
+      const tee = (o: CallOptions): CallOptions => ({
+        ...o,
+        ...(listen?.beforeCall !== undefined && { beforeCall: listen.beforeCall }),
+        ...(listen?.onEvent !== undefined && {
+          onEvent: (e: LlmStreamEvent) => {
+            o.onEvent?.(e);
+            listen.onEvent?.(e);
+          },
+        }),
+      });
       const refresh = async (chapterId: string) => {
         const planning = get().planning === null ? null : await service.planningView();
         if (planning?.ok === true) set({ planning: planning.value });
@@ -789,7 +789,7 @@ export function createAppStore(service: AppService): AppStore {
       if (writerAbort === abort) writerAbort = null;
       set({ writerJob: null });
       const done = written.length === 0 ? '一章也没有写完' : `写完了${written.map((t) => `《${t}》`).join('')}`;
-      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${stop === null ? '' : `；停在这里：${stop as string}`}`, complete: stop === null };
+      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${stop === null ? '' : `；停在这里：${stop as string}`}`, complete: stop === null, cancelled: abort.signal.aborted };
     }
 
     /** 写作工作流的一次运行有了新的样子：换进列表（新的放在最前）。 */
@@ -799,12 +799,12 @@ export function createAppStore(service: AppService): AppStore {
     }
 
     /** 写作工作流的写章节步骤：经写手队列写（与成书进度、AI 助手的后台写作同一时间只有一批）。 */
-    async function workflowWrite(chapterIds: readonly string[], review: boolean, listen: CallOptions): Promise<{ readonly ok: boolean; readonly summary: string }> {
+    async function workflowWrite(chapterIds: readonly string[], review: boolean, listen: CallOptions): Promise<HookOutcome> {
       if (writerRunning || get().writerJob !== null) return { ok: false, summary: '写手正在写别的章节（成书进度或 AI 助手排的一批）：等它写完，再继续这个工作流' };
       writerRunning = true;
       try {
         const done = await writeQueue(chapterIds, { review, listen });
-        return { ok: done.complete, summary: done.summary };
+        return { ok: done.complete, summary: done.summary, cancelled: done.cancelled };
       } finally {
         writerRunning = false;
       }
@@ -814,22 +814,22 @@ export function createAppStore(service: AppService): AppStore {
      * 依次审核这些章（成书进度、AI 助手的后台审核与写作工作流都经这里），同一时间只有一批；已有一批时返回 null。
      * listen：写作工作流交来的一批，它停下时这一批也停下，用量一并报给它。返回怎样结束的一句话与是否全部审完。
      */
-    async function reviewQueueRun(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean } | null> {
+    async function reviewQueueRun(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean } | null> {
       if (reviewQueueAbort !== null || chapterIds.length === 0) return null;
       const abort = new AbortController();
       reviewQueueAbort = abort;
       if (listen?.signal?.aborted === true) abort.abort();
       listen?.signal?.addEventListener('abort', () => abort.abort(), { once: true });
-      const tee = (o: CallOptions): CallOptions =>
-        listen?.onEvent === undefined
-          ? o
-          : {
-              ...o,
-              onEvent: (e) => {
-                o.onEvent?.(e);
-                listen.onEvent?.(e);
-              },
-            };
+      const tee = (o: CallOptions): CallOptions => ({
+        ...o,
+        ...(listen?.beforeCall !== undefined && { beforeCall: listen.beforeCall }),
+        ...(listen?.onEvent !== undefined && {
+          onEvent: (e: LlmStreamEvent) => {
+            o.onEvent?.(e);
+            listen.onEvent?.(e);
+          },
+        }),
+      });
       const reviewed: string[] = [];
       let stop: string | null = null;
       try {
@@ -861,7 +861,7 @@ export function createAppStore(service: AppService): AppStore {
         if (reviewQueueAbort === abort) reviewQueueAbort = null;
         set({ reviewQueue: null });
       }
-      return { summary: `依次审核 ${chapterIds.length} 章：${reviewed.length === 0 ? '一章也没有审完' : `审完了${reviewed.join('、')}`}${stop === null ? '' : `；${stop}`}`, complete: stop === null };
+      return { summary: `依次审核 ${chapterIds.length} 章：${reviewed.length === 0 ? '一章也没有审完' : `审完了${reviewed.join('、')}`}${stop === null ? '' : `；${stop}`}`, complete: stop === null, cancelled: abort.signal.aborted };
     }
 
     async function reviewTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o) {
@@ -959,16 +959,26 @@ export function createAppStore(service: AppService): AppStore {
       }
       return PAGE_LABEL[state.panel] ?? '';
     };
-    /** 作品内容变了：重新读取目录、设定、事实与计划。 */
+    /**
+     * 作品内容变了（后台的写手、工作流与 AI 助手）：重新读取目录、设定、事实与计划。
+     * 不经 run()：后台每一步都会调用，不该让按钮闪一下忙碌、也不该清掉作者正在看的提示。
+     */
     async function refreshWork() {
       const work = await service.reloadWork();
       if (!work.ok) return;
       set({ work: work.value });
-      await loadEntities();
-      await reloadFacts();
+      const [entities, facts] = await Promise.all([service.listEntities(), service.listFacts()]);
+      if (entities.ok) set({ entities: entities.value });
+      if (facts.ok) set({ facts: facts.value });
       if (get().panel === 'planning' || get().panel === 'book') {
         const planning = await service.planningView();
         if (planning.ok) set({ planning: planning.value });
+      }
+      if (get().panel === 'book') {
+        // 成书页的作品现状与运行列表（AI 助手采用了一步、后台推进完一步时也要跟着变）。
+        const [status, workflows] = await Promise.all([service.quickBookStatus(), service.listWorkflows()]);
+        if (status.ok) set({ quickBook: status.value });
+        if (workflows.ok) set({ workflows: workflows.value });
       }
       if (get().panel === 'relations') {
         const relations = await service.relationsView();
@@ -1071,6 +1081,10 @@ export function createAppStore(service: AppService): AppStore {
         effort: get().library?.preferences.assistant.effort ?? 'medium',
         running: () => get().backgroundWork(),
         background: {
+          busy: () => {
+            const work = get().backgroundWork();
+            return work.length === 0 ? null : work.join('；');
+          },
           async writeChapters(chapterIds, review, onEnd) {
             const busy = () => {
               const job = get().writerJob;
@@ -1301,12 +1315,17 @@ export function createAppStore(service: AppService): AppStore {
       },
       async createWork(title) {
         const done = await run(service.createWork(title), opened);
-        if (done) await loadEntities();
+        if (done) {
+          await loadEntities();
+          // 新作品从成书页开始：读取运行列表与作品现状，不然页上只有空表单。
+          if (get().panel === 'book') await get().openQuickBook();
+        }
         return done;
       },
       async openWork(id) {
         if (await run(service.openWork(id), opened)) {
           await loadEntities();
+          if (get().panel === 'book') await get().openQuickBook();
           await autoBackup();
         }
       },
@@ -1809,7 +1828,7 @@ export function createAppStore(service: AppService): AppStore {
                 writeChapters: workflowWrite,
                 async reviewChapters(chapterIds, listen) {
                   const done = await reviewQueueRun(chapterIds, listen);
-                  return done === null ? { ok: false, summary: '已经有一批在依次审核（成书进度或 AI 助手排的）：等它审完，再继续这个工作流' } : { ok: done.complete, summary: done.summary };
+                  return done === null ? { ok: false, summary: '已经有一批在依次审核（成书进度或 AI 助手排的）：等它审完，再继续这个工作流' } : { ok: done.complete, summary: done.summary, cancelled: done.cancelled };
                 },
               },
               onStep: (view) => {
@@ -1822,7 +1841,9 @@ export function createAppStore(service: AppService): AppStore {
             if (result.ok) {
               summary = result.value.summary;
               putWorkflow(result.value.view);
-              t.finish(abort.signal.aborted ? 'cancelled' : 'done', { text: summary });
+              if (abort.signal.aborted) t.finish('cancelled', { text: summary });
+              else if (result.value.view.state === 'failed') t.fail(summary);
+              else t.finish('done', { text: summary });
             } else {
               summary = describeError(result.error);
               t.fail(summary);

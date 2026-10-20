@@ -197,6 +197,8 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
 
     /** 纯文本任务（续写、改写等）：不需要通过能力自检。 */
     async text(request: RunRequest, options: CallOptions = {}): Promise<Result<LlmResult, AppError>> {
+      const blocked = options.beforeCall?.() ?? null;
+      if (blocked !== null) return err({ code: 'interrupted', detail: blocked });
       const prepared = await prepare(request, false);
       if (!prepared.ok) return prepared;
       const result = await prepared.value.port.complete(prepared.value.llmRequest, options);
@@ -210,6 +212,9 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
       schema: z.ZodType<T>,
       options: CallOptions = {},
     ): Promise<Result<{ value: T; attempts: readonly LlmResult[]; contextWindow: number }, AppError>> {
+      // 调用开始前问一声（写作工作流的预算）：不发出请求，这次调用以那个原因失败；已有完成记录时也不再复用——停下就是停下。
+      const blocked = options.beforeCall?.() ?? null;
+      if (blocked !== null) return err({ code: 'interrupted', detail: blocked });
       const prepared = await prepare(request, true);
       if (!prepared.ok) return prepared;
       const repairMessage = (issues: readonly string[]) => {

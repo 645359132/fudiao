@@ -29,6 +29,8 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
   const [mode, setMode] = useState<'step' | 'auto'>('step');
   const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<WorkflowQuote | null>(null);
+  // 连按两次“开始”（双击、连按回车）不建两次运行。
+  const [submitting, setSubmitting] = useState(false);
   const bookChapters = useApp((s) => s.work?.chapters ?? []);
   const key: WorkflowKey = info.key;
   const params =
@@ -51,8 +53,10 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
       aria-label={`开始${info.title}`}
       onSubmit={(e) => {
         e.preventDefault();
-        if (key === 'benchmark') void startBenchmark({ rankText, books: samples, idea, mode, budgetUsd });
-        else void startWorkflow({ workflow: key, params, mode, budgetUsd });
+        if (submitting) return;
+        setSubmitting(true);
+        const started = key === 'benchmark' ? startBenchmark({ rankText, books: samples, idea, mode, budgetUsd }) : startWorkflow({ workflow: key, params, mode, budgetUsd });
+        void started.finally(() => setSubmitting(false));
       }}
     >
       {key === 'benchmark' ? (
@@ -248,7 +252,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
           估算费用
         </button>
-        <button type="submit" className="primary" disabled={!modelReady || advancing !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
+        <button type="submit" className="primary" disabled={!modelReady || submitting || advancing !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
           开始
         </button>
       </div>
@@ -505,7 +509,7 @@ function CastStep({ view, step }: { readonly view: WorkflowView; readonly step: 
         <fieldset>
           <legend>人物</legend>
           {draft.characters.map((c, i) => (
-            <label key={c.name} className="check">
+            <label key={`${i}-${c.name}`} className="check">
               <input type="checkbox" disabled={!waiting || busy} checked={c.selected} onChange={(e) => toggle('characters', i, e.currentTarget.checked)} />
               <span>
                 {c.name}
@@ -523,7 +527,7 @@ function CastStep({ view, step }: { readonly view: WorkflowView; readonly step: 
         <fieldset>
           <legend>关系</legend>
           {draft.relationships.map((r, i) => (
-            <label key={`${r.from}-${r.to}-${r.label}`} className="check">
+            <label key={`${i}-${r.from}-${r.to}-${r.label}`} className="check">
               <input type="checkbox" disabled={!waiting || busy} checked={r.selected} onChange={(e) => toggle('relationships', i, e.currentTarget.checked)} />
               <span>
                 {r.mutual ? `${r.from}与${r.to}：${r.label}` : `${r.from}是${r.to}的${r.label}`}
@@ -699,7 +703,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
-        {step.status !== 'pending' && step.status !== 'running' ? button('重做这一步', 'redo') : null}
+        {step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null}
         {['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null}
         {step.status === 'done' && step.kind === 'draft' && step.changes !== null ? button('撤回这次采用', 'withdraw') : null}
       </div>

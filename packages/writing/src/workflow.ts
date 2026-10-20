@@ -44,7 +44,7 @@ const finished = (s: StepState) => s.status === 'done' || s.status === 'skipped'
 const STATUS_LABEL: Readonly<Record<WorkflowStepStatus, string>> = {
   pending: '待做',
   running: '进行中',
-  awaiting_author: '等作者',
+  awaiting_author: '等你处理',
   done: '已完成',
   failed: '出错',
   skipped: '已跳过',

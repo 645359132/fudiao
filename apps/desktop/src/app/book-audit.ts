@@ -57,21 +57,33 @@ const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 const HANDLED = ['ignored', 'fixed', 'sent_to_writer'] as const;
 
-/** 一章的段落太长时只留开头与结尾，各占一半字数。 */
+/**
+ * 一章的段落太长时只留开头与结尾，各占一半字数。第一段与最后一段总是留下（超长时截短正文），
+ * 不然整章只有一两个巨段（导入的文本）时什么也不给模型看，疑点会被当作“没有矛盾”。
+ */
 function clipParagraphs(paragraphs: readonly SavedParagraph[], limit: number): { readonly kept: readonly SavedParagraph[]; readonly clipped: boolean } {
   const total = paragraphs.reduce((n, p) => n + p.text.length, 0);
   if (total <= limit) return { kept: paragraphs, clipped: false };
+  const half = Math.floor(limit / 2);
+  const shorten = (p: SavedParagraph): SavedParagraph => (p.text.length > half ? { ...p, text: p.text.slice(0, half) } : p);
   const head: SavedParagraph[] = [];
   const tail: SavedParagraph[] = [];
   let used = 0;
   for (const p of paragraphs) {
-    if (used + p.text.length > limit / 2) break;
+    if (used + p.text.length > half) {
+      if (head.length === 0) head.push(shorten(p));
+      break;
+    }
     head.push(p);
     used += p.text.length;
   }
   used = 0;
   for (const p of [...paragraphs].reverse()) {
-    if (used + p.text.length > limit / 2 || head.includes(p)) break;
+    if (head.some((h) => h.id === p.id)) break;
+    if (used + p.text.length > half) {
+      if (tail.length === 0) tail.unshift(shorten(p));
+      break;
+    }
     tail.unshift(p);
     used += p.text.length;
   }
@@ -138,14 +150,19 @@ export function bookAuditUseCases(deps: AppDeps, project: () => SqlPort | null, 
       const others = entities.value.filter((e) => e.kind !== 'character');
       const range = (r: { readonly validFromChapterId: string | null; readonly validToChapterId: string | null }) =>
         r.validFromChapterId === null && r.validToChapterId === null ? '' : `（${r.validFromChapterId === null ? '' : `《${titleOf.get(r.validFromChapterId) ?? ''}》起`}${r.validToChapterId === null ? '' : `至《${titleOf.get(r.validToChapterId) ?? ''}》`}）`;
+      // 只带范围末章之前已经成立的事实与关系：第 50 章才成立的事实不该拿来判前 10 章“矛盾”。
+      const position = new Map(chapters.value.map((c, i) => [c.id, i]));
+      const last = Math.max(...audited.map((c) => position.get(c.id) ?? 0));
+      const startedByRange = (fromChapterId: string | null) => fromChapterId === null || (position.get(fromChapterId) ?? 0) <= last;
       const prompt = renderBookAudit({
         title: work.value?.title ?? '',
         entities: [...characters, ...others].slice(0, MAX_AUDIT_ENTITIES).map((e) => ({ name: e.name, kind: ENTITY_KIND_LABEL[e.kind], locked: e.locked, description: e.description })),
         relations: relations.value
+          .filter((r) => startedByRange(r.validFromChapterId))
           .slice(0, MAX_AUDIT_RELATIONS)
           .map((r) => `${r.mutual ? `${nameOf.get(r.fromId) ?? ''}与${nameOf.get(r.toId) ?? ''}：${r.label}` : `${nameOf.get(r.fromId) ?? ''}是${nameOf.get(r.toId) ?? ''}的${r.label}`}${range(r)}`),
         facts: facts.value
-          .filter((f) => f.status === 'confirmed' && f.kind === 'world')
+          .filter((f) => f.status === 'confirmed' && f.kind === 'world' && startedByRange(f.validFromChapterId))
           .slice(0, MAX_AUDIT_FACTS)
           .map((f) => f.content),
         chapters: audited.map((c, i) => {

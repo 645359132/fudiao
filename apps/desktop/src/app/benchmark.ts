@@ -5,7 +5,7 @@ import type { CallOptions } from '@fudiao/llm';
 import { BENCHMARK_QUOTE_CHARS, BenchmarkBookOutput, BenchmarkCompareOutput, renderBenchmarkBook, renderBenchmarkCompare } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import { clearBenchmarkSamples, listBenchmarkSamples, saveBenchmarkSamples, type BenchmarkSampleInput, type RepoError, type SqlPort } from '@fudiao/store';
-import { parseRankList, trimOverlap } from '@fudiao/writing';
+import { overlapTrimmer, parseRankList, sliceChars } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -37,11 +37,15 @@ export function mergeSamples(rankText: string, books: readonly BenchmarkBookInpu
   return rows;
 }
 
-/** 拆解结果里的文字逐项做复述检查（与样章相同、长于上限的截短），引文超长的截短。返回截短了几处。 */
+/**
+ * 拆解结果里的文字逐项做复述检查（与样章相同、长于上限的截短），引文超长的截短。返回截短了几处。
+ * 来源是给模型看过的那段样章（模型只可能抄它看到的），窗口集合只建一次。
+ */
 function scrub(analysis: BenchmarkBookOutput, sources: readonly string[]): { readonly analysis: BenchmarkBookOutput; readonly trimmed: number } {
   let trimmed = 0;
+  const trim = overlapTrimmer(sources, BENCHMARK_QUOTE_CHARS);
   const t = (s: string) => {
-    const r = trimOverlap(s, sources, BENCHMARK_QUOTE_CHARS);
+    const r = trim(s);
     trimmed += r.trimmed;
     return r.text;
   };
@@ -68,8 +72,9 @@ function scrub(analysis: BenchmarkBookOutput, sources: readonly string[]): { rea
 
 function scrubCompare(compare: BenchmarkCompareOutput, sources: readonly string[]): { readonly compare: BenchmarkCompareOutput; readonly trimmed: number } {
   let trimmed = 0;
+  const trim = overlapTrimmer(sources, BENCHMARK_QUOTE_CHARS);
   const t = (s: string) => {
-    const r = trimOverlap(s, sources, BENCHMARK_QUOTE_CHARS);
+    const r = trim(s);
     trimmed += r.trimmed;
     return r.text;
   };
@@ -85,9 +90,11 @@ function scrubCompare(compare: BenchmarkCompareOutput, sources: readonly string[
   };
 }
 
+/** 给模型看的样章：超出字数时给开头与结尾（按字截，不切开表情符号与扩展区的字）。 */
 function clip(text: string, limit: number): { readonly text: string; readonly clipped: boolean } {
-  if (text.length <= limit) return { text, clipped: false };
-  return { text: `${text.slice(0, limit / 2)}\n……\n${text.slice(-limit / 2)}`, clipped: true };
+  const length = [...text].length;
+  if (length <= limit) return { text, clipped: false };
+  return { text: `${sliceChars(text, 0, limit / 2)}\n……\n${sliceChars(text, length - limit / 2)}`, clipped: true };
 }
 
 export function benchmarkUseCases(deps: AppDeps, project: () => SqlPort | null, runner: ReturnType<typeof modelRunner>) {
@@ -126,17 +133,27 @@ export function benchmarkUseCases(deps: AppDeps, project: () => SqlPort | null, 
         if (!prompt.ok) return err(settings(prompt.error));
         const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: BOOK_OUTPUT_TOKENS, effort: 'medium', stepKey }, BenchmarkBookOutput, options);
         if (!result.ok) return result;
-        return ok(scrub(result.value.value, [row.text, row.blurb]));
+        return ok(scrub(result.value.value, [sample.text, row.blurb]));
       }),
 
-    /** 横向对比：只读各本的拆解（与榜单的书名、标签、字数），不读样章原文；结果同样经复述检查。 */
-    compareBooks: (runId: string, analyses: readonly { readonly title: string; readonly analysis: BenchmarkAnalysis }[], idea: string, stepKey: string, options: CallOptions = {}) =>
+    /**
+     * 横向对比：只读各本的拆解与榜单的书名、标签、字数（来自“榜单与样章”一步的结果，样章删掉以后也在），不读样章原文；
+     * 结果同样经复述检查（样章还在时以它为来源；对比的请求里没有样章，这一道只是兜底）。
+     */
+    compareBooks: (
+      runId: string,
+      rank: readonly { readonly title: string; readonly tags: string; readonly words: string }[],
+      analyses: readonly { readonly title: string; readonly analysis: BenchmarkAnalysis }[],
+      idea: string,
+      stepKey: string,
+      options: CallOptions = {},
+    ) =>
       withPort(async (port): Promise<Result<{ readonly compare: BenchmarkCompare; readonly trimmed: number }, AppError>> => {
         const rows = await listBenchmarkSamples(port, runId);
         if (!rows.ok) return err(repo(rows.error));
         const line = (xs: readonly string[]) => xs.join('；');
         const prompt = renderBenchmarkCompare({
-          rank: rows.value.map((r) => ({ title: r.title, tags: r.tags, words: r.words })),
+          rank: rank.map((r) => ({ title: r.title, tags: r.tags, words: r.words })),
           books: analyses.map(({ title, analysis: a }) => ({
             title,
             genre: a.genre,
@@ -153,7 +170,7 @@ export function benchmarkUseCases(deps: AppDeps, project: () => SqlPort | null, 
         if (!prompt.ok) return err(settings(prompt.error));
         const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: COMPARE_OUTPUT_TOKENS, effort: 'medium', stepKey }, BenchmarkCompareOutput, options);
         if (!result.ok) return result;
-        return ok(scrubCompare(result.value.value, rows.value.flatMap((r) => [r.text, r.blurb])));
+        return ok(scrubCompare(result.value.value, rows.value.flatMap((r) => [clip(r.text, BENCHMARK_SAMPLE_CHARS).text, r.blurb])));
       }),
 
     /** 删掉这次运行的样章原文。返回删了几条。 */

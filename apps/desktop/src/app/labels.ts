@@ -1,7 +1,7 @@
 // 界面与 AI 助手共用的中文名称：设定种类、章节计划与推演的状态等。类型约束键名，存储层增加取值时这里漏不掉。
 import type { SkillStage, WorkflowStepStatus } from '@fudiao/shared';
 import type { RunState } from '@fudiao/writing';
-import type { EntityKind, ForeshadowStatus, PlanStatus, RelationCategory, SimRun } from '@fudiao/store';
+import type { EntityKind, ForeshadowStatus, IssueSource, PlanStatus, RelationCategory, SimRun } from '@fudiao/store';
 
 export const ENTITY_KIND_LABEL: Readonly<Record<EntityKind, string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
 
@@ -39,6 +39,9 @@ export const SIM_PAUSE_LABEL: Readonly<Record<string, string>> = {
   ruling_invalid: '裁决不合规则',
   stalemate: '僵局',
 };
+
+/** 审核问题的来源（B61、B80、B81）。 */
+export const ISSUE_SOURCE_LABEL: Readonly<Record<IssueSource, string>> = { program: '程序检查', model: '模型审核', continuity: '跨章连贯', opening: '开篇诊断' };
 
 /** 写作工作流（B78）一次运行的状态。 */
 export const WORKFLOW_STATE_LABEL: Readonly<Record<RunState, string>> = {

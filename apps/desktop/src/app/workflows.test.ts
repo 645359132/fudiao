@@ -56,7 +56,7 @@ const draft: PlanDraftData = {
 const params = { idea: '落魄书生当铺夜遇旧主', genre: '古风悬疑', chapters: 2, wordsPerChapter: 2000 };
 
 /** 不调用写手的写章节钩子：记下要写的章节。 */
-function fakeWriter(result = { ok: true, summary: '写完了 2 章并审核' }) {
+function fakeWriter(result: { readonly ok: boolean; readonly summary: string; readonly cancelled?: boolean } = { ok: true, summary: '写完了 2 章并审核' }) {
   const calls: { ids: readonly string[]; review: boolean }[] = [];
   const hooks: WorkflowHooks = {
     writeChapters(ids, review) {
@@ -250,6 +250,61 @@ describe('写作工作流（B78）', () => {
     expect(out.view.steps[1]?.note).toBe('没有写想法，沿用作品已有的大纲与人物');
   });
 
+  it('两处同时采用同一步（成书页与 AI 助手）：只有一处采用成，草稿只写进作品一次', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    value(await app.advanceWorkflow(run.run.id));
+    const [a, b] = await Promise.all([app.adoptWorkflowStep(run.run.id, 1), app.adoptWorkflowStep(run.run.id, 1)]);
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
+    expect(value(await app.listEntities()).map((e) => e.name).sort()).toEqual(['林舟', '钱四']);
+    expect(value(await app.workflowRun(run.run.id)).steps[1]?.status).toBe('done');
+  });
+
+  it('采用过的草稿先撤回再重做；写手被停下时写章节一步为中断，继续时接着做同一次', async () => {
+    const { deps, app } = await setup();
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    value(await app.advanceWorkflow(run.run.id));
+    value(await app.adoptWorkflowStep(run.run.id, 1));
+    expect(await app.redoWorkflowStep(run.run.id, 1)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('先“撤回这次采用”') } });
+    value(await app.withdrawWorkflowStep(run.run.id, 1));
+    expect(value(await app.redoWorkflowStep(run.run.id, 1)).steps[1]?.status).toBe('pending');
+
+    // 跳到写章节：写手队列被停下（成书进度的“停下”）时这一步是中断而不是出错。
+    value(await app.skipWorkflowStep(run.run.id, 1));
+    value(await app.skipWorkflowStep(run.run.id, 2));
+    value(await app.savePlan(value(await app.createChapter('第一章')).chapters[0]!.id, { goal: '当玉', castIds: [], beats: [], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 }));
+    const stopped = value(await app.advanceWorkflow(run.run.id, { hooks: fakeWriter({ ok: false, summary: '写手停下了', cancelled: true }).hooks }));
+    expect(stopped.view.steps[3]).toMatchObject({ status: 'interrupted', attempt: 1, note: '写手停下了' });
+    expect(stopped.summary).toContain('停在第 4 步');
+    const again = value(await app.advanceWorkflow(run.run.id, { hooks: fakeWriter().hooks }));
+    expect(again.view.steps[3]).toMatchObject({ status: 'done', attempt: 1 });
+  });
+
+  it('预算在一步中途用完：这一步停下（中断）、用量已记下，继续时接着做同一次', async () => {
+    const { deps, app } = await setup();
+    const priced = value(await app.loadModelServices()).models[0]!;
+    value(await app.updateModel(priced, { displayName: priced.displayName, capabilities: priced.capabilities, prices: { input: 10_000, output: 10_000 } }));
+    const write = async (title: string, text: string) => {
+      const id = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!.id;
+      const opened = value(await app.openChapter(id));
+      value(await app.saveChapter(id, opened.saved, [{ id: `p-${title}`, text, source: 'handwritten' }], { splits: [], merges: [] }));
+    };
+    await write('第一章', '林舟当玉。');
+    await write('第二章', '钱四起疑。');
+    const run = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: null, to: null, rereview: false }, mode: 'auto', budgetUsd: 0.01 }));
+    // 第一章的长篇记忆一次调用就超过上限：第二章不再调用，这一步中断。
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [], openThreads: [] })));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[0]).toMatchObject({ status: 'interrupted', note: expect.stringContaining('预算上限') });
+    expect(out.view.steps[0]?.usage?.cost).toBeGreaterThan(0.01);
+    expect(out.summary).toContain('停在第 1 步');
+    expect(deps.llmRequests).toHaveLength(1);
+    // 预算没提高：下一次继续在这一步之前就停。
+    expect(value(await app.advanceWorkflow(run.run.id)).summary).toContain('预算上限');
+  });
+
   it('模型步骤的步骤键为“workflow:运行:步骤:第几次”', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
@@ -333,6 +388,35 @@ describe('全书体检（B80）', () => {
     expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toEqual([]);
   });
 
+  it('几处疑点里有没核对成的：这一步中断、什么也不写；继续时核对成的不再请求；只体检后面的章节不冲掉首章已有的连贯问题', async () => {
+    const { deps, app } = await setup();
+    const { first, second } = await twoChapters(app);
+    const run = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: null, to: null, rereview: false }, mode: 'auto', budgetUsd: null }));
+    const suspect = (about: string) => ({ earlier: 'C1', later: 'C2', kind: 'character', about, severity: 'high' });
+    const issue = (quote: string, description: string) => ({ paragraph: 'P1', quote, kind: 'character', severity: 'high', evidence: ['A1'], description, suggestion: '' });
+    deps.llmResponses.push(memory('钱四被押进大牢。'), memory('钱四在当铺招呼客人。'), noIssues(), noIssues(), reply(JSON.stringify({ suspects: [suspect('大牢与当铺'), suspect('算盘')] })));
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [issue('钱四在柜台后', '第一章钱四已被押进大牢')] })), { status: 400, body: '{"error":{"message":"坏请求"}}' });
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[4]).toMatchObject({ status: 'interrupted', attempt: 1, note: expect.stringContaining('1 处疑点没有核对成') });
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toEqual([]);
+
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [issue('拨着算盘', '他在牢里没有算盘')] })));
+    const done = value(await app.advanceWorkflow(run.run.id));
+    expect(done.view.state).toBe('done');
+    expect(deps.llmRequests).toHaveLength(1);
+    expect(done.view.steps[4]).toMatchObject({ status: 'done', attempt: 1, output: { issues: 2, failed: 0 } });
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toHaveLength(2);
+
+    // 只体检第二章：它前面的章节不在范围里，这次没有查那一对章节，已有的连贯问题不换掉。
+    const part = value(await app.startWorkflow({ workflow: 'book_audit', params: { from: second, to: second, rereview: false }, mode: 'auto', budgetUsd: null }));
+    // 这些章没有章节计划、不算审核过：依次审核再审一次第二章。
+    deps.llmResponses.push(noIssues());
+    expect(value(await app.advanceWorkflow(part.run.id)).view.state).toBe('done');
+    expect(value(await app.reviewIssues(second)).filter((i) => i.source === 'continuity')).toHaveLength(2);
+    void first;
+  });
+
   it('只有一章时不找疑点；伏笔核对列出到期未回收的；再体检时记忆是最新的不再整理', async () => {
     const { deps, app } = await setup();
     const { first } = await twoChapters(app);
@@ -374,10 +458,13 @@ describe('续写一卷（B82）', () => {
     const outlineBody = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
     for (const part of ['这一卷约 2 章', '节奏快一些', '最后一章章尾留下的事', '钱四要找人打听玉的来历']) expect(outlineBody).toContain(part);
 
-    value(await app.adoptWorkflowStep(run.run.id, 1));
+    const adoptedOutline = value(await app.adoptWorkflowStep(run.run.id, 1));
     const work = value(await app.reloadWork());
     expect(work.volumes.map((v) => [v.title, v.summary])).toEqual([['第二卷 归乡', '林舟带着玉佩回乡寻亲。\n主线：离开当铺；回到故乡；找到旧宅\n卷末：旧宅里藏着父亲的信。']]);
     expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['阿青']);
+    // 采用时记下新建的那一卷：作者改了卷名，后面的步骤照样找得到。
+    expect(adoptedOutline.steps[1]?.output).toMatchObject({ volumeId: work.volumes[0]!.id });
+    value(await app.updateVolume(work.volumes[0]!, { title: '第二卷 归乡路', summary: work.volumes[0]!.summary }));
 
     const plan = {
       chapters: [
@@ -390,7 +477,7 @@ describe('续写一卷（B82）', () => {
     const second = value(await app.advanceWorkflow(run.run.id));
     expect(second.view.steps[2]?.status).toBe('awaiting_author');
     const planBody = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
-    for (const part of ['只给新的一卷“第二卷 归乡”拆 2 章', '新的一卷：第二卷 归乡', '最近几章的梗概', '第一章 夜叩：林舟当玉。']) expect(planBody).toContain(part);
+    for (const part of ['只给新的一卷“第二卷 归乡路”拆 2 章', '新的一卷：第二卷 归乡路', '最近几章的梗概', '第一章 夜叩：林舟当玉。']) expect(planBody).toContain(part);
 
     value(await app.adoptWorkflowStep(run.run.id, 2));
     const view = value(await app.planningView());
@@ -474,7 +561,8 @@ describe('人物小传与关系网补全（B83）', () => {
     const { deps, app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;
     value(await app.updateEntity(lin, { description: '落魄书生' }));
-    value(await app.createEntity('character', '钱四'));
+    const qianId = value(await app.createEntity('character', '钱四')).created;
+    value(await app.updateEntity(qianId, { aliases: ['钱掌柜'] }));
     const wang = value(await app.createEntity('character', '王掌柜')).created;
     value(await app.setEntityLocked(wang, true));
     const write = async (title: string, text: string) => {
@@ -499,10 +587,14 @@ describe('人物小传与关系网补全（B83）', () => {
             { name: '阿青', isNew: true, identity: '林舟的同乡', look: '', personality: '直爽', motive: '', voice: '', firstChapter: 'C2', basis: ['C2'] },
             { name: '王掌柜', isNew: false, identity: '改不得', look: '', personality: '', motive: '', voice: '', firstChapter: '', basis: ['C1'] },
             { name: '林舟', isNew: false, identity: '书生', look: '', personality: '', motive: '', voice: '', firstChapter: 'C1', basis: ['C9'] },
+            // 同一个人用别名又列了一次：丢弃。
+            { name: '钱掌柜', isNew: false, identity: '掌柜', look: '', personality: '', motive: '', voice: '', firstChapter: 'C1', basis: ['C1'] },
           ],
           relationships: [
             { from: '钱四', to: '林舟', category: 'other', label: '债主', mutual: false, description: '林舟押玉欠了钱', secret: false, fromChapter: 'C1', basis: ['C1'] },
             { from: '阿青', to: '林舟', category: 'ally', label: '同乡', mutual: true, description: '', secret: false, fromChapter: '', basis: ['C2'] },
+            // 互为的关系反过来写是同一条：丢弃。
+            { from: '林舟', to: '阿青', category: 'ally', label: '同乡', mutual: true, description: '', secret: false, fromChapter: '', basis: ['C2'] },
             { from: '李五', to: '林舟', category: 'enemy', label: '仇人', mutual: false, description: '', secret: false, fromChapter: '', basis: ['C2'] },
           ],
         }),
@@ -518,7 +610,7 @@ describe('人物小传与关系网补全（B83）', () => {
       ['阿青', true],
     ]);
     expect(draft.relationships.map((r) => r.from)).toEqual(['钱四', '阿青']);
-    expect(draft.dropped).toBe(3);
+    expect(draft.dropped).toBe(5);
 
     // 不要阿青：她的关系也建不了，写明原因。
     value(await app.editWorkflowStep(run.run.id, 2, { ...draft, characters: draft.characters.map((c) => ({ ...c, selected: c.name !== '阿青' })) }));
@@ -585,6 +677,10 @@ describe('扫榜拆书（B79）', () => {
     expect(book).toContain(CANARY);
     expect(compared).not.toContain(CANARY);
     expect(compared).toContain('作者自己的想法：女掌柜');
+    expect(compared).toContain('剑来');
+    // 样章在对比一结束就删掉，不等作者采用。
+    expect(value(await app.benchmarkBooks(run.run.id))).toEqual([]);
+    expect(out.view.steps[2]?.note).toContain('样章原文已从作品库删除');
 
     value(await app.adoptWorkflowStep(run.run.id, 2));
     const skills = value(await app.listWritingSkills()).skills.find((s) => s.skill.name === '对标分析');
@@ -604,13 +700,18 @@ describe('扫榜拆书（B79）', () => {
     expect(JSON.stringify(deps.exportedPackages.at(-1)?.files ?? [])).not.toContain(CANARY);
   });
 
-  it('放弃时删除样章；作品包导出时样章不在里面', async () => {
+  it('放弃时删除样章；作品包导出时样章不在里面；重新打开作品时还在用的样章保留', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startBenchmark({ rankText: '', books: [{ title: '夜当', text: sample }], idea: '', mode: 'step', budgetUsd: null }));
     value(await app.exportProject());
     expect(JSON.stringify(deps.exportedPackages.at(-1)?.files ?? [])).not.toContain(CANARY);
     expect(value(await app.benchmarkBooks(run.run.id))).toHaveLength(1);
+    const work = value(await app.loadLibrary()).works[0]!;
+    await app.closeWork();
+    value(await app.openWork(work.id));
+    expect(value(await app.benchmarkBooks(run.run.id))).toHaveLength(1);
     value(await app.abandonWorkflow(run.run.id));
     expect(value(await app.benchmarkBooks(run.run.id))).toEqual([]);
+    expect(value(await app.workflowRun(run.run.id)).state).toBe('abandoned');
   });
 });

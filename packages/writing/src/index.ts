@@ -22,5 +22,5 @@ export type { OpeningMetrics } from './opening';
 export { guessProtagonist, OPENING_WORDS, openingMetrics } from './opening';
 export type { CastGap, CastGapInput } from './cast';
 export { castGaps } from './cast';
-export type { RankEntry } from './benchmark';
-export { MAX_QUOTE_CHARS, parseRankList, trimOverlap } from './benchmark';
+export { MAX_QUOTE_CHARS, overlapTrimmer, parseRankList, sliceChars, trimOverlap } from './benchmark';
+export type { OverlapResult, RankEntry } from './benchmark';

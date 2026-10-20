@@ -59,6 +59,12 @@ const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
 /** 小传读成一段说明（正文没有交代的项略去）。 */
+/** 查重用的键：互为的关系不分方向（“林舟与阿青：同乡”和“阿青与林舟：同乡”是同一条）。 */
+function relationKey(from: string, to: string, label: string, mutual: boolean): string {
+  const [a, b] = mutual && to < from ? [to, from] : [from, to];
+  return `${a}|${b}|${label}`;
+}
+
 export function bioText(c: Pick<z.infer<typeof CastCharacterDraft>, 'identity' | 'look' | 'personality' | 'motive' | 'voice'>, firstChapter: string | null): string {
   const unknown = (x: string) => x.trim() === '' || x.includes('正文未交代');
   const parts = [
@@ -147,21 +153,22 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
         const name = c.name.trim();
         const basis = c.basis.flatMap((b) => label(b) ?? []);
         const entity = known.get(name);
-        if (name === '' || basis.length === 0 || drafted.some((d) => d.name === name) || entity?.locked === true) {
+        // 同一个人按本名与别名各列一次时只留第一条（d.name 已换成卡片上的本名）。
+        if (name === '' || basis.length === 0 || drafted.some((d) => d.name === (entity?.name ?? name)) || entity?.locked === true) {
           dropped += 1;
           continue;
         }
         drafted.push({ name: entity?.name ?? name, entityId: entity?.id ?? null, identity: c.identity, look: c.look, personality: c.personality, motive: c.motive, voice: c.voice, firstChapterId: label(c.firstChapter), basis, selected: true });
       }
       const people = new Set([...known.keys(), ...drafted.map((d) => d.name)]);
-      const existing = new Set(relations.map((r) => `${nameOf.get(r.fromId) ?? ''}|${nameOf.get(r.toId) ?? ''}|${r.label}`));
+      const existing = new Set(relations.map((r) => relationKey(nameOf.get(r.fromId) ?? '', nameOf.get(r.toId) ?? '', r.label, r.mutual)));
       const links: z.infer<typeof CastRelationDraft>[] = [];
       for (const r of result.value.value.relationships) {
         const from = known.get(r.from.trim())?.name ?? r.from.trim();
         const to = known.get(r.to.trim())?.name ?? r.to.trim();
         const basis = r.basis.flatMap((b) => label(b) ?? []);
-        const key = `${from}|${to}|${r.label.trim()}`;
-        if (!people.has(from) || !people.has(to) || from === to || r.label.trim() === '' || basis.length === 0 || existing.has(key) || links.some((l) => `${l.from}|${l.to}|${l.label}` === key)) {
+        const key = relationKey(from, to, r.label.trim(), r.mutual);
+        if (!people.has(from) || !people.has(to) || from === to || r.label.trim() === '' || basis.length === 0 || existing.has(key) || links.some((l) => relationKey(l.from, l.to, l.label, l.mutual) === key)) {
           dropped += 1;
           continue;
         }
@@ -209,7 +216,7 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
       }
       const existing = await listRelationships(port);
       if (!existing.ok) return err(repo(existing.error));
-      const seen = new Set(existing.value.map((r) => `${r.fromId}|${r.toId}|${r.label}`));
+      const seen = new Set(existing.value.map((r) => relationKey(r.fromId, r.toId, r.label, r.mutual)));
       let made = 0;
       for (const r of draft.relationships.filter((x) => x.selected)) {
         const from = byName.get(r.from.trim());
@@ -218,7 +225,7 @@ export function castCompletionUseCases(deps: AppDeps, project: () => SqlPort | n
           skipped.push(`${r.from}与${r.to}的关系：有一方没有人物卡片（没有勾选这个人物）`);
           continue;
         }
-        const key = `${from.id}|${to.id}|${r.label}`;
+        const key = relationKey(from.id, to.id, r.label, r.mutual);
         if (from.id === to.id || seen.has(key)) continue;
         seen.add(key);
         const rel = await createRelationship(

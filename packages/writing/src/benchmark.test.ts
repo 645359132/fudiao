@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_QUOTE_CHARS, parseRankList, trimOverlap } from './benchmark';
+import { MAX_QUOTE_CHARS, overlapTrimmer, parseRankList, sliceChars, trimOverlap } from './benchmark';
 
 describe('读榜单', () => {
   it('空行分开一本；认得“书名：”等字段；没写书名时第一行是书名（去掉名次）；认不出的行接到简介', () => {
@@ -12,6 +12,17 @@ describe('读榜单', () => {
       { title: '无名书', author: '', tags: '', words: '', blurb: '' },
     ]);
     expect(parseRankList('  \n\n ')).toEqual([]);
+  });
+
+  it('没有空行、一行一本的榜单按行分本（允许一行表头）；一行里制表符分开的几格，第一格是书名', () => {
+    const entries = parseRankList(['榜单', '1. 夜当\t某甲\t古风', '2、剑来', '第3名 无名书\t作者：某乙'].join('\n'));
+    expect(entries).toEqual([
+      { title: '夜当', author: '', tags: '', words: '', blurb: '某甲 古风' },
+      { title: '剑来', author: '', tags: '', words: '', blurb: '' },
+      { title: '无名书', author: '某乙', tags: '', words: '', blurb: '' },
+    ]);
+    // 有空行时仍按段分本，段里的行是简介。
+    expect(parseRankList('1. 夜当\n2. 不是书名\n\n3. 剑来').map((e) => e.title)).toEqual(['夜当', '剑来']);
   });
 });
 
@@ -27,6 +38,16 @@ describe('复述检查', () => {
     expect(trimOverlap(short, [sample])).toEqual({ text: short, trimmed: 0 });
     const spaced = sample.slice(0, 35).split('').join(' ');
     expect(trimOverlap(spaced, [sample]).trimmed).toBe(1);
+  });
+
+  it('按字（码点）计数与截取：表情符号与扩展区的字不被切成半个；检查器只建一次窗口集合', () => {
+    const source = `😀${'一二三四五六七八九十'.repeat(4)}`;
+    const trim = overlapTrimmer([source], 10);
+    const out = trim(`引：${source}`);
+    expect(out.trimmed).toBe(1);
+    expect([...out.text].slice(0, 12).join('')).toBe(`引：😀一二三四五六七八九`);
+    expect(trim('别的话').trimmed).toBe(0);
+    expect(sliceChars('😀一二', 0, 2)).toBe('😀一');
   });
 
   it('没有来源或来源太短时原样返回；几处分开计数', () => {

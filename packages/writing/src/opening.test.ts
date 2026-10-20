@@ -37,4 +37,17 @@ describe('开篇的客观数字', () => {
     expect(guessProtagonist(['钱四。林舟。'], people)?.id).toBe('qian');
     expect(guessProtagonist(['雨。'], people)).toBeNull();
   });
+
+  it('名字互相包含时按最长的算：“张三丰”出现的地方不算“张三”，“林舟”里的“林”不算别名出现', () => {
+    const cast = [
+      { id: 'a', name: '张三', aliases: [] },
+      { id: 'b', name: '张三丰', aliases: [] },
+      { id: 'lin', name: '林舟', aliases: ['林'] },
+    ];
+    expect(guessProtagonist(['张三丰来了，张三丰走了，张三丰又来了。张三看着。'], cast)?.id).toBe('b');
+    const m = openingMetrics([{ text: '张三丰来了，林舟跟在后面。' }], cast[2]!, ['张三', '张三丰', '林舟', '林']);
+    // 主角在“张三丰来了，”5 个字之后第一次出现；前一千字里的名字只有“张三丰”与“林舟”两处。
+    expect(m.protagonistAt).toBe(5);
+    expect(m.namesInOpening).toBe(2);
+  });
 });

@@ -153,6 +153,11 @@ export type LlmStreamEvent =
 export type CallOptions = {
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: LlmStreamEvent) => void;
+  /**
+   * 每次调用开始前问一声：返回原因则不发出请求，这次调用以这个原因失败（例如写作工作流的预算已用完）。
+   * 与取消信号不同：已经在进行的调用照常做完、结果照常记下，只是不再开始下一次。
+   */
+  readonly beforeCall?: () => string | null;
 };
 
 /**

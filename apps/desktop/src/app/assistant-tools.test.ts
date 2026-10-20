@@ -47,6 +47,7 @@ describe('AI 助手的命令表（B69、B71）', () => {
       const action = sample(tool);
       if ((await confirmationFor(action.tool, action, envWithPlans(true))) !== null) confirmed.push(tool);
     }
+    // continue_workflow 只在按原样采用会覆盖内容的草稿时确认（要查运行，这里的样本没有运行）。
     expect(confirmed.sort()).toEqual(['delete_entity', 'delete_relationship', 'delete_volume', 'plan_chapters', 'rollback_writer', 'trash_chapter']);
     const plan = sample('plan_chapters');
     expect(await confirmationFor(plan.tool, plan, envWithPlans(false))).toBeNull();

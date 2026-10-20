@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { ISSUE_SOURCE_LABEL } from '../app/labels';
 import type { ReviewIssueView } from '../app/review';
 import { useApp } from './store-context';
 
@@ -25,7 +26,7 @@ function Issue({ issue, locked }: { readonly issue: ReviewIssueView; readonly lo
       <div className="issue-head">
         <span className="issue-kind">{KIND[issue.kind]}</span>
         <span className="muted">
-          {SEVERITY[issue.severity]} · {issue.source === 'program' ? '程序检查' : '模型审核'}
+          {SEVERITY[issue.severity]} · {ISSUE_SOURCE_LABEL[issue.source]}
         </span>
       </div>
       <button type="button" className="issue-quote" title="在正文中选中这一处" onClick={() => reveal(issue)}>

@@ -109,6 +109,29 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
     expect(stopped).toEqual(['workflow']);
   });
 
+  it('已有大纲时按原样采用骨架会替换大纲：助手先请作者确认，确认后才采用；后台在做事时不能换作品', async () => {
+    const { deps, app } = await setup();
+    const { background } = backgroundJobs();
+    value(await app.updateWorkInfo({ outline: '原来的大纲' }));
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params: { idea: '落魄书生', genre: '', chapters: 2, wordsPerChapter: 2000 }, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    value(await app.advanceWorkflow(run.run.id));
+    step(deps, { message: '', actions: [{ tool: 'continue_workflow', run: run.run.id, adopt: true }], done: false });
+    const paused = value(await app.sendToAssistant('按原样采用', { background }));
+    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: expect.stringContaining('采用会替换作品已有的大纲') });
+    expect(value(await app.reloadWork()).project.outline).toBe('原来的大纲');
+    step(deps, { message: '采用了。', actions: [], done: true });
+    const approved = value(await app.resolveAssistantPending(true, { background }));
+    expect(lastResults(approved.items)?.results[0]).toMatchObject({ tool: 'continue_workflow', ok: true });
+    expect(value(await app.reloadWork()).project.outline).toBe(seed.outline);
+
+    step(deps, { message: '', actions: [{ tool: 'create_work', title: '另一部', genre: null, synopsis: null, outline: null }], done: false });
+    step(deps, { message: '不能换。', actions: [], done: true });
+    const refused = value(await app.sendToAssistant('新建一部', { background: { ...background, busy: () => '写作工作流“一键成书”正在推进' } }));
+    expect(lastResults(refused.items)?.results[0]).toMatchObject({ tool: 'create_work', ok: false, detail: expect.stringContaining('后台还在做') });
+    expect(value(await app.reloadWork()).project.title).toBe('当铺夜谈');
+  });
+
   it('没有后台时（命令行与试用脚本之外）说明不能用；没有运行时 get_workflow 说明怎样开始', async () => {
     const { deps, app } = await setup();
     step(deps, {

@@ -4,6 +4,7 @@ import { relationUseCases } from './relations';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   interruptRunningSteps,
+  purgeBenchmarkSamples,
   latestCallWithUsage,
   getCover,
   getCoverThumbnail,
@@ -219,6 +220,8 @@ export function createAppService(deps: AppDeps) {
     session = { entry, port };
     // 写作工作流（B78）：上次没做完就关掉（或崩溃）的步骤标为中断，作者继续时从这一步重做。读不了也不妨碍打开作品。
     await interruptRunningSteps(port, ctx());
+    // 扫榜拆书的样章（B79，别人的作品）用完即删：上次崩溃或停在对标分析处没有回来的，这里删掉。
+    await purgeBenchmarkSamples(port);
     return view();
   }
 

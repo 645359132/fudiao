@@ -199,6 +199,15 @@ export async function updateWorkflowSteps(
   return after.value === null ? err({ code: 'not_found' }) : ok(after.value);
 }
 
+/**
+ * 写回一步进行中的用量（不带版本守卫、不改版本）：每收到一次调用的用量就写一次，中途崩溃时已发生的费用不丢。
+ * 这一步结束时执行器再以版本守卫写一次总数。
+ */
+export async function setWorkflowStepUsage(port: SqlPort, runId: string, idx: number, usage: StepUsage, ctx: WriteContext): Promise<Result<void, RepoError>> {
+  const done = await port.transaction([{ sql: 'UPDATE workflow_step SET usage = ?, updated_at = ? WHERE run_id = ? AND idx = ?', params: [JSON.stringify(usage), ctx.now, runId, idx] }]);
+  return done.ok ? ok(undefined) : err({ code: 'sql', error: done.error });
+}
+
 /** 放弃一次运行（版本守卫）。放弃的运行不再推进，记录照旧保留。 */
 export function abandonWorkflowRun(port: SqlPort, run: Pick<WorkflowRun, 'id' | 'version'>, ctx: WriteContext): Promise<Result<WorkflowRun, RepoError>> {
   return guardedUpdate(port, RunRow, 'workflow_run', run.id, {

@@ -11,7 +11,9 @@ export type AppError =
   | { readonly code: 'open_failed'; readonly error: OpenError }
   | { readonly code: 'repo'; readonly error: RepoError }
   | { readonly code: 'no_work' }
-  | { readonly code: 'not_found' };
+  | { readonly code: 'not_found' }
+  /** 一件长事做到一半停下（作者停下、预算用完，或其中几次调用失败）：接着做时从停下的地方做起，说明里写明。 */
+  | { readonly code: 'interrupted'; readonly detail: string };
 
 /** 给作者看的错误说明。 */
 export function describeError(error: AppError): string {
@@ -28,6 +30,8 @@ export function describeError(error: AppError): string {
       return '还没有打开作品';
     case 'not_found':
       return '找不到这一项，请刷新后重试';
+    case 'interrupted':
+      return error.detail;
     case 'open_failed':
       switch (error.error.code) {
         case 'schema_too_new':

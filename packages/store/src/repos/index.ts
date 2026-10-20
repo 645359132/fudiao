@@ -11,9 +11,9 @@ export { getCover, getCoverThumbnail, MAX_COVER_CHARS, MAX_THUMBNAIL_CHARS, remo
 export type { RelationCategory, RelationPosition, Relationship, RelationshipFields } from './relationship';
 export { createRelationship, deleteRelationship, listRelationPositions, listRelationships, RELATION_CATEGORIES, setRelationPosition, updateRelationship } from './relationship';
 export type { NewWorkflowRun, StepPatch, WorkflowRun, WorkflowRunWithSteps, WorkflowStepRow } from './workflow';
-export { abandonWorkflowRun, createWorkflowRun, getWorkflowRun, interruptRunningSteps, listWorkflowRuns, StepUsage, updateWorkflowStep, updateWorkflowSteps } from './workflow';
+export { abandonWorkflowRun, createWorkflowRun, getWorkflowRun, interruptRunningSteps, listWorkflowRuns, setWorkflowStepUsage, StepUsage, updateWorkflowStep, updateWorkflowSteps } from './workflow';
 export type { BenchmarkSample, BenchmarkSampleInput } from './benchmark';
-export { clearBenchmarkSamples, listBenchmarkSamples, saveBenchmarkSamples } from './benchmark';
+export { clearBenchmarkSamples, listBenchmarkSamples, purgeBenchmarkSamples, saveBenchmarkSamples } from './benchmark';
 export type { Project, ProjectPatch } from './project';
 export { createProject, DEFAULT_GOALS, getProject, updateProject, WorkGoals } from './project';
 export type { CurrentParagraph, ParagraphSavePlan, SavedParagraph, SourceKind, StructuralEdits } from './paragraph-plan';

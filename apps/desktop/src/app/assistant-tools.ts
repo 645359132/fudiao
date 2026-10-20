@@ -69,6 +69,8 @@ export type BackgroundJobs = {
   reviewChapters(chapterIds: readonly string[], onEnd?: (summary: string) => void): string | null;
   /** 是否已有一次推演在后台推进（同一时间只推进一次）。 */
   simulating(): boolean;
+  /** 后台正在做的事（写作、审核、推演、工作流）的一句话；没有时为 null。换作品前看一眼：这些事都在当前作品里做。 */
+  busy?(): string | null;
   /** 后台写作正在写与排着的章节：助手不直接写、也不回退它们（不然轮到它时会互相当成作者改了正文而停下）。 */
   writing(): readonly string[];
   /** 在后台连续推进这次推演，直到结束、等待作者、暂停或被停下。返回 null 表示已经开始推进，否则是原因。 */
@@ -122,7 +124,7 @@ export type WorkSnapshot = {
 };
 
 /** 写作工作流的用例（B78）；没有时（例如较早的试用脚本）工作流动作说明不能用。 */
-export type AssistantWorkflows = Pick<WorkflowUseCases, 'workflowCatalog' | 'quoteWorkflow' | 'startWorkflow' | 'listWorkflows' | 'workflowRun' | 'adoptWorkflowStep'>;
+export type AssistantWorkflows = Pick<WorkflowUseCases, 'workflowCatalog' | 'quoteWorkflow' | 'startWorkflow' | 'listWorkflows' | 'workflowRun' | 'adoptWorkflowStep' | 'stepConfirmNote'>;
 
 // 提示词里可发起的工作流须正是应用层命令表里助手能发起的那些（去掉要作者先导入材料的）：两边漏了一项都会在这里报错。
 type AssistantStartable = Exclude<WorkflowKey, (typeof AUTHOR_STARTED_WORKFLOWS)[number]>;
@@ -728,6 +730,8 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
     label: '新建作品',
     undo: 'kept',
     async run(action, env) {
+      const working = env.events.background?.busy?.() ?? null;
+      if (working !== null) return failed(`后台还在做：${working}。换作品会让它写进别的作品：先等它做完，或用 stop_background 停下`);
       const created = await env.host.createWork(action.title);
       if (!created.ok) return failWith(created.error);
       const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -755,6 +759,8 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         '作品',
       );
       if (!w.ok) return failed(w.error);
+      const working = env.events.background?.busy?.() ?? null;
+      if (working !== null) return failed(`后台还在做：${working}。换作品会让它写进别的作品：先等它做完，或用 stop_background 停下`);
       const opened = await env.host.openWork(w.value.id);
       if (!opened.ok) return failWith(opened.error);
       env.events.onEffect?.({ kind: 'work_opened' });
@@ -1782,6 +1788,18 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   continue_workflow: {
     label: '继续写作工作流',
     undo: 'kept',
+    // 按原样采用会覆盖作品内容的草稿（替换大纲、覆盖章节计划）时，和成书页的“一路做完”一样先请作者确认。
+    confirm: async (action, env) => {
+      if (!action.adopt) return null;
+      const flows = env.host.workflows;
+      if (flows === undefined) return null;
+      const view = await findWorkflow(flows, action.run);
+      if (!view.ok) return null;
+      const waiting = view.value.steps.find((s) => s.status === 'awaiting_author');
+      if (waiting === undefined || waiting.kind !== 'draft') return null;
+      const note = await flows.stepConfirmNote(view.value.run.id, waiting.idx);
+      return note.ok && note.value !== null ? { summary: `按原样采用“${view.value.run.title}”第 ${waiting.idx + 1} 步“${waiting.label}”：${note.value}`, action: { ...action, run: view.value.run.id } } : null;
+    },
     async run(action, env) {
       const flows = env.host.workflows;
       const jobs = env.events.background;
