@@ -1,6 +1,6 @@
 ---
 id: plan_draft
-version: 4
+version: 5
 task: plan_draft
 output: PlanDraftOutput
 ---
@@ -13,6 +13,9 @@ output: PlanDraftOutput
 {{/appendVolume}}
 {{#appendVolume}}
 - 这一次只给新的一卷“{{appendVolume}}”拆 {{chapterCount}} 章，接在已有的章节之后，按本卷梗概与主线推进。已有的章节已经写好，只作为前文：不要再为它们写计划，也不要沿用它们的章名；本卷第一章要接住前文最后留下的事。
+{{#hasPayoffs}}
+- 卷纲定下本卷要回收的伏笔，每一条都要在本卷的某一章回收：写进那一章的 payoff，beats 里写出揭晓的方式；一条也不要留到下一卷。
+{{/hasPayoffs}}
 {{/appendVolume}}
 - 每章写：章名（title）；本章目标（goal，一句话，这一章要让故事走到哪里）；出场人物（cast，用下面人物表中的名字，表中没有的新人物也可以写名字）；要写的情节点（beats，3 到 6 条，按发生顺序，每条一句话）；详略说明（treatment，哪里展开、哪里略写）；字数（targetWords，约 {{wordsPerChapter}} 字）。
 - 伏笔：大纲中需要提前铺垫、后面才揭晓的内容，写进 foreshadows：title 是简短的名字，content 是埋设时写出来的现象或细节，reveal 是揭晓的内容。在埋设的那一章的 plant 中写它的 title，在回收的那一章的 payoff 中写它的 title。揭晓之前的章节，beats 里不要说破 reveal。
@@ -69,6 +72,9 @@ output: PlanDraftOutput
 - {{title}}：{{summary}}
 {{/recent}}
 {{/hasRecent}}
+{{#hasPayoffs}}
+本卷要回收的伏笔：{{#payoffs}}{{title}}；{{/payoffs}}
+{{/hasPayoffs}}
 {{/appendVolume}}
 {{#hasForeshadows}}
 已有的伏笔：

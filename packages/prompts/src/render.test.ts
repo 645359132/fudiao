@@ -441,6 +441,22 @@ describe('章节计划草稿（B65）', () => {
     expect(text).toContain('作品已有卷时沿用已有的卷名');
   });
 
+  it('续写一卷（B82）：只给新的一卷拆章，列出本卷要回收的伏笔并要求各安排到本卷的某一章；没有时不出现', () => {
+    const base = { title: 't', genre: '', synopsis: '', outline: 'o', characters: [], skills: [], chapters: ['第一章 夜叩'], foreshadows: [], chapterCount: 2, wordsPerChapter: 2000 } as const;
+    const recent = [{ title: '第一章 夜叩', summary: '林舟当玉。' }];
+    const text = fullText(unwrap(renderPlanDraft({ ...base, appendVolume: { title: '第二卷 归乡', summary: '回乡寻亲。', recent, payoffs: ['玉佩的来历', '父亲的信'] } })));
+    expect(text).toContain('只给新的一卷“第二卷 归乡”拆 2 章');
+    expect(text).toContain('已有的章节（最后几章）：第一章 夜叩；');
+    expect(text).toContain('本卷要回收的伏笔：玉佩的来历；父亲的信；');
+    expect(text).toContain('卷纲定下本卷要回收的伏笔，每一条都要在本卷的某一章回收');
+    const bare = fullText(unwrap(renderPlanDraft({ ...base, appendVolume: { title: '第二卷 归乡', summary: '回乡寻亲。', recent } })));
+    expect(bare).toContain('只给新的一卷“第二卷 归乡”拆 2 章');
+    expect(bare).not.toContain('本卷要回收的伏笔');
+    expect(bare).not.toContain('卷纲定下本卷要回收的伏笔');
+    const empty = fullText(unwrap(renderPlanDraft({ ...base, appendVolume: { title: '第二卷 归乡', summary: '回乡寻亲。', recent, payoffs: [] } })));
+    expect(empty).not.toContain('本卷要回收的伏笔');
+  });
+
   it('规划技能（B75）：列出启用的技能与适用说明，视角人物写在详略说明的开头', () => {
     const skill = { name: '雪花写作法', description: '雪花写作法：从一句话的故事逐层展开。生成章节计划时使用。', text: '每章写明视角人物。' };
     const text = fullText(

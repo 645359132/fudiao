@@ -932,10 +932,15 @@ export type PlanDraftInput = {
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
   /**
-   * 续写一卷（B82）：只给这一卷拆章，已有的章节只作为前文。summary 是本卷的梗概与主线，recent 是最近几章的梗概。
-   * 省略时按原来的写法从大纲拆全书。
+   * 续写一卷（B82）：只给这一卷拆章，已有的章节只作为前文。summary 是本卷的梗概与主线，recent 是最近几章的梗概，
+   * payoffs 是卷纲定下本卷要回收的伏笔的名字（要求每一条都在本卷的某一章 payoff）。省略时按原来的写法从大纲拆全书。
    */
-  readonly appendVolume?: { readonly title: string; readonly summary: string; readonly recent: readonly { readonly title: string; readonly summary: string }[] };
+  readonly appendVolume?: {
+    readonly title: string;
+    readonly summary: string;
+    readonly recent: readonly { readonly title: string; readonly summary: string }[];
+    readonly payoffs?: readonly string[];
+  };
 };
 
 /** 章节计划草稿（B65）：作者侧的规划，材料是作者的大纲、设定与已有的伏笔。 */
@@ -960,6 +965,8 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     appendSummary: input.appendVolume?.summary.trim() ?? '',
     recent: (input.appendVolume?.recent ?? []).map((m) => ({ title: m.title, summary: m.summary })),
     hasRecent: (input.appendVolume?.recent.length ?? 0) > 0,
+    payoffs: (input.appendVolume?.payoffs ?? []).map((title) => ({ title })),
+    hasPayoffs: (input.appendVolume?.payoffs?.length ?? 0) > 0,
   });
 }
 

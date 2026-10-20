@@ -442,6 +442,7 @@ describe('续写一卷（B82）', () => {
     const opened = value(await app.openChapter(firstId));
     value(await app.saveChapter(firstId, opened.saved, [{ id: 'p1', text: '林舟当了玉，钱四认出了它。', source: 'handwritten' }], { splits: [], merges: [] }));
     value(await app.savePlan(firstId, { goal: '当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 }));
+    value(await app.addForeshadow({ title: '玉佩的来历', content: '钱四多看了一眼', reveal: '玉佩是仿品', plantChapterId: firstId, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planted' }));
     const run = value(await app.startWorkflow({ workflow: 'next_volume', params: { chapters: 2, wordsPerChapter: 2000, instruction: '节奏快一些' }, mode: 'step', budgetUsd: null }));
     const outline = {
       title: '第二卷 归乡',
@@ -449,7 +450,7 @@ describe('续写一卷（B82）', () => {
       mainline: ['离开当铺', '回到故乡', '找到旧宅'],
       climax: '旧宅里藏着父亲的信。',
       newCharacters: [{ name: '阿青', description: '同乡的少女' }],
-      payoffs: [],
+      payoffs: ['玉佩的来历', '账本里没有的伏笔'],
       newForeshadows: [{ title: '父亲的信', content: '墙缝里露出一角纸', reveal: '信里写着身世' }],
     };
     deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉。', cast: [], foreshadows: [], openThreads: ['钱四要找人打听玉的来历'] })), reply(JSON.stringify(outline)));
@@ -478,6 +479,9 @@ describe('续写一卷（B82）', () => {
     expect(second.view.steps[2]?.status).toBe('awaiting_author');
     const planBody = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
     for (const part of ['只给新的一卷“第二卷 归乡路”拆 2 章', '新的一卷：第二卷 归乡路', '最近几章的梗概', '第一章 夜叩：林舟当玉。']) expect(planBody).toContain(part);
+    // 卷纲挑出的本卷要回收的伏笔传给拆章；账本里没有的不传。
+    expect(planBody).toContain('本卷要回收的伏笔：玉佩的来历；');
+    expect(planBody).not.toContain('账本里没有的伏笔');
 
     value(await app.adoptWorkflowStep(run.run.id, 2));
     const view = value(await app.planningView());

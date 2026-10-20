@@ -76,8 +76,8 @@
     "sha256": "663fa5774bc0d54b2da1cb0622b60e36a109bde690702dc7d6948d6911e29086"
   },
   "plan_draft": {
-    "version": "4",
-    "sha256": "5bc370b8245d18b545b7de0808698950f24a5d3bc4cdf0a873fdfb04b85bc377"
+    "version": "5",
+    "sha256": "9ec67c0a085d3e5bd574ecd54d29c17dabc949b35663f459b92c64c65b9100fa"
   },
   "run_synopsis": {
     "version": "3",

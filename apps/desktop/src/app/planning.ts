@@ -361,8 +361,11 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       return ok({ volume: described.value, characters, foreshadows });
     },
 
-    /** 只给这一卷拆章节计划草稿（B82）：已有的章节只作为前文（列出最后几章与最近的梗概），不改动它们。 */
-    async draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string }, options: CallOptions = {}): Promise<Result<PlanDraft, AppError>> {
+    /**
+     * 只给这一卷拆章节计划草稿（B82）：已有的章节只作为前文（列出最后几章与最近的梗概），不改动它们。
+     * payoffs 是卷纲挑出的本卷要回收的伏笔：只带账本里确实有、还没回收也没废弃的，拆章时要求各安排到本卷的某一章。
+     */
+    async draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string; readonly payoffs?: readonly string[] }, options: CallOptions = {}): Promise<Result<PlanDraft, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       const current = await view(port);
@@ -375,6 +378,9 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
       const written = current.value.chapters.filter((c) => c.hasText);
+      const open = current.value.foreshadows.filter((f) => f.status !== 'dropped' && f.status !== 'paid_off');
+      const openTitles = new Set(open.map((f) => f.title.trim()));
+      const payoffs = [...new Set((request.payoffs ?? []).map((t) => t.trim()))].filter((t) => openTitles.has(t));
       const prompt = renderPlanDraft({
         title: work.value?.title ?? '',
         genre: work.value?.genre ?? '',
@@ -384,13 +390,14 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         skills: skills.value.map((x) => ({ name: x.name, description: x.description, text: x.text })),
         chapters: current.value.chapters.slice(-APPEND_LISTED_CHAPTERS).map((c) => c.chapter.title),
         volumes: volumes.value.map((v) => v.title),
-        foreshadows: current.value.foreshadows.filter((f) => f.status !== 'dropped' && f.status !== 'paid_off').map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+        foreshadows: open.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
         chapterCount: request.chapterCount,
         wordsPerChapter: request.wordsPerChapter,
         appendVolume: {
           title: volume.title,
           summary: volume.summary,
           recent: written.slice(-OUTLINE_RECENT_CHAPTERS).map((c) => ({ title: c.chapter.title, summary: (c.memory?.summary ?? c.chapter.summary).trim() || '（没有梗概）' })),
+          payoffs,
         },
       });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });

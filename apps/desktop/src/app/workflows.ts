@@ -295,7 +295,7 @@ export type WorkflowHost = {
   saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[]): Promise<Result<number, AppError>>;
   draftVolumeOutline(request: VolumeOutlineRequest, options?: CallOptions): Promise<Result<VolumeOutline, AppError>>;
   applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: { readonly id: string; readonly title: string }; readonly characters: number; readonly foreshadows: number }, AppError>>;
-  draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
+  draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string; readonly payoffs?: readonly string[] }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
   applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
   openingSurvey(count: number): Promise<Result<OpeningSurvey, AppError>>;
   diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<{ readonly issues: number; readonly dropped: number }, AppError>>;
@@ -647,13 +647,13 @@ type VolumeOutlineStep = z.infer<typeof VolumeOutlineStep>;
 
 function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
   /** 采用卷纲时新建的那一卷：按记下的标识找；没有记下（旧的运行）时按卷名找最后一个同名的。 */
-  const volumeOf = async (outline: unknown): Promise<Result<{ readonly id: string; readonly title: string }, AppError>> => {
+  const volumeOf = async (outline: unknown): Promise<Result<{ readonly id: string; readonly title: string; readonly payoffs: readonly string[] }, AppError>> => {
     const parsed = VolumeOutlineStep.safeParse(outline);
     if (!parsed.success) return err(invalid('先采用卷纲：这一卷还没有建'));
     const work = await host.reloadWork();
     if (!work.ok) return work;
     const found = work.value.volumes.find((v) => v.id === parsed.data.volumeId) ?? (parsed.data.volumeId === null ? work.value.volumes.filter((v) => v.title === parsed.data.title.trim()).at(-1) : undefined);
-    if (found !== undefined) return ok(found);
+    if (found !== undefined) return ok({ ...found, payoffs: parsed.data.payoffs });
     return err(invalid(parsed.data.volumeId === null ? '先采用卷纲：这一卷还没有建' : `卷纲建的那一卷“${parsed.data.title.trim()}”已经删掉了：撤回“卷纲”的采用后再采用一次`));
   };
   const volumeChapters = async (volumeId: string) => {
@@ -726,7 +726,8 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
           const volume = await volumeOf(output('outline'));
           if (!volume.ok) return volume;
           onProgress(`正在给“${volume.value.title}”拆 ${params.chapters} 章的章节计划`);
-          const draft = await host.draftVolumePlans({ volumeId: volume.value.id, chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey }, options);
+          // 卷纲挑出的本卷要回收的伏笔传给拆章，两步才不会各说各的。
+          const draft = await host.draftVolumePlans({ volumeId: volume.value.id, payoffs: volume.value.payoffs, chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey }, options);
           if (!draft.ok) return draft;
           return ok({ output: draft.value, note: `“${volume.value.title}”${draft.value.chapters.length} 章的计划` });
         },
