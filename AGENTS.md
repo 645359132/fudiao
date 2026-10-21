@@ -108,6 +108,7 @@
 - M6-08 已完成（真实试用一次，2026-10-20，中转站 deepseek-v4.1-flash，40 次调用，输入 10.2 万、输出 22.9 万 Token，按官方价约 $0.31，约 20 分钟）：`tools/workflow-eval`（`pnpm workflow:eval`，`--config` 或 `--base-url`，`--workflow` 选一个或全部；配置里的密钥变量没有设置时退回 `FUDIAO_EVAL_KEY`）在 `m3/eval/book.json` 上依次跑一键成书（现写 3 章）、全书体检（第一、三章植入一处跨章矛盾）、开篇打磨（最严重的一条交给写手修订）、人物补全、续写一卷（2 章）与扫榜拆书（样章只用材料与本次写手的正文）；运行前按 `quoteWorkflow`（新增可选的假定作品规模 `assumed`）汇总预计并等确认，报告写在 `m3/runs/`；`tools/m3-eval/run.ts` 抽出 `importBook` 两边共用；不联网的测试用排好的回复走通全部六个工作流。结果见 `m6/RESULTS.md`：五个工作流走通，续写一卷因第五章审核思考用满被截断而停在“写完并审核”；植入的矛盾没有检出（长篇记忆没有记下端砚）；预计输出低估约一半，已在 `quoteWorkflow` 每次调用另计 6,000 Token 思考。待修清单（审核思考过重、跨章检查只看长篇记忆、章节标签漏进作品文字、伏笔账本不随写作更新等）列在该文件。
 - 连续处理多章时审核没完成的处理（作者决定 2026-10-20，M6-08 试用清单第 1 项）：`app/review.ts` 的 `reviewWithRetry`（`REVIEW_RETRIES` 为 1，取消与调用失败不重试）；服务层默认的写章节与依次审核钩子、状态层的写手队列与依次审核、试用脚本都改为先重试一次，仍没完成就记下这一章、接着做后面的，结束的那句话列出没审完的章节与原因；写作与长篇记忆没完成照旧停下。施工文档成书流程看板一段同步修改。
 - M6-08 试用后的修正（`m6/RESULTS.md` 第 4、5、7 项，2026-10-20）：`packages/writing` 的 `replaceLabels`、`paragraphMention`、`chapterMention`（属性测试），模型照抄的标签在写进作品前换成章节名与段落开头——审核、开篇诊断与跨章连贯问题的说明与建议（`resolveModelIssues` 的 `names`，本章段落自动换，依据由调用方给出称呼），全书体检疑点的 `about`，人物补全草稿的小传与关系说明；一章之内的疑点（前后同一章）不再丢弃，`book_audit` 版本 2 允许前后写同一章，`continuity_check` 版本 2 的 `same` 只给这一章、依据是本章前文的另一段（带版本，那一段改过后过期），问题照常记为 continuity；开篇打磨的诊断记下问题（段落、种类、说明）与作者忽略的问题，“对比前后”按同一段落同一种类比对，写明解决、忽略与复诊新提的条数（`openingIssueChanges`），成书页的对比表显示。
+- M6-08 的两个分支并入 main（2026-10-21）时的补充：服务层默认的写章节与依次审核钩子被停下时记为中断（`HookOutcome.cancelled`，与状态层、M6 审查修正的规则一致）；全书体检的范围从中间某章起时，范围首章之内的疑点（前后同一章）定位出的问题补进这一章（`saveContinuityIssues` 的 `append`，与仍待处理的同一处问题不重复），不换掉它与前一章那一对这次没有查的旧问题，范围从全书第一章起时照常换。真实试用的运行记录 `m3/runs/workflow-2026-10-20T02-13-49-423Z/` 已从该分支的工作树转存到主目录（不入库）。
 - M5-17 已完成：助手的现状给出全书字数与有章节计划的章数，`assistant_turn` 版本 10 要求说数字与作品事实只用现状与动作结果里有的（试用中助手编造过“约 30 章”）。评估与待办见 ASSISTANT_REVIEW.md。
 - M5-16 已完成（作者要求 2026-10-16 用真实模型试一下助手）：试用脚本 `tools/assistant-eval`（`pnpm assistant:eval`，可用 `--base-url` 指向 OpenAI 兼容服务，Key 取自环境变量 `FUDIAO_EVAL_KEY`）；按两次试用修正：助手写完单章整理长篇记忆、新动作 `build_chapter_memory`；须确认的动作后面的动作随确认执行、拒绝时逐条说明没执行；不在待处理里的审核问题处理时返回原因；`foreshadowsForChapter` 并入账本里写明在本章埋设或回收的伏笔；`assistant_turn` 版本 9（没看过正文与审核结果不下结论）。
 - M5-15 已完成（作者问 2026-10-16 助手是否仍有缺陷）：新动作 `get_chapter_memory`、`list_foreshadows`、`update_foreshadow`、`list_review_issues`、`resolve_review_issue`、`revise_review_issue`、`list_skills`、`set_skill`、`stop_background`（`BackgroundJobs.stop`）；`assistant_turn` 版本 8；一轮最多 12 步，走满或停止时说明；之前几轮的动作结果截到 600 字，对话按条数与字数截断；伏笔状态的名称统一到 `labels.ts`。
@@ -256,6 +257,16 @@ pnpm assistant:eval --base-url https://example.com/v1
 
 ```bash
 pnpm assistant:eval --base-url https://example.com/v1 --scenario long-work
+```
+
+写作工作流的真实模型试用（在 `m3/eval/book.json` 上依次跑六个工作流，运行前显示预计费用并请你确认；`--workflow` 只跑一个，`--config` 或 `--base-url` 指定模型；报告写在 `m3/runs/`，不入库；结果与待修清单见 `m6/RESULTS.md`）：
+
+```bash
+pnpm workflow:eval --config m3/eval/config.json
+```
+
+```bash
+pnpm workflow:eval --base-url https://example.com/v1 --workflow book_audit
 ```
 
 Rust 测试（`generate_context!` 在编译期读取前端产物，首次运行前先构建界面）：
