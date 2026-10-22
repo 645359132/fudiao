@@ -151,7 +151,7 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
             </label>
             <label>
               每章字数
-              <input type="number" min={500} step={500} value={words} onChange={(e) => setWords(Number(e.currentTarget.value))} />
+              <input type="number" min={500} step={100} value={words} onChange={(e) => setWords(Number(e.currentTarget.value))} />
             </label>
           </div>
           <label>
@@ -246,7 +246,7 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
             <input
               type="number"
               min={500}
-              step={500}
+              step={100}
               value={words}
               onChange={(e) => {
                 setWords(Number(e.currentTarget.value));
@@ -259,7 +259,7 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
             <input
               type="number"
               min={0.1}
-              step={0.5}
+              step="any"
               value={totalText ?? String(Math.round(totalWords / 1_000) / 10)}
               onBlur={() => setTotalText(null)}
               onChange={(e) => {
