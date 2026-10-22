@@ -241,23 +241,19 @@ describe('写作工作流（B78）', () => {
     expect(value(await app.reloadWork()).project.title).toBe('当铺夜谈');
   });
 
-  it('写章节没有写完时这一步出错并写明原因；重做后再写', async () => {
+  it('写章节没有写完时（调用失败、输出被截断）这一步为中断并写明原因；“继续”时接着写同一次', async () => {
     const { deps, app } = await setup();
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'auto', budgetUsd: null }));
     deps.llmResponses.push(reply(JSON.stringify(seed)), reply(JSON.stringify(draft)));
-    const failing = fakeWriter({ ok: false, summary: '停在《揭晓》：输出被截断' });
+    const failing = fakeWriter({ ok: false, summary: '停在《揭晓》：调用失败（network）：服务在回复中途报错：unexpected EOF' });
     const out = value(await app.advanceWorkflow(run.run.id, { hooks: failing.hooks }));
-    expect(out.view.steps[3]).toMatchObject({ status: 'failed', note: '停在《揭晓》：输出被截断' });
-    expect(out.view.state).toBe('failed');
-    expect(out.summary).toContain('出错');
-    // 出错的一步停在那里，作者重做后接着写。
+    expect(out.view.steps[3]).toMatchObject({ status: 'interrupted', attempt: 1, note: expect.stringContaining('unexpected EOF') });
+    expect(out.view.state).toBe('paused');
+    // 不用重做：继续就接着写（写完的章已在作品里，钩子只排没写完的）。
     const writer = fakeWriter();
-    expect(value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks })).summary).toContain('出错');
-    expect(writer.calls).toHaveLength(0);
-    value(await app.redoWorkflowStep(run.run.id, 3));
     const again = value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks }));
     expect(writer.calls).toHaveLength(1);
-    expect(again.view.steps[3]).toMatchObject({ status: 'done', attempt: 2 });
+    expect(again.view.steps[3]).toMatchObject({ status: 'done', attempt: 1 });
   });
 
   it('就地写章节（没有状态层的钩子）：一章的审核重试后仍没完成时记下，接着写后面的，这一步照常完成', async () => {

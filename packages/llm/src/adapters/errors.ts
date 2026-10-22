@@ -17,7 +17,12 @@ export function mapSdkError(error: unknown): LlmError {
   if (error instanceof Anthropic.APIError || error instanceof OpenAI.APIError) {
     const status: unknown = error.status;
     if (typeof status === 'number') return fromStatus(error as StatusError);
-    return { code: 'unknown', message: error.message };
+    // 用户取消也是没有状态码的 APIError（适配器先判断了取消，这里只是兜底）。
+    if (error instanceof Anthropic.APIUserAbortError || error instanceof OpenAI.APIUserAbortError) return { code: 'unknown', message: error.message };
+    // 其余没有状态码的 APIError 是服务在流里报的错：HTTP 已经是 200、回复开始了，服务端或中转站的上游中途断了
+    // （例如中转站转发的“unexpected EOF”、Anthropic 的 overloaded_error）。SDK 不重试这种错误，与读到一半连接断开一样
+    // 按网络故障处理，由 withRetry 整次重新请求。
+    return { code: 'network', message: `服务在回复中途报错：${error.message}` };
   }
   // 读流式回复时出的错：SDK 把底层的网络错误包成自己的错误类（没有状态码），多半是连接中途断了，算网络故障，可以重试。
   if (error instanceof Anthropic.AnthropicError || error instanceof OpenAI.OpenAIError) return { code: 'network', message: error.message };

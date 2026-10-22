@@ -2058,6 +2058,29 @@ describe('写作工作流的界面（B78）', () => {
     expect(store.getState().workflows ?? []).toEqual([]);
   });
 
+  it('出错的一步：顶部有“重试”，改好原因后点它重做这一步并接着往下走', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '新作品');
+    await addTestedModel(service, deps, { maxOutputTokens: 64_000 });
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    // 没写想法、作品也没有大纲：“大纲与人物”出错。
+    const form = within(page).getByRole('form', { name: '开始一键成书' });
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const seedStep = await within(page).findByRole('region', { name: '第 2 步：大纲与人物' });
+    await waitFor(() => expect(seedStep.textContent).toContain('先写一句想法'));
+    expect(within(page).queryByRole('button', { name: '继续' })).toBeNull();
+    // 作者补上大纲，点顶部的“重试第 2 步”：这一步改为跳过，接着拆章节计划。
+    expect((await service.updateWorkInfo({ outline: '开端：林舟当玉。结局：林舟得知身世。' })).ok).toBe(true);
+    const plan = { chapters: [{ title: '夜叩', goal: '林舟当玉', cast: [], beats: ['叩门'], plant: [], payoff: [], treatment: '', targetWords: 2000 }], foreshadows: [] };
+    deps.llmResponses.push(reply(JSON.stringify(plan)));
+    await user.click(within(page).getByRole('button', { name: '重试第 2 步' }));
+    const planStep = await within(page).findByRole('region', { name: '第 3 步：章节计划' });
+    await within(planStep).findByText('夜叩');
+    expect(store.getState().workflows?.[0]?.steps.map((s) => s.status)).toEqual(['done', 'skipped', 'awaiting_author', 'pending', 'pending']);
+  });
+
   it('开始一键成书：估算费用，每步停下；改过骨架再采用，采用计划，跳过写章节，导出须作者点', async () => {
     const { deps, service, store, user } = start();
     await createWork(user, '新作品');

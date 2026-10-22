@@ -95,7 +95,8 @@ export class OpenAIAdapter implements LlmPort, ModelLister {
         } else if (event.type === 'response.failed') {
           failure = { code: 'server', message: event.response.error?.message ?? '服务返回失败' };
         } else if (event.type === 'error') {
-          failure = { code: 'unknown', message: event.message };
+          // 流里的错误事件：回复中途服务端出错，与连接断开一样可以整次重试。
+          failure = { code: 'network', message: `服务在回复中途报错：${event.message}` };
         }
       }
     } catch (error) {

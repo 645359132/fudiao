@@ -78,7 +78,12 @@ export type WorkflowHooks = {
 export type HookOutcome = { readonly ok: boolean; readonly summary: string; readonly cancelled?: boolean };
 
 /** 钩子没有做完：被停下记为中断（继续时接着做），其余记为出错。 */
-const hookFailure = (done: HookOutcome): AppError => (done.cancelled === true ? { code: 'interrupted', detail: done.summary } : invalid(done.summary));
+/**
+ * 写章节、依次审核的钩子没有做完：这一步记为中断（不是出错），作者点“继续”时接着做同一次。
+ * 这两步按章推进——写完的章、审完的章都已在作品里，写到一半的章由写手按进度续写——没有做完的原因（被停下、调用失败、
+ * 输出被截断）都可以在“继续”时再试；继续时同一个原因再挡住，照样停下说明，不会反复重试。
+ */
+const hookFailure = (done: HookOutcome): AppError => ({ code: 'interrupted', detail: done.summary });
 
 /** 一步里的一件事（整理记忆、核对疑点、拆解一本）没有做成：这一步记为中断，继续时接着做同一次，做成的调用不再请求。 */
 const interrupted = (detail: string): AppError => ({ code: 'interrupted', detail });

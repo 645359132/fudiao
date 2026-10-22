@@ -45,6 +45,8 @@ type Subject = {
   readonly refusal: { readonly category: string | null };
   /** 取消时已知的用量：Anthropic 在流开始时给出输入用量，OpenAI 兼容接口在结束时才给出。 */
   readonly usageOnCancel: 'known' | 'unknown';
+  /** 服务在流里报错的写法（回复开始后上游断了）。 */
+  readonly streamError: string;
 };
 
 const subjects: Subject[] = [
@@ -55,6 +57,7 @@ const subjects: Subject[] = [
     chunks: anthropicChunks,
     refusal: { category: 'cyber' },
     usageOnCancel: 'known',
+    streamError: `event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })}\n\n`,
   },
   {
     name: 'OpenAIChatAdapter',
@@ -64,6 +67,8 @@ const subjects: Subject[] = [
     chunks: openaiChunks,
     refusal: { category: null },
     usageOnCancel: 'unknown',
+    // 中转站把上游断开写成流里的一条 error（截图里的“unexpected EOF”）。
+    streamError: `data: ${JSON.stringify({ error: { message: 'unexpected EOF', type: 'upstream_error' } })}\n\n`,
   },
   {
     name: 'OpenAIAdapter',
@@ -72,6 +77,7 @@ const subjects: Subject[] = [
     chunks: responsesChunks,
     refusal: { category: null },
     usageOnCancel: 'unknown',
+    streamError: `event: error\ndata: ${JSON.stringify({ type: 'error', code: 'server_error', message: 'unexpected EOF', param: null, sequence_number: 9 })}\n\n`,
   },
 ];
 
@@ -202,6 +208,12 @@ describe.each(routes)('$name（$via）', (subject) => {
     const { fetch } = fakeFetch([{ chunks: subject.chunks(MODEL, normal, { stopAfterText: true }), breakAfterChunks: true }]);
     const result = await subject.build(fetch).complete(req);
     expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', partial: { usage: subject.usageOnCancel === 'known' ? expect.objectContaining({ inputTokens: 100 }) : null } }) });
+  });
+
+  it('服务在流里报错（回复开始后上游断了）：转换为 network（可以重试），带上服务的说明与部分用量', async () => {
+    const { fetch } = fakeFetch([{ chunks: [...subject.chunks(MODEL, normal, { stopAfterText: true }), subject.streamError] }]);
+    const result = await subject.build(fetch).complete(req);
+    expect(result).toEqual({ ok: false, error: expect.objectContaining({ code: 'network', message: expect.stringContaining('服务在回复中途报错'), partial: expect.anything() }) });
   });
 
   it('流没有结束标记就正常关闭：不把半截文字当作完成，转换为 network（可以重试）', async () => {

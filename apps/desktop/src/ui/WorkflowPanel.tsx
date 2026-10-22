@@ -828,6 +828,16 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {label}
     </button>
   );
+  const actions = (
+    <div className="form-actions">
+      {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
+      {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
+      {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
+      {step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null}
+      {['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null}
+      {step.status === 'done' && step.kind === 'draft' && step.changes !== null ? button('撤回这次采用', 'withdraw') : null}
+    </div>
+  );
   return (
     <section className="workflow-detail" aria-label={`第 ${step.idx + 1} 步：${step.label}`}>
       <h3>
@@ -866,6 +876,8 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {view.run.workflow === 'benchmark' && step.key === 'compare' ? <CompareView view={view} step={step} /> : null}
       {step.key === 'write' ? (
         <>
+          {/* 写章节一步下面是整本书的成书进度（长篇有几百行）：这一步的操作放在看板上面，不用翻到底。 */}
+          {actions}
           <p className="muted">
             每章写完整理长篇记忆并审核；也可以在下面的成书进度里自己排定章节。
             <button type="button" className="link" onClick={() => void openPlanning()}>
@@ -875,14 +887,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
           <PipelineBoard />
         </>
       ) : null}
-      <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
-        {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
-        {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
-        {step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null}
-        {['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null}
-        {step.status === 'done' && step.kind === 'draft' && step.changes !== null ? button('撤回这次采用', 'withdraw') : null}
-      </div>
+      {step.key === 'write' ? null : actions}
     </section>
   );
 }
@@ -892,6 +897,9 @@ function RunView({ view }: { readonly view: WorkflowView }) {
   const continueWorkflow = useApp((s) => s.continueWorkflow);
   const stopWorkflow = useApp((s) => s.stopWorkflow);
   const abandon = useApp((s) => s.abandonWorkflow);
+  const act = useApp((s) => s.workflowStepAction);
+  // 出错的那一步：顶部给“重试”（重做这一步再继续），不用翻到这一步的最下面找按钮。
+  const failed = view.state === 'failed' ? view.steps.find((s) => s.status === 'failed') : undefined;
   const advancing = useApp((s) => s.workflowAdvancing);
   const progress = useApp((s) => s.workflowProgress);
   const busy = useApp((s) => s.busy);
@@ -916,6 +924,15 @@ function RunView({ view }: { readonly view: WorkflowView }) {
         {running ? (
           <button type="button" onClick={stopWorkflow}>
             停下
+          </button>
+        ) : failed !== undefined ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || advancing !== null}
+            onClick={() => void act(view.run.id, failed.idx, 'redo').then((redone) => (redone ? continueWorkflow(view.run.id) : null))}
+          >
+            重试第 {failed.idx + 1} 步
           </button>
         ) : view.state !== 'ready' && view.state !== 'paused' ? null : (
           <button type="button" className="primary" disabled={busy || advancing !== null} onClick={() => continueWorkflow(view.run.id)}>
