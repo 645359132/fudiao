@@ -249,13 +249,8 @@ impl Limiter {
     fn resize(&mut self, limit: usize) {
         if limit > self.limit {
             let more = limit - self.limit;
-            let paid = self
-                .debt
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |d| {
-                    Some(d - d.min(more))
-                })
-                .map(|d| d.min(more))
-                .unwrap_or(0);
+            // 先用新增的名额抵掉欠额，余下的才真正放出去。
+            let paid = take_debt(&self.debt, more);
             self.semaphore.add_permits(more - paid);
         } else if limit < self.limit {
             let fewer = self.limit - limit;
@@ -263,6 +258,19 @@ impl Limiter {
             self.debt.fetch_add(fewer - forgotten, Ordering::SeqCst);
         }
         self.limit = limit;
+    }
+}
+
+/// 原子地从欠额里扣掉最多 up_to，返回实际扣掉的数（欠额不够时扣到 0）。
+/// 不用 fetch_update：Rust 1.99 起它改名 try_update，旧名字带弃用警告，新名字又超出本仓库声明的最低版本。
+fn take_debt(debt: &AtomicUsize, up_to: usize) -> usize {
+    let mut current = debt.load(Ordering::SeqCst);
+    loop {
+        let taken = current.min(up_to);
+        match debt.compare_exchange(current, current - taken, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return taken,
+            Err(actual) => current = actual,
+        }
     }
 }
 
@@ -275,11 +283,7 @@ struct Slot {
 impl Drop for Slot {
     fn drop(&mut self) {
         if let Some(permit) = self.permit.take() {
-            let owed = self
-                .debt
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |d| d.checked_sub(1))
-                .is_ok();
-            if owed {
+            if take_debt(&self.debt, 1) == 1 {
                 permit.forget();
             }
         }
