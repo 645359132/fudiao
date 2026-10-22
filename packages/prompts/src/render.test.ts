@@ -43,6 +43,7 @@ import {
   renderCastCompletion,
   renderContinuityCheck,
   renderOpeningReview,
+  renderBookVolumes,
   renderPlanDraft,
   renderBookSeed,
   renderRunSynopsis,
@@ -457,6 +458,30 @@ describe('章节计划草稿（B65）', () => {
     expect(empty).not.toContain('本卷要回收的伏笔');
   });
 
+  it('分卷方式（B78）：不分卷、指定卷数、自动三种写法；逐卷拆章时带上全书分卷与本卷之后有没有卷', () => {
+    const base = { title: 't', genre: '', synopsis: '', outline: 'o', characters: [], skills: [], chapters: [], foreshadows: [], chapterCount: 8, wordsPerChapter: 2000 } as const;
+    const none = fullText(unwrap(renderPlanDraft({ ...base, volumeMode: 'none' })));
+    expect(none).toContain('分卷：不分卷');
+    expect(none).not.toContain('10 章及以上时');
+    const fixed = fullText(unwrap(renderPlanDraft({ ...base, chapterCount: 25, volumeMode: 'fixed', volumeCount: 3, volumeChapters: 9 })));
+    expect(fixed).toContain('把 25 章分成 3 卷（前面各卷 9 章');
+    expect(fixed).not.toContain('10 章及以上时');
+    const auto = fullText(unwrap(renderPlanDraft({ ...base, chapterCount: 25 })));
+    expect(auto).toContain('25 章在 10 章及以上时');
+    const bookVolumes = [
+      { title: '第一卷 当铺', summary: '当铺的事。' },
+      { title: '第二卷 归乡', summary: '回乡。' },
+    ];
+    const middle = fullText(unwrap(renderPlanDraft({ ...base, chapterCount: 20, appendVolume: { title: '第一卷 当铺', summary: '当铺的事。', recent: [], bookVolumes, laterVolumes: true } })));
+    expect(middle).toContain('全书分卷：\n- 第一卷 当铺：当铺的事。\n- 第二卷 归乡：回乡。');
+    expect(middle).toContain('本卷之后还有卷：结尾要给下一卷留下钩子');
+    expect(middle).not.toContain('本卷是最后一卷');
+    const last = fullText(unwrap(renderPlanDraft({ ...base, appendVolume: { title: '第二卷 归乡', summary: '回乡。', recent: [], bookVolumes, laterVolumes: false } })));
+    expect(last).toContain('本卷是最后一卷，要写到大纲的结局');
+    const plain = fullText(unwrap(renderPlanDraft({ ...base, appendVolume: { title: '第二卷 归乡', summary: '回乡。', recent: [] } })));
+    expect(plain).not.toContain('全书分卷');
+  });
+
   it('规划技能（B75）：列出启用的技能与适用说明，视角人物写在详略说明的开头', () => {
     const skill = { name: '雪花写作法', description: '雪花写作法：从一句话的故事逐层展开。生成章节计划时使用。', text: '每章写明视角人物。' };
     const text = fullText(
@@ -827,5 +852,31 @@ describe('扫榜拆书的模板（B79）', () => {
     expect(prompt.output?.name).toBe('BenchmarkCompareOutput');
     const text = fullText(prompt);
     for (const part of ['- 夜当（古风），120 万', '【夜当】\n题材：古风悬疑\n卖点：身份反差', '作者自己的想法：女掌柜收旧物']) expect(text).toContain(part);
+  });
+});
+
+describe('全书卷纲（一键成书的长篇规划）', () => {
+  it('写出卷数与各卷章数、大纲、人物与已有伏笔；要求最后一卷写到结局', () => {
+    const text = fullText(
+      unwrap(
+        renderBookVolumes({
+          title: '当铺夜谈',
+          genre: '古代市井',
+          synopsis: '',
+          outline: '林舟当玉；真相揭晓。',
+          characters: [{ name: '林舟', description: '书生' }],
+          skills: [],
+          foreshadows: [{ title: '玉佩', content: '多看一眼', reveal: '遗物' }],
+          volumes: [20, 20, 10],
+        }),
+      ),
+    );
+    expect(text).toContain('一共 3 卷');
+    expect(text).toContain('第 1 卷 20 章；第 2 卷 20 章；第 3 卷 10 章；');
+    expect(text).toContain('最后一卷写到大纲的结局');
+    expect(text).toContain('- 林舟：书生');
+    expect(text).toContain('- 玉佩：多看一眼（揭晓：遗物）');
+    expect(text).toContain('请规划全书的 3 卷');
+    expect(text).not.toContain('规划技能');
   });
 });

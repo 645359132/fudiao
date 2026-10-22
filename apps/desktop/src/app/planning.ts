@@ -1,7 +1,7 @@
 // 章节计划与伏笔账本的用例（需求 B63、B65，施工文档第五章“写手与审核”）。
 // 计划草稿由模型从作品大纲拆出，只是草稿：作者看过、修改后“采用”，才写入章节计划与伏笔账本。
 import type { CallOptions } from '@fudiao/llm';
-import { PlanDraftOutput, renderPlanDraft, renderVolumeOutline, VolumeOutlineOutput, type PlanDraftData } from '@fudiao/prompts';
+import { PlanDraftOutput, renderBookVolumes, renderPlanDraft, renderVolumeOutline, BookVolumesOutput, VolumeOutlineOutput, type PlanDraftData } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   createChapter,
@@ -73,7 +73,24 @@ export type PlanningView = {
 export type PlanDraft = PlanDraftData;
 
 /** stepKey：写作工作流里调用时的步骤键，中断后再做同一次时复用已完成的调用。 */
-export type PlanDraftRequest = { readonly chapterCount: number; readonly wordsPerChapter: number; readonly stepKey?: string };
+/** 一次拆完全书时的分卷方式：auto 由模型按故事段落分、none 不分卷、fixed 指定卷数。 */
+export const VOLUME_MODES = ['auto', 'none', 'fixed'] as const;
+export type VolumeMode = (typeof VOLUME_MODES)[number];
+
+export type PlanDraftRequest = {
+  readonly chapterCount: number;
+  readonly wordsPerChapter: number;
+  readonly stepKey?: string;
+  /** 一次拆完全书时的分卷方式与卷数（只给一卷拆章时不用）。省略按 auto。 */
+  readonly volumeMode?: VolumeMode;
+  readonly volumeCount?: number | null;
+};
+
+/** 一键成书的全书卷纲：各卷的章数，按顺序。 */
+export type BookVolumesRequest = { readonly volumes: readonly number[]; readonly stepKey?: string };
+/** 全书卷纲要写的内容最多约多少 Token：每卷约 700。 */
+export const bookVolumesContentTokens = (volumes: number) => Math.min(16_000, 1_500 + volumes * 700);
+const bookVolumesOutputTokens = (volumes: number) => bookVolumesContentTokens(volumes) + THINKING_ALLOWANCE;
 
 /** 续写一卷（B82）的卷纲：卷名、梗概、主线、卷末转折、新人物、要回收的伏笔与新伏笔。 */
 export type VolumeOutline = VolumeOutlineOutput;
@@ -261,6 +278,61 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
     return ok(map);
   }
 
+  /**
+   * 采用卷纲：在最后新建一卷，简介写梗概、主线与卷末转折；新人物建人物卡片（同名的不重复建）；
+   * 新伏笔记入账本（计划状态，章节由本卷的章节计划补上）。返回新建的卷与建了几项。
+   */
+async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: Volume; readonly characters: number; readonly foreshadows: number }, AppError>> {
+    const port = project();
+    if (port === null) return err({ code: 'no_work' });
+    const title = outline.title.trim();
+    if (title === '') return err({ code: 'settings', detail: '卷名不能为空' });
+    const summary = [
+      outline.summary.trim(),
+      outline.mainline.length === 0 ? '' : `主线：${outline.mainline.map((m) => m.trim()).filter((m) => m !== '').join('；')}`,
+      outline.climax.trim() === '' ? '' : `卷末：${outline.climax.trim()}`,
+    ]
+      .filter((x) => x !== '')
+      .join('\n');
+    const created = await createVolume(port, { id: deps.ids.next(), title }, ctx());
+    if (!created.ok) return err(repo(created.error));
+    const described = summary === '' ? ok(created.value) : await updateVolume(port, created.value.id, created.value.version, { title, summary }, ctx());
+    if (!described.ok) return err(repo(described.error));
+    const entities = await listEntities(port);
+    if (!entities.ok) return err(repo(entities.error));
+    const known = new Set(entities.value.filter((e) => e.kind === 'character').flatMap((e) => [e.name, ...e.aliases].map((n) => n.trim())));
+    let characters = 0;
+    for (const c of outline.newCharacters) {
+      const name = c.name.trim();
+      if (name === '' || known.has(name)) continue;
+      known.add(name);
+      const entity = await createEntity(port, { id: deps.ids.next(), kind: 'character', name }, ctx());
+      if (!entity.ok) return err(repo(entity.error));
+      if (c.description.trim() !== '') {
+        const d = await updateEntity(port, entity.value.id, entity.value.version, { description: c.description.trim() }, ctx());
+        if (!d.ok) return err(repo(d.error));
+      }
+      characters += 1;
+    }
+    const existing = await listForeshadows(port);
+    if (!existing.ok) return err(repo(existing.error));
+    const titles = new Set(existing.value.map((f) => f.title.trim()));
+    let foreshadows = 0;
+    for (const f of outline.newForeshadows) {
+      const t = f.title.trim();
+      if (t === '' || titles.has(t)) continue;
+      titles.add(t);
+      const made = await createForeshadow(
+        port,
+        { id: deps.ids.next(), title: t, content: f.content, reveal: f.reveal, plantChapterId: null, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' },
+        ctx(),
+      );
+      if (!made.ok) return err(repo(made.error));
+      foreshadows += 1;
+    }
+    return ok({ volume: described.value, characters, foreshadows });
+  }
+
   return {
     /**
      * 续写一卷（B82）：由大纲、已有的卷、设定、人物关系、最近几章的长篇记忆、最后一章章尾留下的事与还没有回收的伏笔，
@@ -309,66 +381,74 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
       return result.ok ? ok(result.value.value) : result;
     },
 
+    applyVolumeOutline,
+
     /**
-     * 采用卷纲：在最后新建一卷，简介写梗概、主线与卷末转折；新人物建人物卡片（同名的不重复建）；
-     * 新伏笔记入账本（计划状态，章节由本卷的章节计划补上）。返回新建的卷与建了几项。
+     * 一键成书的全书卷纲（长篇先分卷再逐卷拆章）：按作者定的卷数与各卷章数，由大纲、人物与已有的伏笔给每卷定卷纲（不写入作品）。
+     * 模型给出的卷数与要求不符时报错，由作者重做。
      */
-    async applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: Volume; readonly characters: number; readonly foreshadows: number }, AppError>> {
+    async draftBookVolumes(request: BookVolumesRequest, options: CallOptions = {}): Promise<Result<BookVolumesOutput, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
-      const title = outline.title.trim();
-      if (title === '') return err({ code: 'settings', detail: '卷名不能为空' });
-      const summary = [
-        outline.summary.trim(),
-        outline.mainline.length === 0 ? '' : `主线：${outline.mainline.map((m) => m.trim()).filter((m) => m !== '').join('；')}`,
-        outline.climax.trim() === '' ? '' : `卷末：${outline.climax.trim()}`,
-      ]
-        .filter((x) => x !== '')
-        .join('\n');
-      const created = await createVolume(port, { id: deps.ids.next(), title }, ctx());
-      if (!created.ok) return err(repo(created.error));
-      const described = summary === '' ? ok(created.value) : await updateVolume(port, created.value.id, created.value.version, { title, summary }, ctx());
-      if (!described.ok) return err(repo(described.error));
-      const entities = await listEntities(port);
-      if (!entities.ok) return err(repo(entities.error));
-      const known = new Set(entities.value.filter((e) => e.kind === 'character').flatMap((e) => [e.name, ...e.aliases].map((n) => n.trim())));
+      if (request.volumes.length === 0) return err({ code: 'settings', detail: '至少要有一卷' });
+      const current = await view(port);
+      if (!current.ok) return current;
+      const work = await getProject(port);
+      if (!work.ok) return err(repo(work.error));
+      const skills = await skillsForStage(port, 'planning', deps);
+      if (!skills.ok) return err(repo(skills.error));
+      const open = current.value.foreshadows.filter((f) => f.status !== 'dropped' && f.status !== 'paid_off');
+      const prompt = renderBookVolumes({
+        title: work.value?.title ?? '',
+        genre: work.value?.genre ?? '',
+        synopsis: work.value?.synopsis ?? '',
+        outline: current.value.outline.trim() === '' ? '（还没有写大纲）' : current.value.outline,
+        characters: current.value.characters.map((c) => ({ name: c.name, description: c.description })),
+        skills: skills.value.map((x) => ({ name: x.name, description: x.description, text: x.text })),
+        foreshadows: open.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+        volumes: request.volumes,
+      });
+      if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
+      const result = await runner.structured(
+        { prompt: prompt.value, maxOutputTokens: bookVolumesOutputTokens(request.volumes.length), effort: 'medium', ...(request.stepKey !== undefined && { stepKey: request.stepKey }) },
+        BookVolumesOutput,
+        options,
+      );
+      if (!result.ok) return result;
+      const got = result.value.value.volumes.length;
+      if (got !== request.volumes.length) return err({ code: 'settings', detail: `模型给出 ${got} 卷，与要求的 ${request.volumes.length} 卷不符：可以重做这一步` });
+      return ok(result.value.value);
+    },
+
+    /** 采用全书卷纲：按顺序逐卷新建（卷、新人物与新伏笔同采用一份卷纲）。返回各卷的标识与建了几项。 */
+    async applyBookVolumes(volumes: readonly VolumeOutline[]): Promise<Result<{ readonly volumes: readonly { readonly id: string; readonly title: string }[]; readonly characters: number; readonly foreshadows: number }, AppError>> {
+      const made: { readonly id: string; readonly title: string }[] = [];
       let characters = 0;
-      for (const c of outline.newCharacters) {
-        const name = c.name.trim();
-        if (name === '' || known.has(name)) continue;
-        known.add(name);
-        const entity = await createEntity(port, { id: deps.ids.next(), kind: 'character', name }, ctx());
-        if (!entity.ok) return err(repo(entity.error));
-        if (c.description.trim() !== '') {
-          const d = await updateEntity(port, entity.value.id, entity.value.version, { description: c.description.trim() }, ctx());
-          if (!d.ok) return err(repo(d.error));
-        }
-        characters += 1;
-      }
-      const existing = await listForeshadows(port);
-      if (!existing.ok) return err(repo(existing.error));
-      const titles = new Set(existing.value.map((f) => f.title.trim()));
       let foreshadows = 0;
-      for (const f of outline.newForeshadows) {
-        const t = f.title.trim();
-        if (t === '' || titles.has(t)) continue;
-        titles.add(t);
-        const made = await createForeshadow(
-          port,
-          { id: deps.ids.next(), title: t, content: f.content, reveal: f.reveal, plantChapterId: null, plantAnchor: null, payoffChapterId: null, payoffAnchor: null, status: 'planned' },
-          ctx(),
-        );
-        if (!made.ok) return err(repo(made.error));
-        foreshadows += 1;
+      for (const outline of volumes) {
+        const applied = await applyVolumeOutline(outline);
+        if (!applied.ok) return applied;
+        made.push({ id: applied.value.volume.id, title: applied.value.volume.title });
+        characters += applied.value.characters;
+        foreshadows += applied.value.foreshadows;
       }
-      return ok({ volume: described.value, characters, foreshadows });
+      return ok({ volumes: made, characters, foreshadows });
     },
 
     /**
      * 只给这一卷拆章节计划草稿（B82）：已有的章节只作为前文（列出最后几章与最近的梗概），不改动它们。
      * payoffs 是卷纲挑出的本卷要回收的伏笔：只带账本里确实有、还没回收也没废弃的，拆章时要求各安排到本卷的某一章。
      */
-    async draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string; readonly payoffs?: readonly string[] }, options: CallOptions = {}): Promise<Result<PlanDraft, AppError>> {
+    async draftVolumePlans(
+      request: PlanDraftRequest & {
+        readonly volumeId: string;
+        readonly payoffs?: readonly string[];
+        /** 一键成书逐卷拆章时的全书分卷与“本卷之后还有卷”（续写一卷不给）。 */
+        readonly bookVolumes?: readonly { readonly title: string; readonly summary: string }[];
+        readonly laterVolumes?: boolean;
+      },
+      options: CallOptions = {},
+    ): Promise<Result<PlanDraft, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
       const current = await view(port);
@@ -401,6 +481,8 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
           summary: volume.summary,
           recent: written.slice(-OUTLINE_RECENT_CHAPTERS).map((c) => ({ title: c.chapter.title, summary: (c.memory?.summary ?? c.chapter.summary).trim() || '（没有梗概）' })),
           payoffs,
+          ...(request.bookVolumes !== undefined && { bookVolumes: request.bookVolumes }),
+          ...(request.laterVolumes !== undefined && { laterVolumes: request.laterVolumes }),
         },
       });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
@@ -479,6 +561,10 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         foreshadows: current.value.foreshadows.filter((f) => f.status !== 'dropped').map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
         chapterCount: request.chapterCount,
         wordsPerChapter: request.wordsPerChapter,
+        volumeMode: request.volumeMode ?? 'auto',
+        ...(request.volumeMode === 'fixed' &&
+          request.volumeCount !== null &&
+          request.volumeCount !== undefined && { volumeCount: request.volumeCount, volumeChapters: Math.ceil(request.chapterCount / request.volumeCount) }),
       });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
       const result = await runner.structured(

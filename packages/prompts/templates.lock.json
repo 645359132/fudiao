@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "22",
-    "sha256": "ee2e4590550948c53a62f1ff218223f8b1b98ea68eaa8ed84eaa31262fe78404"
+    "version": "23",
+    "sha256": "9ae2373cdcf9872bdb092f97a802625cf899b4bc19946d3ce262656ebad079e3"
   },
   "baseline_scene": {
     "version": "2",
@@ -34,6 +34,10 @@
   "book_seed": {
     "version": "3",
     "sha256": "7b981ca0bcc9bf7b4e2a34255db9ea0581aca1ca899477d60d61e045dce1fe3b"
+  },
+  "book_volumes": {
+    "version": "1",
+    "sha256": "dc5e48a2cd13ed6e13dc596ed62f8f2151afcc786f27979f4ee3d79a979e194f"
   },
   "candidate_text": {
     "version": "3",
@@ -76,8 +80,8 @@
     "sha256": "663fa5774bc0d54b2da1cb0622b60e36a109bde690702dc7d6948d6911e29086"
   },
   "plan_draft": {
-    "version": "5",
-    "sha256": "9ec67c0a085d3e5bd574ecd54d29c17dabc949b35663f459b92c64c65b9100fa"
+    "version": "6",
+    "sha256": "6ebb23cfb8b0a5e01f120f03923e537d51a32288de9b60a8983c9794653a25ff"
   },
   "run_synopsis": {
     "version": "3",

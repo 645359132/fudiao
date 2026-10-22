@@ -1,6 +1,6 @@
 ---
 id: plan_draft
-version: 5
+version: 6
 task: plan_draft
 output: PlanDraftOutput
 ---
@@ -13,6 +13,9 @@ output: PlanDraftOutput
 {{/appendVolume}}
 {{#appendVolume}}
 - 这一次只给新的一卷“{{appendVolume}}”拆 {{chapterCount}} 章，接在已有的章节之后，按本卷梗概与主线推进。已有的章节已经写好，只作为前文：不要再为它们写计划，也不要沿用它们的章名；本卷第一章要接住前文最后留下的事。
+{{#hasBookVolumes}}
+- 全书分成几卷，本卷是其中一卷（见下面的全书分卷）：只写本卷的事，前后各卷的走向只用来衔接。{{#laterVolumes}}本卷之后还有卷：结尾要给下一卷留下钩子，不要把全书的结局写进本卷。{{/laterVolumes}}{{^laterVolumes}}本卷是最后一卷，要写到大纲的结局。{{/laterVolumes}}
+{{/hasBookVolumes}}
 {{#hasPayoffs}}
 - 卷纲定下本卷要回收的伏笔，每一条都要在本卷的某一章回收：写进那一章的 payoff，beats 里写出揭晓的方式；一条也不要留到下一卷。
 {{/hasPayoffs}}
@@ -24,7 +27,15 @@ output: PlanDraftOutput
 - 分卷：每章的 volume 都写“{{appendVolume}}”，volumes 为空数组。
 {{/appendVolume}}
 {{^appendVolume}}
+{{#volumesNone}}
+- 分卷：不分卷。每章的 volume 写空字符串，volumes 为空数组。
+{{/volumesNone}}
+{{#volumesFixed}}
+- 分卷：按顺序把 {{chapterCount}} 章分成 {{volumeCount}} 卷（前面各卷 {{volumeChapters}} 章，最后一卷放余下的章节；每卷是故事的一个大段落），卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。
+{{/volumesFixed}}
+{{#volumesAuto}}
 - 分卷：{{chapterCount}} 章在 10 章及以上时，按故事的大段落（一个大事件或一个阶段）把章节分成若干卷，每卷约 8 到 20 章；卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。不到 10 章时不分卷：每章的 volume 为空字符串，volumes 为空数组。{{#hasVolumes}}作品已有卷时沿用已有的卷名，接着往后分。{{/hasVolumes}}
+{{/volumesAuto}}
 {{/appendVolume}}
 - 只依据大纲与设定，不添加与大纲矛盾的情节。
 {{#hasSkills}}
@@ -62,6 +73,12 @@ output: PlanDraftOutput
 {{/hasChapters}}
 {{#appendVolume}}
 新的一卷：{{appendVolume}}
+{{#hasBookVolumes}}
+全书分卷：
+{{#bookVolumes}}
+- {{title}}{{#summary}}：{{summary}}{{/summary}}
+{{/bookVolumes}}
+{{/hasBookVolumes}}
 {{#appendSummary}}
 本卷梗概与主线：
 {{appendSummary}}

@@ -7,7 +7,7 @@ import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import type { BookSeed } from './quick-book';
 import { createAppService } from './service';
-import { openingIssueChanges, type WorkflowHooks } from './workflows';
+import { bookVolumesOf, distributeChapters, openingIssueChanges, quickBookPlanning, type WorkflowHooks } from './workflows';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -73,10 +73,13 @@ describe('写作工作流（B78）', () => {
     const { app } = await setup();
     const [book] = app.workflowCatalog();
     expect(book).toMatchObject({ key: 'quick_book', title: '一键成书' });
+    // 目录列出全部步骤；一次运行按章数只走其中一部分（短篇一次拆完，长篇先卷纲再逐卷拆）。
     expect(book?.steps.map((s) => [s.key, s.kind])).toEqual([
       ['model', 'check'],
       ['seed', 'draft'],
       ['plan', 'draft'],
+      ['volumes', 'draft'],
+      ['volumePlans', 'act'],
       ['write', 'act'],
       ['export', 'manual'],
     ]);
@@ -89,6 +92,80 @@ describe('写作工作流（B78）', () => {
     const empty = value(await app.quoteWorkflow('book_audit', { from: null, to: null, rereview: false }));
     const assumed = value(await app.quoteWorkflow('book_audit', { from: null, to: null, rereview: false }, { chapters: 6, written: 6, words: 12_000 }));
     expect(assumed.calls).toBeGreaterThan(empty.calls);
+  });
+
+  it('分卷方式与章数：不分卷与单卷最多 30 章，指定卷数时每卷不超过 30 章，章数上限 2,000；短篇一次拆完、长篇先卷纲再逐卷拆，预计随之变化', async () => {
+    const { app } = await setup();
+    const start = (p: Record<string, unknown>) => app.startWorkflow({ workflow: 'quick_book', params: { ...params, ...p }, mode: 'step', budgetUsd: null });
+    expect(await start({ chapters: 40, volumeMode: 'none' })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('不分卷最多 30 章') } });
+    expect(await start({ chapters: 40, volumeMode: 'fixed', volumeCount: 1 })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('至少分 2 卷') } });
+    expect(await start({ chapters: 40, volumeMode: 'fixed', volumeCount: 41 })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('卷数不能多于章数') } });
+    expect(await start({ chapters: 2001 })).toMatchObject({ ok: false });
+    expect(quickBookPlanning({ chapters: 30, volumeMode: 'auto', volumeCount: null })).toEqual({ kind: 'single' });
+    expect(quickBookPlanning({ chapters: 45, volumeMode: 'auto', volumeCount: null })).toEqual({ kind: 'volumes', chapters: [15, 15, 15] });
+    expect(quickBookPlanning({ chapters: 50, volumeMode: 'fixed', volumeCount: 3 })).toEqual({ kind: 'volumes', chapters: [17, 17, 16] });
+    expect(distributeChapters(2000, 100)).toHaveLength(100);
+    // 短篇的运行五步；长篇把“章节计划”换成卷纲与逐卷拆章。
+    expect(value(await start({})).steps.map((s) => s.key)).toEqual(['model', 'seed', 'plan', 'write', 'export']);
+    expect(value(await start({ chapters: 40 })).steps.map((s) => s.key)).toEqual(['model', 'seed', 'volumes', 'volumePlans', 'write', 'export']);
+    // 40 章比 30 章多：卷纲一次与两卷各一次代替一次拆完（多 2 次），每章 2 段写加记忆与审核（多 10 × 4 次）。
+    const single = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 30 }));
+    const split = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 40 }));
+    expect(split.calls - single.calls).toBe(42);
+  });
+
+  it('长篇先定全书卷纲再逐卷拆章：卷纲可改章数、采用时按顺序建卷；逐卷拆章写进各卷，一卷拆不成时中断、继续时只拆剩下的', async () => {
+    const { deps, app } = await setup();
+    // 20 章一卷的计划要写约 24,000 Token：给测试模型登记够大的最大输出，“检查模型”才放行。
+    const model = value(await app.loadModelServices()).models[0]!;
+    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, maxOutputTokens: 64_000 }, prices: model.prices }));
+    const run = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, chapters: 40 }, mode: 'step', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    const seeded = value(await app.advanceWorkflow(run.run.id));
+    expect(seeded.view.steps.map((s) => s.status)).toEqual(['done', 'awaiting_author', 'pending', 'pending', 'pending', 'pending']);
+    value(await app.adoptWorkflowStep(run.run.id, 1));
+    const volume = (title: string, climax: string) => ({ title, summary: `${title}的事。`, mainline: ['开端', '转折'], climax, newCharacters: [], payoffs: [], newForeshadows: [] });
+    deps.llmResponses.push(reply(JSON.stringify({ volumes: [volume('第一卷 当铺', '留下疑问。'), volume('第二卷 归乡', '真相大白。')] })));
+    const drafted = value(await app.advanceWorkflow(run.run.id));
+    expect(drafted.view.steps[2]).toMatchObject({ status: 'awaiting_author', note: '2 卷：第一卷 当铺、第二卷 归乡', output: { chapters: [20, 20], volumeIds: null } });
+    const asked = JSON.stringify(deps.llmRequests.at(-1)?.body ?? {});
+    expect(asked).toContain('一共 2 卷');
+    expect(asked).toContain('第 1 卷 20 章；第 2 卷 20 章');
+    // 作者把两卷的章数改成 2 与 1（测试里的计划草稿只有两章），采用：按顺序建两卷。
+    const outline = bookVolumesOf(drafted.view.steps[2]!);
+    if (outline === null) throw new Error('卷纲');
+    value(await app.editWorkflowStep(run.run.id, 2, { ...outline, chapters: [2, 1] }));
+    const adopted = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(adopted.steps[2]?.note).toBe('已新建 2 卷，新人物 0 个，新伏笔 0 条');
+    const volumes = value(await app.reloadWork()).volumes;
+    expect(volumes.map((v) => v.title)).toEqual(['第一卷 当铺', '第二卷 归乡']);
+
+    // 逐卷拆章：第一卷拆成并写进作品，第二卷的调用失败——这一步中断，继续时接着拆。
+    deps.llmResponses.push(reply(JSON.stringify(draft)), { status: 400, body: '{"error":{"message":"坏请求"}}' });
+    const stopped = value(await app.advanceWorkflow(run.run.id));
+    expect(stopped.view.steps[3]).toMatchObject({ status: 'interrupted', note: expect.stringContaining('“第二卷 归乡”的章节计划没有拆成') });
+    expect(stopped.view.steps[3]?.note).toContain('前 1 卷已拆好');
+    const first = JSON.stringify(deps.llmRequests.at(-2)?.body ?? {});
+    expect(first).toContain('只给新的一卷“第一卷 当铺”拆 2 章');
+    expect(first).toContain('全书分卷');
+    expect(first).toContain('本卷之后还有卷');
+    const work = value(await app.reloadWork());
+    expect(work.chapters.filter((c) => c.volumeId === volumes[0]?.id).map((c) => c.title)).toEqual(['夜叩', '揭晓']);
+    expect(work.chapters.filter((c) => c.volumeId === volumes[1]?.id)).toEqual([]);
+
+    // 继续：第一卷已有足够的计划不再拆，只拆第二卷；最后一卷的提示词写明要写到结局，并带上前一卷的章节作前文。
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ chapters: [{ ...draft.chapters[1]!, title: '归乡', plant: [], payoff: [] }], foreshadows: [] })));
+    const { hooks } = fakeWriter({ ok: true, summary: '写完了 3 章并审核' });
+    const planned = value(await app.advanceWorkflow(run.run.id, { hooks }));
+    expect(planned.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'done', 'done', 'awaiting_author']);
+    expect(planned.view.steps[3]?.note).toBe('2 卷共 3 章的计划已写进作品（1 卷之前已拆好）');
+    expect(deps.llmRequests).toHaveLength(1);
+    const second = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    expect(second).toContain('本卷是最后一卷，要写到大纲的结局');
+    expect(second).not.toContain('本卷之后还有卷');
+    expect(second).toContain('已有的章节（最后几章）：夜叩；揭晓；');
+    expect(value(await app.reloadWork()).chapters.filter((c) => c.volumeId === volumes[1]?.id).map((c) => c.title)).toEqual(['归乡']);
   });
 
   it('检查模型：登记的最大输出不够这个工作流要写的内容时停在第 1 步并说明；只够写内容时在说明里提醒；登记够了不再提醒', async () => {

@@ -134,6 +134,8 @@ export const AssistantAction = z.discriminatedUnion('tool', [
     genre: opt,
     chapters: z.number().int().positive().nullable(),
     wordsPerChapter: z.number().int().positive().nullable(),
+    /** 一键成书的卷数：null 按故事自动分，1 不分卷，2 以上为指定卷数。 */
+    volumes: z.number().int().positive().nullable(),
     from: opt,
     to: opt,
     rereview: z.boolean().nullable(),

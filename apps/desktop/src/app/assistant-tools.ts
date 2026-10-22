@@ -1779,7 +1779,17 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       } else if (action.workflow === 'next_volume') {
         params = { chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000, instruction: action.instruction ?? '' };
       } else {
-        params = { idea: action.idea ?? '', genre: action.genre ?? '', chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000 };
+        // 一键成书的章数与每章字数由作者定：没说清就先问，不替作者定。
+        if (action.chapters === null || action.wordsPerChapter === null) return failed('作者还没说要写多少章、每章多少字（可以顺带问分几卷）：先问清楚再开始，不要替作者定');
+        const volumes = action.volumes;
+        params = {
+          idea: action.idea ?? '',
+          genre: action.genre ?? '',
+          chapters: action.chapters,
+          wordsPerChapter: action.wordsPerChapter,
+          volumeMode: volumes === null ? 'auto' : volumes <= 1 ? 'none' : 'fixed',
+          volumeCount: volumes !== null && volumes > 1 ? volumes : null,
+        };
       }
       const quote = await flows.quoteWorkflow(action.workflow, params);
       if (!quote.ok) return failWith(quote.error);

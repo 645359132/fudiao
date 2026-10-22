@@ -34,6 +34,7 @@ import {
   CastCompletionOutput,
   DirectorProposalOutput,
   VolumeOutlineOutput,
+  BookVolumesOutput,
   EvidenceJudgementOutput,
   ChapterReviewOutput,
   ChapterMemoryOutput,
@@ -73,6 +74,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   BookSeedOutput,
   BookAuditOutput,
   VolumeOutlineOutput,
+  BookVolumesOutput,
   CastCompletionOutput,
   BenchmarkBookOutput,
   BenchmarkCompareOutput,
@@ -943,14 +945,24 @@ export type PlanDraftInput = {
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
   /**
-   * 续写一卷（B82）：只给这一卷拆章，已有的章节只作为前文。summary 是本卷的梗概与主线，recent 是最近几章的梗概，
-   * payoffs 是卷纲定下本卷要回收的伏笔的名字（要求每一条都在本卷的某一章 payoff）。省略时按原来的写法从大纲拆全书。
+   * 一次拆完全书时的分卷方式（B68、B78）：auto 由模型按故事段落分（10 章以上）、none 不分卷、fixed 按 volumeCount 卷平均分
+   * （volumeChapters 为前面各卷的章数）。省略按 auto。
+   */
+  readonly volumeMode?: 'auto' | 'none' | 'fixed';
+  readonly volumeCount?: number;
+  readonly volumeChapters?: number;
+  /**
+   * 只给一卷拆章（B82 续写一卷，以及一键成书的逐卷拆章）：已有的章节只作为前文。summary 是本卷的梗概与主线，recent 是最近几章的梗概，
+   * payoffs 是卷纲定下本卷要回收的伏笔的名字（要求每一条都在本卷的某一章 payoff）。bookVolumes 是全书分卷（一键成书逐卷拆章时给出，
+   * 前后各卷的走向只用来衔接），laterVolumes 为本卷之后还有卷（结尾要留钩子）。省略 appendVolume 时按原来的写法从大纲拆全书。
    */
   readonly appendVolume?: {
     readonly title: string;
     readonly summary: string;
     readonly recent: readonly { readonly title: string; readonly summary: string }[];
     readonly payoffs?: readonly string[];
+    readonly bookVolumes?: readonly { readonly title: string; readonly summary: string }[];
+    readonly laterVolumes?: boolean;
   };
 };
 
@@ -978,6 +990,43 @@ export function renderPlanDraft(input: PlanDraftInput): Result<RenderedPrompt, s
     hasRecent: (input.appendVolume?.recent.length ?? 0) > 0,
     payoffs: (input.appendVolume?.payoffs ?? []).map((title) => ({ title })),
     hasPayoffs: (input.appendVolume?.payoffs?.length ?? 0) > 0,
+    bookVolumes: (input.appendVolume?.bookVolumes ?? []).map((v) => ({ title: v.title, summary: v.summary.trim() })),
+    hasBookVolumes: (input.appendVolume?.bookVolumes?.length ?? 0) > 0,
+    laterVolumes: input.appendVolume?.laterVolumes === true,
+    volumesNone: input.volumeMode === 'none',
+    volumesFixed: input.volumeMode === 'fixed',
+    volumesAuto: input.volumeMode === undefined || input.volumeMode === 'auto',
+    volumeCount: input.volumeCount ?? 0,
+    volumeChapters: input.volumeChapters ?? 0,
+  });
+}
+
+export type BookVolumesInput = {
+  readonly title: string;
+  readonly genre: string;
+  readonly synopsis: string;
+  readonly outline: string;
+  readonly characters: readonly { readonly name: string; readonly description: string }[];
+  readonly skills: readonly PlanningSkill[];
+  readonly foreshadows: readonly { readonly title: string; readonly content: string; readonly reveal: string }[];
+  /** 各卷的章数，按顺序；卷数即数组长度。 */
+  readonly volumes: readonly number[];
+};
+
+/** 全书卷纲（一键成书的长篇规划）：作者定了卷数与各卷章数，模型按大纲给每卷定卷名、梗概、主线、卷末转折、新人物与伏笔。 */
+export function renderBookVolumes(input: BookVolumesInput): Result<RenderedPrompt, string> {
+  return renderTemplate('book_volumes', {
+    title: input.title,
+    genre: input.genre,
+    synopsis: input.synopsis,
+    outline: input.outline,
+    characters: input.characters.map((c) => ({ name: c.name, description: c.description.trim() })),
+    hasCharacters: input.characters.length > 0,
+    ...skillsData(input.skills),
+    foreshadows: input.foreshadows.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
+    hasForeshadows: input.foreshadows.length > 0,
+    volumeCount: input.volumes.length,
+    volumes: input.volumes.map((chapters, i) => ({ index: i + 1, chapters })),
   });
 }
 

@@ -509,6 +509,10 @@ export type AppState = {
   /** 保存正文后打开模型服务页。 */
   readonly openModelServices: () => Promise<void>;
   readonly closeModelServices: () => void;
+  /** 扫榜拆书的开书方向带进一键成书的开始表单：预填的想法，表单开始后清掉。 */
+  readonly quickBookPrefill: string | null;
+  readonly prefillQuickBook: (idea: string) => void;
+  readonly clearQuickBookPrefill: () => void;
   readonly saveProvider: (provider: ProviderView | null, form: ProviderForm) => Promise<boolean>;
   readonly deleteProvider: (provider: ProviderView) => Promise<void>;
   readonly saveSearchService: (service: SearchServiceView | null, form: SearchServiceForm) => Promise<boolean>;
@@ -1322,6 +1326,7 @@ export function createAppStore(service: AppService): AppStore {
       searchResult: null,
       reveal: null,
       modelServicesOpen: false,
+      quickBookPrefill: null,
       modelServices: null,
       searchServices: null,
       searchTests: {},
@@ -2543,6 +2548,8 @@ export function createAppStore(service: AppService): AppStore {
         return null;
       },
       closeModelServices: () => set({ modelServicesOpen: false }),
+      prefillQuickBook: (idea) => set({ quickBookPrefill: idea }),
+      clearQuickBookPrefill: () => set({ quickBookPrefill: null }),
       saveProvider: (provider, form) => run(service.saveProvider(provider, form), (modelServices) => ({ modelServices })),
       async deleteProvider(provider) {
         await run(service.deleteProvider(provider), (modelServices) => ({ modelServices }));

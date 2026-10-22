@@ -2,22 +2,26 @@ import { useEffect, useRef, useState } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
-import type { VolumeOutline } from '../app/planning';
-import { benchmarkAnalysesOf, benchmarkResultOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { VOLUME_MODES, type VolumeMode, type VolumeOutline } from '../app/planning';
+import { benchmarkAnalysesOf, benchmarkResultOf, bookVolumesOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, MAX_BOOK_CHAPTERS, PLAN_CHAPTERS_PER_CALL, quickBookVolumeIssue, type BookVolumesStep, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
 
 /** 开始表单：一键成书的参数、模式与预算；先估算再开始。模型还不能用时不能开始。 */
-function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly modelReady: boolean }) {
+function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly info: WorkflowInfo; readonly modelReady: boolean; readonly initialIdea?: string; readonly onStarted?: () => void }) {
   const quoteWorkflow = useApp((s) => s.quoteWorkflow);
   const startWorkflow = useApp((s) => s.startWorkflow);
   const advancing = useApp((s) => s.workflowAdvancing);
-  const [idea, setIdea] = useState('');
+  const [idea, setIdea] = useState(initialIdea);
   const [genre, setGenre] = useState('');
   const [chapters, setChapters] = useState(info.key === 'opening_polish' ? 3 : 20);
   const [words, setWords] = useState(3000);
+  const [volumeMode, setVolumeMode] = useState<VolumeMode>('auto');
+  const [volumeCount, setVolumeCount] = useState(3);
+  // 总字数框里正在输入的文字：改章数时清掉、离开框时清掉，平时显示按章数算出的数。
+  const [totalText, setTotalText] = useState<string | null>(null);
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
   const [rereview, setRereview] = useState(false);
@@ -56,9 +60,12 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
             ? {}
             : key === 'benchmark'
               ? { idea, entries: Math.max(1, samples.filter((x) => x.text.trim() !== '').length) }
-              : { idea, genre, chapters, wordsPerChapter: words };
+              : { idea, genre, chapters, wordsPerChapter: words, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
+  // 分卷方式与章数搭不搭：不搭时不能开始，提示怎样改。
+  const volumeIssue = key === 'quick_book' ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null }) : null;
+  const totalWords = chapters * words;
   return (
     <form
       className="panel-form"
@@ -68,7 +75,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         if (submitting) return;
         setSubmitting(true);
         const started = key === 'benchmark' ? startBenchmark({ rankText, books: samples, idea, mode, budgetUsd }) : startWorkflow({ workflow: key, params, mode, budgetUsd });
-        void started.finally(() => setSubmitting(false));
+        void started.then(() => onStarted?.()).finally(() => setSubmitting(false));
       }}
     >
       {key === 'benchmark' ? (
@@ -225,10 +232,11 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
             <input
               type="number"
               min={1}
-              max={300}
+              max={MAX_BOOK_CHAPTERS}
               value={chapters}
               onChange={(e) => {
                 setChapters(Number(e.currentTarget.value));
+                setTotalText(null);
                 touched();
               }}
             />
@@ -246,7 +254,59 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
               }}
             />
           </label>
+          <label>
+            总字数（万字）
+            <input
+              type="number"
+              min={0.1}
+              step={0.5}
+              value={totalText ?? String(Math.round(totalWords / 1_000) / 10)}
+              onBlur={() => setTotalText(null)}
+              onChange={(e) => {
+                // 改总字数反推章数，每章字数不变。
+                setTotalText(e.currentTarget.value);
+                const total = Number(e.currentTarget.value) * 10_000;
+                if (Number.isFinite(total) && total > 0) setChapters(Math.min(MAX_BOOK_CHAPTERS, Math.max(1, Math.round(total / words))));
+                touched();
+              }}
+            />
+          </label>
         </div>
+        <div className="form-row">
+          <label>
+            分卷方式
+            <select
+              aria-label="分卷方式"
+              value={volumeMode}
+              onChange={(e) => {
+                setVolumeMode(VOLUME_MODES.find((m) => m === e.currentTarget.value) ?? 'auto');
+                touched();
+              }}
+            >
+              <option value="auto">自动（按故事段落分，长篇每卷约 20 章）</option>
+              <option value="none">不分卷（最多 {PLAN_CHAPTERS_PER_CALL} 章）</option>
+              <option value="fixed">指定卷数</option>
+            </select>
+          </label>
+          {volumeMode === 'fixed' ? (
+            <label>
+              卷数
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={volumeCount}
+                onChange={(e) => {
+                  setVolumeCount(Number(e.currentTarget.value));
+                  touched();
+                }}
+              />
+            </label>
+          ) : null}
+        </div>
+        <p className="muted">
+          {volumeIssue ?? (chapters > PLAN_CHAPTERS_PER_CALL ? `${chapters} 章先定全书卷纲，再逐卷拆章节计划（每卷不超过 ${PLAN_CHAPTERS_PER_CALL} 章）` : `${chapters} 章一次拆出章节计划`)}
+        </p>
         </>
       )}
       <fieldset>
@@ -273,7 +333,7 @@ function StartForm({ info, modelReady }: { readonly info: WorkflowInfo; readonly
         <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
           估算费用
         </button>
-        <button type="submit" className="primary" disabled={!modelReady || submitting || advancing !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
+        <button type="submit" className="primary" disabled={!modelReady || submitting || advancing !== null || volumeIssue !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
           开始
         </button>
       </div>
@@ -409,6 +469,70 @@ function OutlineStep({ view, step }: { readonly view: WorkflowView; readonly ste
   );
 }
 
+const volumesPayload = (draft: BookVolumesStep): BookVolumesStep => ({
+  ...draft,
+  volumes: draft.volumes.map((v) => ({ ...v, mainline: v.mainline.map((m) => m.trim()).filter((m) => m !== '') })),
+});
+
+/** 一键成书的全书卷纲草稿：每卷的卷名、章数、梗概、主线与卷末可以改；采用时按顺序建卷，之后按各卷的章数逐卷拆章。 */
+function VolumesStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
+  const [draft, setDraft] = useState<BookVolumesStep | null>(() => bookVolumesOf(step));
+  const save = useDraftSaver(view.run.id, step.idx, step.output, draft, volumesPayload);
+  const act = useApp((s) => s.workflowStepAction);
+  const busy = useApp((s) => s.busy);
+  if (draft === null) return <p className="muted">卷纲读不出来，可以重做这一步。</p>;
+  const patchVolume = (i: number, p: Partial<VolumeOutline>) => setDraft({ ...draft, volumes: draft.volumes.map((v, j) => (j === i ? { ...v, ...p } : v)) });
+  const setCount = (i: number, n: number) => setDraft({ ...draft, chapters: draft.chapters.map((c, j) => (j === i ? n : c)) });
+  const changed = JSON.stringify(draft) !== JSON.stringify(step.output);
+  const total = draft.chapters.reduce((n, c) => n + c, 0);
+  const valid = draft.volumes.every((v) => v.title.trim() !== '') && draft.chapters.every((c) => Number.isInteger(c) && c >= 1 && c <= PLAN_CHAPTERS_PER_CALL);
+  return (
+    <div className="panel-form" role="form" aria-label="全书卷纲草稿">
+      <p className="muted">
+        共 {draft.volumes.length} 卷、{total} 章；每卷最多 {PLAN_CHAPTERS_PER_CALL} 章。采用后按各卷的章数逐卷拆章节计划。
+      </p>
+      {draft.volumes.map((v, i) => (
+        <fieldset key={i}>
+          <legend>第 {i + 1} 卷</legend>
+          <div className="form-row">
+            <label>
+              卷名
+              <input aria-label={`第 ${i + 1} 卷卷名`} value={v.title} onChange={(e) => patchVolume(i, { title: e.currentTarget.value })} />
+            </label>
+            <label>
+              章数
+              <input aria-label={`第 ${i + 1} 卷章数`} type="number" min={1} max={PLAN_CHAPTERS_PER_CALL} value={draft.chapters[i] ?? 1} onChange={(e) => setCount(i, Number(e.currentTarget.value))} />
+            </label>
+          </div>
+          <label>
+            本卷梗概
+            <textarea aria-label={`第 ${i + 1} 卷梗概`} rows={2} value={v.summary} onChange={(e) => patchVolume(i, { summary: e.currentTarget.value })} />
+          </label>
+          <label>
+            主线（一行一段）
+            <textarea aria-label={`第 ${i + 1} 卷主线`} rows={3} value={v.mainline.join('\n')} onChange={(e) => patchVolume(i, { mainline: e.currentTarget.value.split('\n') })} />
+          </label>
+          <label>
+            卷末转折
+            <textarea aria-label={`第 ${i + 1} 卷卷末`} rows={2} value={v.climax} onChange={(e) => patchVolume(i, { climax: e.currentTarget.value })} />
+          </label>
+          {v.newCharacters.length === 0 ? null : <p className="muted">新人物：{v.newCharacters.map((c) => c.name).join('、')}</p>}
+          {v.newForeshadows.length === 0 ? null : <p className="muted">新伏笔：{v.newForeshadows.map((f) => f.title).join('、')}</p>}
+          {v.payoffs.length === 0 ? null : <p className="muted">本卷回收：{v.payoffs.join('、')}</p>}
+        </fieldset>
+      ))}
+      <div className="form-actions">
+        <button type="button" className="primary" disabled={busy || !valid} onClick={() => void (async () => (changed && !(await save(draft)) ? false : act(view.run.id, step.idx, 'adopt')))()}>
+          采用卷纲
+        </button>
+        <button type="button" disabled={busy || !changed} onClick={() => void save(draft)}>
+          保存修改
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** 等作者确认的跨章疑点：用不着核对的可以删去，确认后逐条读两章的原文。 */
 function SuspectsStep({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const draft = suspectsOf(step);
@@ -474,7 +598,7 @@ function AnalysesView({ step }: { readonly step: WorkflowStepView }) {
 function CompareView({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const result = benchmarkResultOf(step);
   const act = useApp((s) => s.workflowStepAction);
-  const startWorkflow = useApp((s) => s.startWorkflow);
+  const prefill = useApp((s) => s.prefillQuickBook);
   const advancing = useApp((s) => s.workflowAdvancing);
   const busy = useApp((s) => s.busy);
   if (result === null) return null;
@@ -508,7 +632,8 @@ function CompareView({ view, step }: { readonly view: WorkflowView; readonly ste
                   type="button"
                   className="link"
                   disabled={busy || advancing !== null}
-                  onClick={() => void startWorkflow({ workflow: 'quick_book', params: { idea: d.idea, genre: '', chapters: 20, wordsPerChapter: 3000 }, mode: 'step', budgetUsd: null })}
+                  title="填进一键成书的开始表单，章数、字数与卷数由你定"
+                  onClick={() => prefill(d.idea)}
                 >
                   用这个方向开一键成书
                 </button>
@@ -721,6 +846,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {plan === null ? null : <PlanDraftChapters draft={plan} withBeats={false} />}
       {step.key === 'suspects' ? <SuspectsStep view={view} step={step} /> : null}
       {waiting && step.key === 'outline' && !closed ? <OutlineStep key={`${step.version}`} view={view} step={step} /> : null}
+      {waiting && step.key === 'volumes' && !closed ? <VolumesStep key={`${step.version}`} view={view} step={step} /> : null}
       {findings === null || findings.length === 0 ? null : (
         <ul aria-label="伏笔核对">
           {findings.map((f) => (
@@ -750,7 +876,7 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
         </>
       ) : null}
       <div className="form-actions">
-        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
+        {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
         {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
         {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
         {step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null}
@@ -866,12 +992,16 @@ export function WorkflowPanel() {
   const modelServicesOpen = useApp((s) => s.modelServicesOpen);
   const refresh = useApp((s) => s.refreshQuickBook);
   const [starting, setStarting] = useState<WorkflowKey | null>(runs !== null && runs.length > 0 ? null : 'quick_book');
+  // 扫榜拆书的开书方向带着想法过来：展开一键成书的表单并预填；表单开始或收起后清掉。
+  const prefill = useApp((s) => s.quickBookPrefill);
+  const clearPrefill = useApp((s) => s.clearQuickBookPrefill);
+  const open = prefill !== null ? 'quick_book' : starting;
   // 从“模型服务”回来时重新读取：模型是否可用只在那里改变。
   useEffect(() => {
     if (!modelServicesOpen) void refresh();
   }, [modelServicesOpen, refresh]);
   const selected = runs?.find((v) => v.run.id === selectedId) ?? null;
-  const info = catalog.find((w) => w.key === starting) ?? null;
+  const info = catalog.find((w) => w.key === open) ?? null;
   return (
     <section className="workflow-page" aria-label="成书">
       <h2>成书</h2>
@@ -882,13 +1012,20 @@ export function WorkflowPanel() {
           <li key={w.key} className="workflow-card">
             <strong>{w.title}</strong>
             <span className="muted">{w.description}</span>
-            <button type="button" aria-pressed={starting === w.key} onClick={() => setStarting(starting === w.key ? null : w.key)}>
-              {starting === w.key ? '收起' : `新的${w.title}`}
+            <button
+              type="button"
+              aria-pressed={open === w.key}
+              onClick={() => {
+                setStarting(open === w.key ? null : w.key);
+                clearPrefill();
+              }}
+            >
+              {open === w.key ? '收起' : `新的${w.title}`}
             </button>
           </li>
         ))}
       </ul>
-      {info === null ? null : <StartForm key={info.key} info={info} modelReady={modelReady} />}
+      {info === null ? null : <StartForm key={`${info.key}:${prefill ?? ''}`} info={info} modelReady={modelReady} initialIdea={info.key === 'quick_book' ? (prefill ?? '') : ''} onStarted={clearPrefill} />}
       {runs === null || runs.length === 0 ? null : (
         <>
           <label className="workflow-pick">

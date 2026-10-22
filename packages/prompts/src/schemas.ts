@@ -294,6 +294,10 @@ export const VolumeOutlineOutput = z.object({
 });
 export type VolumeOutlineOutput = z.infer<typeof VolumeOutlineOutput>;
 
+/** 全书卷纲（B67、B78 的长篇规划）：按作者定的卷数，每卷一份卷纲（字段同续写一卷的卷纲）。 */
+export const BookVolumesOutput = z.object({ volumes: z.array(VolumeOutlineOutput) });
+export type BookVolumesOutput = z.infer<typeof BookVolumesOutput>;
+
 /** 人物小传与关系网补全（B83）：要补的人物（小传）与关系。章节用提示词中的标签（C1……）指代，由应用层换回标识。 */
 export const CastCompletionOutput = z.object({
   characters: z.array(

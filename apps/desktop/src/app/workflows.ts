@@ -25,7 +25,19 @@ import { nextAction, runState, transition, type RunState, type StepEvent } from 
 export { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from './labels';
 import { z } from 'zod';
 import { describeError, type AppError } from './errors';
-import { planContentTokens, type AppliedDraft, type PlanDraft, type PlanDraftRequest, type PlanningView, type VolumeOutline, type VolumeOutlineRequest } from './planning';
+import {
+  bookVolumesContentTokens,
+  planContentTokens,
+  VOLUME_MODES,
+  type AppliedDraft,
+  type BookVolumesRequest,
+  type PlanDraft,
+  type PlanDraftRequest,
+  type PlanningView,
+  type VolumeMode,
+  type VolumeOutline,
+  type VolumeOutlineRequest,
+} from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
 import type { OpeningDiagnosis, OpeningSurvey } from './opening';
 import { CastDraft } from './cast-completion';
@@ -166,6 +178,8 @@ type WorkflowDef<P> = {
   readonly runTitle: (params: P) => string;
   readonly estimate: (params: P, book: BookSize) => WorkflowEstimate;
   readonly steps: readonly Step<P>[];
+  /** 这次运行要走哪些步（按键，顺序即执行顺序）；省略时走全部。一键成书按章数决定是一次拆完还是先卷纲再逐卷拆。 */
+  readonly stepsFor?: (params: P) => readonly string[];
 };
 
 /** 去掉参数类型的工作流：参数在每次执行时按定义校验，命令表里各工作流的参数类型因此可以不同。 */
@@ -176,6 +190,7 @@ type AnyWorkflow = {
   readonly runTitle: (params: unknown) => string;
   readonly estimate: (params: unknown, book: BookSize) => WorkflowEstimate;
   readonly steps: readonly Step<unknown>[];
+  readonly stepsFor: (params: unknown) => readonly string[];
 };
 
 const issues = (error: z.ZodError) => error.issues.map((i) => `${i.path.join('.')} ${i.message}`.trim()).join('；');
@@ -200,6 +215,7 @@ function erase<P>(def: WorkflowDef<P>): AnyWorkflow {
     parseParams,
     runTitle: (v) => typed(v, def.runTitle, def.title),
     estimate: (v, book) => typed(v, (p) => def.estimate(p, book), { calls: 0, inputTokens: 0, outputTokens: 0 }),
+    stepsFor: (v) => typed(v, (p) => def.stepsFor?.(p) ?? def.steps.map((s) => s.key), def.steps.map((s) => s.key)),
     steps: def.steps.map((s): Step<unknown> => {
       const { adopt, confirm, skipIf } = s;
       return {
@@ -235,12 +251,57 @@ function erase<P>(def: WorkflowDef<P>): AnyWorkflow {
 }
 
 /** 一键成书的参数：想法、类型、章数与每章字数（已有大纲时可以不写想法，跳过骨架这一步）。 */
-export const QuickBookParams = z.object({
-  idea: z.string(),
-  genre: z.string(),
-  chapters: z.number().int().min(1).max(300),
-  wordsPerChapter: z.number().int().min(500).max(20_000),
-});
+/** 一键成书的章数上限（连载规模）。 */
+export const MAX_BOOK_CHAPTERS = 2_000;
+/** 一次调用最多拆多少章的计划：更多的章数先定全书卷纲，再逐卷拆，每卷不超过这个数。 */
+export const PLAN_CHAPTERS_PER_CALL = 30;
+/** 自动分卷时每卷约多少章。 */
+export const AUTO_CHAPTERS_PER_VOLUME = 20;
+
+type VolumeChoice = { readonly chapters: number; readonly volumeMode: VolumeMode; readonly volumeCount: number | null };
+
+/** 各卷的章数：平均分，前面的卷多一章。 */
+export function distributeChapters(chapters: number, volumes: number): number[] {
+  const count = Math.max(1, Math.min(volumes, chapters));
+  const base = Math.floor(chapters / count);
+  const extra = chapters % count;
+  return Array.from({ length: count }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+/** 分卷方式与章数搭不搭：不分卷与单卷最多 PLAN_CHAPTERS_PER_CALL 章；指定卷数时每卷不超过它。给作者看的问题，没有问题时为 null。 */
+export function quickBookVolumeIssue(p: VolumeChoice): string | null {
+  const least = Math.ceil(p.chapters / PLAN_CHAPTERS_PER_CALL);
+  if (p.volumeMode === 'none') return p.chapters > PLAN_CHAPTERS_PER_CALL ? `不分卷最多 ${PLAN_CHAPTERS_PER_CALL} 章：${p.chapters} 章请选“自动分卷”或指定卷数（至少 ${least} 卷）` : null;
+  if (p.volumeMode !== 'fixed') return null;
+  const count = p.volumeCount ?? 0;
+  if (count < 1) return '请填卷数';
+  if (count > p.chapters) return '卷数不能多于章数';
+  if (Math.ceil(p.chapters / count) > PLAN_CHAPTERS_PER_CALL) return `每卷最多 ${PLAN_CHAPTERS_PER_CALL} 章：${p.chapters} 章至少分 ${least} 卷`;
+  return null;
+}
+
+/** 怎样拆章节计划：章数不多时一次拆完（分卷方式交给模板），否则先定全书卷纲、再按各卷的章数逐卷拆。 */
+export type QuickBookPlanning = { readonly kind: 'single' } | { readonly kind: 'volumes'; readonly chapters: readonly number[] };
+export function quickBookPlanning(p: VolumeChoice): QuickBookPlanning {
+  if (p.chapters <= PLAN_CHAPTERS_PER_CALL) return { kind: 'single' };
+  const count = p.volumeMode === 'fixed' ? Math.max(1, p.volumeCount ?? 1) : Math.ceil(p.chapters / AUTO_CHAPTERS_PER_VOLUME);
+  return { kind: 'volumes', chapters: distributeChapters(p.chapters, count) };
+}
+
+export const QuickBookParams = z
+  .object({
+    idea: z.string(),
+    genre: z.string(),
+    chapters: z.number().int().min(1).max(MAX_BOOK_CHAPTERS),
+    wordsPerChapter: z.number().int().min(500).max(20_000),
+    /** 分卷方式与卷数（fixed 时用）。早先的运行没有这两项，按自动分卷。 */
+    volumeMode: z.enum(VOLUME_MODES).default('auto'),
+    volumeCount: z.number().int().min(1).max(200).nullable().default(null),
+  })
+  .superRefine((p, ctx) => {
+    const issue = quickBookVolumeIssue(p);
+    if (issue !== null) ctx.addIssue({ code: 'custom', message: issue, path: ['volumeCount'] });
+  });
 export type QuickBookParams = z.infer<typeof QuickBookParams>;
 
 /** 全书体检的参数：范围（章节标识，null 为从头、到尾）与要不要重新审核已经审过的章节。 */
@@ -297,7 +358,17 @@ export type WorkflowHost = {
   saveContinuityIssues(chapterIds: readonly string[], located: readonly LocatedSuspect[], append?: readonly string[]): Promise<Result<number, AppError>>;
   draftVolumeOutline(request: VolumeOutlineRequest, options?: CallOptions): Promise<Result<VolumeOutline, AppError>>;
   applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ readonly volume: { readonly id: string; readonly title: string }; readonly characters: number; readonly foreshadows: number }, AppError>>;
-  draftVolumePlans(request: PlanDraftRequest & { readonly volumeId: string; readonly payoffs?: readonly string[] }, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
+  draftVolumePlans(
+    request: PlanDraftRequest & {
+      readonly volumeId: string;
+      readonly payoffs?: readonly string[];
+      readonly bookVolumes?: readonly { readonly title: string; readonly summary: string }[];
+      readonly laterVolumes?: boolean;
+    },
+    options?: CallOptions,
+  ): Promise<Result<PlanDraft, AppError>>;
+  draftBookVolumes(request: BookVolumesRequest, options?: CallOptions): Promise<Result<{ readonly volumes: readonly VolumeOutline[] }, AppError>>;
+  applyBookVolumes(volumes: readonly VolumeOutline[]): Promise<Result<{ readonly volumes: readonly { readonly id: string; readonly title: string }[]; readonly characters: number; readonly foreshadows: number }, AppError>>;
   applyVolumeDraft(draft: PlanDraft, volumeId: string): Promise<Result<AppliedDraft, AppError>>;
   openingSurvey(count: number): Promise<Result<OpeningSurvey, AppError>>;
   diagnoseOpening(survey: OpeningSurvey, index: number, stepKey: string, options?: CallOptions): Promise<Result<OpeningDiagnosis, AppError>>;
@@ -331,7 +402,12 @@ const THINKING_TOKENS_PER_CALL = 6_000;
  * 一键成书的一步要写的内容最多约多少 Token（不含思考）：骨架随章数，计划每章约 1,200，写手一段最多整章的目标字数。
  * 调用器会把每次请求的输出上限压到模型登记的最大输出，登记值比它小的模型写不完这一步。
  */
-const quickBookOutputNeed = (p: QuickBookParams) => Math.max(seedContentTokens(p.chapters), planContentTokens(p.chapters), segmentContentTokens(p.wordsPerChapter));
+const quickBookOutputNeed = (p: QuickBookParams) => {
+  const planning = quickBookPlanning(p);
+  const perCall = planning.kind === 'single' ? p.chapters : Math.max(...planning.chapters);
+  const outline = planning.kind === 'single' ? 0 : bookVolumesContentTokens(planning.chapters.length);
+  return Math.max(seedContentTokens(p.chapters), planContentTokens(perCall), outline, segmentContentTokens(p.wordsPerChapter));
+};
 
 function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowDef<QuickBookParams> {
   return {
@@ -339,14 +415,19 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
     description: '一句话的想法 → 大纲与人物 → 章节计划 → 写手写完并审核 → 导出',
     params: QuickBookParams,
     runTitle: (p) => `一键成书：${p.idea.trim() === '' ? '按已有大纲' : p.idea.trim().slice(0, 20)}`,
+    // 章数不多时一次拆完章节计划；长篇先定全书卷纲，再按各卷的章数逐卷拆。
+    stepsFor: (p) => (quickBookPlanning(p).kind === 'single' ? ['model', 'seed', 'plan', 'write', 'export'] : ['model', 'seed', 'volumes', 'volumePlans', 'write', 'export']),
     estimate(p) {
       const words = p.chapters * p.wordsPerChapter;
       const segments = p.chapters * Math.max(1, Math.ceil(p.wordsPerChapter / 1_500));
+      const planning = quickBookPlanning(p);
+      // 骨架一次；计划一次拆完，或全书卷纲一次加每卷一次；每章分段写、整理记忆、审核。
+      const volumes = planning.kind === 'single' ? 0 : planning.chapters.length;
+      const planCalls = planning.kind === 'single' ? 1 : 1 + volumes;
       return {
-        // 骨架、计划各一次；每章分段写、整理记忆、审核。
-        calls: 2 + segments + p.chapters * 2,
-        inputTokens: Math.round(3_000 + 6_000 + segments * 9_000 + p.chapters * 2 * 6_000 + words * TOKENS_PER_CHAR * 2),
-        outputTokens: Math.round(2_000 + p.chapters * 150 + p.chapters * 800 + words * TOKENS_PER_CHAR + p.chapters * (1_500 + 3_000)),
+        calls: 1 + planCalls + segments + p.chapters * 2,
+        inputTokens: Math.round(3_000 + 6_000 * planCalls + segments * 9_000 + p.chapters * 2 * 6_000 + words * TOKENS_PER_CHAR * 2),
+        outputTokens: Math.round(2_000 + p.chapters * 150 + volumes * 700 + p.chapters * 800 + words * TOKENS_PER_CHAR + p.chapters * (1_500 + 3_000)),
       };
     },
     steps: [
@@ -408,7 +489,7 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
         output: PlanDraftOutput,
         async run({ params, stepKey, options, onProgress }) {
           onProgress(`正在按大纲拆出 ${params.chapters} 章的章节计划`);
-          const draft = await host.draftPlans({ chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey }, options);
+          const draft = await host.draftPlans({ chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey, volumeMode: params.volumeMode, volumeCount: params.volumeCount }, options);
           if (!draft.ok) return draft;
           return ok({ output: draft.value, note: `${draft.value.chapters.length} 章的计划` });
         },
@@ -423,6 +504,71 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
           if (!applied.ok) return applied;
           const missing = applied.value.unmatchedCast;
           return ok(`已采用 ${draft.chapters.length} 章的计划${missing.length > 0 ? `；这些人物还没有人物卡片：${missing.join('、')}` : ''}`);
+        },
+      }),
+      step<QuickBookParams, BookVolumesStep>({
+        key: 'volumes',
+        label: '全书卷纲',
+        kind: 'draft',
+        output: BookVolumesStep,
+        async run({ params, stepKey, options, onProgress }) {
+          const planning = quickBookPlanning(params);
+          const counts = planning.kind === 'volumes' ? planning.chapters : [params.chapters];
+          onProgress(`正在把全书分成 ${counts.length} 卷：卷名、主线、新人物与伏笔`);
+          const drafted = await host.draftBookVolumes({ volumes: counts, stepKey }, options);
+          if (!drafted.ok) return drafted;
+          return ok({ output: { volumes: [...drafted.value.volumes], chapters: [...counts], volumeIds: null }, note: `${counts.length} 卷：${drafted.value.volumes.map((v) => v.title).join('、')}` });
+        },
+        async adopt(_ctx, outline) {
+          const applied = await host.applyBookVolumes(outline.volumes);
+          if (!applied.ok) return applied;
+          return ok({
+            note: `已新建 ${applied.value.volumes.length} 卷，新人物 ${applied.value.characters} 个，新伏笔 ${applied.value.foreshadows} 条`,
+            output: { ...outline, volumeIds: applied.value.volumes.map((v) => v.id) },
+          });
+        },
+      }),
+      step<QuickBookParams, z.infer<typeof VolumePlansReport>>({
+        key: 'volumePlans',
+        label: '逐卷拆章',
+        kind: 'act',
+        output: VolumePlansReport,
+        async run({ params, stepKey, options, onProgress, output }) {
+          const parsed = BookVolumesStep.safeParse(output('volumes'));
+          const ids = parsed.success ? parsed.data.volumeIds : null;
+          if (!parsed.success || ids === null) return err(invalid('先采用全书卷纲：各卷还没有建'));
+          const outline = parsed.data;
+          const view = await host.planningView();
+          if (!view.ok) return view;
+          const bookVolumes = outline.volumes.map((v) => ({ title: v.title, summary: v.summary }));
+          const done: { readonly volumeId: string; readonly chapters: number }[] = [];
+          let skipped = 0;
+          // 按顺序逐卷拆：后一卷的前文是前一卷的章节。中断后接着做时，已经有了足够章节计划的卷不再拆。
+          for (const [i, volumeId] of ids.entries()) {
+            const volume = outline.volumes[i];
+            const count = outline.chapters[i] ?? 0;
+            if (volume === undefined || count <= 0) continue;
+            const planned = view.value.chapters.filter((c) => c.chapter.volumeId === volumeId && c.plan !== null).length;
+            if (planned >= count) {
+              skipped += 1;
+              done.push({ volumeId, chapters: planned });
+              continue;
+            }
+            onProgress(`正在给第 ${i + 1} / ${ids.length} 卷“${volume.title}”拆 ${count} 章的章节计划`);
+            const draft = await host.draftVolumePlans(
+              { volumeId, payoffs: volume.payoffs, chapterCount: count, wordsPerChapter: params.wordsPerChapter, stepKey: `${stepKey}:${i}`, bookVolumes, laterVolumes: i < ids.length - 1 },
+              options,
+            );
+            if (!draft.ok) {
+              if (options.signal?.aborted === true) return draft;
+              return err(interrupted(`“${volume.title}”的章节计划没有拆成：${describeError(draft.error)}${done.length > 0 ? `（前 ${done.length} 卷已拆好，继续时接着拆）` : ''}`));
+            }
+            const applied = await host.applyVolumeDraft(draft.value, volumeId);
+            if (!applied.ok) return err(interrupted(`“${volume.title}”的章节计划没有写进作品：${describeError(applied.error)}`));
+            done.push({ volumeId, chapters: draft.value.chapters.length });
+          }
+          const total = done.reduce((n, v) => n + v.chapters, 0);
+          return ok({ output: { volumes: done, skipped }, note: `${done.length} 卷共 ${total} 章的计划已写进作品${skipped > 0 ? `（${skipped} 卷之前已拆好）` : ''}` });
         },
       }),
       step<QuickBookParams, { readonly chapters: readonly string[]; readonly summary: string }>({
@@ -675,6 +821,21 @@ const VolumeAuditReport = z.object({ suspects: z.number().int(), issues: z.numbe
 /** 卷纲这一步的结果：模型给的卷纲，采用后记下新建的那一卷的标识（作者之后改卷名也找得到）。 */
 const VolumeOutlineStep = VolumeOutlineOutput.extend({ volumeId: z.string().nullable().default(null) });
 type VolumeOutlineStep = z.infer<typeof VolumeOutlineStep>;
+
+/** 一键成书“全书卷纲”这一步的结果：各卷的卷纲与章数（作者可改），采用后记下新建各卷的标识。 */
+export const BookVolumesStep = z.object({
+  volumes: z.array(VolumeOutlineOutput),
+  chapters: z.array(z.number().int().min(1)),
+  volumeIds: z.array(z.string()).nullable().default(null),
+});
+export type BookVolumesStep = z.infer<typeof BookVolumesStep>;
+/** 全书卷纲步骤的草稿（界面编辑用）；不是卷纲或不合格时为 null。 */
+export const bookVolumesOf = (step: Pick<WorkflowStepView, 'output'>): BookVolumesStep | null => {
+  const parsed = BookVolumesStep.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+/** “逐卷拆章”这一步的结果：各卷写进作品的章数。 */
+const VolumePlansReport = z.object({ volumes: z.array(z.object({ volumeId: z.string(), chapters: z.number().int() })), skipped: z.number().int() });
 
 function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
   /** 采用卷纲时新建的那一卷：按记下的标识找；没有记下（旧的运行）时按卷名找最后一个同名的。 */
@@ -1283,6 +1444,12 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     return { run: data.run, title: def?.title ?? data.run.workflow, steps, state: runState(data.steps, data.run.abandoned), spent };
   }
 
+  /** 第 idx 步的定义：按这一步的键找（一次运行的步骤可以是定义的一部分，序号与定义不一定对齐）。 */
+  const specAt = (def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number): Step<unknown> | undefined => {
+    const key = data.steps[idx]?.key;
+    return key === undefined ? undefined : def.steps.find((x) => x.key === key);
+  };
+
   async function load(port: SqlPort, runId: string): Promise<Result<WorkflowRunWithSteps, AppError>> {
     const got = await getWorkflowRun(port, runId);
     if (!got.ok) return err(repo(got.error));
@@ -1357,7 +1524,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
    * 草稿不会写进作品两遍。
    */
   async function adoptStep(port: SqlPort, def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv): Promise<Result<{ readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown }, AppError>> {
-    const spec = def.steps[idx];
+    const spec = specAt(def, data, idx);
     const row = data.steps[idx];
     if (spec?.adopt === undefined || row === undefined) return err(invalid('这一步没有要采用的结果'));
     const claimed = await updateWorkflowSteps(port, data.run.id, [{ step: row, patch: {} }], ctx());
@@ -1406,7 +1573,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
   async function runStep(port: SqlPort, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv, prices: Prices | undefined): Promise<Result<WorkflowRunWithSteps, AppError>> {
     const def = defOf(data.run.workflow);
     if (def === null) return err(invalid(`不认得的工作流“${data.run.workflow}”`));
-    const spec = def.steps[idx];
+    const spec = specAt(def, data, idx);
     if (spec === undefined) return err(invalid('这次运行的步骤与工作流的定义对不上'));
     const skip = spec.skipIf === undefined ? null : await spec.skipIf(contextFor(def, data, idx, env, { value: EMPTY_USAGE }, prices));
     if (skip !== null) return apply(port, data, { type: 'skip', idx }, { [idx]: { note: skip } });
@@ -1530,7 +1697,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
             params: p.value as Readonly<Record<string, unknown>>,
             mode: request.mode,
             budgetUsd: request.budgetUsd,
-            steps: def.steps.map((s) => s.key),
+            steps: def.stepsFor(p.value),
           },
           ctx(),
         );
@@ -1633,7 +1800,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         const data = await load(port, runId);
         if (!data.ok) return data;
         const def = defOf(data.value.run.workflow);
-        const spec = def?.steps[idx];
+        const spec = def === null ? undefined : specAt(def, data.value, idx);
         const row = data.value.steps[idx];
         if (spec === undefined || row === undefined) return err({ code: 'not_found' });
         if (row.status !== 'awaiting_author' || spec.kind !== 'draft') return err(invalid('这一步现在不能修改'));
@@ -1669,7 +1836,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         const data = await load(port, runId);
         if (!data.ok) return data;
         const def = defOf(data.value.run.workflow);
-        const spec = def?.steps[idx];
+        const spec = def === null ? undefined : specAt(def, data.value, idx);
         const row = data.value.steps[idx];
         if (def === null || spec === undefined || row === undefined) return err({ code: 'not_found' });
         if (row.status !== 'awaiting_author' || spec.confirm === undefined) return ok(null);
@@ -1684,7 +1851,8 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         const data = await load(port, runId);
         if (!data.ok) return data;
         const row = data.value.steps[idx];
-        const spec = defOf(data.value.run.workflow)?.steps[idx];
+        const def = defOf(data.value.run.workflow);
+        const spec = def === null ? undefined : specAt(def, data.value, idx);
         if (row?.status === 'done' && spec?.kind === 'draft' && row.changes !== null) return err(invalid('这一步的草稿已经采用进作品：先“撤回这次采用”，再重做'));
         return act(runId, { type: 'redo', idx }, { [idx]: { note: '' } });
       });
@@ -1701,7 +1869,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         if (!data.ok) return data;
         const def = defOf(data.value.run.workflow);
         const row = data.value.steps[idx];
-        if (def?.steps[idx]?.kind !== 'draft' || row === undefined) return err(invalid('只有采用过的草稿可以撤回'));
+        if (def === null || specAt(def, data.value, idx)?.kind !== 'draft' || row === undefined) return err(invalid('只有采用过的草稿可以撤回'));
         const check = transition(data.value.steps, { type: 'withdraw', idx });
         if (!check.ok) return err(invalid(check.error));
         const undone = await tracker.undo(row.changes ?? []);

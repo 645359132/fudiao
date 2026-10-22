@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 用真实的用例与作品库（Node 的 SqlPort）驱动界面，覆盖 B01、B02 的主要流程。
 import { readFileSync, rmSync } from 'node:fs';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { warehouseSpec } from '@fudiao/domain/testing';
 import { fakeModel } from '@fudiao/engine/testing';
@@ -2029,6 +2029,35 @@ describe('快速成书的界面（B67）', () => {
 });
 
 describe('写作工作流的界面（B78）', () => {
+  it('开始表单：总字数随章数与每章字数算出、改总字数反推章数；指定卷数时每卷不能超过 30 章；扫榜的开书方向只预填想法', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '新作品');
+    await addTestedModel(service, deps, { maxOutputTokens: 64_000 });
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    const form = within(page).getByRole('form', { name: '开始一键成书' });
+    expect(within(form).getByRole('spinbutton', { name: '总字数（万字）' })).toHaveProperty('value', '6');
+    const count = within(form).getByRole('spinbutton', { name: '章数' });
+    await user.clear(count);
+    await user.type(count, '40');
+    expect(form.textContent).toContain('40 章先定全书卷纲，再逐卷拆章节计划');
+    await user.selectOptions(within(form).getByRole('combobox', { name: '分卷方式' }), 'fixed');
+    const volumes = within(form).getByRole('spinbutton', { name: '卷数' });
+    await user.clear(volumes);
+    await user.type(volumes, '1');
+    expect(form.textContent).toContain('每卷最多 30 章');
+    expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(true);
+    const total = within(form).getByRole('spinbutton', { name: '总字数（万字）' });
+    await user.clear(total);
+    await user.type(total, '3');
+    expect(count).toHaveProperty('value', '10');
+    expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(false);
+    // 扫榜拆书的开书方向只把想法填进表单，章数、字数与卷数仍由作者定，不自动开始。
+    act(() => store.getState().prefillQuickBook('修鞋摊的旧物'));
+    await waitFor(() => expect(within(within(page).getByRole('form', { name: '开始一键成书' })).getByRole('textbox', { name: '一句话的想法' })).toHaveProperty('value', '修鞋摊的旧物'));
+    expect(store.getState().workflows ?? []).toEqual([]);
+  });
+
   it('开始一键成书：估算费用，每步停下；改过骨架再采用，采用计划，跳过写章节，导出须作者点', async () => {
     const { deps, service, store, user } = start();
     await createWork(user, '新作品');
