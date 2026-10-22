@@ -150,7 +150,7 @@ describe('AI 助手（B69）', () => {
   it('思考深度与上下文用量：按作者选的深度发请求；每一步结束后报告发给模型的 Token 数与模型的上下文上限', async () => {
     const { deps, app } = await setup();
     const model = value(await app.loadModelServices()).models[0]!;
-    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 200_000 }, prices: model.prices }));
+    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 200_000, limitsKnown: { ...model.capabilities.limitsKnown, contextWindow: true } }, prices: model.prices }));
     deps.llmRequests.length = 0;
     const done: AssistantTurnOutput = { message: '好的。', actions: [], done: true };
     deps.llmResponses.push(reply(JSON.stringify(done), { input: 3_000, output: 200, cacheRead: 0 }));

@@ -131,9 +131,11 @@ describe('收集写作上下文', () => {
   });
 
   it('预算：默认模型上下文长度的 60%，最多 32,000；没有默认模型时用保守值', () => {
-    const model = (contextWindow: number) => ({ capabilities: { contextWindow } }) as StoredModel;
+    const model = (contextWindow: number, known = true) => ({ capabilities: { contextWindow, limitsKnown: { contextWindow: known, maxOutputTokens: false } } }) as StoredModel;
     expect(contextBudget(null)).toBe(DEFAULT_CONTEXT_BUDGET);
     expect(contextBudget(model(32_000))).toBe(19_200);
     expect(contextBudget(model(1_000_000))).toBe(32_000);
+    // 上下文长度没有依据时按估算的 128,000 算，封顶 32,000。
+    expect(contextBudget(model(32_000, false))).toBe(32_000);
   });
 });
