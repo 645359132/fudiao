@@ -92,7 +92,7 @@ async function main(): Promise<number> {
     if (!added.ok) return fail(`模型没有添加：${JSON.stringify(added.error)}`);
     const stored = added.value.models[0];
     if (stored === undefined) return fail('模型没有添加');
-    const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...model.capabilities, selfTestPassed: false }, prices: model.prices });
+    const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...model.capabilities, selfTestPassed: false, limitsKnown: { contextWindow: true, maxOutputTokens: true } }, prices: model.prices });
     if (!updated.ok) return fail(`模型的能力与价格没有保存：${JSON.stringify(updated.error)}`);
     console.log('能力自检…');
     const tested = await app.runSelfTest(stored.id);

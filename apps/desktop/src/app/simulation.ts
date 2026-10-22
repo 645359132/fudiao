@@ -43,6 +43,7 @@ import {
 import type { AppError } from './errors';
 import type { ProviderView } from './model-services';
 import { projectCallLog, THINKING_ALLOWANCE, type modelRunner, type ModelChoice } from './model-runner';
+import { clipOutput } from './model-limits';
 import type { AppDeps } from './ports';
 import { checkSceneConfig, describeSceneProblems } from './scene-editing';
 import { describeEffect, describeOccurrence, forkLabel, rulingToOutput, type ForkPoint } from './sim-describe';
@@ -242,7 +243,7 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
     const profile: ModelProfile = { provider: service.id, model: model.modelId, capabilities: model.capabilities, ...(model.prices !== null && { prices: model.prices }) };
     const task = (kind: keyof typeof TASK_OUTPUT): TaskModel => ({
       profile,
-      maxOutputTokens: Math.min(TASK_OUTPUT[kind] + THINKING_ALLOWANCE, model.capabilities.maxOutputTokens),
+      maxOutputTokens: clipOutput(model.capabilities, TASK_OUTPUT[kind] + THINKING_ALLOWANCE),
       ...(model.capabilities.reasoningControl === 'effort' && { effort: TASK_EFFORT[kind] }),
     });
     return ok({

@@ -99,6 +99,7 @@ import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
 import { writerUseCases } from './writer';
 import { modelRunner } from './model-runner';
+import { effectiveLimits } from './model-limits';
 import { contextBudget, gatherWritingInput, type EditorSelection } from './writing-context';
 import { maxOutputTokens, needsSelection, promptParts, targetLength } from './selection-ops';
 import { renderSelectionEdit, type SelectionOperation } from '@fudiao/prompts';
@@ -343,7 +344,13 @@ export function createAppService(deps: AppDeps) {
   const candidates = candidateUseCases(deps, () => session?.port ?? null);
   const writingSkills = writingSkillUseCases(deps, () => session?.port ?? null);
   /** 模型调用：用默认模型，调用记录写入当前作品库（M2-05 起由选区操作等使用）。 */
-  const runner = modelRunner({ deps, project: () => session?.port ?? null, defaultModel: () => services.defaultModel() });
+  const runner = modelRunner({
+    deps,
+    project: () => session?.port ?? null,
+    defaultModel: () => services.defaultModel(),
+    // 服务的超限报错里写明的上限记进模型，之后的请求按它发。
+    learn: (choice, learned) => services.learnModelLimits(choice.model.id, learned),
+  });
   const planning = planningUseCases(deps, () => session?.port ?? null, runner);
   const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
@@ -891,7 +898,7 @@ export function createAppService(deps: AppDeps) {
       const view = await services.loadModelServices();
       if (!view.ok) return view;
       const model = view.value.models.find((m) => m.providerId === call.value?.provider && m.modelId === call.value.model);
-      return ok(model === undefined ? null : { promptTokens: usage.input + usage.cacheRead + usage.cacheWrite, contextWindow: model.capabilities.contextWindow });
+      return ok(model === undefined ? null : { promptTokens: usage.input + usage.cacheRead + usage.cacheWrite, contextWindow: effectiveLimits(model.capabilities).contextWindow });
     },
     ...quickBook,
   };

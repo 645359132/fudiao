@@ -1,11 +1,13 @@
 // 桌面端的模型调用（需求 B19、B35、B36，施工文档第六章）：用默认模型、经凭据代理发出，每次调用写入作品库的 llm_call；
 // 结构化输出经管线校验与有限次修正，仍失败时暂停并说明原因；必须输出结构化数据的任务只能用通过能力自检的模型。
 import {
+  parseLimitError,
   structured,
   withCallLog,
   withRetry,
   type CallLog,
   type CallOptions,
+  type LearnedLimits,
   type LlmCallRecord,
   type LlmPort,
   type LlmRequest,
@@ -20,6 +22,7 @@ import { appendLlmCall, findCompletedCall, type LlmCallRow, type SqlPort, type S
 import { z } from 'zod';
 import type { AppError } from './errors';
 import type { ProviderView } from './model-services';
+import { clipOutput, effectiveLimits, portCapabilities } from './model-limits';
 import type { AppDeps } from './ports';
 
 /** 结构化输出的修正次数上限（B35）。 */
@@ -131,14 +134,18 @@ export type RunnerDeps = {
   /** 当前打开的作品库；没有打开作品时调用不写记录。 */
   readonly project: () => SqlPort | null;
   readonly defaultModel: () => Promise<Result<ModelChoice | null, AppError>>;
+  /** 从服务的超限报错里学到的上限记进模型，返回更新后的模型；没有时不学、不重发。 */
+  readonly learn?: (choice: ModelChoice, learned: LearnedLimits) => Promise<Result<StoredModel, AppError>>;
 };
+
+type Prepared = { readonly port: LlmPort; readonly llmRequest: LlmRequest; readonly name: string; readonly contextWindow: number; readonly choice: ModelChoice };
 
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
 /** 没有打开作品时最多暂存多少条调用记录（超出时丢掉最早的）。 */
 const UNSAVED_CALLS_LIMIT = 500;
 
-export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
+export function modelRunner({ deps, project, defaultModel, learn }: RunnerDeps) {
   /**
    * 没有打开作品时（例如 AI 助手新建作品之前的几步）的调用记录先暂存在这里，下一次在某部作品里调用时补记进那部作品，
    * 用量与费用因此不漏算。这些调用没有步骤键，不需要查重。
@@ -157,8 +164,8 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     for (const record of records) await log.append(record);
   }
 
-  async function prepare(request: RunRequest, needsStructured: boolean): Promise<Result<{ port: LlmPort; llmRequest: LlmRequest; name: string; contextWindow: number }, AppError>> {
-    const choice = request.model === undefined ? await defaultModel() : ok(request.model);
+  async function prepare(request: RunRequest, needsStructured: boolean, chosen?: ModelChoice): Promise<Result<Prepared, AppError>> {
+    const choice: Result<ModelChoice | null, AppError> = chosen !== undefined ? ok(chosen) : request.model !== undefined ? ok(request.model) : await defaultModel();
     if (!choice.ok) return choice;
     if (choice.value === null) return err(settings('还没有设置默认模型：请在“模型服务”中添加服务与模型'));
     const { provider, model } = choice.value;
@@ -166,7 +173,7 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     if (needsStructured && (!model.capabilities.selfTestPassed || model.capabilities.structuredOutput === 'none')) {
       return err(settings(`默认模型${name}没有通过能力自检，不能用于需要结构化输出的任务；请在“模型服务”中运行能力自检，或换一个模型`));
     }
-    const profile: ModelProfile = { provider: provider.id, model: model.modelId, capabilities: model.capabilities, ...(model.prices !== null && { prices: model.prices }) };
+    const profile: ModelProfile = { provider: provider.id, model: model.modelId, capabilities: portCapabilities(model.capabilities), ...(model.prices !== null && { prices: model.prices }) };
     const p = request.prompt;
     const llmRequest: LlmRequest = {
       task: p.task as TaskKind,
@@ -176,7 +183,8 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
       messages: p.messages,
       ...(p.output !== undefined && { output: p.output }),
       ...(request.tools !== undefined && { tools: request.tools }),
-      maxOutputTokens: Math.min(request.maxOutputTokens, model.capabilities.maxOutputTokens),
+      // 最大输出有依据时不超过它；没有依据时按请求本身的需要发出，超限由服务报错、再学（learnFrom）。
+      maxOutputTokens: clipOutput(model.capabilities, request.maxOutputTokens),
       ...(request.effort !== undefined && { effort: request.effort }),
       ...(request.stepKey !== undefined && { stepKey: request.stepKey }),
     };
@@ -186,7 +194,33 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     if (db !== null && unsaved.length > 0) await flushUnsaved(log);
     // 网络中断时整次重新请求（withRetry 在调用记录外面：每次尝试各记一条，失败的不计入完成记录）。
     const port = withRetry(withCallLog(adapter, log, () => deps.clock.now()), deps.retry);
-    return ok({ port, llmRequest, name, contextWindow: model.capabilities.contextWindow });
+    return ok({ port, llmRequest, name, contextWindow: effectiveLimits(model.capabilities).contextWindow, choice: choice.value });
+  }
+
+  /**
+   * 超限报错：报错里写明的上限记进模型（以服务说的为准），并决定要不要重发——最大输出比发出的小时按它重发一次；
+   * 只学到上下文长度而发出的输出上限不小于它时同样重发（vLLM 一类把输入与输出合在一起算）；其余不重发，错误里附上学到的数字。
+   */
+  async function learnFrom(message: string, choice: ModelChoice, sent: number): Promise<{ readonly choice: ModelChoice; readonly retryWith: number | null; readonly hint: string }> {
+    const learned = parseLimitError(message);
+    if (learned === null || learn === undefined) return { choice, retryWith: null, hint: '' };
+    const saved = await learn(choice, learned);
+    const next = saved.ok ? { provider: choice.provider, model: saved.value } : choice;
+    const n = (x: number) => x.toLocaleString('en-US');
+    const parts = [
+      ...(learned.maxOutputTokens !== undefined ? [`最大输出 ${n(learned.maxOutputTokens)} Token`] : []),
+      ...(learned.contextWindow !== undefined ? [`上下文长度 ${n(learned.contextWindow)} Token`] : []),
+    ];
+    const hint = `；已从服务的报错里记下这个模型的${parts.join('与')}`;
+    const retryWith =
+      learned.maxOutputTokens !== undefined
+        ? learned.maxOutputTokens < sent
+          ? learned.maxOutputTokens
+          : null
+        : learned.contextWindow !== undefined && sent >= learned.contextWindow
+          ? Math.floor(learned.contextWindow / 2)
+          : null;
+    return { choice: next, retryWith, hint };
   }
 
   return {
@@ -197,8 +231,9 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
     async modelLimits(): Promise<{ readonly model: string; readonly contextWindow: number; readonly maxOutputTokens: number; readonly nativeSchema: boolean } | null> {
       const choice = await defaultModel();
       if (!choice.ok || choice.value === null) return null;
-      const { contextWindow, maxOutputTokens, structuredOutput } = choice.value.model.capabilities;
-      return { model: choice.value.model.id, contextWindow, maxOutputTokens, nativeSchema: structuredOutput === 'native' };
+      // 没有依据的上下文按常见的大小估算；没有依据的最大输出不压请求，这里给个用不到的大数。
+      const limits = effectiveLimits(choice.value.model.capabilities);
+      return { model: choice.value.model.id, contextWindow: limits.contextWindow, maxOutputTokens: limits.maxOutputTokens ?? Number.MAX_SAFE_INTEGER, nativeSchema: choice.value.model.capabilities.structuredOutput === 'native' };
     },
 
     /** 纯文本任务（续写、改写等）：不需要通过能力自检。 */
@@ -207,8 +242,14 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
       if (blocked !== null) return err({ code: 'interrupted', detail: blocked });
       const prepared = await prepare(request, false);
       if (!prepared.ok) return prepared;
-      const result = await prepared.value.port.complete(prepared.value.llmRequest, options);
-      return result.ok ? result : err(settings(`调用${prepared.value.name}失败（${result.error.code}）：${result.error.message}`));
+      const first = await prepared.value.port.complete(prepared.value.llmRequest, options);
+      if (first.ok) return first;
+      const learned = await learnFrom(first.error.message, prepared.value.choice, prepared.value.llmRequest.maxOutputTokens);
+      if (learned.retryWith === null) return err(settings(`调用${prepared.value.name}失败（${first.error.code}）：${first.error.message}${learned.hint}`));
+      const again = await prepare({ ...request, maxOutputTokens: Math.min(request.maxOutputTokens, learned.retryWith) }, false, learned.choice);
+      if (!again.ok) return again;
+      const second = await again.value.port.complete(again.value.llmRequest, options);
+      return second.ok ? second : err(settings(`调用${again.value.name}失败（${second.error.code}）：${second.error.message}${learned.hint}`));
     },
 
     /** 结构化任务：经结构化输出管线校验，失败时最多修正 MAX_REPAIRS 次，仍失败则返回暂停原因。 */
@@ -227,8 +268,16 @@ export function modelRunner({ deps, project, defaultModel }: RunnerDeps) {
         const rendered = renderStructuredRepair(issues);
         return rendered.ok ? rendered.value : issues.join('\n');
       };
-      const result = await structured(prepared.value.port, schema, prepared.value.llmRequest, { ...options, maxRepairs: MAX_REPAIRS, repairMessage });
-      return result.ok ? ok({ ...result.value, contextWindow: prepared.value.contextWindow }) : err(settings(describeStructuredFailure(result.error, prepared.value.name)));
+      const run = (p: Prepared) => structured(p.port, schema, p.llmRequest, { ...options, maxRepairs: MAX_REPAIRS, repairMessage });
+      const first = await run(prepared.value);
+      if (first.ok) return ok({ ...first.value, contextWindow: prepared.value.contextWindow });
+      if (first.error.code !== 'call_failed') return err(settings(describeStructuredFailure(first.error, prepared.value.name)));
+      const learned = await learnFrom(first.error.error.message, prepared.value.choice, prepared.value.llmRequest.maxOutputTokens);
+      if (learned.retryWith === null) return err(settings(describeStructuredFailure(first.error, prepared.value.name) + learned.hint));
+      const again = await prepare({ ...request, maxOutputTokens: Math.min(request.maxOutputTokens, learned.retryWith) }, true, learned.choice);
+      if (!again.ok) return again;
+      const second = await run(again.value);
+      return second.ok ? ok({ ...second.value, contextWindow: again.value.contextWindow }) : err(settings(describeStructuredFailure(second.error, again.value.name) + learned.hint));
     },
   };
 }

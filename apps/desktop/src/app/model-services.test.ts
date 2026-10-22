@@ -1,5 +1,6 @@
 import { rmSync } from 'node:fs';
-import { PLACEHOLDER_API_KEY } from '@fudiao/llm';
+import { CONSERVATIVE_CAPABILITIES, PLACEHOLDER_API_KEY } from '@fudiao/llm';
+import { CONSERVATIVE_CONTEXT_WINDOW, CONSERVATIVE_MAX_OUTPUT_TOKENS } from '@fudiao/store';
 import { anthropicChunks, errorBody, openaiChunks, responsesChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
@@ -178,6 +179,10 @@ describe('模型服务', () => {
     }
   });
 
+  it('保守能力的上下文长度与最大输出，与存储层判断“有依据”用的数一致', () => {
+    expect(CONSERVATIVE_CAPABILITIES).toMatchObject({ contextWindow: CONSERVATIVE_CONTEXT_WINDOW, maxOutputTokens: CONSERVATIVE_MAX_OUTPUT_TOKENS });
+  });
+
   it('新模型的能力：保守能力 ← 内置表 ← 服务返回；价格只来自内置表', () => {
     const table = [{ kind: 'openai' as const, modelId: 'known', capabilities: { structuredOutput: 'native' as const, contextWindow: 400_000 }, prices: { input: 1, output: 4 } }];
     expect(resolveModel('openai', 'unknown', null, table)).toMatchObject({ source: 'user', prices: null, capabilities: { structuredOutput: 'prompt', contextWindow: 32_000 } });
@@ -192,6 +197,10 @@ describe('模型服务', () => {
       capabilities: { structuredOutput: 'native', contextWindow: 128_000 },
     });
     expect(resolveModel('anthropic', 'known', null, table).source).toBe('user');
+    // 上下文长度与最大输出只在内置表或服务给出时算有依据。
+    expect(resolveModel('openai', 'unknown', null, table).capabilities.limitsKnown).toEqual({ contextWindow: false, maxOutputTokens: false });
+    expect(resolveModel('openai', 'known', null, table).capabilities.limitsKnown).toEqual({ contextWindow: true, maxOutputTokens: false });
+    expect(resolveModel('openai', 'known', { id: 'known', displayName: null, capabilities: { maxOutputTokens: 16_000 } }, table).capabilities.limitsKnown).toEqual({ contextWindow: true, maxOutputTokens: true });
     // 内置表给 Anthropic 与 OpenAI 官方接口的主流模型标上了模型自带的联网搜索，来源记为内置。
     expect(resolveModel('anthropic', 'claude-sonnet-5-5', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, promptCaching: true }, prices: { input: 2, output: 10, webSearch: 10 } });
     expect(resolveModel('openai', 'gpt-4.1', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, reasoningControl: 'none', contextWindow: 1_047_576 } });
@@ -226,10 +235,18 @@ describe('模型服务', () => {
     const [p] = value(await app.saveProvider(null, { kind: 'openai_compatible', name: 'S', baseUrl: 'https://s.example.test/v1', authMethod: 'api_key', apiKey: 'sk-s' })).providers;
     const [m] = value(await app.addModel(p?.id ?? '', 'm')).models;
     const reply = (text: string) => ({ chunks: openaiChunks('m', { text: [text], end: 'stop' as const }) });
+    // 自检先发一个输出上限极大的探测请求：服务拒绝时的报错里写着真正的最大输出，记进能力（有依据，来源记为服务）。
+    expect(m?.capabilities.limitsKnown).toEqual({ contextWindow: false, maxOutputTokens: false });
+    deps.llmResponses.push({ status: 400, body: JSON.stringify({ error: { message: 'max_tokens is too large: 1000000. This model supports at most 8192 completion tokens, whereas you provided 1000000.' } }) });
     for (let i = 0; i < 3; i++) deps.llmResponses.push(reply(JSON.stringify(SELF_TEST_EXPECTED)));
     const passed = value(await app.runSelfTest(m?.id ?? ''));
     expect(passed.report).toEqual({ passed: true, runs: [null, null, null], reason: null });
-    expect(passed.view.models[0]).toMatchObject({ capabilities: { selfTestPassed: true }, selfTest: { status: 'passed', reason: null } });
+    expect(passed.view.models[0]).toMatchObject({
+      source: 'service',
+      capabilities: { selfTestPassed: true, maxOutputTokens: 8_192, limitsKnown: { contextWindow: false, maxOutputTokens: true } },
+      selfTest: { status: 'passed', reason: null },
+    });
+    expect((deps.llmRequests[0]?.body as { max_tokens?: number }).max_tokens).toBe(1_000_000);
     expect(JSON.stringify(deps.llmRequests.at(-1)?.body)).toContain('能力自检');
 
     const tested = passed.view.models[0];
@@ -237,8 +254,10 @@ describe('模型服务', () => {
     const changed = value(await app.updateModel(tested, { displayName: 'm', capabilities: { ...tested.capabilities, structuredOutput: 'json_object' }, prices: { input: 0.3, output: 1.2 } }));
     expect(changed.models[0]).toMatchObject({ source: 'user', capabilities: { structuredOutput: 'json_object', selfTestPassed: false }, selfTest: null, prices: { input: 0.3, output: 1.2 } });
 
-    deps.llmResponses.push(reply('{"scene":"雨夜当铺"}'));
+    // 探测被照单全收时什么也学不到，登记的最大输出不变。
+    deps.llmResponses.push(reply('OK'), reply('{"scene":"雨夜当铺"}'));
     const failed = value(await app.runSelfTest(m?.id ?? ''));
+    expect(failed.view.models[0]?.capabilities.maxOutputTokens).toBe(8_192);
     expect(failed.report.passed).toBe(false);
     expect(failed.view.models[0]).toMatchObject({ capabilities: { selfTestPassed: false }, selfTest: { status: 'failed', reason: expect.stringMatching(/^第 1 次：输出不符合格式/) } });
   });

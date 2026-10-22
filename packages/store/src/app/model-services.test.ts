@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { APP_DB_FILE, appMigrationsDir, loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
 import {
+  CONSERVATIVE_CONTEXT_WINDOW,
+  CONSERVATIVE_MAX_OUTPUT_TOKENS,
   createModel,
   createProvider,
   deleteModel,
@@ -15,7 +17,7 @@ import {
   setDefaultModel,
   updateModel,
   updateProvider,
-  type StoredCapabilities,
+  StoredCapabilities,
 } from './model-services';
 
 const ctx = { now: '2026-10-08T00:00:00.000Z' };
@@ -39,6 +41,7 @@ function value<T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
 }
 
 const caps: StoredCapabilities = {
+  limitsKnown: { contextWindow: true, maxOutputTokens: true },
   structuredOutput: 'prompt',
   promptCaching: false,
   reasoningControl: 'none',
@@ -126,5 +129,17 @@ describe('应用设置库：模型服务', () => {
     expect(await updateModel(db, m, { displayName: 'x', capabilities: caps, prices: { input: -1, output: 0 } }, ctx)).toMatchObject({ ok: false, error: { code: 'invalid' } });
     m = value(await recordSelfTest(db, m, { status: 'failed', at: ctx.now, reason: '第 1 次：输出不符合格式' }, ctx));
     expect(m).toMatchObject({ capabilities: { selfTestPassed: false }, selfTest: { status: 'failed', reason: '第 1 次：输出不符合格式' } });
+  });
+});
+
+describe('能力记录里的 limitsKnown', () => {
+  it('早先的记录没有这一项：与保守值不同的当作有依据；写了的照写', () => {
+    const base = { structuredOutput: 'prompt' as const, promptCaching: false, reasoningControl: 'none' as const, refusalFallback: 'none' as const, selfTestPassed: false };
+    expect(StoredCapabilities.parse({ ...base, contextWindow: CONSERVATIVE_CONTEXT_WINDOW, maxOutputTokens: CONSERVATIVE_MAX_OUTPUT_TOKENS }).limitsKnown).toEqual({ contextWindow: false, maxOutputTokens: false });
+    expect(StoredCapabilities.parse({ ...base, contextWindow: 200_000, maxOutputTokens: CONSERVATIVE_MAX_OUTPUT_TOKENS }).limitsKnown).toEqual({ contextWindow: true, maxOutputTokens: false });
+    expect(StoredCapabilities.parse({ ...base, contextWindow: 200_000, maxOutputTokens: 64_000, limitsKnown: { contextWindow: false, maxOutputTokens: true } }).limitsKnown).toEqual({
+      contextWindow: false,
+      maxOutputTokens: true,
+    });
   });
 });

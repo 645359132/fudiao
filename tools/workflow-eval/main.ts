@@ -118,10 +118,10 @@ async function main(): Promise<number> {
     const stored = added.value.models[0];
     if (stored === undefined) return fail('模型没有添加');
     if (config !== null) {
-      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...config.model.capabilities, selfTestPassed: false }, prices: config.model.prices });
+      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...config.model.capabilities, selfTestPassed: false, limitsKnown: { contextWindow: true, maxOutputTokens: true } }, prices: config.model.prices });
       if (!updated.ok) return fail(`模型的能力与价格没有保存：${JSON.stringify(updated.error)}`);
     } else if (args.maxOutput !== null) {
-      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...stored.capabilities, maxOutputTokens: args.maxOutput }, prices: stored.prices });
+      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...stored.capabilities, maxOutputTokens: args.maxOutput, limitsKnown: { ...stored.capabilities.limitsKnown, maxOutputTokens: true } }, prices: stored.prices });
       if (!updated.ok) return fail(`模型的最大输出没有保存：${JSON.stringify(updated.error)}`);
     }
 

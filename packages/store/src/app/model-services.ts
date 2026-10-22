@@ -19,18 +19,32 @@ export const DialectOverrides = z
   .strict();
 export type DialectOverrides = z.infer<typeof DialectOverrides>;
 
-/** 与 packages/llm 的 ModelCapabilities 相同（应用层以类型检查保证两者一致）。 */
-export const StoredCapabilities = z.object({
-  structuredOutput: z.enum(['native', 'json_object', 'prompt', 'none']),
-  promptCaching: z.boolean(),
-  reasoningControl: z.enum(['effort', 'none']),
-  refusalFallback: z.enum(['server_default', 'none']),
-  contextWindow: z.number().int().positive(),
-  maxOutputTokens: z.number().int().positive(),
-  selfTestPassed: z.boolean(),
-  // 模型自带的联网搜索（M7-02）。早先保存的记录没有这一项，读出来按不支持处理。
-  webSearch: z.boolean().default(false),
-});
+/** 保守能力里的上下文长度与最大输出（与 packages/llm 的 CONSERVATIVE_CAPABILITIES 相同，应用层的测试保证一致）。 */
+export const CONSERVATIVE_CONTEXT_WINDOW = 32_000;
+export const CONSERVATIVE_MAX_OUTPUT_TOKENS = 4_096;
+
+/** 与 packages/llm 的 ModelCapabilities 相同（应用层以类型检查保证两者一致），另加应用层的记号 limitsKnown。 */
+export const StoredCapabilities = z
+  .object({
+    structuredOutput: z.enum(['native', 'json_object', 'prompt', 'none']),
+    promptCaching: z.boolean(),
+    reasoningControl: z.enum(['effort', 'none']),
+    refusalFallback: z.enum(['server_default', 'none']),
+    contextWindow: z.number().int().positive(),
+    maxOutputTokens: z.number().int().positive(),
+    selfTestPassed: z.boolean(),
+    // 模型自带的联网搜索（M7-02）。早先保存的记录没有这一项，读出来按不支持处理。
+    webSearch: z.boolean().default(false),
+    /**
+     * 上下文长度与最大输出有没有依据（内置表、服务返回、作者填写或从服务的超限报错里学到）。没有依据的是保守值：
+     * 调用器不按保守的最大输出压请求、上下文按常见的大小估算，再从服务的报错里学。早先的记录没有这一项：与保守值不同的当作有依据。
+     */
+    limitsKnown: z.object({ contextWindow: z.boolean(), maxOutputTokens: z.boolean() }).optional(),
+  })
+  .transform((c) => ({
+    ...c,
+    limitsKnown: c.limitsKnown ?? { contextWindow: c.contextWindow !== CONSERVATIVE_CONTEXT_WINDOW, maxOutputTokens: c.maxOutputTokens !== CONSERVATIVE_MAX_OUTPUT_TOKENS },
+  }));
 export type StoredCapabilities = z.infer<typeof StoredCapabilities>;
 
 export const StoredPrices = z.object({
@@ -233,6 +247,8 @@ export type ModelPatch = {
   readonly displayName: string;
   readonly capabilities: StoredCapabilities;
   readonly prices: StoredPrices | null;
+  /** 这次改动的来源：作者编辑（默认）、采用内置表、从服务学到。 */
+  readonly source?: 'service' | 'builtin' | 'user';
 };
 
 /**
@@ -247,10 +263,10 @@ export async function updateModel(port: SqlPort, model: StoredModel, patch: Mode
   const retest = capabilities.data.structuredOutput !== model.capabilities.structuredOutput;
   const caps = retest ? { ...capabilities.data, selfTestPassed: false } : { ...capabilities.data, selfTestPassed: model.capabilities.selfTestPassed };
   return guardedUpdate(port, ModelRow, 'model_profile', model.id, {
-    sql: `UPDATE model_profile SET display_name = ?, capabilities = ?, prices = ?, source = 'user', ${retest ? 'self_test = NULL, ' : ''}
+    sql: `UPDATE model_profile SET display_name = ?, capabilities = ?, prices = ?, source = ?, ${retest ? 'self_test = NULL, ' : ''}
             version = version + 1, updated_at = ?
           WHERE id = ? AND version = ? RETURNING ${MODEL_COLUMNS}`,
-    params: [patch.displayName.trim() || model.modelId, JSON.stringify(caps), prices === null ? null : JSON.stringify(prices.data), ctx.now, model.id, model.version],
+    params: [patch.displayName.trim() || model.modelId, JSON.stringify(caps), prices === null ? null : JSON.stringify(prices.data), patch.source ?? 'user', ctx.now, model.id, model.version],
   });
 }
 

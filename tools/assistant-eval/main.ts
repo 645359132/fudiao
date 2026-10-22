@@ -107,10 +107,10 @@ async function main(): Promise<number> {
     if (stored === undefined) return fail('模型没有添加');
     console.log(`模型：${modelId}（上下文 ${stored.capabilities.contextWindow.toLocaleString('en-US')}，最大输出 ${(maxOutput ?? stored.capabilities.maxOutputTokens).toLocaleString('en-US')}，结构化输出 ${stored.capabilities.structuredOutput}）`);
     if (config !== null) {
-      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...config.model.capabilities, selfTestPassed: false }, prices: config.model.prices });
+      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...config.model.capabilities, selfTestPassed: false, limitsKnown: { contextWindow: true, maxOutputTokens: true } }, prices: config.model.prices });
       if (!updated.ok) return fail(`模型的能力与价格没有保存：${JSON.stringify(updated.error)}`);
     } else if (maxOutput !== null) {
-      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...stored.capabilities, maxOutputTokens: maxOutput }, prices: stored.prices });
+      const updated = await app.updateModel(stored, { displayName: stored.displayName, capabilities: { ...stored.capabilities, maxOutputTokens: maxOutput, limitsKnown: { ...stored.capabilities.limitsKnown, maxOutputTokens: true } }, prices: stored.prices });
       if (!updated.ok) return fail(`模型的最大输出没有保存：${JSON.stringify(updated.error)}`);
     }
     console.log('能力自检…');

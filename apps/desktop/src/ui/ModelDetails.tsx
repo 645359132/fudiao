@@ -41,6 +41,13 @@ const priceText = (m: StoredModel) =>
 
 const optionalNumber = (v: string) => (v.trim() === '' ? undefined : Number(v));
 
+/** 上下文长度与最大输出；没有依据的写“未登记”（请求按需要发出，真实上限从服务的报错里学）。 */
+const limitsText = (m: StoredModel) => {
+  const n = (x: number) => x.toLocaleString('en-US');
+  const known = m.capabilities.limitsKnown;
+  return `上下文 ${known.contextWindow ? n(m.capabilities.contextWindow) : '未登记'} · 最大输出 ${known.maxOutputTokens ? n(m.capabilities.maxOutputTokens) : '未登记'}`;
+};
+
 /** 作者覆盖模型的能力与价格（B56）。改结构化输出方式后须重新自检。 */
 function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly onDone: () => void }) {
   const save = useApp((s) => s.updateModel);
@@ -52,8 +59,9 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
   const [promptCaching, setCaching] = useState(c.promptCaching);
   const [reasoning, setReasoning] = useState(c.reasoningControl === 'effort');
   const [webSearch, setWebSearch] = useState(c.webSearch);
-  const [contextWindow, setContext] = useState(String(c.contextWindow));
-  const [maxOutput, setMaxOutput] = useState(String(c.maxOutputTokens));
+  // 没有依据的上下文长度与最大输出不显示保守值（会被当成真实上限）：留空，由服务的报错来学；填了数字就是有依据。
+  const [contextWindow, setContext] = useState(c.limitsKnown.contextWindow ? String(c.contextWindow) : '');
+  const [maxOutput, setMaxOutput] = useState(c.limitsKnown.maxOutputTokens ? String(c.maxOutputTokens) : '');
   const [input, setInput] = useState(p === null ? '' : String(p.input));
   const [output, setOutput] = useState(p === null ? '' : String(p.output));
   const [cacheRead, setCacheRead] = useState(p?.cacheRead === undefined ? '' : String(p.cacheRead));
@@ -82,8 +90,9 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
       promptCaching,
       reasoningControl: reasoning ? 'effort' : 'none',
       webSearch,
-      contextWindow: Number(contextWindow),
-      maxOutputTokens: Number(maxOutput),
+      contextWindow: contextWindow.trim() === '' ? c.contextWindow : Number(contextWindow),
+      maxOutputTokens: maxOutput.trim() === '' ? c.maxOutputTokens : Number(maxOutput),
+      limitsKnown: { contextWindow: contextWindow.trim() !== '' || c.limitsKnown.contextWindow, maxOutputTokens: maxOutput.trim() !== '' || c.limitsKnown.maxOutputTokens },
     };
     void save(model.id, { displayName, capabilities, prices }).then((done) => {
       if (done) onDone();
@@ -127,12 +136,12 @@ function ModelEditor({ model, onDone }: { readonly model: StoredModel; readonly 
           模型自带的联网搜索（Anthropic 与 OpenAI 官方接口的服务端搜索工具）
         </label>
         <label>
-          上下文长度（Token）
-          <input type="number" min={1} value={contextWindow} onChange={(e) => setContext(e.currentTarget.value)} />
+          上下文长度（Token；不知道可留空，会从服务的报错里学）
+          <input type="number" min={1} placeholder="未登记" value={contextWindow} onChange={(e) => setContext(e.currentTarget.value)} />
         </label>
         <label>
-          最大输出（Token）
-          <input type="number" min={1} value={maxOutput} onChange={(e) => setMaxOutput(e.currentTarget.value)} />
+          最大输出（Token；不知道可留空，能力自检会探测）
+          <input type="number" min={1} placeholder="未登记" value={maxOutput} onChange={(e) => setMaxOutput(e.currentTarget.value)} />
         </label>
         <fieldset>
           <legend>价格（每百万 Token，美元；输入与输出都填写才计算费用）</legend>
@@ -218,7 +227,7 @@ export function ModelRow({ model, isDefault }: { readonly model: StoredModel; re
       </button>
       <span className="model-facts" role="note" aria-label={`${model.displayName} 的能力`}>
         {model.modelId === model.displayName ? '' : `${model.modelId} · `}结构化输出：{STRUCTURED[model.capabilities.structuredOutput]}
-        {model.capabilities.webSearch ? ' · 自带联网搜索' : ''} · {selfTestText(model)} · {priceText(model)}
+        {model.capabilities.webSearch ? ' · 自带联网搜索' : ''} · {limitsText(model)} · {selfTestText(model)} · {priceText(model)}
       </span>
       {report !== undefined && (
         <span className={report !== 'testing' && !report.ok ? 'report failed' : 'report'} role="status" aria-label={`${model.displayName} 的连接测试`}>

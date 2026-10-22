@@ -4,6 +4,7 @@ import { renderConnectionTest, renderSelfTest, SELF_TEST_EXPECTED, SelfTestOutpu
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RetryPolicy } from '@fudiao/llm';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { limitError } from '../testing/models';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -34,6 +35,7 @@ async function setup(options: { prices?: boolean; selfTested?: boolean; retry?: 
   if (m === undefined) throw new Error('样本');
   if (options.prices === true) value(await app.updateModel(m, { displayName: 'm', capabilities: m.capabilities, prices: { input: 2, output: 8 } }));
   if (options.selfTested === true) {
+    deps.llmResponses.push(limitError(4_096));
     for (let i = 0; i < 3; i++) deps.llmResponses.push(reply(JSON.stringify(SELF_TEST_EXPECTED)));
     expect(value(await app.runSelfTest(m.id)).report.passed).toBe(true);
   }
@@ -50,6 +52,46 @@ describe('模型调用', () => {
       ok: false,
       error: { code: 'settings', detail: '还没有设置默认模型：请在“模型服务”中添加服务与模型' },
     });
+  });
+
+  it('最大输出没有依据的模型：请求按自己的需要发出，不压到保守的 4,096', async () => {
+    const { deps, app } = await setup();
+    deps.llmResponses.push(reply('好'));
+    value(await app.runner.text({ prompt: prompt(renderConnectionTest()), maxOutputTokens: 36_000 }));
+    expect((deps.llmRequests[0]?.body as { max_tokens?: number }).max_tokens).toBe(36_000);
+  });
+
+  it('服务以超限拒绝时：从报错里学到最大输出、记进模型并按它重发一次；学到上下文长度时记下、错误里说明', async () => {
+    const { deps, app } = await setup();
+    deps.llmResponses.push(
+      { status: 400, body: JSON.stringify({ error: { message: 'max_tokens is too large: 36000. This model supports at most 8192 completion tokens, whereas you provided 36000.' } }) },
+      reply('好'),
+    );
+    const result = value(await app.runner.text({ prompt: prompt(renderConnectionTest()), maxOutputTokens: 36_000 }));
+    expect(result.text).toBe('好');
+    expect(deps.llmRequests.map((r) => (r.body as { max_tokens?: number }).max_tokens)).toEqual([36_000, 8_192]);
+    expect(value(await app.loadModelServices()).models[0]).toMatchObject({ source: 'service', capabilities: { maxOutputTokens: 8_192, limitsKnown: { maxOutputTokens: true, contextWindow: false } } });
+    // 之后的请求按学到的上限压。
+    deps.llmResponses.push(reply('好'));
+    value(await app.runner.text({ prompt: prompt(renderConnectionTest()), maxOutputTokens: 36_000 }));
+    expect((deps.llmRequests.at(-1)?.body as { max_tokens?: number }).max_tokens).toBe(8_192);
+
+    deps.llmResponses.push({
+      status: 400,
+      body: JSON.stringify({ error: { message: "This model's maximum context length is 16000 tokens. However, you requested 20000 tokens (12000 in the messages, 8000 in the completion)." } }),
+    });
+    const failed = await app.runner.text({ prompt: prompt(renderConnectionTest()), maxOutputTokens: 36_000 });
+    expect(failed).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('已从服务的报错里记下这个模型的上下文长度 16,000 Token') } });
+    expect(value(await app.loadModelServices()).models[0]).toMatchObject({ capabilities: { contextWindow: 16_000, limitsKnown: { contextWindow: true, maxOutputTokens: true } } });
+    expect(deps.llmRequests).toHaveLength(4);
+  });
+
+  it('结构化任务同样：超限报错后按学到的上限重发一次', async () => {
+    const { deps, app } = await setup({ selfTested: true });
+    deps.llmResponses.push({ status: 400, body: JSON.stringify({ error: { message: 'Invalid max_tokens value, the valid range of max_tokens is [1, 512]' } }) }, reply(JSON.stringify(SELF_TEST_EXPECTED)));
+    const fixed = value(await app.runner.structured({ prompt: prompt(renderSelfTest()), maxOutputTokens: 1_000 }, SelfTestOutput));
+    expect(fixed.value).toEqual(SELF_TEST_EXPECTED);
+    expect(deps.llmRequests.slice(-2).map((r) => (r.body as { max_tokens?: number }).max_tokens)).toEqual([1_000, 512]);
   });
 
   it('每次调用都写入作品库的调用记录：模板版本、用量与费用（价格未配置时为未知）', async () => {

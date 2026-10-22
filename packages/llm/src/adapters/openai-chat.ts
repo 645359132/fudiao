@@ -5,6 +5,7 @@ import { requestHash } from '../request-hash';
 import type { CallOptions, Effort, LlmError, LlmPort, LlmRequest, LlmResult, LlmUsage } from '../types';
 import { errList, MAX_LISTED_MODELS, okList, type ListedModel, type ModelLister } from '../models';
 import { mapSdkError, streamError } from './errors';
+import { listedLimits } from './listed-limits';
 import { unsupportedTools } from './server-tools';
 import { ThinkFilter } from './think-filter';
 import { OPENAI_DIALECT, type ChatDialect } from './dialect';
@@ -52,7 +53,7 @@ export class OpenAIChatAdapter implements LlmPort, ModelLister {
     const out: ListedModel[] = [];
     try {
       for await (const m of this.client.models.list(options.signal === undefined ? {} : { signal: options.signal })) {
-        out.push({ id: m.id, displayName: null, capabilities: {} });
+        out.push({ id: m.id, displayName: null, capabilities: listedLimits(m) });
         if (out.length >= MAX_LISTED_MODELS) break;
       }
     } catch (error) {

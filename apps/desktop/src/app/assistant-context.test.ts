@@ -47,9 +47,11 @@ type Big = Awaited<ReturnType<typeof bigWork>>;
 async function setWindow({ app, deps }: Big, contextWindow: number, structuredOutput?: 'native' | 'prompt') {
   const model = value(await app.loadModelServices()).models[0]!;
   const output = structuredOutput ?? model.capabilities.structuredOutput;
-  value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, contextWindow, maxOutputTokens: 8_000, structuredOutput: output }, prices: model.prices }));
+  value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, contextWindow, maxOutputTokens: 8_000, structuredOutput: output, limitsKnown: { contextWindow: true, maxOutputTokens: true } }, prices: model.prices }));
   // 改了结构化输出方式须重新自检。
   if (output !== model.capabilities.structuredOutput) {
+    // 自检先探测最大输出：服务照单全收，什么也学不到，登记的 8,000 保持原样。
+    deps.llmResponses.push(reply('OK'));
     for (let i = 0; i < 3; i++) deps.llmResponses.push(reply(JSON.stringify(SELF_TEST_EXPECTED)));
     if (!value(await app.runSelfTest(model.id)).report.passed) throw new Error('能力自检没有通过');
   }

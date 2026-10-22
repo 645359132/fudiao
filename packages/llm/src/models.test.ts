@@ -70,6 +70,24 @@ describe('模型列表', () => {
     }
   });
 
+  it('兼容接口的列表带了上下文或最大输出字段时采用（中转站、vLLM、LiteLLM 的写法）', async () => {
+    const data = [
+      { id: 'router', object: 'model', context_length: 131072, top_provider: { max_completion_tokens: 16384 } },
+      { id: 'vllm', object: 'model', max_model_len: 32768 },
+      { id: 'litellm', object: 'model', max_input_tokens: 200000, max_output_tokens: 8192 },
+      { id: 'plain', object: 'model', context_length: null },
+    ];
+    const adapter = new OpenAIChatAdapter({ baseURL: 'http://127.0.0.1:11434/v1', fetch: fakeFetch([{ body: JSON.stringify({ object: 'list', data }) }]).fetch, maxRetries: 0 });
+    const listed = await adapter.listModels();
+    if (!listed.ok) throw new Error(listed.error.message);
+    expect(listed.value.map((m) => [m.id, m.capabilities])).toEqual([
+      ['litellm', { contextWindow: 200_000, maxOutputTokens: 8_192 }],
+      ['plain', {}],
+      ['router', { contextWindow: 131_072, maxOutputTokens: 16_384 }],
+      ['vllm', { contextWindow: 32_768 }],
+    ]);
+  });
+
   it('获取失败时给出统一的错误', async () => {
     const adapter = new OpenAIAdapter({ apiKey: 'k', fetch: fakeFetch([{ status: 401, body: errorBody(401) }]).fetch, maxRetries: 0 });
     expect(await adapter.listModels()).toMatchObject({ ok: false, error: { code: 'auth', status: 401 } });

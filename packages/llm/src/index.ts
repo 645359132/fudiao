@@ -49,3 +49,5 @@ export type {
   WebSearchOutcome,
 } from './types';
 export { CONSERVATIVE_CAPABILITIES } from './types';
+export { parseLimitError, probeMaxOutput, PROBE_MAX_OUTPUT_TOKENS } from './limits';
+export type { LearnedLimits, ProbePrompt } from './limits';

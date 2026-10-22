@@ -28,7 +28,7 @@ function value<T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
   return r.value;
 }
 
-const caps: StoredCapabilities = { structuredOutput: 'native', promptCaching: true, reasoningControl: 'effort', refusalFallback: 'none', contextWindow: 1_000_000, maxOutputTokens: 128_000, selfTestPassed: false, webSearch: true };
+const caps: StoredCapabilities = { limitsKnown: { contextWindow: true, maxOutputTokens: true }, structuredOutput: 'native', promptCaching: true, reasoningControl: 'effort', refusalFallback: 'none', contextWindow: 1_000_000, maxOutputTokens: 128_000, selfTestPassed: false, webSearch: true };
 
 describe('应用设置库：搜索服务（B84，app 迁移 0002 至 0004）', () => {
   it('从 0003 升级到 0004：已有的服务（含沿用的 Key）与默认项保留，model_id 为空', async () => {

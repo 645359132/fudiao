@@ -737,6 +737,8 @@ describe('模型服务', () => {
     expect(within(card).getByRole('note', { name: '模型 Y 的能力' }).textContent).toContain('未自检');
 
     const good = JSON.stringify(SELF_TEST_EXPECTED);
+    // 自检先探测最大输出（服务照单全收时学不到），再连测三次。
+    deps.llmResponses.push({ chunks: anthropicChunks('model-y', { text: ['OK'], end: 'stop' }) });
     for (let i = 0; i < 3; i++) deps.llmResponses.push({ chunks: anthropicChunks('model-y', { text: [good], end: 'stop' }) });
     await user.click(within(card).getByRole('button', { name: '能力自检' }));
     await waitFor(() => expect(within(card).getByRole('note', { name: '模型 Y 的能力' }).textContent).toContain('自检通过'));
@@ -2501,7 +2503,7 @@ describe('AI 助手的输入框：模型、思考深度与上下文用量', () =
     const services = await service.loadModelServices();
     if (!services.ok) throw new Error('模型服务');
     const model = services.value.models[0]!;
-    expect((await service.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 100_000 }, prices: model.prices })).ok).toBe(true);
+    expect((await service.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, reasoningControl: 'effort', contextWindow: 100_000, limitsKnown: { ...model.capabilities.limitsKnown, contextWindow: true } }, prices: model.prices })).ok).toBe(true);
     await store.getState().loadAssistantModels();
     await user.click(await screen.findByRole('button', { name: '思考：中' }));
     await user.click(await screen.findByRole('menuitemradio', { name: /^高/ }));

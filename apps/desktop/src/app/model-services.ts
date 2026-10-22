@@ -5,13 +5,16 @@ import {
   CONSERVATIVE_CAPABILITIES,
   isModelLister,
   PLACEHOLDER_API_KEY,
+  probeMaxOutput,
   runSelfTest,
   testConnection,
   type ConnectionReport,
+  type LearnedLimits,
   type ListedModel,
   type LlmPort,
   type ModelCapabilities,
   type ModelLister,
+  type ModelProfile,
   type SelfTestReport,
 } from '@fudiao/llm';
 import { checkSelfTest, renderConnectionTest, renderSelfTest, SelfTestOutput } from '@fudiao/prompts';
@@ -41,10 +44,25 @@ import {
 import { BUILTIN_MODELS, builtinModel, type BuiltinModel } from './builtin-models';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE } from './thinking';
+import { clipOutput, portCapabilities } from './model-limits';
 import type { AppDeps, CredentialStatus, KeyHeader } from './ports';
 
-/** 新添加的模型按保守能力处理（施工文档第六章）。存储与模型端口的能力描述须一致，否则这里通不过类型检查。 */
-const NEW_MODEL_CAPABILITIES: StoredCapabilities = CONSERVATIVE_CAPABILITIES satisfies ModelCapabilities;
+/**
+ * 新添加的模型按保守能力处理（施工文档第六章）。存储与模型端口的能力描述须一致，否则这里通不过类型检查。
+ * 上下文长度与最大输出没有依据：调用器不按它们压请求，从服务的超限报错里学。
+ */
+const NEW_MODEL_CAPABILITIES: StoredCapabilities = { ...(CONSERVATIVE_CAPABILITIES satisfies ModelCapabilities), limitsKnown: { contextWindow: false, maxOutputTokens: false } };
+
+/**
+ * 交给模型端口的能力描述。allow 为这次请求要用的输出上限：最大输出没有依据时按它放开（端口与自检不按保守值压请求，
+ * 超限由服务报错、再学）。
+ */
+const profileOf = (provider: Pick<Provider, 'id'>, model: StoredModel, allow?: number): ModelProfile => ({
+  provider: provider.id,
+  model: model.modelId,
+  capabilities: { ...portCapabilities(model.capabilities), ...(allow !== undefined && !model.capabilities.limitsKnown.maxOutputTokens && { maxOutputTokens: allow }) },
+  ...(model.prices !== null && { prices: model.prices }),
+});
 
 /** 各服务种类的默认地址与认证方式。地址是服务的接口地址，不是模型名称（硬性规则 13 只禁止写死模型）。 */
 export const PROVIDER_PRESETS: Readonly<Record<ProviderKind, { readonly label: string; readonly baseUrl: string; readonly keyHeader: KeyHeader | null }>> = {
@@ -88,8 +106,16 @@ export function resolveModel(
 ): { capabilities: StoredCapabilities; prices: StoredPrices | null; source: 'service' | 'builtin' | 'user'; displayName: string } {
   const builtin = builtinModel(kind, modelId, table);
   const fromService = listed !== null && Object.keys(listed.capabilities).length > 0;
+  // 上下文长度与最大输出只在内置表或服务给出时算有依据；否则是保守值，由调用器从服务的报错里学。
+  const known = (key: 'contextWindow' | 'maxOutputTokens') => listed?.capabilities[key] !== undefined || builtin?.capabilities[key] !== undefined;
   return {
-    capabilities: { ...NEW_MODEL_CAPABILITIES, ...builtin?.capabilities, ...(listed?.capabilities ?? {}), selfTestPassed: false },
+    capabilities: {
+      ...NEW_MODEL_CAPABILITIES,
+      ...builtin?.capabilities,
+      ...(listed?.capabilities ?? {}),
+      selfTestPassed: false,
+      limitsKnown: { contextWindow: known('contextWindow'), maxOutputTokens: known('maxOutputTokens') },
+    },
     prices: builtin?.prices ?? null,
     source: fromService ? 'service' : builtin !== undefined ? 'builtin' : listed !== null ? 'service' : 'user',
     // 按后缀对上的内置条目只借用能力与价格，显示名仍是服务上的模型名。
@@ -274,10 +300,46 @@ export function modelServices(deps: AppDeps) {
       const updated = await updateModel(
         p.value,
         model,
-        { displayName: model.displayName, capabilities: { ...model.capabilities, ...builtin.capabilities }, prices: builtin.prices ?? model.prices },
+        {
+          displayName: model.displayName,
+          capabilities: {
+            ...model.capabilities,
+            ...builtin.capabilities,
+            limitsKnown: {
+              contextWindow: model.capabilities.limitsKnown.contextWindow || builtin.capabilities.contextWindow !== undefined,
+              maxOutputTokens: model.capabilities.limitsKnown.maxOutputTokens || builtin.capabilities.maxOutputTokens !== undefined,
+            },
+          },
+          prices: builtin.prices ?? model.prices,
+          source: 'builtin',
+        },
         ctx(),
       );
       return updated.ok ? view() : err(repo(updated.error));
+    },
+
+    /**
+     * 调用器从服务的超限报错里学到的上限记进模型（需求 B56）：以服务说的为准，连同“有依据”的记号，来源记为服务。
+     * 返回更新后的模型，调用器据此重发。
+     */
+    async learnModelLimits(modelId: string, learned: LearnedLimits): Promise<Result<StoredModel, AppError>> {
+      const p = await port();
+      if (!p.ok) return p;
+      const current = await view();
+      if (!current.ok) return current;
+      const model = current.value.models.find((m) => m.id === modelId);
+      if (model === undefined) return err({ code: 'not_found' });
+      const capabilities: StoredCapabilities = {
+        ...model.capabilities,
+        ...(learned.maxOutputTokens !== undefined && { maxOutputTokens: learned.maxOutputTokens }),
+        ...(learned.contextWindow !== undefined && { contextWindow: learned.contextWindow }),
+        limitsKnown: {
+          contextWindow: model.capabilities.limitsKnown.contextWindow || learned.contextWindow !== undefined,
+          maxOutputTokens: model.capabilities.limitsKnown.maxOutputTokens || learned.maxOutputTokens !== undefined,
+        },
+      };
+      const updated = await updateModel(p.value, model, { displayName: model.displayName, capabilities, prices: model.prices, source: 'service' }, ctx());
+      return updated.ok ? ok(updated.value) : err(repo(updated.error));
     },
 
     /** 能力自检（B57）：连续三次通过才可用于必须输出结构化数据的任务；结果写入模型记录。 */
@@ -291,17 +353,42 @@ export function modelServices(deps: AppDeps) {
       if (model === undefined || provider === undefined) return err({ code: 'not_found' });
       const prompt = renderSelfTest();
       if (!prompt.ok || prompt.value.output === undefined) return err(library(prompt.ok ? '自检模板缺少输出结构' : prompt.error));
+      const adapter = deps.llm.forProvider(provider);
+      const options = signal === undefined ? {} : { signal };
+      // 先探测最大输出：发一个输出上限极大的最小请求，服务拒绝时的报错里写着真正的上限，学到就记进能力（以服务说的为准，来源记为服务）。
+      // 服务照单全收时学不到，保持原样。
+      let target = model;
+      const probe = renderConnectionTest();
+      if (probe.ok) {
+        const learned = await probeMaxOutput(adapter, profileOf(provider, model), { template: probe.value.template, system: probe.value.system, messages: probe.value.messages }, options);
+        if (learned !== null && (learned !== model.capabilities.maxOutputTokens || !model.capabilities.limitsKnown.maxOutputTokens)) {
+          const updated = await updateModel(
+            p.value,
+            model,
+            {
+              displayName: model.displayName,
+              capabilities: { ...model.capabilities, maxOutputTokens: learned, limitsKnown: { ...model.capabilities.limitsKnown, maxOutputTokens: true } },
+              prices: model.prices,
+              source: 'service',
+            },
+            ctx(),
+          );
+          if (!updated.ok) return err(repo(updated.error));
+          target = updated.value;
+        }
+      }
+      // 答案很短，但思考计入输出的服务（例如 DeepSeek）要留出思考的余量；格式检查用浅的思考就够。
+      const budget = clipOutput(target.capabilities, 1_024 + THINKING_ALLOWANCE);
       const report = await runSelfTest(
-        deps.llm.forProvider(provider),
-        { provider: provider.id, model: model.modelId, capabilities: model.capabilities, ...(model.prices !== null && { prices: model.prices }) },
+        adapter,
+        profileOf(provider, target, budget),
         { template: prompt.value.template, system: prompt.value.system, messages: prompt.value.messages, output: prompt.value.output },
         SelfTestOutput,
         checkSelfTest,
-        signal === undefined ? {} : { signal },
-        // 答案很短，但思考计入输出的服务（例如 DeepSeek）要留出思考的余量；格式检查用浅的思考就够。
-        { maxOutputTokens: 1_024 + THINKING_ALLOWANCE, effort: 'low' },
+        options,
+        { maxOutputTokens: budget, effort: 'low' },
       );
-      const recorded = await recordSelfTest(p.value, model, { status: report.passed ? 'passed' : 'failed', at: deps.clock.now(), reason: report.reason }, ctx());
+      const recorded = await recordSelfTest(p.value, target, { status: report.passed ? 'passed' : 'failed', at: deps.clock.now(), reason: report.reason }, ctx());
       if (!recorded.ok) return err(repo(recorded.error));
       const next = await view();
       return next.ok ? ok({ view: next.value, report }) : next;
@@ -332,7 +419,7 @@ export function modelServices(deps: AppDeps) {
       if (!prompt.ok) return err(library(prompt.error));
       const report = await testConnection(
         deps.llm.forProvider(provider),
-        { provider: provider.id, model: model.modelId, capabilities: model.capabilities, ...(model.prices !== null && { prices: model.prices }) },
+        profileOf(provider, model),
         prompt.value,
         () => Date.parse(deps.clock.now()),
         signal,

@@ -4,6 +4,7 @@ import type { WritingContextInput } from '@fudiao/context';
 import { createEntityMatcher } from '@fudiao/editor';
 import type { Chapter, Entity, Fact, Project, Relationship, StoredModel } from '@fudiao/store';
 import { relationApplies } from '@fudiao/writing';
+import { effectiveLimits } from './model-limits';
 
 /** 编辑器中的选区（或光标，此时 from 与 to 相同），位置是段落标识加段内下标。 */
 export type EditorSelection = {
@@ -23,7 +24,7 @@ export const MAX_CONTEXT_BUDGET = 32_000;
 
 export function contextBudget(model: StoredModel | null): number {
   if (model === null) return DEFAULT_CONTEXT_BUDGET;
-  return Math.min(Math.floor(model.capabilities.contextWindow * 0.6), MAX_CONTEXT_BUDGET);
+  return Math.min(Math.floor(effectiveLimits(model.capabilities).contextWindow * 0.6), MAX_CONTEXT_BUDGET);
 }
 
 type Para = { readonly id: string; readonly text: string };

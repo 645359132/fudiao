@@ -50,7 +50,10 @@ export type QuickBookDeps = {
   readonly runner: ReturnType<typeof modelRunner>;
   readonly planningView: () => Promise<Result<PlanningView, AppError>>;
   readonly defaultModel: () => Promise<
-    Result<{ readonly model: { readonly displayName: string; readonly capabilities: { readonly selfTestPassed: boolean; readonly structuredOutput: string; readonly maxOutputTokens: number } } } | null, AppError>
+    Result<
+      { readonly model: { readonly displayName: string; readonly capabilities: { readonly selfTestPassed: boolean; readonly structuredOutput: string; readonly maxOutputTokens: number; readonly limitsKnown: { readonly maxOutputTokens: boolean } } } } | null,
+      AppError
+    >
   >;
   /** 修改作品信息（作品名改了时同步作品列表）。 */
   readonly updateWorkInfo: (patch: ProjectPatch) => Promise<Result<unknown, AppError>>;
@@ -101,7 +104,8 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
             : null;
       const chapters = plan.value.chapters;
       return ok({
-        model: { ready: problem === null, name: model?.displayName ?? null, problem, maxOutputTokens: model?.capabilities.maxOutputTokens ?? null },
+        // 最大输出没有依据时为 null：请求不按保守值压，不在这里拦。
+        model: { ready: problem === null, name: model?.displayName ?? null, problem, maxOutputTokens: model?.capabilities.limitsKnown.maxOutputTokens === true ? model.capabilities.maxOutputTokens : null },
         outline: plan.value.outline.trim() !== '',
         characters: plan.value.characters.length,
         chapters: chapters.length,
