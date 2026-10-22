@@ -86,13 +86,14 @@ export function resolveModel(
   listed: ListedModel | null,
   table: readonly BuiltinModel[] = BUILTIN_MODELS,
 ): { capabilities: StoredCapabilities; prices: StoredPrices | null; source: 'service' | 'builtin' | 'user'; displayName: string } {
-  const builtin = table.find((b) => b.kind === kind && b.modelId === modelId);
+  const builtin = builtinModel(kind, modelId, table);
   const fromService = listed !== null && Object.keys(listed.capabilities).length > 0;
   return {
     capabilities: { ...NEW_MODEL_CAPABILITIES, ...builtin?.capabilities, ...(listed?.capabilities ?? {}), selfTestPassed: false },
     prices: builtin?.prices ?? null,
     source: fromService ? 'service' : builtin !== undefined ? 'builtin' : listed !== null ? 'service' : 'user',
-    displayName: listed?.displayName ?? builtin?.displayName ?? modelId,
+    // 按后缀对上的内置条目只借用能力与价格，显示名仍是服务上的模型名。
+    displayName: listed?.displayName ?? (builtin !== undefined && builtin.modelId === modelId.trim() ? builtin.displayName : undefined) ?? modelId,
   };
 }
 

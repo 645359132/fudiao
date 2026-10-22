@@ -77,5 +77,28 @@ export const BUILTIN_MODELS: readonly BuiltinModel[] = [
   openai('gpt-4.1', { structuredOutput: 'native', promptCaching: false, reasoningControl: 'none', contextWindow: 1_047_576, maxOutputTokens: 32_768, webSearch: true }, 2, 8, 0.5),
 ];
 
-/** 内置表中这个模型的条目；没有时为 undefined。 */
-export const builtinModel = (kind: ProviderKind, modelId: string): BuiltinModel | undefined => BUILTIN_MODELS.find((b) => b.kind === kind && b.modelId === modelId.trim());
+/**
+ * 内置表中这个模型的条目；没有时为 undefined。
+ * 中转站给 DeepSeek 起的名字常带版本与构建后缀（deepseek-v4.1-flash:1017、deepseek/DeepSeek-V4-Pro）：
+ * 兼容接口的服务按名字里的 deepseek 加 flash 或 pro 对到内置条目（deepseekAlias）；其他种类的服务只按完整的模型名。
+ */
+export function builtinModel(kind: ProviderKind, modelId: string, table: readonly BuiltinModel[] = BUILTIN_MODELS): BuiltinModel | undefined {
+  const id = modelId.trim();
+  const exact = table.find((b) => b.kind === kind && b.modelId === id);
+  if (exact !== undefined || kind !== 'openai_compatible') return exact;
+  const alias = deepseekAlias(id);
+  return alias === null ? undefined : table.find((b) => b.kind === kind && b.modelId === alias);
+}
+
+/** 兼容接口上 DeepSeek 模型名的归一：去掉厂商前缀与冒号后的构建号，按 flash 或 pro 对到官方的模型名；对不上时为 null。 */
+export function deepseekAlias(modelId: string): 'deepseek-flash' | 'deepseek-v4-pro' | null {
+  const name = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/^.*\//, '')
+    .replace(/:.*$/, '');
+  if (!name.includes('deepseek')) return null;
+  if (/(^|[^a-z])flash([^a-z]|$)/.test(name)) return 'deepseek-flash';
+  if (/(^|[^a-z])pro([^a-z]|$)/.test(name)) return 'deepseek-v4-pro';
+  return null;
+}

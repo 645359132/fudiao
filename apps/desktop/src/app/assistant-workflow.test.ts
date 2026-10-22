@@ -27,7 +27,8 @@ async function setup() {
   const app = createAppService(deps);
   value(await app.loadLibrary());
   value(await app.createWork('新作品'));
-  await addTestedModel(app, deps);
+  // 一键成书的一步要写几万 Token：登记够大的最大输出，“检查模型”才放行。
+  await addTestedModel(app, deps, { maxOutputTokens: 64_000 });
   return { deps, app };
 }
 

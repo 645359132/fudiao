@@ -26,7 +26,7 @@ export type BookSeed = BookSeedData;
 /** 快速成书各步的状态：每一步做完没有，由作品里已有的数据得出。 */
 export type QuickBookStatus = {
   /** 默认模型是否可以用于结构化任务（已设置且通过能力自检）；problem 是不能用的原因。 */
-  readonly model: { readonly ready: boolean; readonly name: string | null; readonly problem: string | null };
+  readonly model: { readonly ready: boolean; readonly name: string | null; readonly problem: string | null; readonly maxOutputTokens: number | null };
   readonly outline: boolean;
   readonly characters: number;
   readonly chapters: number;
@@ -36,8 +36,10 @@ export type QuickBookStatus = {
   readonly pendingIssues: number;
 };
 
-/** 作品骨架的输出上限：大纲随章数变长，另留出思考的余量。 */
-export const seedOutputTokens = (chapterCount: number) => Math.min(16_000, 2_000 + chapterCount * 150) + THINKING_ALLOWANCE;
+/** 作品骨架要写的内容最多约多少 Token：大纲随章数变长。工作流的“检查模型”按它核对模型的最大输出。 */
+export const seedContentTokens = (chapterCount: number) => Math.min(16_000, 2_000 + chapterCount * 150);
+/** 作品骨架的输出上限：内容之外另留出思考的余量。 */
+export const seedOutputTokens = (chapterCount: number) => seedContentTokens(chapterCount) + THINKING_ALLOWANCE;
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
@@ -48,7 +50,7 @@ export type QuickBookDeps = {
   readonly runner: ReturnType<typeof modelRunner>;
   readonly planningView: () => Promise<Result<PlanningView, AppError>>;
   readonly defaultModel: () => Promise<
-    Result<{ readonly model: { readonly displayName: string; readonly capabilities: { readonly selfTestPassed: boolean; readonly structuredOutput: string } } } | null, AppError>
+    Result<{ readonly model: { readonly displayName: string; readonly capabilities: { readonly selfTestPassed: boolean; readonly structuredOutput: string; readonly maxOutputTokens: number } } } | null, AppError>
   >;
   /** 修改作品信息（作品名改了时同步作品列表）。 */
   readonly updateWorkInfo: (patch: ProjectPatch) => Promise<Result<unknown, AppError>>;
@@ -99,7 +101,7 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
             : null;
       const chapters = plan.value.chapters;
       return ok({
-        model: { ready: problem === null, name: model?.displayName ?? null, problem },
+        model: { ready: problem === null, name: model?.displayName ?? null, problem, maxOutputTokens: model?.capabilities.maxOutputTokens ?? null },
         outline: plan.value.outline.trim() !== '',
         characters: plan.value.characters.length,
         chapters: chapters.length,

@@ -44,8 +44,10 @@ export const MAX_FACTS = 30;
 /** 交给写手的人物关系最多这么多条（两端都出场的在前）。 */
 export const MAX_RELATIONS = 30;
 
-/** 每段的输出上限：目标字数的两倍，另留出思考的余量。 */
-const segmentOutputTokens = (words: number) => words * 2 + THINKING_ALLOWANCE;
+/** 写手一段要写的内容最多约多少 Token：目标字数的两倍。 */
+export const segmentContentTokens = (words: number) => words * 2;
+/** 每段的输出上限：内容之外另留出思考的余量。 */
+const segmentOutputTokens = (words: number) => segmentContentTokens(words) + THINKING_ALLOWANCE;
 
 export type WriterOutcome = {
   /** written：本章写完；cancelled：作者取消；stopped：中途停下（原因见 reason），已写入的段保留，可以续写。 */

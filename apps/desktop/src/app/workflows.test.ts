@@ -91,6 +91,26 @@ describe('写作工作流（B78）', () => {
     expect(assumed.calls).toBeGreaterThan(empty.calls);
   });
 
+  it('检查模型：登记的最大输出不够这个工作流要写的内容时停在第 1 步并说明；只够写内容时在说明里提醒；登记够了不再提醒', async () => {
+    const { deps, app } = await setup();
+    // 测试里的模型没有登记能力，最大输出按保守的 4,096 计；20 章 3,000 字的计划草稿要写约 24,000 Token。
+    const big = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, chapters: 20, wordsPerChapter: 3000 }, mode: 'auto', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(big.run.id));
+    expect(out.view.state).toBe('failed');
+    expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringMatching(/最大输出只有 4,096 Token，不够.*约 24,000 Token/) });
+    expect(deps.llmRequests).toHaveLength(0);
+    // 2 章 2,000 字：内容最多约 4,000 Token，够写；没有思考的余量，说明里提醒。
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    const small = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
+    expect(value(await app.advanceWorkflow(small.run.id)).view.steps[0]).toMatchObject({ status: 'done', note: expect.stringContaining('只够写内容') });
+    // 登记了足够的最大输出后不再提醒。
+    const model = value(await app.loadModelServices()).models[0]!;
+    value(await app.updateModel(model, { displayName: model.displayName, capabilities: { ...model.capabilities, maxOutputTokens: 64_000 }, prices: model.prices }));
+    deps.llmResponses.push(reply(JSON.stringify(seed)));
+    const again = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));
+    expect(value(await app.advanceWorkflow(again.run.id)).view.steps[0]).toMatchObject({ status: 'done', note: '默认模型：m' });
+  });
+
   it('每步停下：检查模型后停在骨架草稿；作者改过再采用，作品里是改过的内容；计划同样；写章节交给钩子；导出须作者动手', async () => {
     const { deps, app } = await setup();
     const started = value(await app.startWorkflow({ workflow: 'quick_book', params, mode: 'step', budgetUsd: null }));

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { SELF_TEST_EXPECTED } from '@fudiao/prompts';
 import { resolveModel } from './model-services';
+import { deepseekAlias } from './builtin-models';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -84,6 +85,18 @@ describe('模型服务', () => {
 
     const plain = value(await app.addModel(p?.id ?? '', 'some-other-model')).models.find((m) => m.modelId === 'some-other-model')!;
     expect(await app.applyBuiltinModel(plain.id)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('内置表中没有') } });
+
+    // 中转站给 DeepSeek 起的名字带版本与构建后缀：按名字里的 flash 或 pro 对到内置条目，显示名保留原名。
+    const relay = value(await app.saveProvider(null, { ...deepseek, name: '中转站', baseUrl: 'https://relay.example.test/v1' })).providers.find((x) => x.name === '中转站')!;
+    const flash = value(await app.addModel(relay.id, 'deepseek-v4.1-flash:1017')).models.find((m) => m.modelId === 'deepseek-v4.1-flash:1017')!;
+    expect(flash).toMatchObject({ source: 'builtin', displayName: 'deepseek-v4.1-flash:1017', prices: { input: 0.3, output: 1.2 }, capabilities: { reasoningControl: 'effort', maxOutputTokens: 384_000 } });
+    const pro = value(await app.addModel(relay.id, 'deepseek/DeepSeek-V4-Pro')).models.find((m) => m.modelId === 'deepseek/DeepSeek-V4-Pro')!;
+    expect(pro).toMatchObject({ source: 'builtin', prices: { input: 1.32, output: 3.96 } });
+    const chat = value(await app.addModel(relay.id, 'deepseek-chat')).models.find((m) => m.modelId === 'deepseek-chat')!;
+    expect(chat.source).toBe('user');
+    // 早先添加、只有保守能力的中转站模型同样可以一键采用。
+    const stale = value(await app.updateModel(flash, { displayName: flash.displayName, capabilities: { ...flash.capabilities, maxOutputTokens: 4_096 }, prices: null })).models.find((m) => m.id === flash.id)!;
+    expect(value(await app.applyBuiltinModel(stale.id)).models.find((m) => m.id === flash.id)).toMatchObject({ prices: { input: 0.3 }, capabilities: { maxOutputTokens: 384_000 } });
   });
 
   it('模型：第一个模型成为默认模型；可以改默认、删除模型', async () => {
@@ -183,6 +196,11 @@ describe('模型服务', () => {
     expect(resolveModel('anthropic', 'claude-sonnet-5-5', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, promptCaching: true }, prices: { input: 2, output: 10, webSearch: 10 } });
     expect(resolveModel('openai', 'gpt-4.1', null)).toMatchObject({ source: 'builtin', capabilities: { webSearch: true, reasoningControl: 'none', contextWindow: 1_047_576 } });
     expect(resolveModel('openai_compatible', 'deepseek-flash', null).capabilities.webSearch).toBe(false);
+    // 兼容接口上带后缀的 DeepSeek 模型名对到内置条目；其他种类的服务只按完整的模型名。
+    expect(resolveModel('openai_compatible', 'DeepSeek-V4-Flash', null)).toMatchObject({ source: 'builtin', displayName: 'DeepSeek-V4-Flash', prices: { input: 0.3 } });
+    expect(resolveModel('openai', 'deepseek-flash:1017', null).source).toBe('user');
+    expect(deepseekAlias('deepseek-chat')).toBeNull();
+    expect(deepseekAlias('deepseek-v4.1-flash:1017')).toBe('deepseek-flash');
   });
 
   it('获取模型列表并从中添加：带上服务返回的能力', async () => {

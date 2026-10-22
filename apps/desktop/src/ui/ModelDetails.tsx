@@ -209,7 +209,7 @@ export function ModelRow({ model, isDefault }: { readonly model: StoredModel; re
         能力与价格
       </button>
       {outdated ? (
-        <button type="button" disabled={busy} title="按服务官方文档核实过的能力与价格，例如可以调节思考深度" onClick={() => void applyBuiltin(model.id)}>
+        <button type="button" disabled={busy} title="按服务官方文档核实过的能力与价格，例如可以调节思考深度；中转站的价格可能与官方不同，采用后可以再改" onClick={() => void applyBuiltin(model.id)}>
           采用内置的能力与价格
         </button>
       ) : null}

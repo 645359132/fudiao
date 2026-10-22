@@ -1946,8 +1946,8 @@ describe('快速成书的界面（B67）', () => {
     const form = within(page).getByRole('form', { name: '开始一键成书' });
     expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(true);
 
-    // 在“模型服务”里配好模型后回到成书页：显示已连接。
-    await addTestedModel(service, deps);
+    // 在“模型服务”里配好模型后回到成书页：显示已连接。登记够大的最大输出，“检查模型”才放行默认的 20 章。
+    await addTestedModel(service, deps, { maxOutputTokens: 64_000 });
     await user.click(screen.getByRole('button', { name: '成书' }));
     await waitFor(() => expect(page.textContent).toContain('已连接'));
 
@@ -2030,7 +2030,7 @@ describe('写作工作流的界面（B78）', () => {
   it('开始一键成书：估算费用，每步停下；改过骨架再采用，采用计划，跳过写章节，导出须作者点', async () => {
     const { deps, service, store, user } = start();
     await createWork(user, '新作品');
-    await addTestedModel(service, deps);
+    await addTestedModel(service, deps, { maxOutputTokens: 64_000 });
     await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
     const page = await screen.findByRole('region', { name: '成书' });
     await waitFor(() => expect(page.textContent).toContain('已连接'));

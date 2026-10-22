@@ -42,7 +42,7 @@ describe('快速成书（B67）', () => {
   it('各步的状态：没有默认模型时说明原因；有了模型、骨架、计划之后逐步变化', async () => {
     const { deps, app } = await setup();
     expect(value(await app.quickBookStatus())).toEqual({
-      model: { ready: false, name: null, problem: '还没有设置默认模型' },
+      model: { ready: false, name: null, problem: '还没有设置默认模型', maxOutputTokens: null },
       outline: false,
       characters: 0,
       chapters: 0,

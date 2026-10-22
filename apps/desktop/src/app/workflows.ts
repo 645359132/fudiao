@@ -25,7 +25,7 @@ import { nextAction, runState, transition, type RunState, type StepEvent } from 
 export { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from './labels';
 import { z } from 'zod';
 import { describeError, type AppError } from './errors';
-import type { AppliedDraft, PlanDraft, PlanDraftRequest, PlanningView, VolumeOutline, VolumeOutlineRequest } from './planning';
+import { planContentTokens, type AppliedDraft, type PlanDraft, type PlanDraftRequest, type PlanningView, type VolumeOutline, type VolumeOutlineRequest } from './planning';
 import { AuditSuspect, type LocatedSuspect } from './book-audit';
 import type { OpeningDiagnosis, OpeningSurvey } from './opening';
 import { CastDraft } from './cast-completion';
@@ -36,7 +36,9 @@ import type { CastGap } from '@fudiao/writing';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
 import { chapterLengths, type Chapter } from '@fudiao/store';
 import type { AppDeps } from './ports';
-import type { BookSeed, BookSeedRequest, QuickBookStatus } from './quick-book';
+import { seedContentTokens, type BookSeed, type BookSeedRequest, type QuickBookStatus } from './quick-book';
+import { segmentContentTokens } from './writer';
+import { THINKING_ALLOWANCE } from './thinking';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
 export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion', 'benchmark'] as const;
@@ -325,6 +327,12 @@ const TOKENS_PER_CHAR = 1.5;
  */
 const THINKING_TOKENS_PER_CALL = 6_000;
 
+/**
+ * 一键成书的一步要写的内容最多约多少 Token（不含思考）：骨架随章数，计划每章约 1,200，写手一段最多整章的目标字数。
+ * 调用器会把每次请求的输出上限压到模型登记的最大输出，登记值比它小的模型写不完这一步。
+ */
+const quickBookOutputNeed = (p: QuickBookParams) => Math.max(seedContentTokens(p.chapters), planContentTokens(p.chapters), segmentContentTokens(p.wordsPerChapter));
+
 function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowDef<QuickBookParams> {
   return {
     title: '一键成书',
@@ -347,12 +355,24 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
         label: '检查模型',
         kind: 'check',
         output: z.object({ model: z.string() }),
-        async run() {
+        async run({ params }) {
           const status = await host.quickBookStatus();
           if (!status.ok) return status;
           const { model } = status.value;
           if (!model.ready) return err(invalid(`${model.problem ?? '默认模型不能用'}：请在“模型服务”里设置默认模型并运行能力自检`));
-          return ok({ output: { model: model.name ?? '' }, note: `默认模型：${model.name ?? ''}` });
+          // 登记的最大输出不够这一步要写的内容时在花钱之前就停下；没有登记能力的模型按保守的 4,096 计，先思考的模型思考也计入输出。
+          const need = quickBookOutputNeed(params);
+          const max = model.maxOutputTokens;
+          const n = (x: number) => x.toLocaleString('en-US');
+          if (max !== null && max < need) {
+            return err(
+              invalid(
+                `“${model.name ?? ''}”登记的最大输出只有 ${n(max)} Token，不够这个工作流的一步要写的约 ${n(need)} Token：请在“模型服务”的“能力与价格”里把最大输出改成服务实际支持的数值（中转站的 DeepSeek 可以“采用内置的能力与价格”），或换一个模型`,
+              ),
+            );
+          }
+          const tight = max !== null && max < need + THINKING_ALLOWANCE ? `；登记的最大输出 ${n(max)} Token 只够写内容，先思考的模型思考也计入输出，被截断时请在“能力与价格”里调高` : '';
+          return ok({ output: { model: model.name ?? '' }, note: `默认模型：${model.name ?? ''}${tight}` });
         },
       }),
       step<QuickBookParams, BookSeed>({
