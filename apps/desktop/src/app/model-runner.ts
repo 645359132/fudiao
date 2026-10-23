@@ -147,6 +147,16 @@ type Prepared = { readonly port: LlmPort; readonly llmRequest: LlmRequest; reado
 
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
+/**
+ * 带步骤键的纯文本调用里不能复用的完成记录：截断的，或回复是空的（模型把输出都用在了思考上，没写出正文）。
+ * 复用它们只会原样得到同一个结果，接着做时换一个键重新调用。
+ */
+export function unusableCall(row: Pick<LlmCallRow, 'status' | 'response'>): boolean {
+  if (row.status === 'truncated') return true;
+  const text = row.response !== null && typeof row.response === 'object' ? (row.response as { readonly text?: unknown }).text : undefined;
+  return row.status === 'completed' && typeof text === 'string' && text.trim() === '';
+}
+
 /** 没有打开作品时最多暂存多少条调用记录（超出时丢掉最早的）。 */
 const UNSAVED_CALLS_LIMIT = 500;
 
@@ -251,10 +261,10 @@ export function modelRunner({ deps, project, defaultModel, learn }: RunnerDeps) 
       let first = await prepared.value.port.complete(prepared.value.llmRequest, options);
       for (let n = 1; !first.ok && first.error.code === 'step_conflict' && request.recallOnChange === true && request.stepKey !== undefined; n++) {
         const key = `${request.stepKey}:c${n}`;
-        // 截断的记录不复用（与写手的 retryableStepKey 一样），跳到下一个键。
+        // 截断与空的记录不复用（与写手的 retryableStepKey 一样），跳到下一个键。
         const db = project();
         const done = db === null ? null : await findCompletedCall(db, key);
-        if (done?.ok === true && done.value?.status === 'truncated') continue;
+        if (done?.ok === true && done.value !== null && unusableCall(done.value)) continue;
         sent = { ...request, stepKey: key };
         prepared = await prepare(sent, false);
         if (!prepared.ok) return prepared;

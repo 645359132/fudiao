@@ -283,6 +283,22 @@ describe('写手成章', () => {
     expect(value(await app.listSnapshots(c2)).filter((s) => s.reason === 'writer')).toHaveLength(1);
   });
 
+  it('模型回了空的回复：自动重试一次；两次都空就停下说明，接着写时重新调用这一段，不复用空的结果', async () => {
+    const { deps, app, c2 } = await setup();
+    // 第一段先空一次、重试后写出来；第二段两次都是空的。
+    deps.llmResponses.push(reply(''), reply('林舟又叩响了门。'), reply(''), reply('  \n'));
+    const stopped = value(await app.writeChapter(c2));
+    expect(stopped).toMatchObject({ status: 'stopped', segmentsDone: 1, plan: { status: 'writing' } });
+    expect(stopped.reason).toContain('第 2 段模型回了空的回复（输出的 500 个 Token 都用在了思考上');
+    expect(deps.llmRequests).toHaveLength(4);
+    expect(await texts(app, c2)).toEqual(['林舟又叩响了门。']);
+
+    deps.llmResponses.push(reply('林舟转身走进雨里。'));
+    expect(value(await app.writeChapter(c2))).toMatchObject({ status: 'written', segmentsDone: 2 });
+    expect(deps.llmRequests).toHaveLength(5);
+    expect(await texts(app, c2)).toEqual(['林舟又叩响了门。', '林舟转身走进雨里。']);
+  });
+
   it('输出被截断：半截的这一段不写入，停下并说明；接着写时重新调用这一段，不复用截断的结果', async () => {
     const { deps, app, c2 } = await setup();
     deps.llmResponses.push(reply('林舟又叩响了门。'), { chunks: openaiChunks('m', { text: ['钱四的目光停'], end: 'length' }) });

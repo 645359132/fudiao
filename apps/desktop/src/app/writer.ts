@@ -32,7 +32,7 @@ import {
 } from '@fudiao/store';
 import { effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
-import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
+import { THINKING_ALLOWANCE, unusableCall, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
 import { skillsForStage } from './writing-skills';
 
@@ -69,15 +69,18 @@ const settings = (detail: string): AppError => ({ code: 'settings', detail });
 const tail = (text: string) => (text.length <= TAIL_CHARS ? text : text.slice(-TAIL_CHARS));
 const body = (paragraphs: readonly SavedParagraph[]) => paragraphs.map((p) => p.text).join('\n');
 
-/** 截断过的段落另起步骤键：第一次用原键，之后依次加“:r1”“:r2”……，直到一个没有截断记录的键。 */
+/** 截断过或回复是空的段落另起步骤键：第一次用原键，之后依次加“:r1”“:r2”……，直到一个没有这种记录的键。 */
 export async function retryableStepKey(port: SqlPort, base: string): Promise<Result<string, RepoError>> {
   for (let attempt = 0; ; attempt++) {
     const key = attempt === 0 ? base : `${base}:r${attempt}`;
     const found = await findCompletedCall(port, key);
     if (!found.ok) return found;
-    if (found.value?.status !== 'truncated') return ok(key);
+    if (found.value === null || !unusableCall(found.value)) return ok(key);
   }
 }
+
+/** 一段的回复是空的时自动重试几次（有的模型偶尔把输出都用在思考上、一个字也不写，再问一次通常就好）。 */
+const EMPTY_RETRIES = 1;
 
 export function writerUseCases(deps: AppDeps, session: () => { readonly port: SqlPort; readonly path: string } | null, runner: ReturnType<typeof modelRunner>) {
   const ctx = () => ({ now: deps.clock.now() });
@@ -261,19 +264,28 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
           isLast: i === total - 1,
         });
         if (!prompt.ok) return err(settings(prompt.error));
-        const stepKey = await retryableStepKey(port, `writer:${chapterId}:${progress.runId}:${i}`);
-        if (!stepKey.ok) return err(repo(stepKey.error));
-        // 这一段调用过、却没写进正文（例如写入时冲突）时，接着写复用那次的结果；同时写几卷时前文可能已经变了，对不上就重新调用。
-        const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value, recallOnChange: true }, events);
-        if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
-        if (result.value.outcome === 'cancelled') return outcome('cancelled', null);
-        if (result.value.outcome === 'refused') return outcome('stopped', `模型拒绝了这一段${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`);
-        if (result.value.outcome === 'truncated') {
-          return outcome('stopped', `第 ${i + 1} 段的输出被截断，没有写入；可以在模型服务中调高这个模型的最大输出，或换一个模型，再接着写（这一段会重新写）`);
+        let texts: string[] = [];
+        let spent: number | null = null;
+        for (let attempt = 0; attempt <= EMPTY_RETRIES && texts.length === 0; attempt++) {
+          if (attempt > 0 && aborted()) return outcome('cancelled', null);
+          const stepKey = await retryableStepKey(port, `writer:${chapterId}:${progress.runId}:${i}`);
+          if (!stepKey.ok) return err(repo(stepKey.error));
+          // 这一段调用过、却没写进正文（例如写入时冲突）时，接着写复用那次的结果；同时写几卷时前文可能已经变了，对不上就重新调用。
+          const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value, recallOnChange: true }, events);
+          if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
+          if (result.value.outcome === 'cancelled') return outcome('cancelled', null);
+          if (result.value.outcome === 'refused') return outcome('stopped', `模型拒绝了这一段${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`);
+          if (result.value.outcome === 'truncated') {
+            return outcome('stopped', `第 ${i + 1} 段的输出被截断，没有写入；可以在模型服务中调高这个模型的最大输出，或换一个模型，再接着写（这一段会重新写）`);
+          }
+          // 写手的输出先规范标点（B74），再按行切成段落。
+          texts = splitParagraphs(normalizePunctuation(result.value.text));
+          spent = result.value.usage?.outputTokens ?? null;
         }
-        // 写手的输出先规范标点（B74），再按行切成段落。
-        const texts = splitParagraphs(normalizePunctuation(result.value.text));
-        if (texts.length === 0) return outcome('stopped', '模型没有写出文字');
+        if (texts.length === 0) {
+          const thinking = spent !== null && spent > 0 ? `输出的 ${spent.toLocaleString('en-US')} 个 Token 都用在了思考上，` : '';
+          return outcome('stopped', `第 ${i + 1} 段模型回了空的回复（${thinking}没有写出正文），重试一次仍是空的；可以接着写（这一段会重新写），总是这样时换一个模型`);
+        }
 
         const written = await appendWrittenSegment(port, { plan, paragraphs: paragraphs.value, texts, newId: () => deps.ids.next() }, ctx());
         if (!written.ok) {
