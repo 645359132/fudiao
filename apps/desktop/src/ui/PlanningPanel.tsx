@@ -360,7 +360,7 @@ function MemoryBlock({ item }: { readonly item: PlanChapterView }) {
   const planning = useApp((s) => s.planning);
   const building = useApp((s) => s.memoryBuilding);
   const writerJob = useApp((s) => s.writerJob);
-  // 同时写几卷时几条线可能同时在整理记忆，memoryBuilding 只记得一章：写手手上的各章另外看。
+  // 写手写完一章整理记忆时也算在生成。
   const writerMemory = useApp((s) => s.writerJobs.some((j) => j.chapterId === item.chapter.id && j.stage === 'memory'));
   const build = useApp((s) => s.buildMemory);
   const busy = useApp((s) => s.busy);

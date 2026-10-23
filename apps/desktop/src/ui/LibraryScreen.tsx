@@ -17,6 +17,8 @@ function WorkItem({ work }: { readonly work: LibraryWork }) {
   const openWorkCover = useApp((s) => s.openWorkCover);
   const setArchived = useApp((s) => s.setArchived);
   const removeMissing = useApp((s) => s.removeMissingWork);
+  const canOpenWindows = useApp((s) => s.canOpenWindows);
+  const openNewWindow = useApp((s) => s.openNewWindow);
   const busy = useApp((s) => s.busy);
   const openable = !busy && !work.missing;
   return (
@@ -46,6 +48,11 @@ function WorkItem({ work }: { readonly work: LibraryWork }) {
         {work.missing ? null : (
           <button type="button" className="ghost" disabled={busy} aria-label={`更换 ${work.title} 的封面`} onClick={() => void openWorkCover(work.id)}>
             更换封面
+          </button>
+        )}
+        {work.missing || !canOpenWindows ? null : (
+          <button type="button" className="ghost" disabled={busy} aria-label={`在新窗口打开 ${work.title}`} title="这个窗口里的书照常写，另一本书在新窗口里开" onClick={() => void openNewWindow(work.id)}>
+            新窗口
           </button>
         )}
         <button type="button" className="ghost" disabled={busy} aria-label={`${work.archived ? '取消归档' : '归档'} ${work.title}`} onClick={() => void setArchived(work.id, !work.archived)}>

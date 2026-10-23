@@ -127,10 +127,10 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     const memoryOf = new Map(memories.value.filter((m) => hasText.has(m.chapterId)).map((m) => [m.chapterId, m]));
     const earlier: { title: string; summary: string }[] = [];
     let used = 0;
-    // 前面还没写完或还没整理记忆的章节（同时写几卷时，前一卷可能还在写）：用它的章节计划顶上，至少知道那里要发生什么。
+    // 前面还没写、正在写或还没整理记忆的章节（例如作者跳着写）：用它的章节计划顶上，至少知道那里要发生什么。
     const planOf = new Map(plans.value.map((p) => [p.chapterId, p]));
     /**
-     * 写手此刻正在写的章节（同时写几卷时另一条线在写）：它的正文还不是完整的一章，不当作上一章的结尾。
+     * 写手此刻正在写的章节（例如 AI 助手在后台修订它）：它的正文还不是完整的一章，不当作上一章的结尾。
      * 写手停下后作者自己写完的章节计划仍停在“写作中”，所以看的是此刻在不在写，不看计划的状态。
      */
     const unfinished = (id: string) => writing.has(id);
@@ -270,7 +270,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
           if (attempt > 0 && aborted()) return outcome('cancelled', null);
           const stepKey = await retryableStepKey(port, `writer:${chapterId}:${progress.runId}:${i}`);
           if (!stepKey.ok) return err(repo(stepKey.error));
-          // 这一段调用过、却没写进正文（例如写入时冲突）时，接着写复用那次的结果；同时写几卷时前文可能已经变了，对不上就重新调用。
+          // 这一段调用过、却没写进正文（例如写入时冲突）时，接着写复用那次的结果；前文在这期间变了（例如前面的章节写完、整理了记忆），对不上就重新调用。
           const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value, recallOnChange: true }, events);
           if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
           if (result.value.outcome === 'cancelled') return outcome('cancelled', null);

@@ -35,10 +35,22 @@ pub struct OpenReport {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum OpenError {
-    ChecksumMismatch { version: u32 },
-    SchemaTooNew { version: u32, known: u32 },
-    MigrationFailed { version: u32, detail: String },
-    IoError { detail: String },
+    ChecksumMismatch {
+        version: u32,
+    },
+    SchemaTooNew {
+        version: u32,
+        known: u32,
+    },
+    MigrationFailed {
+        version: u32,
+        detail: String,
+    },
+    IoError {
+        detail: String,
+    },
+    /// 这部作品已经在另一个窗口里打开（每个窗口各开一部作品，同一部只能开在一个窗口里）。
+    AlreadyOpen {},
 }
 
 /// 计算校验和前统一换行符，同一文件在 Windows 与 Linux 检出时校验和相同。

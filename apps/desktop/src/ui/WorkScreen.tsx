@@ -26,6 +26,8 @@ export function WorkScreen() {
   const title = useApp((s) => s.work?.project.title ?? '');
   const panel = useApp((s) => s.panel);
   const requestCloseWork = useApp((s) => s.requestCloseWork);
+  const canOpenWindows = useApp((s) => s.canOpenWindows);
+  const openNewWindow = useApp((s) => s.openNewWindow);
   const showPanel = useApp((s) => s.showPanel);
   const startTextImport = useApp((s) => s.startTextImport);
   const exportBook = useApp((s) => s.exportBook);
@@ -123,6 +125,13 @@ export function WorkScreen() {
               {menuItem('layers', '段落来源', () => void openSourceStats())}
               {menuItem('tasks', '用量与费用', () => void openUsage())}
               {menuItem('settings', '模型服务', () => void openModelServices())}
+              {canOpenWindows ? (
+                <>
+                  <DropdownMenu.Separator className="menu-separator" />
+                  {/* 一本书由一个写手在这个窗口里写着，另一本书在新窗口里开（作者决定 2026-10-23）。 */}
+                  {menuItem('window', '在新窗口打开另一本书', () => void openNewWindow(null))}
+                </>
+              ) : null}
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>

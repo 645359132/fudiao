@@ -14,7 +14,7 @@ use std::{
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, Window};
 use tauri_plugin_dialog::DialogExt;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
@@ -59,16 +59,35 @@ pub fn decode(bytes: &[u8], forced: Option<&'static Encoding>) -> (&'static str,
     (encoding.name(), text.into_owned(), had_errors)
 }
 
-/// 选中的导入文件按令牌暂存在 Rust 端，改选编码时重新解码，导入或取消后释放。
+/// 选中的一个导入文件：哪个窗口选的、文件名与原始字节。
+struct Picked {
+    window: String,
+    file_name: String,
+    bytes: Vec<u8>,
+}
+
+/// 选中的导入文件按令牌暂存在 Rust 端，改选编码时重新解码，导入或取消后释放；记下是哪个窗口选的，
+/// 那个窗口关掉时一并释放（几个窗口各写一本书时，关掉一个窗口不再等于整个程序退出）。
 #[derive(Default)]
 pub struct ImportState {
-    files: Mutex<HashMap<String, (String, Vec<u8>)>>,
+    files: Mutex<HashMap<String, Picked>>,
     next: AtomicU64,
+}
+
+impl ImportState {
+    /// 窗口关掉了：释放它选过、还没导入或取消的文件。
+    pub fn forget_window(&self, label: &str) {
+        self.files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, picked| picked.window != label);
+    }
 }
 
 #[tauri::command]
 pub async fn import_pick_text(
     app: AppHandle,
+    window: Window,
     state: State<'_, ImportState>,
 ) -> Result<Option<DecodedText>, FileError> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -95,7 +114,14 @@ pub async fn import_pick_text(
         .files
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(token.clone(), (file_name.clone(), bytes));
+        .insert(
+            token.clone(),
+            Picked {
+                window: window.label().to_string(),
+                file_name: file_name.clone(),
+                bytes,
+            },
+        );
     Ok(Some(DecodedText {
         token,
         file_name,
@@ -114,7 +140,9 @@ pub fn import_redecode(
     let forced = Encoding::for_label(encoding.as_bytes())
         .ok_or_else(|| io(format!("不认识的编码：{encoding}")))?;
     let files = state.files.lock().unwrap_or_else(|e| e.into_inner());
-    let (file_name, bytes) = files
+    let Picked {
+        file_name, bytes, ..
+    } = files
         .get(&token)
         .ok_or_else(|| io("导入文件已释放，请重新选择"))?;
     let (name, text, had_errors) = decode(bytes, Some(forced));

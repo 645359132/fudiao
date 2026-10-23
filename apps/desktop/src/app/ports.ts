@@ -10,6 +10,11 @@ export interface LibraryPort {
   /** 读取 library.json；文件不存在时为 null。 */
   read(): Promise<Result<string | null, string>>;
   write(content: string): Promise<Result<void, string>>;
+  /**
+   * 文件里现在的内容还是 expected（null 为文件不存在）时才写入，返回写了没有：几个窗口共用这一个文件，
+   * 读改写之间别的窗口写过时不写，调用方重读再改。没有时（测试替身）直接写。
+   */
+  replace?(expected: string | null, content: string): Promise<Result<boolean, string>>;
   /** 默认作品库：文档\复调。 */
   defaultDir(): Promise<Result<string, string>>;
   probe(dir: string): Promise<Probe>;
@@ -17,10 +22,12 @@ export interface LibraryPort {
   pickFolder(title: string): Promise<string | null>;
 }
 
-/** 打开作品库（桌面端为 Rust 命令 `db_open`），同一时间只打开一部作品。 */
+/** 打开作品库（桌面端为 Rust 命令 `db_open`），一个窗口同一时间只打开一部作品。 */
 export interface ProjectOpener {
   open(dir: string, now: string): Promise<Result<{ readonly port: SqlPort; readonly report: OpenReport }, OpenError>>;
   close(): Promise<void>;
+  /** 这部作品是不是已经在别的窗口里打开（是的话把那个窗口切到前面）；只有一个窗口时没有。 */
+  heldElsewhere?(dir: string): Promise<boolean>;
 }
 
 /** 未保存编辑的草稿：作品文件夹下 drafts/<章节标识>.json（Rust 命令）。 */
@@ -114,6 +121,17 @@ export interface ImagePort {
   prepareCover(file: Blob): Promise<Result<CoverImage, string>>;
 }
 
+/**
+ * 多个窗口（作者决定 2026-10-23）：一本书在一个窗口里写着，另一个窗口可以开另一本书；每个窗口各开一部作品，
+ * 同一部作品只开在一个窗口里。只有桌面端有，测试可以给替身，浏览器预览没有。
+ */
+export interface WindowPort {
+  /** 开一个新窗口：给了作品时新窗口直接打开它（已经在某个窗口里开着时切到那个窗口），没给时显示作品列表。 */
+  open(work: { readonly id: string; readonly path: string } | null): Promise<Result<void, string>>;
+  /** 这个窗口启动时要打开的作品标识（新窗口带来的），取一次就没有了。 */
+  takeOpen(): Promise<string | null>;
+}
+
 export interface Clock {
   /** UTC ISO 字符串。 */
   now(): string;
@@ -136,6 +154,8 @@ export type AppDeps = {
   readonly llm: LlmFactory;
   readonly web: WebPort;
   readonly images: ImagePort;
+  /** 多个窗口；没有时（浏览器预览）只在这一个窗口里换作品。 */
+  readonly windows?: WindowPort;
   /** 网络中断与服务端错误后的重试；不给时用默认（等 3 秒、10 秒各重试一次）。测试中关掉，需要时注入不真等的实现。 */
   readonly retry?: RetryPolicy;
   readonly clock: Clock;

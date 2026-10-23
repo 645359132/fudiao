@@ -9,6 +9,8 @@ export function LeaveDialog() {
   const leave = useApp((s) => s.leaveConfirm);
   const confirm = useApp((s) => s.confirmLeave);
   const cancel = useApp((s) => s.cancelLeave);
+  const canOpenWindows = useApp((s) => s.canOpenWindows);
+  const openNewWindow = useApp((s) => s.openNewWindow);
   const exit = leave?.to === 'exit';
   return (
     <AlertDialog.Root
@@ -31,8 +33,9 @@ export function LeaveDialog() {
                 ))}
               </ul>
               <p className="muted">
-                {exit ? '关闭复调' : '回到作品列表'}会停下它们。已经写入的段落、长篇记忆与推演事件都保留，下次打开这部作品可以接着做；正在写的那一段没写完的部分不会保存。
+                {exit ? '关闭这个窗口' : '回到作品列表'}会停下它们。已经写入的段落、长篇记忆与推演事件都保留，下次打开这部作品可以接着做；正在写的那一段没写完的部分不会保存。
               </p>
+              {!exit && canOpenWindows ? <p className="muted">想同时写另一本书：在新窗口里打开作品列表，这本书在这里接着写。</p> : null}
             </div>
           </AlertDialog.Description>
           <div className="dialog-actions">
@@ -41,9 +44,14 @@ export function LeaveDialog() {
                 留在这里
               </button>
             </AlertDialog.Cancel>
+            {!exit && canOpenWindows ? (
+              <button type="button" onClick={() => void openNewWindow(null)}>
+                在新窗口打开作品列表
+              </button>
+            ) : null}
             <AlertDialog.Action asChild>
               <button type="button" className="danger" onClick={() => void confirm()}>
-                {exit ? '停下并关闭' : '停下并返回作品列表'}
+                {exit ? '停下并关闭窗口' : '停下并返回作品列表'}
               </button>
             </AlertDialog.Action>
           </div>

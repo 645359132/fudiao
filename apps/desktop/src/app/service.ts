@@ -137,21 +137,33 @@ export type WorkView = {
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 
 export function createAppService(deps: AppDeps) {
+  /** 作品列表文件写回时撞上别的窗口在写，最多重读再改几次。 */
+  const MODIFY_ATTEMPTS = 5;
   let file: LibraryFile = EMPTY_LIBRARY;
   let session: { entry: WorkEntry; port: SqlPort } | null = null;
   const ctx = () => ({ now: deps.clock.now() });
 
-  async function load(): Promise<Result<LibraryFile, AppError>> {
-    const text = await deps.library.read();
-    if (!text.ok) return err({ code: 'library', detail: text.error });
-    if (text.value === null) return ok(EMPTY_LIBRARY);
+  function parseLibrary(text: string | null): Result<LibraryFile, AppError> {
+    if (text === null) return ok(EMPTY_LIBRARY);
     try {
-      const parsed = LibraryFile.safeParse(JSON.parse(text.value));
+      const parsed = LibraryFile.safeParse(JSON.parse(text));
       if (parsed.success) return ok(parsed.data);
     } catch {
       // 落到下面的错误
     }
     return err({ code: 'library', detail: '作品列表文件已损坏' });
+  }
+
+  async function load(): Promise<Result<LibraryFile, AppError>> {
+    const text = await deps.library.read();
+    if (!text.ok) return err({ code: 'library', detail: text.error });
+    return parseLibrary(text.value);
+  }
+
+  /** 按文件里现在的样子更新这个窗口记着的那份（别的窗口可能刚改过）；读不了时照旧用记着的。 */
+  async function refresh(): Promise<void> {
+    const loaded = await load();
+    if (loaded.ok) file = loaded.value;
   }
 
   async function save(next: LibraryFile): Promise<Result<void, AppError>> {
@@ -161,15 +173,43 @@ export function createAppService(deps: AppDeps) {
     return ok(undefined);
   }
 
+  /**
+   * 改作品列表文件：照文件里现在的样子改，写回时文件还是读到的那样才写（Rust 端排队比较），中间别的窗口写过就重读再改。
+   * 几个窗口共用这一个文件（每个窗口各写一本书），照着各自记着的那份整个写回会冲掉别的窗口刚记下的作品或偏好。
+   * 文件损坏读不了时按这个窗口记着的那份改（与以前一样把它写好）。
+   */
+  async function modify(change: (current: LibraryFile) => LibraryFile): Promise<Result<void, AppError>> {
+    for (let attempt = 0; attempt < MODIFY_ATTEMPTS; attempt++) {
+      const text = await deps.library.read();
+      if (!text.ok) return err({ code: 'library', detail: text.error });
+      const parsed = parseLibrary(text.value);
+      const next = change(parsed.ok ? parsed.value : file);
+      if (deps.library.replace === undefined) return save(next);
+      const written = await deps.library.replace(text.value, `${JSON.stringify(next, null, 2)}\n`);
+      if (!written.ok) return err({ code: 'library', detail: written.error });
+      if (written.value) {
+        file = next;
+        return ok(undefined);
+      }
+    }
+    return err({ code: 'library', detail: '作品列表文件一直在被别的窗口改写，这次没有写进去，请再试一次' });
+  }
+
   async function libraryDir(): Promise<Result<string, AppError>> {
+    // 作品库位置可能刚在别的窗口里改过。
+    await refresh();
     if (file.libraryDir !== null) return ok(file.libraryDir);
     const dir = await deps.library.defaultDir();
     return dir.ok ? ok(dir.value) : err({ code: 'library', detail: dir.error });
   }
 
   async function upsert(entry: WorkEntry): Promise<Result<void, AppError>> {
-    const others = file.works.filter((w) => w.id !== entry.id && !samePath(w.path, entry.path));
-    return save({ ...file, works: [...others, entry] });
+    return modify((f) => {
+      // 归档与否只由“归档”改：这个窗口记着的那份可能是别的窗口归档之前的。
+      const known = f.works.find((w) => w.id === entry.id || samePath(w.path, entry.path));
+      const merged = known === undefined ? entry : { ...entry, archived: known.archived };
+      return { ...f, works: [...f.works.filter((w) => w.id !== entry.id && !samePath(w.path, entry.path)), merged] };
+    });
   }
 
   async function view(): Promise<Result<WorkView, AppError>> {
@@ -196,6 +236,8 @@ export function createAppService(deps: AppDeps) {
     entryOf: (project: Project) => Omit<WorkEntry, 'cover'>,
     prepare?: (port: SqlPort) => Promise<Result<unknown, AppError>>,
   ): Promise<Result<WorkView, AppError>> {
+    // 这部作品在别的窗口里开着：先别关手上这一部（关了又打不开那一部，窗口里就什么也没有了），切到那个窗口。
+    if ((await deps.opener.heldElsewhere?.(path)) === true) return err({ code: 'open_failed', error: { code: 'already_open' } });
     await close();
     const opened = await deps.opener.open(path, deps.clock.now());
     if (!opened.ok) return err({ code: 'open_failed', error: opened.error });
@@ -454,6 +496,7 @@ export function createAppService(deps: AppDeps) {
     createWork,
 
     async openWork(id: string): Promise<Result<WorkView, AppError>> {
+      await refresh();
       const entry = file.works.find((w) => w.id === id);
       if (entry === undefined) return err({ code: 'not_found' });
       if (!(await deps.library.probe(entry.path)).hasProject) return err({ code: 'missing', path: entry.path });
@@ -467,6 +510,7 @@ export function createAppService(deps: AppDeps) {
       if (path === null) return ok(null);
       if (!(await deps.library.probe(path)).hasProject) return err({ code: 'not_a_work', path });
       const now = deps.clock.now();
+      await refresh();
       return openAt(path, (p) => {
         const known = file.works.find((w) => w.id === p.id || samePath(w.path, path));
         return { id: p.id, path, title: p.title, archived: known?.archived ?? false, lastOpenedAt: now };
@@ -475,18 +519,39 @@ export function createAppService(deps: AppDeps) {
 
     closeWork: close,
 
+    /** 能不能开新窗口（桌面端可以；浏览器预览不行）。 */
+    canOpenWindows: (): boolean => deps.windows !== undefined,
+
+    /**
+     * 在新窗口里打开作品列表，或某部作品（已经在某个窗口里开着时切到那个窗口）：一本书在这个窗口里写着，
+     * 另一本书在另一个窗口里开（作者决定 2026-10-23）。
+     */
+    async openInNewWindow(workId: string | null): Promise<Result<void, AppError>> {
+      if (deps.windows === undefined) return err({ code: 'settings', detail: '这里不能开新窗口' });
+      await refresh();
+      const entry = workId === null ? null : file.works.find((w) => w.id === workId);
+      if (entry === undefined) return err({ code: 'not_found' });
+      const opened = await deps.windows.open(entry === null ? null : { id: entry.id, path: entry.path });
+      return opened.ok ? ok(undefined) : err({ code: 'library', detail: `新窗口没有打开：${opened.error}` });
+    },
+
+    /** 这个窗口启动时要打开的作品（新窗口带来的）；没有时为 null。 */
+    pendingWindowWork: (): Promise<string | null> => deps.windows?.takeOpen() ?? Promise.resolve(null),
+
     async setArchived(id: string, archived: boolean): Promise<Result<LibraryView, AppError>> {
+      await refresh();
       if (!file.works.some((w) => w.id === id)) return err({ code: 'not_found' });
-      const saved = await save({ ...file, works: file.works.map((w) => (w.id === id ? { ...w, archived } : w)) });
+      const saved = await modify((f) => ({ ...f, works: f.works.map((w) => (w.id === id ? { ...w, archived } : w)) }));
       return saved.ok ? loadLibrary() : saved;
     },
 
     /** 文件夹已不存在的作品从列表移除；不动任何文件。 */
     async removeMissingWork(id: string): Promise<Result<LibraryView, AppError>> {
+      await refresh();
       const entry = file.works.find((w) => w.id === id);
       if (entry === undefined) return err({ code: 'not_found' });
       if ((await deps.library.probe(entry.path)).hasProject) return err({ code: 'library', detail: '作品文件夹仍然存在，只能归档' });
-      const saved = await save({ ...file, works: file.works.filter((w) => w.id !== id) });
+      const saved = await modify((f) => ({ ...f, works: f.works.filter((w) => w.id !== id) }));
       return saved.ok ? loadLibrary() : saved;
     },
 
@@ -494,7 +559,7 @@ export function createAppService(deps: AppDeps) {
     async chooseLibraryDir(): Promise<Result<LibraryView | null, AppError>> {
       const dir = await deps.library.pickFolder('选择作品库位置');
       if (dir === null) return ok(null);
-      const saved = await save({ ...file, libraryDir: dir });
+      const saved = await modify((f) => ({ ...f, libraryDir: dir }));
       return saved.ok ? loadLibrary() : saved;
     },
 
@@ -634,6 +699,8 @@ export function createAppService(deps: AppDeps) {
       if (!parsed.ok) return err({ code: 'library', detail: parsed.error });
       const rawId = parsed.value.data.tables['project']?.[0]?.['id'];
       const projectId = typeof rawId === 'string' ? rawId : '';
+      // 别的窗口可能刚导入过同一个作品包：按文件里现在的作品列表判断标识重不重。
+      await refresh();
       const data = file.works.some((w) => w.id === projectId) ? withProjectId(parsed.value.data, deps.ids.next()) : parsed.value.data;
       const path = await newWorkPath(parsed.value.manifest.title);
       if (!path.ok) return path;
@@ -704,7 +771,7 @@ export function createAppService(deps: AppDeps) {
 
     /** 修改对所有作品生效的偏好。 */
     async setPreferences(patch: Partial<Preferences>): Promise<Result<LibraryView, AppError>> {
-      const saved = await save({ ...file, preferences: { ...file.preferences, ...patch } });
+      const saved = await modify((f) => ({ ...f, preferences: { ...f.preferences, ...patch } }));
       return saved.ok ? loadLibrary() : saved;
     },
 

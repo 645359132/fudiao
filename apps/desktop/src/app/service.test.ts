@@ -32,6 +32,46 @@ describe('作品列表', () => {
     expect(value(await app.loadLibrary())).toEqual({ libraryDir: join(deps.root, 'Documents', '复调'), works: [], preferences: DEFAULT_PREFERENCES });
   });
 
+  it('几个窗口共用作品列表文件：一个窗口记下的作品，另一个窗口改偏好或归档时不会冲掉', async () => {
+    const { deps, app } = setup();
+    const other = createAppService(deps);
+    value(await app.loadLibrary());
+    value(await other.loadLibrary());
+    value(await app.createWork('甲书'));
+    value(await other.createWork('乙书'));
+    value(await other.setPreferences({ theme: 'dark' }));
+    const seen = value(await app.loadLibrary());
+    expect(seen.works.map((w) => w.title).sort()).toEqual(['乙书', '甲书']);
+    expect(seen.preferences.theme).toBe('dark');
+    // 窗口：在新窗口里打开作品列表或某部作品；新窗口启动时取走带来的作品，只取一次。
+    const jia = seen.works.find((w) => w.title === '甲书')!;
+    value(await app.openInNewWindow(null));
+    value(await app.openInNewWindow(jia.id));
+    expect(deps.windowOpens).toEqual([null, { id: jia.id, path: jia.path }]);
+    expect(await app.openInNewWindow('没有这部')).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    deps.pendingWindow.current = jia.id;
+    expect(await other.pendingWindowWork()).toBe(jia.id);
+    expect(await other.pendingWindowWork()).toBeNull();
+  });
+
+  it('几个窗口：别的窗口归档的作品，这个窗口改书名时不会取消归档；作品在别的窗口里开着时不关掉手上的这一部', async () => {
+    const { deps, app } = setup();
+    const other = createAppService(deps);
+    value(await app.loadLibrary());
+    const jia = value(await app.createWork('甲书')).entry;
+    value(await other.loadLibrary());
+    value(await other.setArchived(jia.id, true));
+    value(await app.updateWorkInfo({ title: '甲书（修订）' }));
+    const seen = value(await other.loadLibrary()).works.find((w) => w.id === jia.id);
+    expect(seen).toMatchObject({ title: '甲书（修订）', archived: true });
+    // 乙书在“别的窗口”里开着：打开它时不关掉甲书，说明并切过去。
+    const yi = value(await other.createWork('乙书')).entry;
+    value(await app.loadLibrary());
+    deps.heldElsewhere.add(yi.path);
+    expect(await app.openWork(yi.id)).toMatchObject({ ok: false, error: { code: 'open_failed', error: { code: 'already_open' } } });
+    deps.heldElsewhere.clear();
+  });
+
   it('偏好：旧的作品列表文件没有偏好时用默认值；修改后写入文件', async () => {
     const { deps, app } = setup();
     mkdirSync(dirname(deps.libraryFile), { recursive: true });
@@ -39,10 +79,12 @@ describe('作品列表', () => {
     expect(value(await app.loadLibrary()).preferences).toEqual(DEFAULT_PREFERENCES);
     expect(value(await app.setPreferences({ showParagraphSource: false })).preferences).toEqual({ ...DEFAULT_PREFERENCES, showParagraphSource: false });
     const layout = { sidebar: 300, assistant: 420, sidebarHidden: true };
-    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' }, writer: { parallel: 2 } });
+    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' } });
     expect(value(await app.setPreferences({ assistant: { effort: 'high' } })).preferences.assistant).toEqual({ effort: 'high' });
-    expect(value(await app.setPreferences({ writer: { parallel: 3 } })).preferences.writer).toEqual({ parallel: 3 });
-    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' }, writer: { parallel: 3 } });
+    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' } });
+    // 2026-10-22 版写进文件的“同时写几卷”已经取消：旧文件照常读，这一项丢掉。
+    writeFileSync(deps.libraryFile, JSON.stringify({ version: 1, libraryDir: null, works: [], preferences: { ...DEFAULT_PREFERENCES, writer: { parallel: 2 } } }));
+    expect(value(await app.loadLibrary()).preferences).toEqual(DEFAULT_PREFERENCES);
   });
 
   it('新建作品：在作品库下建文件夹与作品库，加入列表并成为当前作品', async () => {

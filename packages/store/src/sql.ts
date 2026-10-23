@@ -54,7 +54,9 @@ export type OpenError =
   | { readonly code: 'checksum_mismatch'; readonly version: number }
   | { readonly code: 'schema_too_new'; readonly version: number; readonly known: number }
   | { readonly code: 'migration_failed'; readonly version: number; readonly detail: string }
-  | { readonly code: 'io_error'; readonly detail: string };
+  | { readonly code: 'io_error'; readonly detail: string }
+  /** 这部作品已经在另一个窗口里打开（桌面端每个窗口各开一部作品，同一部只开在一个窗口里）。 */
+  | { readonly code: 'already_open' };
 
 const MIGRATION_FILE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 

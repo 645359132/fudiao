@@ -37,10 +37,10 @@ export function PipelineBoard() {
   const planning = useApp((s) => s.planning);
   const job = useApp((s) => s.writerJob);
   const jobs = useApp((s) => s.writerJobs);
-  const parallel = useApp((s) => s.library?.preferences.writer.parallel ?? 1);
-  const setParallel = useApp((s) => s.setWriterParallel);
   const reviewing = useApp((s) => s.reviewingChapterId);
   const building = useApp((s) => s.memoryBuilding);
+  // AI 助手在后台写某一章时，这本书的写手已经在用（一本书一次只由一个写手写）。
+  const assistantWriting = useApp((s) => s.assistantJobs.some((j) => j.kind === 'writing'));
   const busy = useApp((s) => s.busy);
   const write = useApp((s) => s.writeChapters);
   const stop = useApp((s) => s.cancelWriting);
@@ -60,15 +60,13 @@ export function PipelineBoard() {
   const fromId = ids.includes(from) ? from : (ids[0] ?? '');
   const toId = ids.includes(to) ? to : (ids.at(-1) ?? '');
   const range = ids.slice(ids.indexOf(fromId), ids.indexOf(toId) + 1);
-  const idle = !busy && job === null && reviewing === null && building === null && queue === null;
+  const idle = !busy && job === null && !assistantWriting && reviewing === null && building === null && queue === null;
   // 已经写好的章节（写手没在写的），按书中顺序：可以依次审核。
   const written = planning.chapters.filter((c) => c.hasText && c.plan?.status !== 'writing').map((c) => c.chapter.id);
   const titleOf = (id: string) => planning.chapters.find((c) => c.chapter.id === id)?.chapter.title ?? '';
   const count = (f: (c: PlanChapterView) => boolean) => planning.chapters.filter(f).length;
   const issues = planning.chapters.reduce((n, c) => n + c.pendingIssues, 0);
   const queued = new Set(job?.queued ?? []);
-  // 待写的章节分在几卷里：同一卷里一章一章写，不同的卷可以同时写。
-  const volumes = new Set(pending.map((c) => c.chapter.volumeId ?? '')).size;
 
   return (
     <section aria-label="成书进度">
@@ -137,16 +135,6 @@ export function PipelineBoard() {
           <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} />
           写完后审核
         </label>
-        <label title="同一卷里后一章要接上前一章，一章一章写；不同的卷可以同时写，每卷的开头靠卷纲、章节计划与已写好的前文接上">
-          同时写
-          <select aria-label="同时写几卷" value={parallel} disabled={job !== null} onChange={(e) => void setParallel(Number(e.target.value))}>
-            {[1, 2, 3, 4].map((n) => (
-              <option key={n} value={n}>
-                {n} 卷
-              </option>
-            ))}
-          </select>
-        </label>
         <button type="button" disabled={!idle || written.length === 0} onClick={() => void reviewAll(written)}>
           依次审核已写好的 {written.length} 章
         </button>
@@ -156,12 +144,6 @@ export function PipelineBoard() {
           </button>
         ) : null}
       </div>
-      {jobs.length > 1 ? (
-        <p role="status" className="muted" aria-label="同时在写">
-          同时在写：{jobs.map((j) => `《${titleOf(j.chapterId)}》`).join('')}
-        </p>
-      ) : null}
-      {parallel > 1 && volumes === 1 && ids.length > 1 ? <p className="muted">待写的章节都在同一卷里：同一卷里后一章要接上前一章，一章一章写。</p> : null}
       {ids.length > 1 ? (
         <div className="skill-actions">
           <label>

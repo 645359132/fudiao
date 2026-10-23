@@ -69,6 +69,20 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), FileError> {
     fs::rename(&tmp, path).map_err(FileError::from)
 }
 
+/// 作品列表文件的读改写在整个程序里排队（几个窗口共用这一个文件，各写一本书）。
+static LIBRARY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 文件里现在的内容还是 expected（None 表示文件还不存在）时才写入 content，返回写了没有。
+/// 界面先读、改好再交回来；中间别的窗口写过时不写，界面重读再改，不冲掉别的窗口刚记下的东西。
+pub fn replace_if(path: &Path, expected: Option<&str>, content: &str) -> Result<bool, FileError> {
+    let _guard = LIBRARY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if read_text(path)?.as_deref() != expected {
+        return Ok(false);
+    }
+    write_atomic(path, content)?;
+    Ok(true)
+}
+
 fn library_path(app: &AppHandle) -> Result<PathBuf, FileError> {
     Ok(app
         .path()
@@ -84,7 +98,17 @@ pub fn library_read(app: AppHandle) -> Result<Option<String>, FileError> {
 
 #[tauri::command]
 pub fn library_write(app: AppHandle, content: String) -> Result<(), FileError> {
+    let _guard = LIBRARY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     write_atomic(&library_path(&app)?, &content)
+}
+
+#[tauri::command]
+pub fn library_replace(
+    app: AppHandle,
+    expected: Option<String>,
+    content: String,
+) -> Result<bool, FileError> {
+    replace_if(&library_path(&app)?, expected.as_deref(), &content)
 }
 
 #[tauri::command]
@@ -118,6 +142,19 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from(LIBRARY_FILE)]);
+    }
+
+    #[test]
+    fn replace_writes_only_when_the_file_is_still_what_the_caller_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LIBRARY_FILE);
+        assert!(replace_if(&path, None, "甲").unwrap());
+        // 读的时候文件还不存在，别的窗口已经写过：不写。
+        assert!(!replace_if(&path, None, "乙").unwrap());
+        assert!(!replace_if(&path, Some("别的"), "乙").unwrap());
+        assert_eq!(read_text(&path).unwrap().as_deref(), Some("甲"));
+        assert!(replace_if(&path, Some("甲"), "乙").unwrap());
+        assert_eq!(read_text(&path).unwrap().as_deref(), Some("乙"));
     }
 
     #[test]

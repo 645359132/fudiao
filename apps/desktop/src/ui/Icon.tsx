@@ -1,5 +1,6 @@
 // 界面图标：Lucide（ISC 许可证）的线条图标，按名称取用。装饰用，读屏软件忽略（按钮自有文字或 aria-label）。
 import {
+  AppWindow,
   ArrowUp,
   BookOpen,
   Bookmark,
@@ -84,6 +85,7 @@ const ICONS = {
   brain: Brain,
   model: Cpu,
   trash: Trash2,
+  window: AppWindow,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

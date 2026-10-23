@@ -17,7 +17,7 @@ import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluatio
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
-import { MAX_WRITER_LANES, type AssistantEffort, type Layout, type Preferences, type Theme } from '../app/library';
+import { type AssistantEffort, type Layout, type Preferences, type Theme } from '../app/library';
 import type { RelationsView } from '../app/relations';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
@@ -177,9 +177,9 @@ export type AppState = {
   readonly selectionDismissed: string | null;
   readonly planUnmatched: readonly string[];
   readonly planDrafting: boolean;
-  /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。同时写几卷时是其中第一条。 */
+  /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
   readonly writerJob: WriterJob | null;
-  /** 写手手上的各章（同时写几卷时每卷一章）；没有在写时为空。只问“写手在不在写”时用 writerJob。 */
+  /** 写手手上的那一章（一本书只有一个写手，最多一条）；没有在写时为空。只问“写手在不在写”时用 writerJob。 */
   readonly writerJobs: readonly WriterJob[];
   /** AI 助手交给后台的单章写作、审核与修订（M5-23）；写作与修订期间那一章只读。 */
   readonly assistantJobs: readonly { readonly id: string; readonly kind: 'writing' | 'review' | 'revise'; readonly chapterId: string }[];
@@ -350,6 +350,13 @@ export type AppState = {
   readonly requestExit: () => boolean;
   readonly confirmLeave: () => Promise<void>;
   readonly cancelLeave: () => void;
+  /** 能不能开新窗口（桌面端可以，浏览器预览不行）。 */
+  readonly canOpenWindows: boolean;
+  /**
+   * 在新窗口里打开作品列表（workId 为 null）或某部作品：这本书在这个窗口里接着写，另一本书在新窗口里开
+   * （作者决定 2026-10-23）。从“还有任务在进行”的对话框里点时，对话框收起、这里的任务照常进行。
+   */
+  readonly openNewWindow: (workId: string | null) => Promise<void>;
   /** 桌面端注册关闭窗口的函数（作者确认停下任务并退出时调用）。 */
   readonly setExit: (exit: () => void) => void;
   /** 读取模型列表与默认模型（对话框下方的模型选择用），不打开模型服务页。 */
@@ -383,8 +390,6 @@ export type AppState = {
   /** 打开一章并显示它的审核抽屉。 */
   readonly openChapterReview: (chapterId: string) => Promise<void>;
   readonly cancelWriting: () => void;
-  /** 写手同时写几卷（1 至 4，对所有作品生效）。 */
-  readonly setWriterParallel: (lanes: number) => Promise<void>;
   readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
   /** 角色推演（B22 起）：场景列表、选中的场景（'new' 为新建）与还没有保存的场景配置草稿（B39）。 */
   readonly simScenes: readonly SimScene[] | null;
@@ -573,6 +578,16 @@ export function createAppStore(service: AppService): AppStore {
     let writerAbort: AbortController | null = null;
     /** 写手队列已占位（writerJob 在第一章开始前才设上）。 */
     let writerRunning = false;
+    /**
+     * 一本书只由一个写手写（作者决定 2026-10-23）：写手队列在写，或 AI 助手在后台写某一章时，说明谁在写；都没有时为 null。
+     * 后一章要接上前一章的结尾与长篇记忆，两个写手同时写同一本书的不同章节会接不上。
+     */
+    const writerBusy = (): string | null => {
+      const jobs = get().writerJobs;
+      if (writerRunning || jobs.length > 0) return `写手正在写${jobs.map((j) => `《${chapter(j.chapterId)?.title ?? ''}》`).join('')}`;
+      const single = get().assistantJobs.find((j) => j.kind === 'writing');
+      return single === undefined ? null : `写手正在后台写《${chapter(single.chapterId)?.title ?? ''}》`;
+    };
     let reviewQueueAbort: AbortController | null = null;
     /** 正在后台推进的写作工作流（同一时间只推进一个）；关闭作品时停下并等它结束。 */
     let workflowAbort: AbortController | null = null;
@@ -740,7 +755,7 @@ export function createAppStore(service: AppService): AppStore {
       const written = new Set<string>();
       /** 写完了、但审核重试后仍没有完成的章节（带原因），在结束的那句话里列出。 */
       const unreviewed: string[] = [];
-      /** 停在哪里、为什么（显示给作者的话）；同时写几卷时可能有几处。 */
+      /** 停在哪里、为什么（显示给作者的话）。 */
       const stops: string[] = [];
       const halt = (note: string) => {
         stops.push(note);
@@ -771,18 +786,11 @@ export function createAppStore(service: AppService): AppStore {
         }
       };
 
-      // 同一卷里后一章要接上前一章（上一章的结尾与长篇记忆），只能一章一章写；不同的卷可以同时写（每卷一条线），
-      // 每卷的开头靠卷纲、章节计划与已写好的前文接上前一卷。一卷写完，这条线接着写还没开始的下一卷。
-      // 按卷分组（交来的章节可能几卷交错，例如 AI 助手列出的），卷里按书中的顺序：同一卷绝不分给两条线。
+      // 一本书只由一个写手按书中顺序写：后一章要接上前一章的结尾与长篇记忆（作者决定 2026-10-23：同一本书不分几条线同时写，
+      // 要并发就在另一个窗口里写另一本书）。交来的顺序可能是乱的（例如 AI 助手列出的章节），按书中顺序排好。
       const position = new Map((get().work?.chapters ?? []).map((c, i) => [c.id, i]));
-      const byVolume = new Map<string, string[]>();
-      for (const id of chapterIds) {
-        const volume = chapter(id)?.volumeId ?? '';
-        byVolume.set(volume, [...(byVolume.get(volume) ?? []), id]);
-      }
-      const groups = [...byVolume.values()].map((ids) => ids.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0)));
-      const lanes = Math.max(1, Math.min(get().library?.preferences.writer.parallel ?? 1, MAX_WRITER_LANES, groups.length));
-      const waiting = [...chapterIds];
+      const ordered = [...chapterIds].sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0));
+      const waiting = [...ordered];
       const jobs = new Map<string, Omit<WriterJob, 'queued'>>();
       const publish = () => {
         const list = [...jobs.values()].map((j) => ({ ...j, queued: [...waiting] }));
@@ -792,7 +800,6 @@ export function createAppStore(service: AppService): AppStore {
         jobs.set(job.chapterId, job);
         publish();
       };
-      let halted = false;
 
       /** 写一章：写正文、整理长篇记忆、（要审核时）审核。返回能不能接着写后面的。 */
       async function one(chapterId: string): Promise<boolean> {
@@ -848,34 +855,22 @@ export function createAppStore(service: AppService): AppStore {
         }
       }
 
-      /** 一条线：一卷一卷地写，一卷里一章一章地写；哪条线停下了，其余的线写完手上这一章也不再接着写。 */
-      async function lane(): Promise<void> {
-        for (let group = groups.shift(); group !== undefined; group = groups.shift()) {
-          for (const id of group) {
-            if (halted || abort.signal.aborted) return;
-            if (!(await one(id))) {
-              halted = true;
-              return;
-            }
-          }
-        }
-      }
-
       publish();
-      await Promise.all(Array.from({ length: lanes }, () => lane()));
+      for (const id of ordered) {
+        if (abort.signal.aborted || !(await one(id))) break;
+      }
       // 停下落在两章之间（或这一批还没开始写）时没有哪一章说“停在这里”：照样记为停下，不当成写完了。
-      const left = chapterIds.filter((id) => !written.has(id)).length;
+      const left = ordered.filter((id) => !written.has(id)).length;
       if (abort.signal.aborted && stops.length === 0 && left > 0) halt(`已停下：还有 ${left} 章没有写，可以再点“依次写完”接着写`);
       if (writerAbort === abort) writerAbort = null;
       jobs.clear();
       waiting.length = 0;
       publish();
-      const titles = chapterIds.filter((id) => written.has(id)).map((id) => `《${chapter(id)?.title ?? ''}》`);
+      const titles = ordered.filter((id) => written.has(id)).map((id) => `《${chapter(id)?.title ?? ''}》`);
       const done = titles.length === 0 ? '一章也没有写完' : `写完了${titles.join('')}`;
       const missed = unreviewedNote(unreviewed);
       if (stops.length === 0 && missed !== '') set({ message: missed.slice(1) });
-      const how = lanes > 1 ? `写手分 ${lanes} 卷同时写 ${chapterIds.length} 章` : `写手依次写 ${chapterIds.length} 章`;
-      return { summary: `${how}：${done}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
+      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
     }
 
     /** 写作工作流的一次运行有了新的样子：换进列表（新的放在最前）。 */
@@ -886,7 +881,8 @@ export function createAppStore(service: AppService): AppStore {
 
     /** 写作工作流的写章节步骤：经写手队列写（与成书进度、AI 助手的后台写作同一时间只有一批）。 */
     async function workflowWrite(chapterIds: readonly string[], review: boolean, listen: CallOptions): Promise<HookOutcome> {
-      if (writerRunning || get().writerJob !== null) return { ok: false, summary: '写手正在写别的章节（成书进度或 AI 助手排的一批）：等它写完，再继续这个工作流' };
+      const busy = writerBusy();
+      if (busy !== null) return { ok: false, summary: `${busy}（一本书一次只由一个写手写）：等它写完，再继续这个工作流` };
       writerRunning = true;
       try {
         const done = await writeQueue(chapterIds, { review, listen });
@@ -1184,8 +1180,8 @@ export function createAppStore(service: AppService): AppStore {
           },
           async writeChapters(chapterIds, review, onEnd) {
             const busy = () => {
-              const jobs = get().writerJobs;
-              return writerRunning || jobs.length > 0 ? `写手正在写${jobs.map((j) => `《${chapter(j.chapterId)?.title ?? ''}》`).join('')}，等这一批写完或在“任务”里停下以后再排` : null;
+              const who = writerBusy();
+              return who === null ? null : `${who}（一本书一次只由一个写手写），等它写完或在“任务”里停下以后再排`;
             };
             const before = busy();
             if (before !== null) return before;
@@ -1219,6 +1215,8 @@ export function createAppStore(service: AppService): AppStore {
             if (job.kind !== 'review' && (get().writerJobs.some((j) => j.chapterId === job.chapterId) || get().assistantJobs.some((j) => j.chapterId === job.chapterId && j.kind !== 'review'))) {
               return `《${chapter(job.chapterId)?.title ?? ''}》正在后台写作或修订，等它做完或在“任务”里停下以后再说`;
             }
+            const busy = job.kind === 'writing' ? writerBusy() : null;
+            if (busy !== null) return `${busy}（一本书一次只由一个写手写，后一章要接上前一章）：等它写完或在“任务”里停下以后再写这一章`;
             // 写手不覆盖未保存的修改：先保存编辑器里的内容，保存不了就不排。
             if (job.kind !== 'review' && !(await get().leaveChapter())) return '本章正文没有保存成功，没有排上：先处理好本章（复制或导出后重新打开），再排';
             const abort = new AbortController();
@@ -1418,6 +1416,9 @@ export function createAppStore(service: AppService): AppStore {
 
       async init() {
         await run(service.loadLibrary(), (library) => ({ library }));
+        // 新开的窗口带着要打开的作品（在别的窗口里点了“在新窗口打开”）。
+        const pending = await service.pendingWindowWork();
+        if (pending !== null) await get().openWork(pending);
       },
       async createWork(title) {
         const done = await run(service.createWork(title), opened);
@@ -1451,6 +1452,9 @@ export function createAppStore(service: AppService): AppStore {
         if (!(await get().leaveChapter())) return;
         // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
         writerAbort?.abort();
+        // AI 助手交给后台的单章任务也停下：不然在这个窗口里接着打开的另一本书会以为写手还在写。
+        for (const j of assistantJobAborts.values()) j.abort.abort();
+        assistantJobAborts.clear();
         reviewQueueAbort?.abort();
         // 写作工作流停在当前这一步（下次打开为中断，可以继续）。
         workflowAbort?.abort();
@@ -1459,7 +1463,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, writerJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], assistantJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1921,6 +1925,12 @@ export function createAppStore(service: AppService): AppStore {
         else exitApp?.();
       },
       cancelLeave: () => set({ leaveConfirm: null }),
+      canOpenWindows: service.canOpenWindows(),
+      async openNewWindow(workId) {
+        set({ leaveConfirm: null });
+        const opened = await service.openInNewWindow(workId);
+        if (!opened.ok) set({ message: describeError(opened.error) });
+      },
       setExit(exit) {
         exitApp = exit;
       },
@@ -2268,7 +2278,13 @@ export function createAppStore(service: AppService): AppStore {
       },
       async writeChapters(chapterIds, options = {}) {
         // 同步占位：AI 助手在同一步里排两批、或作者在助手排上之后又点了按钮，都不会同时开始两批。
-        if (writerRunning || get().writerJob !== null || chapterIds.length === 0) return null;
+        if (chapterIds.length === 0) return null;
+        // 章节页、计划页的按钮在写手忙时也点得到：说明谁在写，不要一声不响。
+        const busy = writerBusy();
+        if (busy !== null) {
+          set({ message: `${busy}：一本书一次只由一个写手写，等它写完或在“任务”里停下以后再写` });
+          return null;
+        }
         writerRunning = true;
         try {
           return (await writeQueue(chapterIds, options)).summary;
@@ -2281,7 +2297,6 @@ export function createAppStore(service: AppService): AppStore {
       },
       cancelReviewQueue: () => reviewQueueAbort?.abort(),
       cancelWriting: () => writerAbort?.abort(),
-      setWriterParallel: (lanes) => savePreferences({ writer: { parallel: Math.max(1, Math.min(MAX_WRITER_LANES, Math.round(lanes))) } }),
       async openReview() {
         const chapterId = get().selectedChapterId;
         if (chapterId === null) return;

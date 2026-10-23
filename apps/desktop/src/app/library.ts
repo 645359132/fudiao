@@ -29,19 +29,12 @@ export const Preferences = z.object({
     .default(DEFAULT_LAYOUT),
   /** AI 助手每一步的思考深度（对话框下方选择）；写手、审核等任务各用自己的深度。 */
   assistant: z.object({ effort: z.enum(['low', 'medium', 'high']).default('medium') }).default({ effort: 'medium' }),
-  /**
-   * 写手同时写几卷（成书进度里选）：同一卷里后一章要接上前一章，只能一章一章写；不同的卷可以同时写，
-   * 每卷的开头靠卷纲、章节计划与已写好的前文接上前一卷。1 为一次只写一章。
-   */
-  writer: z.object({ parallel: z.number().int().min(1).max(4).default(2) }).default({ parallel: 2 }),
 });
 export type Preferences = z.infer<typeof Preferences>;
 export type Theme = Preferences['theme'];
 export type Layout = Preferences['layout'];
 export type AssistantEffort = Preferences['assistant']['effort'];
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' }, writer: { parallel: 2 } };
-/** 写手最多同时写几卷。 */
-export const MAX_WRITER_LANES = 4;
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' } };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

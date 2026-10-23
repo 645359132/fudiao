@@ -73,6 +73,7 @@ export function tauriDeps(): AppDeps {
     library: {
       read: () => call(invoke<string | null>('library_read')),
       write: (content) => call(invoke<void>('library_write', { content })),
+      replace: (expected, content) => call(invoke<boolean>('library_replace', { expected, content })),
       defaultDir: () => call(invoke<string>('library_default_dir')),
       probe: (dir) => invoke<Probe>('project_probe', { dir }),
       async pickFolder(title) {
@@ -86,6 +87,7 @@ export function tauriDeps(): AppDeps {
         return report.ok ? ok({ port: tauriSqlPort(invoke), report: report.value }) : report;
       },
       close: () => closeProjectDb(invoke),
+      heldElsewhere: (dir) => invoke<boolean>('db_held_elsewhere', { projectDir: dir }).catch(() => false),
     },
     drafts: {
       read: (projectDir, chapterId) => call(invoke<string | null>('draft_read', { projectDir, chapterId })),
@@ -110,6 +112,13 @@ export function tauriDeps(): AppDeps {
         // Rust 返回 [重新打开的报告, 恢复前备份]。
         const result = await call(invoke<[unknown, BackupInfo]>('backup_restore', { name, now }));
         return result.ok ? ok(result.value[1]) : result;
+      },
+    },
+    windows: {
+      open: (work) => call(invoke<void>('window_open', { workId: work?.id ?? null, workDir: work?.path ?? null })),
+      async takeOpen() {
+        const taken = await call(invoke<string | null>('window_take_open'));
+        return taken.ok ? taken.value : null;
       },
     },
     clock: { now: () => new Date().toISOString() },

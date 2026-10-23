@@ -1,4 +1,4 @@
-//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿（M1-05）、导入导出与备份（M1-07）、凭据代理（M2-01）、凭据存储（M2-02）与读公开网页（M7-01）。
+//! 桌面应用的 Rust 部分：数据库命令（M1-02）、作品列表与作品文件夹（M1-04）、草稿（M1-05）、导入导出与备份（M1-07）、凭据代理（M2-01）、凭据存储（M2-02）与读公开网页（M7-01）与多个窗口（每个窗口各写一本书）。
 //! 业务逻辑留在 TypeScript，Rust 只提供 IO 与凭据（施工文档第二章）。
 
 pub mod credentials;
@@ -8,6 +8,7 @@ pub mod library;
 pub mod net;
 pub mod transfer;
 pub mod web;
+pub mod windows;
 
 use serde::Serialize;
 
@@ -46,10 +47,27 @@ pub fn run() {
         .manage(web::WebState {
             reader: web::WebReader::new(),
         })
+        .manage(windows::WindowState::default())
+        // 每个窗口各开一部作品：窗口关掉时忘掉它的作品库、还没取走的作品与选了还没导入的文件。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                use tauri::Manager;
+                window
+                    .state::<db::commands::DbState>()
+                    .forget(window.label());
+                window
+                    .state::<windows::WindowState>()
+                    .forget(window.label());
+                window
+                    .state::<transfer::ImportState>()
+                    .forget_window(window.label());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
             db::commands::db_open,
             db::commands::db_close,
+            db::commands::db_held_elsewhere,
             db::commands::db_query,
             db::commands::db_tx,
             db::commands::app_db_open,
@@ -57,6 +75,7 @@ pub fn run() {
             db::commands::app_db_tx,
             library::library_read,
             library::library_write,
+            library::library_replace,
             library::library_default_dir,
             library::project_probe,
             drafts::draft_read,
@@ -77,7 +96,9 @@ pub fn run() {
             credentials::credential_set,
             credentials::credential_status,
             credentials::credential_delete,
-            web::web_fetch
+            web::web_fetch,
+            windows::window_open,
+            windows::window_take_open
         ])
         .run(tauri::generate_context!())
         .expect("无法启动应用");

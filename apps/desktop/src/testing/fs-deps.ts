@@ -60,6 +60,11 @@ export type TestDeps = AppDeps & {
   readonly webPages: Map<string, WebPage>;
   /** 作品库写入的故障注入：下一个有语句匹配的事务以 sql_error 失败（用完即去掉），模拟写到一半出错。 */
   readonly sqlFaults: RegExp[];
+  /** 多个窗口：开新窗口的请求（作品或 null 为作品列表），与这个窗口启动时要打开的作品。 */
+  readonly windowOpens: ({ readonly id: string; readonly path: string } | null)[];
+  readonly pendingWindow: { current: string | null };
+  /** 在“别的窗口”里开着的作品文件夹（打开它们时应切过去，不关掉手上的作品）。 */
+  readonly heldElsewhere: Set<string>;
   readonly limits: (readonly (readonly [string, number])[])[];
   dispose(): Promise<void>;
 };
@@ -145,6 +150,9 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
   const searchProxy = proxyOver(searchService);
   // 与桌面端一样，端口不绑定某一个连接：恢复备份后换了连接，同一个端口照常可用。
   const sqlFaults: RegExp[] = [];
+  const windowOpens: TestDeps['windowOpens'] = [];
+  const pendingWindow: TestDeps['pendingWindow'] = { current: null };
+  const heldElsewhere = new Set<string>();
   const port: SqlPort = {
     query: (sql, params) => (current === null ? Promise.resolve(err({ code: 'not_open' })) : current.query(sql, params)),
     transaction: (statements: readonly Statement[]) => {
@@ -195,6 +203,9 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     searchRequests,
     webPages,
     sqlFaults,
+    windowOpens,
+    pendingWindow,
+    heldElsewhere,
     limits,
     // 测试结束时关闭作品库与设置库，临时目录才能删除。
     async dispose() {
@@ -236,6 +247,13 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
         writeFileSync(libraryFile, content);
         return Promise.resolve(ok(undefined));
       },
+      replace: (expected, content) => {
+        const now = existsSync(libraryFile) ? readFileSync(libraryFile, 'utf8') : null;
+        if (now !== expected) return Promise.resolve(ok(false));
+        mkdirSync(join(root, 'appdata'), { recursive: true });
+        writeFileSync(libraryFile, content);
+        return Promise.resolve(ok(true));
+      },
       defaultDir: () => Promise.resolve(ok(documents)),
       probe: (dir) =>
         Promise.resolve({
@@ -255,6 +273,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
         currentDir = dir;
         return Promise.resolve(ok({ port, report: opened.value.report }));
       },
+      heldElsewhere: (dir) => Promise.resolve(heldElsewhere.has(dir)),
       close() {
         current?.close();
         current = null;
@@ -353,6 +372,17 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
       },
     },
     ...(retryPolicy !== undefined && { retry: retryPolicy }),
+    windows: {
+      open(work) {
+        windowOpens.push(work);
+        return Promise.resolve(ok(undefined));
+      },
+      takeOpen() {
+        const id = pendingWindow.current;
+        pendingWindow.current = null;
+        return Promise.resolve(id);
+      },
+    },
     // jsdom 与 Node 没有 canvas：封面原样编码，缩略图取前一段，尺寸固定为 600×800。
     images: {
       async prepareCover(file) {

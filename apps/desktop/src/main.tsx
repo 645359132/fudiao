@@ -1,4 +1,5 @@
 import { StrictMode } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -40,9 +41,27 @@ const syncTitleBar = () => {
     .catch(() => undefined);
 };
 store.subscribe(syncTitleBar);
+// 窗口标题是这个窗口里的书名：几本书各开在一个窗口里时（每个窗口各写一本书），任务栏上分得清。
+let windowTitle: string | null = null;
+const syncWindowTitle = () => {
+  const work = store.getState().work?.project.title;
+  const next = work === undefined ? '复调' : `${work} · 复调`;
+  if (next === windowTitle) return;
+  windowTitle = next;
+  getCurrentWindow()
+    .setTitle(next)
+    .catch(() => undefined);
+};
+store.subscribe(syncWindowTitle);
 
-createRoot(root).render(
-  <StrictMode>
-    <App store={store} />
-  </StrictMode>,
-);
+// 页面重新载入（F5 或开发时整页刷新）时，Rust 端还记着这个窗口之前开的作品：先放下，
+// 不然别的窗口打不开它，这个窗口也只显示作品列表。之后再渲染（渲染时才打开作品）。
+void invoke('db_close')
+  .catch(() => undefined)
+  .finally(() =>
+    createRoot(root).render(
+      <StrictMode>
+        <App store={store} />
+      </StrictMode>,
+    ),
+  );

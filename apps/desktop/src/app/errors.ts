@@ -42,6 +42,8 @@ export function describeError(error: AppError): string {
           return `升级作品库失败，已保留原样：${error.error.detail}`;
         case 'io_error':
           return `无法打开作品库：${error.error.detail}`;
+        case 'already_open':
+          return '这部作品已经在另一个窗口里打开，已切到那个窗口';
       }
       break;
     case 'repo':
