@@ -1873,14 +1873,366 @@ fieldset.plain {
   gap: 12px;
 }
 
-/* 技能的标识（SKILL.md 的 name）与适用说明 */
-.skill-key {
-  font-size: 12px;
+/* 写作技能页（B61、B75）：左边一行一项的列表，右边是选中那一项的详情（主从布局） */
+.work-main-inner:has(.skills-page) {
+  max-width: 1180px;
+}
+
+/* 左右两栏按这一页自己的宽度排（两侧栏开着时主区可能很窄），不按窗口宽度。 */
+.skills-page {
+  container-type: inline-size;
+}
+
+.skills-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.skills-header h2 {
+  margin: 0 0 4px;
+}
+
+.skills-header p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.skills-header-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+/* 这一页的两个页签（技能、规避表达）：下划线式，与列表上方的分段筛选区分开 */
+.skills-tabs {
+  gap: 18px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skills-tabs button {
+  margin-bottom: -1px;
+  padding: 6px 2px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
 }
 
-.skill-description {
-  margin: 4px 0 6px;
+.skills-tabs button:hover:not(:disabled) {
+  border-bottom-color: var(--border-strong);
+  color: var(--text);
+}
+
+.skills-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.skills-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.skills-list-pane {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 分段按钮：全部 / 规划 / 写章节 */
+.segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.segmented button {
+  gap: 4px;
+  padding: 3px 10px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 13px;
+}
+
+.segmented button[aria-pressed='true'] {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.segmented-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.skills-rows {
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  list-style: none;
+}
+
+.skills-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.skills-row + .skills-row {
+  margin-top: 2px;
+}
+
+.skills-row:hover {
+  background: var(--surface-2);
+}
+
+.skills-row[aria-current='true'] {
+  background: var(--accent-soft);
+}
+
+.skills-row.off .skills-row-main {
+  opacity: 0.55;
+}
+
+.skills-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.skills-row-main:hover:not(:disabled) {
+  color: inherit;
+}
+
+.skills-row-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.skills-row-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.skills-row-desc {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.skills-row-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+}
+
+.skills-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: normal;
+  line-height: 1.5;
+}
+
+.skills-badge.warn {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* 开关：原生的复选框画成滑块（role="switch"，读屏照常读出开与关） */
+input.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--border);
+  cursor: pointer;
+  appearance: none;
+  transition: background 0.15s;
+}
+
+input.switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  content: '';
+  transition: transform 0.15s;
+}
+
+input.switch:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+input.switch:checked::after {
+  transform: translateX(12px);
+}
+
+input.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.switch-label {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.skills-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: none;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.skills-detail form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.skills-detail form label {
+  font-size: 13px;
+}
+
+.skills-detail-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.skills-detail-head h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.skills-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.skills-detail-meta code {
+  font-size: 12px;
+}
+
+.skills-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skills-field-label {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.skills-field-label .muted {
+  font-weight: normal;
+}
+
+.skills-field-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.skills-instruction textarea,
+.skills-avoid textarea {
+  min-height: 220px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.skills-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+button.danger-text,
+button.danger-text:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.skills-empty {
+  padding: 24px;
+}
+
+@container (max-width: 720px) {
+  .skills-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skills-list-pane {
+    position: static;
+  }
+
+  .skills-header {
+    flex-direction: column;
+  }
 }
 
 /* 技能用在哪个阶段（B75） */
