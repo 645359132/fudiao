@@ -123,6 +123,35 @@ export function membersAt<M extends { readonly id: string; readonly kind: string
 
 export type Point = { readonly x: number; readonly y: number };
 
+/** 关系图看到的那一块（SVG 的 viewBox），长宽比与 GRAPH_SIZE 相同。 */
+export type GraphView = { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+export const FULL_VIEW: GraphView = { x: 0, y: 0, w: GRAPH_SIZE.width, h: GRAPH_SIZE.height };
+/** 最多放大到 4 倍（看清人名与称谓），最多缩小到 2 倍大的范围（拖出去的人物也找得回来）。 */
+const MIN_VIEW_W = GRAPH_SIZE.width / 4;
+const MAX_VIEW_W = GRAPH_SIZE.width * 2;
+
+/** 以 at 为中心缩放：factor 小于 1 放大、大于 1 缩小；at 那一点在屏幕上不动。 */
+export function zoomView(view: GraphView, factor: number, at: Point): GraphView {
+  const w = Math.min(MAX_VIEW_W, Math.max(MIN_VIEW_W, view.w * factor));
+  const f = w / view.w;
+  return { x: at.x - (at.x - view.x) * f, y: at.y - (at.y - view.y) * f, w, h: view.h * f };
+}
+
+/** 刚好装下这些点（留出人名的位置），长宽比不变；没有点时看全图。 */
+export function fitView(points: readonly Point[], pad = 70): GraphView {
+  if (points.length === 0) return FULL_VIEW;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const ratio = GRAPH_SIZE.height / GRAPH_SIZE.width;
+  const width = Math.max(...xs) - Math.min(...xs) + pad * 2;
+  const height = Math.max(...ys) - Math.min(...ys) + pad * 2;
+  const w = Math.min(MAX_VIEW_W, Math.max(MIN_VIEW_W, width, height / ratio));
+  const h = w * ratio;
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
 /**
  * 力导向布局（Fruchterman–Reingold）：有关系的互相吸引，所有节点互相排斥，并向中心轻轻收拢。
  * 结果只由输入决定（起点按顺序排在圆上，迭代次数固定），同样的数据每次画出同样的图；拖定的节点不动。

@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { RELATION_CATEGORIES, type Entity, type RelationCategory, type Relationship, type RelationshipFields } from '@fudiao/store';
 import { exitAt, type CastTimeline } from '@fudiao/writing';
 import { ENTITY_KIND_LABEL, PRESENCE_KIND_LABEL, RELATION_CATEGORY_LABEL } from '../app/labels';
 import { suggestionText } from '../app/relation-changes';
-import { GRAPH_SIZE, layoutGraph, membersAt, presenceTimelines, relationsAt, type Point, type RelationsView } from '../app/relations';
+import { FULL_VIEW, fitView, GRAPH_SIZE, layoutGraph, membersAt, presenceTimelines, relationsAt, zoomView, type GraphView, type Point, type RelationsView } from '../app/relations';
 import { Icon } from './Icon';
+import { IconButton } from './IconButton';
 import { NO_CHAPTERS, useApp } from './store-context';
 
 /** 侧栏显示的内容：选中的人物、选中的关系、新建关系（可带上一方），或什么都没选。 */
@@ -80,6 +81,9 @@ function RelationGraph({
   const svg = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<{ readonly id: string; readonly at: Point; readonly moved: boolean } | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  // 看到的那一块：滚轮或按钮缩放，按住空白处拖动平移。
+  const [view, setView] = useState<GraphView>(FULL_VIEW);
+  const [pan, setPan] = useState<{ readonly x: number; readonly y: number; readonly from: GraphView; readonly scale: number; readonly moved: boolean } | null>(null);
   // 排布只取决于有哪些人物、谁和谁之间有关系、哪些位置拖定过：改称谓、说明、类别等不重新排布。
   // 用这三样拼成的字符串做依赖，数据每次重新读取（数组换了新的）也不重算。
   const idsKey = members.map((m) => m.id).join('\n');
@@ -99,25 +103,75 @@ function RelationGraph({
   const focus = hover ?? (selection?.kind === 'node' ? selection.id : null);
   const neighbors = new Set(focus === null ? [] : relationships.flatMap((r) => (r.fromId === focus ? [r.toId] : r.toId === focus ? [r.fromId] : [])));
 
+  /** 屏幕上的一点在图里的坐标（不夹到图的范围内）。jsdom 里没有 getScreenCTM，这时为 null。 */
+  const pointAt = (clientX: number, clientY: number): Point | null => {
+    const m = svg.current?.getScreenCTM?.();
+    if (m === null || m === undefined) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
+    return { x: p.x, y: p.y };
+  };
   const toGraph = (e: ReactPointerEvent): Point | null => {
-    const el = svg.current;
-    const m = el?.getScreenCTM?.();
-    if (el === null || m === null || m === undefined) return null;
-    const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+    const p = pointAt(e.clientX, e.clientY);
+    if (p === null) return null;
     return { x: Math.round(Math.min(GRAPH_SIZE.width - 20, Math.max(20, p.x))), y: Math.round(Math.min(GRAPH_SIZE.height - 20, Math.max(20, p.y))) };
   };
+  const center = (v: GraphView): Point => ({ x: v.x + v.w / 2, y: v.y + v.h / 2 });
+
+  // 按住 Ctrl 滚轮缩放（触控板双指捏合也带 ctrlKey），只滚滚轮时照常滚动页面，不把页面卡在图上。
+  // 缩放要拦下浏览器的页面缩放：React 的 onWheel 是被动监听，不能 preventDefault，所以直接挂在元素上。
+  useEffect(() => {
+    const el = svg.current;
+    if (el === null) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = Math.exp(Math.max(-0.5, Math.min(0.5, e.deltaY * 0.0015)));
+      const at = pointAt(e.clientX, e.clientY);
+      setView((v) => zoomView(v, factor, at ?? center(v)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+  const zoomBy = (factor: number) => setView((v) => zoomView(v, factor, center(v)));
+  const fit = () => setView(fitView(members.flatMap((m) => (visible.has(m.id) ? [pos.get(m.id)].filter((p): p is Point => p !== undefined) : []))));
+  const percent = Math.round((GRAPH_SIZE.width / view.w) * 100);
 
   return (
-    <svg
-      ref={svg}
-      className="relation-graph"
-      viewBox={`0 0 ${GRAPH_SIZE.width} ${GRAPH_SIZE.height}`}
-      role="img"
-      aria-label="人物关系图"
-      onPointerDown={(e) => {
-        if (e.target === svg.current) onSelect(null);
-      }}
-    >
+    <div className="relation-graph-wrap">
+      <div className="graph-zoom" role="toolbar" aria-label="缩放关系图">
+        <IconButton icon="zoomOut" label="缩小" onClick={() => zoomBy(1.25)} disabled={percent <= 50} />
+        <span className="graph-zoom-level" aria-label="缩放比例">
+          {percent}%
+        </span>
+        <IconButton icon="zoomIn" label="放大" onClick={() => zoomBy(0.8)} disabled={percent >= 400} />
+        <IconButton icon="fit" label="适应全图" tip="缩放到刚好装下这时显示的人物；按住 Ctrl 滚动滚轮也能缩放，拖动空白处移动" onClick={fit} />
+      </div>
+      <svg
+        ref={svg}
+        className={pan?.moved === true ? 'relation-graph panning' : 'relation-graph'}
+        viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        role="img"
+        aria-label="人物关系图"
+        onPointerDown={(e) => {
+          // 按在空白处：拖动是平移，没拖动是取消选中。
+          if (e.target !== svg.current || e.button !== 0) return;
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          setPan({ x: e.clientX, y: e.clientY, from: view, scale: svg.current?.getScreenCTM?.()?.a ?? 1, moved: false });
+        }}
+        onPointerMove={(e) => {
+          if (pan === null) return;
+          const dx = e.clientX - pan.x;
+          const dy = e.clientY - pan.y;
+          if (!pan.moved && Math.hypot(dx, dy) < 3) return;
+          if (!pan.moved) setPan({ ...pan, moved: true });
+          setView({ ...pan.from, x: pan.from.x - dx / pan.scale, y: pan.from.y - dy / pan.scale });
+        }}
+        onPointerUp={() => {
+          if (pan !== null && !pan.moved) onSelect(null);
+          setPan(null);
+        }}
+        onPointerCancel={() => setPan(null)}
+      >
       <defs>
         {RELATION_CATEGORIES.map((c) => (
           <marker key={c} id={`rel-arrow-${c}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -209,7 +263,8 @@ function RelationGraph({
           );
         })}
       </g>
-    </svg>
+      </svg>
+    </div>
   );
 }
 

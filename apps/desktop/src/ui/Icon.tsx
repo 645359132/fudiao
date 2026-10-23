@@ -17,6 +17,7 @@ import {
   FolderOpen,
   History,
   Layers,
+  Maximize2,
   ListChecks,
   ListTodo,
   Monitor,
@@ -41,6 +42,8 @@ import {
   Waypoints,
   WandSparkles,
   X,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -86,6 +89,9 @@ const ICONS = {
   model: Cpu,
   trash: Trash2,
   window: AppWindow,
+  zoomIn: ZoomIn,
+  zoomOut: ZoomOut,
+  fit: Maximize2,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

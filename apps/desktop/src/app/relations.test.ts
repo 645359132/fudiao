@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
-import { GRAPH_SIZE, layoutGraph, relationsAt } from './relations';
+import { FULL_VIEW, fitView, GRAPH_SIZE, layoutGraph, relationsAt, zoomView } from './relations';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -119,5 +119,43 @@ describe('关系图的布局', () => {
     expect(d('a', 'b')).toBeLessThan(d('a', 'c'));
     expect(layoutGraph([], [], new Map()).size).toBe(0);
     expect(layoutGraph(['x'], [], new Map()).get('x')).toBeDefined();
+  });
+});
+
+describe('关系图的缩放', () => {
+  it('以一点为中心缩放时那一点不动；最多放大到 4 倍、缩小到 2 倍大的范围；长宽比不变', () => {
+    const at = { x: 300, y: 200 };
+    const zoomed = zoomView(FULL_VIEW, 0.5, at);
+    expect(zoomed.w).toBe(GRAPH_SIZE.width / 2);
+    expect(zoomed.h / zoomed.w).toBeCloseTo(GRAPH_SIZE.height / GRAPH_SIZE.width);
+    // at 在视图里的相对位置不变。
+    expect((at.x - zoomed.x) / zoomed.w).toBeCloseTo(at.x / FULL_VIEW.w);
+    expect((at.y - zoomed.y) / zoomed.h).toBeCloseTo(at.y / FULL_VIEW.h);
+    let v = FULL_VIEW;
+    for (let i = 0; i < 20; i++) v = zoomView(v, 0.5, at);
+    expect(v.w).toBe(GRAPH_SIZE.width / 4);
+    for (let i = 0; i < 20; i++) v = zoomView(v, 2, at);
+    expect(v.w).toBe(GRAPH_SIZE.width * 2);
+  });
+
+  it('适应全图：刚好装下这些点并留出边距，长宽比不变；没有点时看全图', () => {
+    const fitted = fitView([
+      { x: 100, y: 100 },
+      { x: 400, y: 180 },
+    ]);
+    expect(fitted.h / fitted.w).toBeCloseTo(GRAPH_SIZE.height / GRAPH_SIZE.width);
+    for (const p of [
+      { x: 100, y: 100 },
+      { x: 400, y: 180 },
+    ]) {
+      expect(p.x).toBeGreaterThan(fitted.x);
+      expect(p.x).toBeLessThan(fitted.x + fitted.w);
+      expect(p.y).toBeGreaterThan(fitted.y);
+      expect(p.y).toBeLessThan(fitted.y + fitted.h);
+    }
+    expect(fitted.w).toBeLessThan(GRAPH_SIZE.width);
+    expect(fitView([])).toEqual(FULL_VIEW);
+    // 只有一个人物时不放大到看不清周围：最多 4 倍。
+    expect(fitView([{ x: 500, y: 300 }]).w).toBe(GRAPH_SIZE.width / 4);
   });
 });

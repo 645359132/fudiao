@@ -2889,6 +2889,24 @@ describe('人物关系网（B73）', () => {
     for (const name of ['林舟（人物）', '钱四（人物）', '聚宝当铺（组织）']) expect(within(graph).getByRole('button', { name })).toBeTruthy();
     expect(within(page).getByRole('list', { name: '关系列表' }).textContent).toContain('钱四是林舟的债主隐秘');
 
+    // 缩放：按钮放大、缩小与适应全图，按住 Ctrl 滚轮以指针处为中心缩放，只滚滚轮不缩放。
+    const zoom = within(page).getByRole('toolbar', { name: '缩放关系图' });
+    const box = () => graph.getAttribute('viewBox')?.split(' ').map(Number) ?? [];
+    expect(box()).toEqual([0, 0, 1000, 640]);
+    await user.click(within(zoom).getByRole('button', { name: '放大' }));
+    expect(box()[2]).toBe(800);
+    expect(within(zoom).getByLabelText('缩放比例').textContent).toBe('125%');
+    await user.click(within(zoom).getByRole('button', { name: '缩小' }));
+    expect(box()[2]).toBeCloseTo(1000);
+    fireEvent.wheel(graph, { deltaY: 200 });
+    expect(box()[2]).toBeCloseTo(1000);
+    fireEvent.wheel(graph, { deltaY: 200, ctrlKey: true });
+    const out = box()[2] ?? 0;
+    expect(out).toBeGreaterThan(1000);
+    // 适应全图：缩到刚好装下三个设定（可能比全图略大，人物靠边时要留出名字的位置）。
+    await user.click(within(zoom).getByRole('button', { name: '适应全图' }));
+    expect(box()[2]).toBeLessThan(out);
+
     // 按章节查看：从第二章起的关系在第一章时不成立。
     await user.selectOptions(within(page).getByRole('combobox', { name: '按章节查看' }), chapters[0]!.id);
     expect(within(graph).queryByRole('button', { name: '钱四是林舟的债主' })).toBeNull();
