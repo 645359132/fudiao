@@ -219,6 +219,27 @@ describe('长篇记忆', () => {
     );
     expect(value(await reviewStaleMemories(db, later))).toEqual(['c1']);
   });
+
+  it('删掉一段、或一段挪到别的章（段落数不变）也标为待复核；已是待复核的不再动；全书的记忆列表不带依据的段落版本', async () => {
+    const db = await fresh();
+    value(await saveChapterMemory(db, memory, ctx));
+    value(await saveChapterMemory(db, { ...memory, chapterId: 'c2', basedOn: {} }, ctx));
+    expect(value(await reviewStaleMemories(db, later))).toEqual([]);
+    value(await db.transaction([{ sql: "DELETE FROM paragraph WHERE id = 'g2'", params: [] }]));
+    expect(value(await reviewStaleMemories(db, later))).toEqual(['c1']);
+    expect(value(await reviewStaleMemories(db, later))).toEqual([]);
+
+    // 第二章记着的是“没有段落”；第一章的一段挪过来以后两章都变了。
+    value(await saveChapterMemory(db, { ...memory, basedOn: { g1: 1 } }, later));
+    expect(value(await reviewStaleMemories(db, later))).toEqual([]);
+    value(await db.transaction([{ sql: "UPDATE paragraph SET chapter_id = 'c2' WHERE id = 'g1'", params: [] }]));
+    expect(value(await reviewStaleMemories(db, later)).sort()).toEqual(['c1', 'c2']);
+
+    const listed = value(await listChapterMemories(db));
+    expect(listed.map((m) => m.chapterId)).toEqual(['c1', 'c2']);
+    expect(listed.every((m) => !('basedOn' in m))).toBe(true);
+    expect(value(await getChapterMemory(db, 'c1'))).toMatchObject({ basedOn: { g1: 1 } });
+  });
 });
 
 describe('审核问题', () => {

@@ -567,6 +567,30 @@ export function chapterLock(state: AppState, chapterId: string | null): ChapterL
   return null;
 }
 
+/**
+ * 后台刷新用：同一时间只做一次；做的期间又被要求做，做完再做一次（拿到最新的）。写手每写一段、每整理一章记忆、
+ * AI 助手每改一处都要刷新页面上的数据，几百章的书读一次要不少时间；以前几处同时读同样的东西，与作者的点击抢作品库，界面跟着卡。
+ */
+function coalesced(run: () => Promise<void>): () => Promise<void> {
+  let current: Promise<void> | null = null;
+  let again = false;
+  return () => {
+    if (current !== null) {
+      again = true;
+      return current;
+    }
+    current = (async () => {
+      do {
+        again = false;
+        await run();
+      } while (again);
+    })().finally(() => {
+      current = null;
+    });
+    return current;
+  };
+}
+
 export function createAppStore(service: AppService): AppStore {
   return createStore<AppState>()((set, get) => {
     let editor: EditorHandle | null = null;
@@ -726,10 +750,16 @@ export function createAppStore(service: AppService): AppStore {
     const assistantJobAborts = new Map<string, { readonly kind: 'writing' | 'review' | 'revise'; readonly abort: AbortController }>();
     let assistantJobSeq = 0;
 
+    /** 计划页开着时在后台重新读计划视图（写手每写一段、每整理一章记忆、每审完一章都要刷新看板），见 coalesced；没开着时不读（打开时会读）。 */
+    const reloadPlanning = coalesced(async () => {
+      if (get().planning === null) return;
+      const planning = await service.planningView();
+      if (planning.ok && get().planning !== null) set({ planning: planning.value });
+    });
+
     /** 助手的后台任务做完：重新载入受影响的计划、正文与审核问题，以及对话（撤销记录在做完时写进对话）。 */
     async function afterAssistantJob(chapterId: string) {
-      const planning = get().planning === null ? null : await service.planningView();
-      if (planning?.ok === true) set({ planning: planning.value });
+      await reloadPlanning();
       if (get().selectedChapterId === chapterId) {
         const content = await service.openChapter(chapterId);
         if (content.ok && get().selectedChapterId === chapterId) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
@@ -778,8 +808,7 @@ export function createAppStore(service: AppService): AppStore {
         }),
       });
       const refresh = async (chapterId: string) => {
-        const planning = get().planning === null ? null : await service.planningView();
-        if (planning?.ok === true) set({ planning: planning.value });
+        await reloadPlanning();
         if (get().selectedChapterId === chapterId) {
           const content = await service.openChapter(chapterId);
           if (content.ok) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
@@ -924,8 +953,7 @@ export function createAppStore(service: AppService): AppStore {
           const queued = chapterIds.slice(i + 1);
           set({ reviewQueue: { chapterId, done: i, total: chapterIds.length, queued } });
           const { result, complete, reason } = await reviewWithRetry(() => reviewTask(chapterId, abort, tee), abort.signal);
-          const planning = get().planning === null ? null : await service.planningView();
-          if (planning?.ok === true) set({ planning: planning.value });
+          await reloadPlanning();
           const title = chapter(chapterId)?.title ?? '';
           if (abort.signal.aborted) {
             stop = `在《${title}》停下了`;
@@ -965,10 +993,9 @@ export function createAppStore(service: AppService): AppStore {
       const result = await service.buildMemory(chapterId, tee(t.options()));
       if (result.ok) t.finish('done');
       else t.fail(describeError(result.error));
-      const planning = get().planning === null ? null : await service.planningView();
+      await reloadPlanning();
       set({
         memoryBuilding: get().memoryBuilding === chapterId ? null : get().memoryBuilding,
-        ...(planning?.ok === true && { planning: planning.value }),
         ...(!result.ok && { message: describeError(result.error) }),
       });
       return result.ok;
@@ -1050,17 +1077,15 @@ export function createAppStore(service: AppService): AppStore {
      * 作品内容变了（后台的写手、工作流与 AI 助手）：重新读取目录、设定、事实与计划。
      * 不经 run()：后台每一步都会调用，不该让按钮闪一下忙碌、也不该清掉作者正在看的提示。
      */
-    async function refreshWork() {
+    /** 作品在别处改过（AI 助手的一步、写作工作流推进了一步）：重新读作品与开着的页。同一时间只读一次，见 coalesced。 */
+    const refreshWork = coalesced(async () => {
       const work = await service.reloadWork();
       if (!work.ok) return;
       set({ work: work.value });
       const [entities, facts] = await Promise.all([service.listEntities(), service.listFacts()]);
       if (entities.ok) set({ entities: entities.value });
       if (facts.ok) set({ facts: facts.value });
-      if (get().panel === 'planning' || get().panel === 'book') {
-        const planning = await service.planningView();
-        if (planning.ok) set({ planning: planning.value });
-      }
+      if (get().panel === 'planning' || get().panel === 'book') await reloadPlanning();
       if (get().panel === 'book') {
         // 成书页的作品现状与运行列表（AI 助手采用了一步、后台推进完一步时也要跟着变）。
         const [status, workflows] = await Promise.all([service.quickBookStatus(), service.listWorkflows()]);
@@ -1071,7 +1096,7 @@ export function createAppStore(service: AppService): AppStore {
         const relations = await service.relationsView();
         if (relations.ok) set({ relations: relations.value });
       }
-    }
+    });
     /** 打开一章（不在这一章时重新载入正文）。助手工作期间正文只读，不需要先保存。 */
     const showChapter = (chapterId: string): Partial<AppState> =>
       get().selectedChapterId === chapterId && get().panel === 'chapter'
@@ -2350,8 +2375,7 @@ export function createAppStore(service: AppService): AppStore {
               ? '审核完成，没有发现问题'
               : null;
         patch(issues, note);
-        const planning = get().planning === null ? null : await service.planningView();
-        if (planning?.ok === true) set({ planning: planning.value });
+        await reloadPlanning();
       },
       async reviewFromBoard(chapterId) {
         if (get().writerJob !== null || get().reviewingChapterId !== null || get().review?.running === true) return;
@@ -2361,9 +2385,9 @@ export function createAppStore(service: AppService): AppStore {
         set({ reviewingChapterId: chapterId, message: null });
         const result = await reviewTask(chapterId, abort);
         if (reviewAbort === abort) reviewAbort = null;
-        const planning = get().planning === null ? null : await service.planningView();
+        await reloadPlanning();
         const message = !result.ok ? describeError(result.error) : result.value.modelReviewed ? null : `只做了程序检查，模型审核没有完成：${result.value.reason ?? ''}`;
-        set({ reviewingChapterId: null, ...(planning?.ok === true && { planning: planning.value }), ...(message !== null && { message }) });
+        set({ reviewingChapterId: null, ...(message !== null && { message }) });
       },
       async openChapterReview(chapterId) {
         await get().selectChapter(chapterId);

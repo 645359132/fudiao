@@ -1314,6 +1314,45 @@ describe('成书流程看板（B65）', () => {
     return { ...ctx, ids };
   }
 
+  it('写手写着的时候计划页在后台刷新：同一时间只读一次计划视图，读的期间又要读的并成读完后的一次', async () => {
+    const { service, store, user, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    await addChapter(user, '第一章 夜叩');
+    const id = store.getState().work?.chapters[0]?.id ?? '';
+    expect((await service.savePlan(id, { goal: '林舟当玉', castIds: [], beats: ['叩门', '压价', '起疑', '离开', '回头', '雨停'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 9000 })).ok).toBe(true);
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await screen.findByRole('region', { name: '成书进度' });
+    // 计划视图读得慢（几百章的书），写手的每一段却很快写完。
+    let reads = 0;
+    let inFlight = 0;
+    let most = 0;
+    const planningView = service.planningView.bind(service);
+    service.planningView = async () => {
+      reads += 1;
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      inFlight -= 1;
+      return planningView();
+    };
+    let segments = 0;
+    deps.llmRoute.current = (body) => {
+      if (body.includes('你是一位中文长篇小说的写手')) {
+        segments += 1;
+        return reply(`第 ${segments} 段写到这里。`);
+      }
+      return body.includes('整理一章正文的要点') ? memory('梗概。') : null;
+    };
+    expect(await store.getState().writeChapters([id], {})).toBe('写手依次写 1 章：写完了《第一章 夜叩》');
+    service.planningView = planningView;
+    expect(segments).toBeGreaterThanOrEqual(3);
+    // 以前每写一段、写完、整理完记忆各读一次（段数加 2 次），而且几次同时读。
+    expect(most).toBe(1);
+    expect(reads).toBeLessThan(segments + 2);
+    expect(store.getState().planning?.chapters[0]?.plan?.status).toBe('written');
+  });
+
   it('一本书只有一个写手：跨了卷也按书中顺序一章一章写，后一章接上前一章的结尾；停下落在两章之间时记为停下', async () => {
     const { service, store, user, deps } = start();
     await createWork(user, '当铺夜谈');

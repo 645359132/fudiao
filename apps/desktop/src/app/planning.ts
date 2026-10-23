@@ -30,7 +30,7 @@ import {
   saveChapterPlan,
   updateForeshadow,
   type Chapter,
-  type ChapterMemory,
+  type ChapterMemorySummary,
   type ChapterPlan,
   type Entity,
   type Foreshadow,
@@ -50,7 +50,7 @@ export type PlanChapterView = {
   readonly plan: ChapterPlan | null;
   readonly problems: readonly PlanProblem[];
   /** 长篇记忆（B66）；正文在生成记忆后改过时状态为待复核。 */
-  readonly memory: ChapterMemory | null;
+  readonly memory: ChapterMemorySummary | null;
   readonly hasText: boolean;
   /** 待处理的审核问题数（B64）。 */
   readonly pendingIssues: number;

@@ -6,40 +6,44 @@ import { z } from 'zod';
 import type { SqlPort } from '../sql';
 import { jsonColumn, queryAll, queryOne, type RepoError, type WriteContext } from './common';
 
+const memoryFields = {
+  chapter_id: z.string(),
+  summary: z.string(),
+  cast_state: jsonColumn(z.record(z.string(), z.string())),
+  foreshadow_progress: jsonColumn(z.record(z.string(), z.string())),
+  status: z.enum(['valid', 'stale']),
+  llm_call_id: z.string().nullable(),
+  version: z.number().int(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  open_threads: jsonColumn(z.array(z.string())),
+};
+const summaryOf = (r: z.output<z.ZodObject<typeof memoryFields>>) => ({
+  chapterId: r.chapter_id,
+  summary: r.summary,
+  /** 人物设定标识 → 本章结束时的状态。 */
+  castState: r.cast_state,
+  /** 伏笔标识 → 本章中的进展。 */
+  foreshadowProgress: r.foreshadow_progress,
+  /** 章尾留给后面的事：悬而未决的问题、承诺或约定、没有完成的动作（迁移 0013）。 */
+  openThreads: r.open_threads,
+  status: r.status,
+  llmCallId: r.llm_call_id,
+  version: r.version,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+const SummaryRow = z.object(memoryFields).transform(summaryOf);
 const MemoryRow = z
-  .object({
-    chapter_id: z.string(),
-    summary: z.string(),
-    cast_state: jsonColumn(z.record(z.string(), z.string())),
-    foreshadow_progress: jsonColumn(z.record(z.string(), z.string())),
-    based_on: jsonColumn(z.record(z.string(), z.number().int())),
-    status: z.enum(['valid', 'stale']),
-    llm_call_id: z.string().nullable(),
-    version: z.number().int(),
-    created_at: z.string(),
-    updated_at: z.string(),
-    open_threads: jsonColumn(z.array(z.string())),
-  })
-  .transform((r) => ({
-    chapterId: r.chapter_id,
-    summary: r.summary,
-    /** 人物设定标识 → 本章结束时的状态。 */
-    castState: r.cast_state,
-    /** 伏笔标识 → 本章中的进展。 */
-    foreshadowProgress: r.foreshadow_progress,
-    /** 章尾留给后面的事：悬而未决的问题、承诺或约定、没有完成的动作（迁移 0013）。 */
-    openThreads: r.open_threads,
-    /** 生成时依据的段落：段落标识 → 版本。 */
-    basedOn: r.based_on,
-    status: r.status,
-    llmCallId: r.llm_call_id,
-    version: r.version,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  }));
+  .object({ ...memoryFields, based_on: jsonColumn(z.record(z.string(), z.number().int())) })
+  /** basedOn：生成时依据的段落，段落标识 → 版本。 */
+  .transform((r) => ({ ...summaryOf(r), basedOn: r.based_on }));
 export type ChapterMemory = z.output<typeof MemoryRow>;
+/** 列出全书的记忆时不带依据的段落版本（每章几百段，几百章时有上百万字节，用的地方只有判断待复核）。 */
+export type ChapterMemorySummary = z.output<typeof SummaryRow>;
 
 const COLUMNS = 'chapter_id, summary, cast_state, foreshadow_progress, based_on, status, llm_call_id, version, created_at, updated_at, open_threads';
+const SUMMARY_COLUMNS = COLUMNS.split(', ').filter((c) => c !== 'based_on');
 
 export type MemoryInput = {
   readonly chapterId: string;
@@ -55,12 +59,12 @@ export function getChapterMemory(port: SqlPort, chapterId: string): Promise<Resu
   return queryOne(port, MemoryRow, `SELECT ${COLUMNS} FROM chapter_memory WHERE chapter_id = ?`, [chapterId]);
 }
 
-/** 回收站以外的章节的记忆，按章节顺序。 */
-export function listChapterMemories(port: SqlPort): Promise<Result<ChapterMemory[], RepoError>> {
+/** 回收站以外的章节的记忆，按章节顺序；不带依据的段落版本（要它时用 getChapterMemory）。 */
+export function listChapterMemories(port: SqlPort): Promise<Result<ChapterMemorySummary[], RepoError>> {
   return queryAll(
     port,
-    MemoryRow,
-    `SELECT ${COLUMNS.split(', ').map((c) => `m.${c}`).join(', ')} FROM chapter_memory m JOIN chapter c ON c.id = m.chapter_id
+    SummaryRow,
+    `SELECT ${SUMMARY_COLUMNS.map((c) => `m.${c}`).join(', ')} FROM chapter_memory m JOIN chapter c ON c.id = m.chapter_id
      JOIN chapter_book_order o ON o.chapter_id = c.id WHERE c.status = 'normal' ORDER BY o.position`,
   );
 }
@@ -106,20 +110,24 @@ export async function saveChapterMemory(port: SqlPort, input: MemoryInput, ctx: 
 
 /**
  * 依据的段落改过、删掉，或本章多了新段落时，记忆标为待复核。打开作品与保存章节后调用；可随时重算。
- * 返回新标为待复核的章节。
+ * 返回新标为待复核的章节。比较在一条查询里做完：以前每部记忆各查一次本章的段落，几百章的书每读一次计划视图
+ * 就要来回上百次、搬近 1 MB 的段落版本，写手写着的时候界面跟着卡。
  */
 export async function reviewStaleMemories(port: SqlPort, ctx: WriteContext): Promise<Result<string[], RepoError>> {
-  const memories = await queryAll(port, MemoryRow, `SELECT ${COLUMNS} FROM chapter_memory WHERE status = 'valid'`);
-  if (!memories.ok) return memories;
-  const stale: string[] = [];
-  for (const m of memories.value) {
-    const rows = await port.query('SELECT id, version FROM paragraph WHERE chapter_id = ?', [m.chapterId]);
-    if (!rows.ok) return err({ code: 'sql', error: rows.error });
-    const current = new Map(rows.value.map((r) => [String(r['id']), Number(r['version'])]));
-    const changed =
-      current.size !== Object.keys(m.basedOn).length || Object.entries(m.basedOn).some(([id, version]) => current.get(id) !== version);
-    if (changed) stale.push(m.chapterId);
-  }
+  const changed = await queryAll(
+    port,
+    z.object({ chapter_id: z.string() }),
+    `SELECT m.chapter_id FROM chapter_memory m
+     WHERE m.status = 'valid' AND (
+       (SELECT count(*) FROM paragraph p WHERE p.chapter_id = m.chapter_id) <> (SELECT count(*) FROM json_each(m.based_on))
+       OR EXISTS (
+         SELECT 1 FROM json_each(m.based_on) j LEFT JOIN paragraph p ON p.id = j.key AND p.chapter_id = m.chapter_id
+         WHERE p.id IS NULL OR p.version <> j.value
+       )
+     )`,
+  );
+  if (!changed.ok) return changed;
+  const stale = changed.value.map((r) => r.chapter_id);
   if (stale.length === 0) return ok([]);
   const result = await port.transaction(
     stale.map((id) => ({ sql: "UPDATE chapter_memory SET status = 'stale', version = version + 1, updated_at = ? WHERE chapter_id = ?", params: [ctx.now, id] })),

@@ -285,7 +285,8 @@ describe('命令（测试模型）', () => {
     const directorCalls = director.calls.filter((c) => c.step === 'director');
     expect(directorCalls.length).toBe(3 * 19);
     expect(directorCalls[0]?.text).toContain('第三轮爆发');
-  }, 30_000);
+    // 三次各 20 回合的推演并行写盘：单独跑约 15 秒，整套测试并行时在开发机上到过 37 秒。
+  }, 90_000);
 
   it('outcomes 按结局归类，列出代表运行的关键转折', async () => {
     const batch = join(out, 'batch');

@@ -63,7 +63,7 @@ export type { ChapterPlan, PlanFields, PlanStatus } from './chapter-plan';
 export { deleteChapterPlan, getChapterPlan, listChapterPlans, PLAN_STATUSES, saveChapterPlan, setPlanStatus } from './chapter-plan';
 export type { BuiltinSkill, WritingSkill } from './writing-skill';
 export { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
-export type { ChapterMemory, MemoryInput } from './chapter-memory';
+export type { ChapterMemory, ChapterMemorySummary, MemoryInput } from './chapter-memory';
 export { getChapterMemory, listChapterMemories, listChaptersWithText, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
 export type { IssueEvidence, IssueInput, IssueKind, IssueSeverity, IssueSource, IssueStatus, ReviewIssue } from './review-issue';
 export { addIssues, countPendingIssues, getIssue, ISSUE_KINDS, ISSUE_SOURCES, ISSUE_STATUSES, listIssues, replacePendingIssues, reviewStaleIssues, setIssueStatus } from './review-issue';
