@@ -79,9 +79,10 @@ describe('作品列表', () => {
     expect(value(await app.loadLibrary()).preferences).toEqual(DEFAULT_PREFERENCES);
     expect(value(await app.setPreferences({ showParagraphSource: false })).preferences).toEqual({ ...DEFAULT_PREFERENCES, showParagraphSource: false });
     const layout = { sidebar: 300, assistant: 420, sidebarHidden: true };
-    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' } });
+    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' }, autoRelationChanges: true });
     expect(value(await app.setPreferences({ assistant: { effort: 'high' } })).preferences.assistant).toEqual({ effort: 'high' });
-    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' } });
+    expect(value(await app.setPreferences({ autoRelationChanges: false })).preferences.autoRelationChanges).toBe(false);
+    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' }, autoRelationChanges: false });
     // 2026-10-22 版写进文件的“同时写几卷”已经取消：旧文件照常读，这一项丢掉。
     writeFileSync(deps.libraryFile, JSON.stringify({ version: 1, libraryDir: null, works: [], preferences: { ...DEFAULT_PREFERENCES, writer: { parallel: 2 } } }));
     expect(value(await app.loadLibrary()).preferences).toEqual(DEFAULT_PREFERENCES);

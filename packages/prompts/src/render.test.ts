@@ -41,6 +41,7 @@ import {
   renderBenchmarkBook,
   renderBenchmarkCompare,
   renderCastCompletion,
+  renderRelationChanges,
   renderContinuityCheck,
   renderOpeningReview,
   renderBookVolumes,
@@ -835,6 +836,30 @@ describe('人物补全的模板（B83）', () => {
     const text = fullText(prompt);
     for (const part of ['最多列 20 个人物', '- 钱四（又名四爷）〔缺口：说明为空〕', '- 钱四是林舟的债主', '[C1] 第一章：林舟当玉。（出场：钱四）']) expect(text).toContain(part);
     expect(fullText(unwrap(renderCastCompletion({ title: 't', genre: '', characters: [], relations: [], chapters: [] })))).toContain('人物：还没有人物卡片');
+  });
+});
+
+describe('人物关系变化的模板（B73 补充）', () => {
+  it('relation_changes：人物带别名、说明与退场情况，现在的关系带标签，各章梗概带章末的人物状态', () => {
+    const prompt = unwrap(
+      renderRelationChanges({
+        title: '长夜问刀',
+        genre: '武侠',
+        characters: [
+          { name: '沈孤舟', aliases: ['沈三'], description: '刀客', status: '' },
+          { name: '顾寒衣', aliases: [], description: '', status: '第 50 章退场：坠崖' },
+        ],
+        relations: [{ label: 'R1', text: '沈孤舟与顾寒衣：灭门仇敌', description: '顾家灭了沈家满门' }],
+        chapters: [{ label: 'C1', title: '雪夜', summary: '两人约定暂时联手。', cast: ['沈孤舟：负伤'] }],
+      }),
+    );
+    expect(prompt.output?.name).toBe('RelationChangesOutput');
+    expect(prompt.task).toBe('relation_changes');
+    const text = fullText(prompt);
+    for (const part of ['最多列 20 条关系变化', '- 沈孤舟（又名沈三）：刀客', '- 顾寒衣〔第 50 章退场：坠崖〕', '[R1] 沈孤舟与顾寒衣：灭门仇敌：顾家灭了沈家满门', '[C1] 雪夜：两人约定暂时联手。\n  沈孤舟：负伤']) expect(text).toContain(part);
+    const empty = fullText(unwrap(renderRelationChanges({ title: 't', genre: '', characters: [], relations: [], chapters: [] })));
+    expect(empty).toContain('人物：还没有人物卡片');
+    expect(empty).toContain('现在的关系：还没有');
   });
 });
 

@@ -14,6 +14,7 @@ const TASKS: Readonly<Record<string, string>> = {
   plan_draft: '章节计划草稿',
   writer: '写手成章',
   memory: '长篇记忆',
+  relation_changes: '人物关系变化',
   review: '审核',
   director: '导演提议',
   reader: '读者代理',

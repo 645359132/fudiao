@@ -47,6 +47,7 @@ export function WorkScreen() {
   const openQuickBook = useApp((s) => s.openQuickBook);
   const running = useApp((s) => s.tasks.filter((t) => t.status === 'running').length);
   const pendingReview = useApp((s) => s.facts.filter((f) => f.status === 'needs_review').length);
+  const relationPending = useApp((s) => s.relationPending);
   const busy = useApp((s) => s.busy);
   const assistantOpen = useApp((s) => s.assistantOpen);
   const toggleAssistant = useApp((s) => s.toggleAssistant);
@@ -151,7 +152,7 @@ export function WorkScreen() {
                 {navItem('book', 'book', '成书', panel === 'book', () => void openQuickBook(), undefined, '写作工作流：一键成书等，按固定的步骤依次做，每步可以看、改、采用')}
                 {navItem('planning', 'plan', '计划', panel === 'planning', () => void openPlanning())}
                 {navItem('settings', 'people', '设定', panel === 'settings', () => void openSettings())}
-                {navItem('relations', 'relations', '人物关系', panel === 'relations', () => void openRelations(), undefined, '人物关系网：谁和谁是什么关系，随章节变化')}
+                {navItem('relations', 'relations', '人物关系', panel === 'relations', () => void openRelations(), relationPending > 0 ? `（待确认 ${relationPending}）` : undefined, '人物关系网：谁和谁是什么关系，随章节变化')}
             {navItem('facts', 'facts', '事实', panel === 'facts', () => void openFacts(), pendingReview > 0 ? `（待复核 ${pendingReview}）` : undefined)}
                 {navItem('simulation', 'stage', '推演', panel === 'simulation', () => void openSimulation(), undefined, '角色推演：设置场景，让角色各自依据所知行动')}
                 {navItem('search', 'search', '查找', panel === 'search', () => void openSearch(), undefined, '全文查找（Ctrl+F）')}

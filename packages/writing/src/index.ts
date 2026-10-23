@@ -25,3 +25,7 @@ export { castGaps } from './cast';
 export { MAX_QUOTE_CHARS, overlapTrimmer, parseRankList, sliceChars, trimOverlap } from './benchmark';
 export type { OverlapResult, RankEntry } from './benchmark';
 export { chapterMention, MENTION_HEAD_CHARS, paragraphMention, replaceLabels } from './labels';
+export type { CastTimeline, CastTimelineInput, PresenceKind, PresenceRecord } from './presence';
+export { castTimelines, exitAt, exitNote, presentAt } from './presence';
+export type { ChangeChapter, ChangeKind, LabeledRelation, PendingChange, Person, ProjectedRelation, RelationChangeDraft, RelationRecord, ResolvedChange, ResolveInput } from './relation-changes';
+export { projectRelations, relationToChange, resolveRelationChanges, samePerson } from './relation-changes';

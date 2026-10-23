@@ -173,7 +173,12 @@ function step<P, O>(spec: StepSpec<P, O>): Step<P> {
 export type BookSize = { readonly chapters: number; readonly written: number; readonly words: number };
 
 /** 预计用量：调用次数与 Token（思考计入输出）。 */
-export type WorkflowEstimate = { readonly calls: number; readonly inputTokens: number; readonly outputTokens: number };
+/** written：这个工作流里写手要写的章数（桌面端写完一章还要找人物关系的变化，见 quoteWorkflow 的 relationChanges）。 */
+export type WorkflowEstimate = { readonly calls: number; readonly inputTokens: number; readonly outputTokens: number; readonly written?: number };
+
+/** 写完一章后找人物关系的变化（B73 补充）：一章一次，读这一章的长篇记忆与人物、关系表。 */
+const RELATION_CHANGE_INPUT = 4_000;
+const RELATION_CHANGE_OUTPUT = 800;
 
 type WorkflowDef<P> = {
   readonly title: string;
@@ -430,6 +435,7 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
       const volumes = planning.kind === 'single' ? 0 : planning.chapters.length;
       const planCalls = planning.kind === 'single' ? 1 : 1 + volumes;
       return {
+        written: p.chapters,
         calls: 1 + planCalls + segments + p.chapters * 2,
         inputTokens: Math.round(3_000 + 6_000 * planCalls + segments * 9_000 + p.chapters * 2 * 6_000 + words * TOKENS_PER_CHAR * 2),
         outputTokens: Math.round(2_000 + p.chapters * 150 + volumes * 700 + p.chapters * 800 + words * TOKENS_PER_CHAR + p.chapters * (1_500 + 3_000)),
@@ -867,6 +873,7 @@ function nextVolume(host: WorkflowHost): WorkflowDef<NextVolumeParams> {
       const segments = p.chapters * Math.max(1, Math.ceil(p.wordsPerChapter / 1_500));
       const suspects = Math.min(10, Math.ceil(p.chapters / 2));
       return {
+        written: p.chapters,
         calls: 2 + segments + p.chapters * 2 + 1 + suspects,
         inputTokens: Math.round(8_000 + 8_000 + segments * 9_000 + p.chapters * 2 * 6_000 + words * TOKENS_PER_CHAR * 2 + 4_000 + suspects * (p.wordsPerChapter * TOKENS_PER_CHAR * 2 + 2_000)),
         outputTokens: Math.round(3_000 + p.chapters * 800 + words * TOKENS_PER_CHAR + p.chapters * (1_500 + 3_000) + 3_000 + suspects * 1_500),
@@ -1672,14 +1679,17 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     /**
      * 开始前的预计用量与费用（按默认模型的价格；价格未知时费用为 null）。
      * assumed 是假定的作品规模：试用脚本（tools/workflow-eval）在章节写出来之前估算后面的工作流时用；不给时按作品现状。
+     * relationChanges：写完一章后找人物关系的变化（桌面端的写手队列按偏好做，默认开），每写一章另计一次调用。
      */
-    async quoteWorkflow(workflow: WorkflowKey, params: unknown, assumed?: BookSize): Promise<Result<WorkflowQuote, AppError>> {
+    async quoteWorkflow(workflow: WorkflowKey, params: unknown, assumed?: BookSize, options: { readonly relationChanges?: boolean } = {}): Promise<Result<WorkflowQuote, AppError>> {
       const def = ERASED[workflow];
       const p = def.parseParams(params);
       if (!p.ok) return err(invalid(p.error));
       const book = assumed ?? (await currentSize());
-      const base = def.estimate(p.value, book);
-      const estimate = { ...base, outputTokens: base.outputTokens + base.calls * THINKING_TOKENS_PER_CALL };
+      const { written = 0, ...base } = def.estimate(p.value, book);
+      const extra = options.relationChanges === true ? written : 0;
+      const calls = base.calls + extra;
+      const estimate = { calls, inputTokens: base.inputTokens + extra * RELATION_CHANGE_INPUT, outputTokens: base.outputTokens + extra * RELATION_CHANGE_OUTPUT + calls * THINKING_TOKENS_PER_CALL };
       const price = await pricing();
       const cost = costOf({ inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }, price?.prices);
       return ok({ ...estimate, costUsd: cost, model: price?.model ?? null });

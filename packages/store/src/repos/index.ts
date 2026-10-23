@@ -19,6 +19,21 @@ export type { Cover, CoverImage } from './cover';
 export { getCover, getCoverThumbnail, MAX_COVER_CHARS, MAX_THUMBNAIL_CHARS, removeCover, saveCover } from './cover';
 export type { RelationCategory, RelationPosition, Relationship, RelationshipFields } from './relationship';
 export { createRelationship, deleteRelationship, listRelationPositions, listRelationships, RELATION_CATEGORIES, setRelationPosition, updateRelationship } from './relationship';
+export type { CastPresence, CastPresenceFields, PresenceKind } from './cast-presence';
+export { deleteCastPresence, listCastAppearances, listCastPresence, PRESENCE_KINDS, saveCastPresence, updateCastPresence } from './cast-presence';
+export type { RelationScanInput, RelationSuggestion, SuggestionInput, SuggestionKind, SuggestionStatus } from './relation-suggestion';
+export {
+  countChaptersWithoutMemory,
+  countPendingRelationSuggestions,
+  getRelationSuggestion,
+  listRelationScans,
+  listRelationScanTodo,
+  listRelationSuggestions,
+  saveRelationScan,
+  settleRelationSuggestion,
+  SUGGESTION_KINDS,
+  SUGGESTION_STATUSES,
+} from './relation-suggestion';
 export type { NewWorkflowRun, StepPatch, WorkflowRun, WorkflowRunWithSteps, WorkflowStepRow } from './workflow';
 export { abandonWorkflowRun, createWorkflowRun, getWorkflowRun, interruptRunningSteps, listWorkflowRuns, setWorkflowStepUsage, StepUsage, updateWorkflowStep, updateWorkflowSteps } from './workflow';
 export type { BenchmarkSample, BenchmarkSampleInput } from './benchmark';

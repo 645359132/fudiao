@@ -89,6 +89,10 @@ export async function seedDemo(app: AppService): Promise<{ readonly mainWorkId: 
     must(await app.savePlan(chapters[i]!.id, { goal, castIds: [shen.id], beats: [goal], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
   }
 
+  // 第一章的长篇记忆，以及从它找出、等作者确认的人物关系变化（B73 补充）。
+  must(await app.buildMemory(first.id));
+  must(await app.findRelationChanges([first.id]));
+
   // 一段真实走过的助手对话。
   must(await app.sendToAssistant('给沈砚身边加一个重要的配角人物'));
   return { mainWorkId: work.project.id };

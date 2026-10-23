@@ -109,7 +109,9 @@ export function ChapterPanel() {
               ? `写手正在写这一章${mine.total > 0 ? `（已写 ${mine.done} / ${mine.total} 段）` : ''}`
               : mine.stage === 'memory'
                 ? '这一章已写完，正在整理长篇记忆'
-                : '这一章已写完，正在审核'}
+                : mine.stage === 'relations'
+                  ? '这一章已写完，正在找人物关系的变化'
+                  : '这一章已写完，正在审核'}
             ，完成之前正文只读。
           </span>
           <button type="button" onClick={cancelWriting}>

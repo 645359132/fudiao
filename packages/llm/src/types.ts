@@ -25,7 +25,9 @@ export type TaskKind =
   | 'assistant'
   | 'writer'
   | 'review'
-  | 'memory';
+  | 'memory'
+  /** 人物关系随剧情的变化（B73 补充）：从长篇记忆找出关系与人物的变化。 */
+  | 'relation_changes';
 
 /**
  * 模型能力描述（B56）。来源依次为服务返回的信息、内置能力表与用户覆盖；

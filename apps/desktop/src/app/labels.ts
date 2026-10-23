@@ -1,7 +1,7 @@
 // 界面与 AI 助手共用的中文名称：设定种类、章节计划与推演的状态等。类型约束键名，存储层增加取值时这里漏不掉。
 import type { SkillStage, WorkflowStepStatus } from '@fudiao/shared';
 import type { RunState } from '@fudiao/writing';
-import type { EntityKind, ForeshadowStatus, IssueSource, PlanStatus, RelationCategory, SimRun } from '@fudiao/store';
+import type { EntityKind, ForeshadowStatus, IssueSource, PlanStatus, PresenceKind, RelationCategory, SimRun } from '@fudiao/store';
 
 export const ENTITY_KIND_LABEL: Readonly<Record<EntityKind, string>> = { character: '人物', location: '地点', organization: '组织', item: '物品', rule: '世界规则' };
 
@@ -25,6 +25,9 @@ export const RELATION_CATEGORY_LABEL: Readonly<Record<RelationCategory, string>>
   affiliation: '从属',
   other: '其他',
 };
+
+/** 人物的出场、退场与回归（B73 补充）。 */
+export const PRESENCE_KIND_LABEL: Readonly<Record<PresenceKind, string>> = { enter: '出场', exit: '退场', return: '回归' };
 
 /** 推演的状态、结束与暂停的原因（B28）。结束与暂停的原因来自引擎的事件，没有收录的原样显示。 */
 export const SIM_RUN_STATUS_LABEL: Readonly<Record<SimRun['status'], string>> = { created: '还没有开始', running: '进行中', awaiting_author: '等待作者', paused: '已暂停', ended: '已结束' };

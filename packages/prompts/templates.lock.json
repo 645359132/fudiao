@@ -83,6 +83,10 @@
     "version": "6",
     "sha256": "6ebb23cfb8b0a5e01f120f03923e537d51a32288de9b60a8983c9794653a25ff"
   },
+  "relation_changes": {
+    "version": "1",
+    "sha256": "ecd8ec47de72d829ab2825e5ac467f627c04d148b70c1761db5d3c52a759baa2"
+  },
   "run_synopsis": {
     "version": "3",
     "sha256": "f3217db2960d38e02534528fda0a92d8474fed7d420449ddd2abd4bac6aa8e51"

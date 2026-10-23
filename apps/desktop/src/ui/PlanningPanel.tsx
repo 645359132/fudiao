@@ -318,7 +318,9 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
             ? `写手正在写${mine.total > 0 ? `（${mine.done} / ${mine.total} 段）` : ''}`
             : mine.stage === 'memory'
               ? '已写完，正在整理长篇记忆'
-              : '已写完，正在审核'
+              : mine.stage === 'relations'
+                ? '已写完，正在找人物关系的变化'
+                : '已写完，正在审核'
           : queued
             ? '排队中'
             : PLAN_STATUS_LABEL[plan.status]}

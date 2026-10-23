@@ -86,6 +86,8 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
       assistant_message: (tables['assistant_message'] ?? []).map((row) => ({ conversation_id: LEGACY_CONVERSATION_ID, ...row })),
     };
   },
+  // 0024：新增人物的出场与退场、关系与人物变化的建议、每章找到的长篇记忆版本，旧版本导出的数据中没有，导入为空。
+  24: (tables) => tables,
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

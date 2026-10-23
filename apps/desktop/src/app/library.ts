@@ -29,12 +29,14 @@ export const Preferences = z.object({
     .default(DEFAULT_LAYOUT),
   /** AI 助手每一步的思考深度（对话框下方选择）；写手、审核等任务各用自己的深度。 */
   assistant: z.object({ effort: z.enum(['low', 'medium', 'high']).default('medium') }).default({ effort: 'medium' }),
+  /** 写手写完一章、整理完长篇记忆后，自动找出这一章带来的人物关系与人物进出的变化（B73 补充），存为待确认的建议。 */
+  autoRelationChanges: z.boolean().default(true),
 });
 export type Preferences = z.infer<typeof Preferences>;
 export type Theme = Preferences['theme'];
 export type Layout = Preferences['layout'];
 export type AssistantEffort = Preferences['assistant']['effort'];
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' } };
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' }, autoRelationChanges: true };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

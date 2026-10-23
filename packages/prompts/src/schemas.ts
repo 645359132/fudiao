@@ -329,6 +329,38 @@ export const CastCompletionOutput = z.object({
 });
 export type CastCompletionOutput = z.infer<typeof CastCompletionOutput>;
 
+/**
+ * 人物关系随剧情的变化（B73 补充）：这几章里关系的新增、改变与结束，人物的出场、退场与回归。
+ * 章节与关系用提示词中的标签（C1……、R1……）指代，由应用层换回标识；对不上的丢弃。
+ */
+export const RelationChangesOutput = z.object({
+  relations: z.array(
+    z.object({
+      chapter: z.string(),
+      kind: z.enum(['add', 'change', 'end']),
+      relation: z.string(),
+      from: z.string(),
+      to: z.string(),
+      category: z.enum(['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other']),
+      label: z.string(),
+      mutual: z.boolean(),
+      description: z.string(),
+      secret: z.boolean(),
+      reason: z.string(),
+    }),
+  ),
+  cast: z.array(
+    z.object({
+      chapter: z.string(),
+      kind: z.enum(['enter', 'exit', 'return']),
+      name: z.string(),
+      description: z.string(),
+      reason: z.string(),
+    }),
+  ),
+});
+export type RelationChangesOutput = z.infer<typeof RelationChangesOutput>;
+
 /** 扫榜拆书（B79）：一本对标作品的拆解，只有结构与技法；引文由应用层做复述检查。 */
 export const BenchmarkBookOutput = z.object({
   genre: z.string(),

@@ -152,6 +152,9 @@ fudiao/
 | `review_issue` | id、chapter_id、kind（设定冲突、时间线、视角越界、伏笔、人物言行、偏离计划、重复与节奏、AI 腔）、severity、anchor（段落标识、版本、引文）、evidence（依据：设定、事实、伏笔或段落；另一章的段落带 chapterId 与 version，迁移 0020 起）、description、suggestion、status（待处理、已忽略、已修改、已交写手修订、过期）、source（程序、模型、跨章连贯检查 continuity（迁移 0020）或开篇诊断 opening（迁移 0021））、llm_call_id；迁移 0005 | B64、B80 |
 | `relationship` | id、from_id 与 to_id（两项不同的设定，删除设定时级联删除）、category（亲属、情感、师承、友盟、竞争、敌对、从属、其他）、label（读作“from 是 to 的 label”）、mutual（双方相同）、description、secret（读者还不知道）、适用章节范围（valid_from/to_chapter_id，章节删除时置空）、version；迁移 0012 | B73 |
 | `relation_position` | entity_id（删除设定时级联删除）、x、y（关系图逻辑坐标 1000×640 中作者拖定的位置，只影响显示）；迁移 0012 | B73 |
+| `cast_presence` | id、entity_id（删除设定时级联删除）、chapter_id（删除章节时级联删除）、kind（出场 enter、退场 exit、回归 return；同一人物同一章同种只有一条）、note、version；出场多数由章节计划与长篇记忆推算，这里只记推算不出的（新人物在哪一章出场）与作者改的；退场那一章人物还在、下一章起不在，回归那一章起又在；迁移 0024 | B73 |
+| `relation_suggestion` | id、chapter_id（来源章节）、kind（relation_add、relation_change、relation_end、cast_enter、cast_exit、cast_return）、relationship_id（模型指认的原来那条，关系删除时置空）、from_id 与 from_name、to_id 与 to_name（还没有卡片的新人物只有名字；设定删除时级联删除）、category、label、old_label（改变前的称谓）、mutual、secret、description（关系说明、新人物的小传或退场的说明）、valid_to_chapter_id（同一批里新增后又结束的）、reason（依据）、status（待确认、已采用、已忽略）、memory_version（依据的长篇记忆版本）、llm_call_id、result_id（采用后建出或改动的记录）、version；派生结论，作者采用后才写进作品；迁移 0024 | B73 |
+| `relation_scan` | chapter_id（主键，删除章节时级联删除）、memory_version（这一章按哪个版本的长篇记忆找过）、llm_call_id；记忆重建后版本变了，这一章再找一次；迁移 0024 | B73 |
 | `benchmark_sample` | run_id 与 idx（主键；运行删除时级联删除）、title、author、tags、words、blurb、text（样章原文）、created_at；扫榜拆书作者导入的榜单与样章，别人的作品，只用于拆解；`schema.ts` 的 `LOCAL_TABLES`，不进作品包与数据导出，跑完或放弃时删除；迁移 0022 | B79 |
 | `workflow_run` | id、workflow（工作流的键，例如 quick_book）、title、params（开始时的参数 JSON）、mode（step 每步停下、auto 一路做完）、budget_usd（费用上限，可空）、status（进行中 active、已放弃 abandoned；做没做完由各步推出，不另存）、version；迁移 0019，随作品包导出 | B78 |
 | `workflow_step` | run_id 与 idx（主键；运行删除时级联删除）、key（步骤的键）、status（待做、进行中、等作者、已完成、出错、已跳过、中断、可能过时）、output（步骤的结果 JSON：草稿、报告或说明，读出时按这一步的结构校验）、edited（作者改过草稿）、attempt（第几次执行，模型步骤的步骤键用它）、note（给作者看的一句话）、changes（采用时对作品的改动，撤回用，与 AI 助手的撤销记录同一格式）、usage（这一步的用量与费用）、based_on（派生结论依据的段落或长篇记忆的版本）、started_at、finished_at、version；迁移 0019 | B78 |
@@ -780,6 +783,16 @@ M5-05 的设计（人物关系网）：
 - AI 助手：`assistant_turn` 版本 3；动作 `add_relationship`、`update_relationship`（“不限”取消章节限制）、`delete_relationship`（须确认，说明里读出这条关系）；现状里列出已有关系（最多 80 条，附类别、隐秘与章节范围）；`open_page` 可以打开关系页。
 - 快速成书：`book_seed` 版本 2 输出 `relationships`（较早的输出没有，按空处理）；采用骨架时按名字（含别名）建立，对不上的、重复的跳过；骨架编辑器里可以删去。
 - 关系图：`app/relations.ts` 的 `layoutGraph`（力导向，起点按顺序排在圆上、迭代次数固定，结果只由输入决定；斥力在一定距离内起作用，向中心收拢；没有关系的人物排在底部一行；没有拖定位置时缩放到画布中间）。拖动人物即固定位置（`relation_position`），可以取消或整张图重新排布。排布用全部关系，按章节查看时人物不跳动。同一对人物之间的几条关系画成错开的弧线，单向带箭头，隐秘为虚线，颜色按类别。
+
+M5-05 补充的设计（人物关系随剧情变化，作者反馈 2026-10-23）：
+
+- 起因：人物关系页只有建书时生成的关系，写了一百多章也不变；人物会新出场（包括写手自己写出来的）、死去或离开、回来，关系会变（仇敌暂时联手）。人物补全（B83）只增不改，也不管退场。
+- 找变化：模板 `relation_changes`（版本 1，任务种类 `relation_changes`，输出 `RelationChangesOutput`：relations 的 add、change、end 与 cast 的 enter、exit、return，章节用 C1……、关系用 R1……指代）读这几章的长篇记忆（梗概与人物在章末的状态）、人物表（说明截到 60 字，带“还没出场”“第 N 章退场：…”“待作者确认的新人物”）与这几章开始时的关系。“开始时的关系”是已有关系里在第一章成立的，再按书中顺序叠上这几章之前待确认的建议（`packages/writing` 的 `projectRelations`），后面几章不重复前面已经找到、还没确认的。用例 `app/relation-changes.ts` 的 `findRelationChanges`（一批最多 8 章、梗概与人物状态合计约 1.2 万字），结果由 `resolveRelationChanges`（纯函数）换回标识：名字对不上人物、两端同一人、与已有关系相同、没有变化、重复的丢弃；已有人物不算新出场；同一批里先新增后改变或结束的两人合并（新增的到改变的前一章或结束的那一章为止）；说明里照抄的标签换成章节名与关系。作者已采用或忽略过的同一条不再提。一次查找在一个事务里换掉这些章原来待确认的建议，并在 `relation_scan` 记下按哪个版本的记忆找过。
+- 采用：作者在关系页逐条采用、忽略或全部采用（按书中顺序，同一章先出场、再关系、后退场；没采用成的跳过并说明）。新增从这一章起；改变按两端在这一章成立的关系重新找原来那条（`relationToChange`：模型指认的那条仍成立时取它，否则同称谓的、唯一的），旧的到上一章为止、新的从这一章起（原来那条就是从这一章起的或这是第一章时就地改）；结束到这一章为止，找不到时说明可以忽略；新人物建卡片（小传写进说明）并记下出场；关系连到还没卡片的新人物时顺带采用他的出场；退场与回归记进 `cast_presence`。再采用一次不重复建。
+- 写手队列：状态层的 `writeQueue` 写完一章、整理完长篇记忆后（偏好 `autoRelationChanges` 开着时，默认开）找这一章的变化，看板的阶段为 relations，任务种类 `relations`；没找成时记下这一章、接着写后面的（与审核一样），结束的那句话列出，并写明找到了几条；AI 助手在后台写完单章后同样找。服务层默认的写章节钩子（测试、命令行与试用脚本）不找；`quoteWorkflow` 的 `relationChanges` 让桌面端的预计每写一章另计一次调用。
+- 补找：关系页的“从已写的章节找出变化”只找长篇记忆有效、还没按当前这一版记忆找过的章节，按书中顺序分批，进度写在页上，可以停下；有正文却没有有效记忆的章节写明要先整理。
+- 出场与退场：第一次出场取章节计划的出场人物、长篇记忆的人物状态与记下的出场里最早的（`castTimelines`、`presentAt`、`exitAt`，纯函数）；关系页按章节查看时只显示那一章已出场、没有退场的人物（组织、地点不筛选；整本书推算不出任何出场时不筛选），排布仍用全部人物，位置不跳动；书写到最后仍在退场中的人物画成虚线；人物详情列出首次出场与退场、回归。设定页的人物下面可以记下、修改与删除出场、退场与回归。规划（`plan_draft`、`volume_outline`、`book_volumes`）的人物说明后面带上“（第 N 章退场：…）”（`characterBriefs`），模板文字不变。
+- 导航“人物关系”显示待确认的条数（`relationPending`，打开作品、后台写完一章、采用与忽略后更新）。
 
 M5-13 的设计（助手的后台任务与如实汇报）：
 

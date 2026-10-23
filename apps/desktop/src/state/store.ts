@@ -6,7 +6,7 @@ import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
 import { reviewWithRetry, type ReviewIssueView } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
-import type { ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
+import type { CastPresenceFields, ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantConversationView, AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
@@ -19,6 +19,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
 import { type AssistantEffort, type Layout, type Preferences, type Theme } from '../app/library';
 import type { RelationsView } from '../app/relations';
+import type { CastPresenceView } from '../app/relation-changes';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
 import { NO_OVERRIDES, type ContextManifest, type ContextOverrides } from '@fudiao/context';
@@ -69,10 +70,10 @@ export type ChapterDrawer = { readonly kind: 'entity'; readonly entityId: string
 export type EditorSelectionInfo = { readonly key: string; readonly chapterId: string; readonly length: number; readonly preview: string };
 
 /** 一次选区操作：流式生成的文字与状态（B16）。 */
-/** 成书流程正在处理的章节：写作（已写 done / total 段）、整理长篇记忆或审核；queued 是排在后面的章节。 */
+/** 成书流程正在处理的章节：写作（已写 done / total 段）、整理长篇记忆、找人物关系的变化或审核；queued 是排在后面的章节。 */
 export type WriterJob = {
   readonly chapterId: string;
-  readonly stage: 'writing' | 'memory' | 'review';
+  readonly stage: 'writing' | 'memory' | 'relations' | 'review';
   readonly done: number;
   readonly total: number;
   readonly queued: readonly string[];
@@ -132,6 +133,12 @@ export type AppState = {
   readonly facts: readonly Fact[];
   /** 人物关系网（B73）：关系、可以作为一端的设定与作者拖定的位置（打开关系页时读取）。 */
   readonly relations: RelationsView | null;
+  /** 待确认的关系与人物变化的条数（B73 补充）：导航“人物关系”上显示。打开作品、后台写完一章与采用后更新。 */
+  readonly relationPending: number;
+  /** 正在从已写的章节找出关系变化：做完了几批、一共几批；没有在找时为 null。 */
+  readonly relationScan: { readonly done: number; readonly total: number } | null;
+  /** 人物的出场与退场（设定页用，打开设定页时读取）。 */
+  readonly castPresence: CastPresenceView | null;
   /** 事实页中选中的事实；“new” 表示正在新建。 */
   readonly selectedFactId: string | null;
   readonly wordCount: number;
@@ -478,6 +485,19 @@ export type AppState = {
   /** 记下（at 为 null 时取消）一项设定在关系图上的位置。 */
   readonly placeRelationNode: (entityId: string, at: { readonly x: number; readonly y: number } | null) => Promise<void>;
   readonly resetRelationLayout: () => Promise<void>;
+  /** 采用或忽略一条待确认的关系与人物变化（B73 补充）。返回是否成功。 */
+  readonly adoptRelationSuggestion: (id: string) => Promise<boolean>;
+  readonly ignoreRelationSuggestion: (id: string) => Promise<boolean>;
+  /** 按书中顺序全部采用；没采用成的跳过，说明原因。 */
+  readonly adoptAllRelationSuggestions: () => Promise<void>;
+  /** 从已写的章节找出关系变化：只找还没按当前这一版长篇记忆找过的，分批进行，登记为任务；同一时间只有一次。 */
+  readonly findRelationChangesInBook: () => Promise<void>;
+  readonly stopRelationScan: () => void;
+  /** 写完一章后自动找出关系变化（对所有作品生效的偏好，默认开）。 */
+  readonly setAutoRelationChanges: (on: boolean) => Promise<void>;
+  /** 记下（id 为 null）或修改人物的出场、退场与回归；删除一条。返回是否成功。 */
+  readonly saveCastPresence: (id: string | null, fields: CastPresenceFields) => Promise<boolean>;
+  readonly deleteCastPresence: (id: string) => Promise<boolean>;
   readonly selectFact: (id: string | null) => void;
   readonly saveFact: (id: string | null, input: FactInput) => Promise<boolean>;
   readonly setFactStatus: (id: string, status: FactStatus) => Promise<void>;
@@ -757,6 +777,44 @@ export function createAppStore(service: AppService): AppStore {
       if (planning.ok && get().planning !== null) set({ planning: planning.value });
     });
 
+    /**
+     * 人物关系的变化（B73 补充）有了新的：重新读待确认的条数；关系页开着时重新读它，设定页读过出场与退场时一并更新。
+     * 写手每写完一章都要来一次，同一时间只读一次，见 coalesced。
+     */
+    const refreshRelations = coalesced(async () => {
+      const count = await service.relationSuggestionCount();
+      if (count.ok) set({ relationPending: count.value });
+      if (get().panel === 'relations') {
+        const relations = await service.relationsView();
+        if (relations.ok && get().panel === 'relations') set({ relations: relations.value });
+      }
+      if (get().castPresence !== null) {
+        const presence = await service.castPresenceView();
+        if (presence.ok && get().castPresence !== null) set({ castPresence: presence.value });
+      }
+    });
+    /** 采用了关系变化：新人物要进设定列表（正文高亮也用它），出场与退场、关系页与条数随之更新。 */
+    async function afterRelationAdoption() {
+      const entities = await service.listEntities();
+      if (entities.ok) set({ entities: entities.value });
+      await refreshRelations();
+    }
+    /** 写完一章后自动找出关系变化（偏好，默认开）。 */
+    const autoRelations = () => get().library?.preferences.autoRelationChanges ?? true;
+    /** 正在从已写的章节找出关系变化（同一时间只有一次）；关闭作品时停下。 */
+    let relationScanAbort: AbortController | null = null;
+
+    /** 找一章带来的关系与人物变化，登记为任务。返回找到几条；没找成时返回原因。 */
+    async function relationTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o): Promise<{ readonly added: number } | { readonly error: string }> {
+      const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+      const t = startTask('relations', `人物关系变化 · ${title}`, chapterId, abort);
+      const result = await service.findRelationChanges([chapterId], tee(t.options({ text: false })));
+      if (result.ok) t.finish('done', { text: result.value.added === 0 ? '没有找到变化' : `找到 ${result.value.added} 条待确认的变化` });
+      else t.fail(describeError(result.error));
+      await refreshRelations();
+      return result.ok ? { added: result.value.added } : { error: describeError(result.error) };
+    }
+
     /** 助手的后台任务做完：重新载入受影响的计划、正文与审核问题，以及对话（撤销记录在做完时写进对话）。 */
     async function afterAssistantJob(chapterId: string) {
       await reloadPlanning();
@@ -785,6 +843,10 @@ export function createAppStore(service: AppService): AppStore {
       const written = new Set<string>();
       /** 写完了、但审核重试后仍没有完成的章节（带原因），在结束的那句话里列出。 */
       const unreviewed: string[] = [];
+      /** 写完了、但人物关系的变化没有找成的章节（带原因），同样不挡住后面的写作，在结束的那句话里列出。 */
+      const unrelated: string[] = [];
+      /** 这一批找到的待确认的关系与人物变化。 */
+      let relationsFound = 0;
       /** 停在哪里、为什么（显示给作者的话）。 */
       const stops: string[] = [];
       const halt = (note: string) => {
@@ -867,6 +929,17 @@ export function createAppStore(service: AppService): AppStore {
             halt(`“${title}”已写完，但长篇记忆没有生成：${get().message ?? ''}${rest()}`);
             return false;
           }
+          // 人物关系的变化（B73 补充）：存为待确认的建议；没找成时记下这一章、接着写后面的（与审核一样）。
+          if (autoRelations()) {
+            put({ chapterId, stage: 'relations', done: segmentsTotal, total: segmentsTotal });
+            const found = await relationTask(chapterId, abort, tee);
+            if (abort.signal.aborted) {
+              halt(`“${title}”已写完，找人物关系的变化时停下了。可以在人物关系页“从已写的章节找出变化”补上${rest()}`);
+              return false;
+            }
+            if ('error' in found) unrelated.push(`《${title}》（${found.error}）`);
+            else relationsFound += found.added;
+          }
           if (options.review !== true) return true;
           // 审核提出的问题留给作者处理，不挡住后面的章节；模型审核没有完成时重试一次，仍没完成就记下这一章、接着写后面的。
           put({ chapterId, stage: 'review', done: segmentsTotal, total: segmentsTotal });
@@ -897,9 +970,10 @@ export function createAppStore(service: AppService): AppStore {
       publish();
       const titles = ordered.filter((id) => written.has(id)).map((id) => `《${chapter(id)?.title ?? ''}》`);
       const done = titles.length === 0 ? '一章也没有写完' : `写完了${titles.join('')}`;
-      const missed = unreviewedNote(unreviewed);
+      const missed = `${unreviewedNote(unreviewed)}${unrelatedNote(unrelated)}`;
       if (stops.length === 0 && missed !== '') set({ message: missed.slice(1) });
-      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
+      const found = relationsFound === 0 ? '' : `；找到 ${relationsFound} 条人物关系与人物进出的变化，等作者在人物关系页确认`;
+      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${found}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
     }
 
     /** 写作工作流的一次运行有了新的样子：换进列表（新的放在最前）。 */
@@ -974,6 +1048,8 @@ export function createAppStore(service: AppService): AppStore {
 
     /** 审核重试后仍没有完成的章节，接在结束的那句话后面（以“；”开头）；没有时为空。 */
     const unreviewedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：${titles.join('、')}`);
+    /** 人物关系的变化没有找成的章节，同上。 */
+    const unrelatedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的人物关系变化没有找出，可以在人物关系页“从已写的章节找出变化”补上：${titles.join('、')}`);
 
     async function reviewTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o) {
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
@@ -1041,6 +1117,7 @@ export function createAppStore(service: AppService): AppStore {
     async function loadEntities() {
       await run(service.listEntities(), (entities) => ({ entities }));
       await run(service.listFacts(), (facts) => ({ facts }));
+      await refreshRelations();
     }
 
     const reloadFacts = () => run(service.listFacts(), (facts) => ({ facts }));
@@ -1092,10 +1169,7 @@ export function createAppStore(service: AppService): AppStore {
         if (status.ok) set({ quickBook: status.value });
         if (workflows.ok) set({ workflows: workflows.value });
       }
-      if (get().panel === 'relations') {
-        const relations = await service.relationsView();
-        if (relations.ok) set({ relations: relations.value });
-      }
+      await refreshRelations();
     });
     /** 打开一章（不在这一章时重新载入正文）。助手工作期间正文只读，不需要先保存。 */
     const showChapter = (chapterId: string): Partial<AppState> =>
@@ -1250,10 +1324,12 @@ export function createAppStore(service: AppService): AppStore {
             assistantJobAborts.set(id, { kind: job.kind, abort });
             set({ assistantJobs: [...get().assistantJobs, { id, kind: job.kind, chapterId: job.chapterId }] });
             void (async () => {
+              let wrote = false;
               try {
                 const outcome = await job.work(t.options());
                 if (outcome.ok) t.finish('done', { text: outcome.detail });
                 else t.fail(outcome.detail);
+                wrote = outcome.ok && job.kind === 'writing';
               } catch (e) {
                 t.fail(e instanceof Error ? e.message : String(e));
               } finally {
@@ -1261,6 +1337,8 @@ export function createAppStore(service: AppService): AppStore {
                 set({ assistantJobs: get().assistantJobs.filter((j) => j.id !== id) });
                 await afterAssistantJob(job.chapterId);
               }
+              // 助手在后台写完一章（长篇记忆随之整理）：与写手队列一样找人物关系的变化，找不成只记在任务里。
+              if (wrote && autoRelations() && !abort.signal.aborted) await relationTask(job.chapterId, abort);
             })();
             return null;
           },
@@ -1368,6 +1446,9 @@ export function createAppStore(service: AppService): AppStore {
       entities: [],
       selectedEntityId: null,
       relations: null,
+      relationPending: 0,
+      relationScan: null,
+      castPresence: null,
       drawer: null,
       facts: [],
       selectedFactId: null,
@@ -1481,6 +1562,7 @@ export function createAppStore(service: AppService): AppStore {
         for (const j of assistantJobAborts.values()) j.abort.abort();
         assistantJobAborts.clear();
         reviewQueueAbort?.abort();
+        relationScanAbort?.abort();
         // 写作工作流停在当前这一步（下次打开为中断，可以继续）。
         workflowAbort?.abort();
         await workflowLoop;
@@ -1488,7 +1570,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, writerJobs: [], assistantJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], assistantJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1768,6 +1850,7 @@ export function createAppStore(service: AppService): AppStore {
           // 各页缓存的是恢复前的数据：丢掉，打开时重新读取。
           cover: undefined,
           relations: null,
+          castPresence: null,
           skills: null,
           planning: null,
           quickBook: null,
@@ -1787,6 +1870,9 @@ export function createAppStore(service: AppService): AppStore {
       async openSettings(entityId) {
         if (!(await get().leaveChapter())) return;
         set({ panel: 'settings', chapterContent: null, selectedEntityId: entityId ?? get().selectedEntityId, drawer: null });
+        // 人物的出场与退场（B73 补充）在设定里改。
+        const presence = await service.castPresenceView();
+        if (presence.ok) set({ castPresence: presence.value });
       },
       selectEntity: (id) => set({ selectedEntityId: id }),
       async createEntity(kind, name) {
@@ -1901,7 +1987,9 @@ export function createAppStore(service: AppService): AppStore {
                 ? `写手在写${title(job.chapterId)}${job.total > 0 ? `（已写 ${job.done} / ${job.total} 段）` : ''}`
                 : job.stage === 'memory'
                   ? `写手写完了${title(job.chapterId)}，正在整理它的长篇记忆`
-                  : `写手写完了${title(job.chapterId)}，正在审核`,
+                  : job.stage === 'relations'
+                    ? `写手写完了${title(job.chapterId)}，正在找它带来的人物关系变化`
+                    : `写手写完了${title(job.chapterId)}，正在审核`,
             )
             .join('；');
           const queued = jobs[0]?.queued ?? [];
@@ -1916,7 +2004,7 @@ export function createAppStore(service: AppService): AppStore {
         // 写手一章里的写作、记忆与审核，以及依次审核正在审的这一章，已经在上面说了；助手自己的这一轮不算。
         for (const t of s.tasks) {
           if (t.status !== 'running' || t.kind === 'assistant') continue;
-          if (jobs.some((j) => j.chapterId === t.chapterId) && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'review')) continue;
+          if (jobs.some((j) => j.chapterId === t.chapterId) && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'relations' || t.kind === 'review')) continue;
           if (queue !== null && t.chapterId === queue.chapterId && t.kind === 'review') continue;
           out.push(t.title);
         }
@@ -1967,7 +2055,7 @@ export function createAppStore(service: AppService): AppStore {
 
       selectWorkflow: (runId) => set({ workflowId: runId }),
       async quoteWorkflow(workflow, params) {
-        const quote = await service.quoteWorkflow(workflow, params);
+        const quote = await service.quoteWorkflow(workflow, params, undefined, { relationChanges: autoRelations() });
         if (quote.ok) return quote.value;
         set({ message: describeError(quote.error) });
         return null;
@@ -2516,6 +2604,69 @@ export function createAppStore(service: AppService): AppStore {
       },
       async resetRelationLayout() {
         await run(service.resetRelationLayout(), (relations) => ({ relations }));
+      },
+      async adoptRelationSuggestion(id) {
+        const done = await run(service.adoptRelationSuggestion(id), () => ({}));
+        await afterRelationAdoption();
+        return done;
+      },
+      async ignoreRelationSuggestion(id) {
+        const done = await run(service.ignoreRelationSuggestion(id), () => ({}));
+        await refreshRelations();
+        return done;
+      },
+      async adoptAllRelationSuggestions() {
+        let failed: readonly string[] = [];
+        await run(service.adoptAllRelationSuggestions(), (r) => {
+          failed = r.failed;
+          return {};
+        });
+        await afterRelationAdoption();
+        if (failed.length > 0) set({ message: `有 ${failed.length} 条没有采用，留在待确认里：${failed.join('；')}` });
+      },
+      async findRelationChangesInBook() {
+        if (relationScanAbort !== null) return;
+        const abort = new AbortController();
+        relationScanAbort = abort;
+        const t = startTask('relations', '从已写的章节找出人物关系变化', null, abort);
+        set({ relationScan: { done: 0, total: 0 }, message: null });
+        try {
+          const result = await service.backfillRelationChanges({ ...t.options({ text: false }), onBatch: (done, total) => set({ relationScan: { done, total } }) });
+          if (!result.ok) {
+            t.fail(describeError(result.error));
+            set({ message: describeError(result.error) });
+            return;
+          }
+          const r = result.value;
+          const note = r.scanned === 0 ? '没有要找的章节：已写的章节都按现在的长篇记忆找过了' : `找过 ${r.scanned} 章，找到 ${r.added} 条待确认的变化${r.left > 0 ? `；还有 ${r.left} 章没有找，再点一次接着找` : ''}`;
+          if (r.stop === null) t.finish('done', { text: note });
+          else t.fail(`${describeError(r.stop)}：${note}`);
+          set({ message: r.stop === null ? (r.scanned === 0 ? note : null) : `${r.stop.code === 'interrupted' ? '已停下' : `没有找完：${describeError(r.stop)}`}。${note}` });
+        } finally {
+          if (relationScanAbort === abort) relationScanAbort = null;
+          set({ relationScan: null });
+          await refreshRelations();
+        }
+      },
+      stopRelationScan() {
+        relationScanAbort?.abort();
+      },
+      setAutoRelationChanges: (on) => savePreferences({ autoRelationChanges: on }),
+      async saveCastPresence(id, fields) {
+        const records = get().castPresence?.records ?? get().relations?.presence.records ?? [];
+        const current = id === null ? null : (records.find((r) => r.id === id) ?? null);
+        if (id !== null && current === null) return false;
+        const done = await run(service.saveCastPresence(current, fields), (castPresence) => ({ castPresence }));
+        await refreshRelations();
+        return done;
+      },
+      async deleteCastPresence(id) {
+        const records = get().castPresence?.records ?? get().relations?.presence.records ?? [];
+        const current = records.find((r) => r.id === id);
+        if (current === undefined) return false;
+        const done = await run(service.deleteCastPresence(current), (castPresence) => ({ castPresence }));
+        await refreshRelations();
+        return done;
       },
       async openFacts(factId) {
         if (!(await get().leaveChapter())) return;

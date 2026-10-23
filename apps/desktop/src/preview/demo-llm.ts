@@ -40,6 +40,21 @@ function assistantReply(r: LlmRequest): string {
   });
 }
 
+/** 第一章的长篇记忆与它带来的人物关系变化（关系页的“待确认的变化”有东西可看）。 */
+const DEMO_MEMORY = {
+  summary: '沈砚背着竹篓下青崖山，山脚茶棚的挑夫认出他是青崖山的人；他照师父临终的话往渡口去，找一个姓卫的人。',
+  cast: [{ name: '沈砚', state: '走在去渡口的小路上，身上的旧袍子有人认得' }],
+  foreshadows: [],
+  openThreads: ['到渡口找姓卫的人'],
+};
+const DEMO_RELATION_CHANGES = {
+  relations: [{ chapter: 'C1', kind: 'add', relation: '', from: '苏晚', to: '沈砚', category: 'ally', label: '暗中相助的人', mutual: false, description: '在茶棚后面替他引开了眼线', secret: true, reason: '茶棚后面有人替他引开了挑夫的视线' }],
+  cast: [
+    { chapter: 'C1', kind: 'enter', name: '苏晚', description: '茶棚老板娘，替沈砚引开眼线，来历不明', reason: '' },
+    { chapter: 'C1', kind: 'exit', name: '青崖老人', description: '临终只留下一句话，之后只在回忆里出现', reason: '师父临死前只说了一句' },
+  ],
+};
+
 export function demoLlm(): LlmPort {
   return {
     async complete(r: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
@@ -50,6 +65,10 @@ export function demoLlm(): LlmPort {
             ? assistantReply(r)
             : r.template.id === 'chapter_review'
               ? JSON.stringify({ issues: [] })
+              : r.template.id === 'chapter_memory'
+                ? JSON.stringify(DEMO_MEMORY)
+                : r.template.id === 'relation_changes'
+                  ? JSON.stringify(DEMO_RELATION_CHANGES)
               : r.template.id === 'selection_edit'
                 ? '石阶上的冰还没有化尽，他一步一步踩稳了才往下走。竹篓很轻，里面只有两件换洗的衣裳，和师父留下的那封信。'
                 : '演示';

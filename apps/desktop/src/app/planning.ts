@@ -43,6 +43,7 @@ import { checkPlan, suggestForeshadowStatus, type ForeshadowSuggestion, type Pla
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
+import { characterBriefs } from './relation-changes';
 import { skillsForStage } from './writing-skills';
 
 export type PlanChapterView = {
@@ -351,6 +352,8 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
       if (written.length === 0) return err({ code: 'settings', detail: '还没有写好的章节：续写一卷要接着前文写，先写几章，或用一键成书从头开始' });
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
+      const briefs = await characterBriefs(port, current.value.characters);
+      if (!briefs.ok) return err(repo(briefs.error));
       // 人物前文结尾的状态：取各章记忆里最后一次写到的。
       const stateOf = new Map<string, string>();
       for (const c of written) for (const [id, state] of Object.entries(c.memory?.castState ?? {})) stateOf.set(id, state);
@@ -362,7 +365,7 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
         synopsis: work.value?.synopsis ?? '',
         outline: current.value.outline,
         volumes: volumes.value.map((v) => ({ title: v.title, summary: v.summary })),
-        characters: current.value.characters.map((e) => ({ name: e.name, description: e.description, state: stateOf.get(e.id) ?? '' })),
+        characters: briefs.value.map((e) => ({ name: e.name, description: e.description, state: stateOf.get(e.id) ?? '' })),
         relations: relations.value.flatMap((r) => (nameOf.has(r.fromId) && nameOf.has(r.toId) ? [r.mutual ? `${nameOf.get(r.fromId) ?? ''}与${nameOf.get(r.toId) ?? ''}：${r.label}` : `${nameOf.get(r.fromId) ?? ''}是${nameOf.get(r.toId) ?? ''}的${r.label}`] : [])),
         skills: skills.value.map((x) => ({ name: x.name, description: x.description, text: x.text })),
         writtenCount: written.length,
@@ -397,13 +400,15 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
       if (!work.ok) return err(repo(work.error));
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
+      const briefs = await characterBriefs(port, current.value.characters);
+      if (!briefs.ok) return err(repo(briefs.error));
       const open = current.value.foreshadows.filter((f) => f.status !== 'dropped' && f.status !== 'paid_off');
       const prompt = renderBookVolumes({
         title: work.value?.title ?? '',
         genre: work.value?.genre ?? '',
         synopsis: work.value?.synopsis ?? '',
         outline: current.value.outline.trim() === '' ? '（还没有写大纲）' : current.value.outline,
-        characters: current.value.characters.map((c) => ({ name: c.name, description: c.description })),
+        characters: briefs.value.map((c) => ({ name: c.name, description: c.description })),
         skills: skills.value.map((x) => ({ name: x.name, description: x.description, text: x.text })),
         foreshadows: open.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal })),
         volumes: request.volumes,
@@ -460,6 +465,8 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
       if (volume === undefined) return err({ code: 'settings', detail: '要拆章的这一卷不在了' });
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
+      const briefs = await characterBriefs(port, current.value.characters);
+      if (!briefs.ok) return err(repo(briefs.error));
       const written = current.value.chapters.filter((c) => c.hasText);
       const open = current.value.foreshadows.filter((f) => f.status !== 'dropped' && f.status !== 'paid_off');
       const openTitles = new Set(open.map((f) => f.title.trim()));
@@ -469,7 +476,7 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
         genre: work.value?.genre ?? '',
         synopsis: work.value?.synopsis ?? '',
         outline: current.value.outline.trim() === '' ? '（还没有写大纲）' : current.value.outline,
-        characters: current.value.characters.map((c) => ({ name: c.name, description: c.description })),
+        characters: briefs.value.map((c) => ({ name: c.name, description: c.description })),
         skills: skills.value.map((x) => ({ name: x.name, description: x.description, text: x.text })),
         chapters: current.value.chapters.slice(-APPEND_LISTED_CHAPTERS).map((c) => c.chapter.title),
         volumes: volumes.value.map((v) => v.title),
@@ -549,12 +556,14 @@ async function applyVolumeOutline(outline: VolumeOutline): Promise<Result<{ read
       // 规划技能（B75），例如雪花写作法。
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
+      const briefs = await characterBriefs(port, current.value.characters);
+      if (!briefs.ok) return err(repo(briefs.error));
       const prompt = renderPlanDraft({
         title: work.value?.title ?? '',
         genre: work.value?.genre ?? '',
         synopsis: work.value?.synopsis ?? '',
         outline: current.value.outline,
-        characters: current.value.characters.map((c) => ({ name: c.name, description: c.description })),
+        characters: briefs.value.map((c) => ({ name: c.name, description: c.description })),
         skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
         chapters: current.value.chapters.map((c) => c.chapter.title),
         volumes: volumes.value.map((v) => v.title),

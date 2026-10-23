@@ -112,6 +112,10 @@ describe('写作工作流（B78）', () => {
     const single = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 30 }));
     const split = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 40 }));
     expect(split.calls - single.calls).toBe(42);
+    // 写完一章后找人物关系的变化（B73 补充，桌面端按偏好）：每写一章另计一次。
+    const related = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 30 }, undefined, { relationChanges: true }));
+    expect(related.calls - single.calls).toBe(30);
+    expect(related.inputTokens).toBeGreaterThan(single.inputTokens);
   });
 
   it('长篇先定全书卷纲再逐卷拆章：卷纲可改章数、采用时按顺序建卷；逐卷拆章写进各卷，一卷拆不成时中断、继续时只拆剩下的', async () => {

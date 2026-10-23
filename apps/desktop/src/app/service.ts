@@ -1,6 +1,7 @@
 // 应用服务层（DESIGN_PATTERNS 第六章）：每个作者操作对应一个用例，协调作品列表、作品库与仓储。
 // 界面组件只调用这里的用例、订阅状态，不直接访问仓储或端口。
 import { relationUseCases } from './relations';
+import { relationChangeUseCases } from './relation-changes';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   interruptRunningSteps,
@@ -401,6 +402,7 @@ export function createAppService(deps: AppDeps) {
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const simEvaluation = simEvaluationUseCases(deps, () => session?.port ?? null);
   const relations = relationUseCases(deps, () => session?.port ?? null);
+  const relationChanges = relationChangeUseCases(deps, () => session?.port ?? null, runner);
   const simulation = simulationUseCases({
     deps,
     project: () => session?.port ?? null,
@@ -426,6 +428,7 @@ export function createAppService(deps: AppDeps) {
     ...simulation,
     ...simEvaluation,
     ...relations,
+    ...relationChanges,
 
     /** 交给写手修订与写手写章共用一把锁：写手正在写这一章时不修订，修订期间也不开始写。 */
     async reviseIssue(issueId: string, options: CallOptions = {}) {

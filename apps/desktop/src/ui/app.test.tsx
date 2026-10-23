@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // 用真实的用例与作品库（Node 的 SqlPort）驱动界面，覆盖 B01、B02 的主要流程。
-import { readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { warehouseSpec } from '@fudiao/domain/testing';
@@ -41,9 +42,17 @@ afterEach(async () => {
   }
 });
 
-function start() {
+/**
+ * relationChanges：写手写完一章后自动找人物关系的变化（默认开的偏好）。别的测试按排好的回复走写作流程，关掉它，
+ * 不让多出来的一次调用用掉排给审核的回复；测这件事的测试打开它。
+ */
+function start({ relationChanges = false }: { readonly relationChanges?: boolean } = {}) {
   const deps = fsDeps();
   all.push(deps);
+  if (!relationChanges) {
+    mkdirSync(dirname(deps.libraryFile), { recursive: true });
+    writeFileSync(deps.libraryFile, JSON.stringify({ version: 1, libraryDir: null, works: [], preferences: { autoRelationChanges: false } }));
+  }
   const service = createAppService(deps);
   const store = createAppStore(service);
   render(<App store={store} />);
@@ -2904,6 +2913,147 @@ describe('人物关系网（B73）', () => {
     const confirm = within(page).getByRole('group', { name: '确认删除' });
     await user.click(within(confirm).getByRole('button', { name: '确定删除' }));
     await waitFor(() => expect(store.getState().relations?.relationships).toEqual([]));
+  });
+});
+
+describe('人物关系随剧情变化（B73 补充）', () => {
+  const plan = (castIds: string[]) => ({ goal: '目标', castIds, beats: ['一'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 });
+  const memoryReply = (summary: string) => reply(JSON.stringify({ summary, cast: [{ name: '沈孤舟', state: '负伤' }, { name: '顾寒衣', state: '同行' }], foreshadows: [], openThreads: [] }));
+  const RELATIONS = '你在替小说作者跟进人物关系网';
+  const nothing = () => reply(JSON.stringify({ relations: [], cast: [] }));
+  /** 第二章的变化：仇敌暂时联手、顾寒衣坠崖退场、白衣人出场。 */
+  const secondChapter = () =>
+    reply(
+      JSON.stringify({
+        relations: [{ chapter: 'C1', kind: 'change', relation: 'R1', from: '沈孤舟', to: '顾寒衣', category: 'ally', label: '暂时联手', mutual: true, description: '', secret: false, reason: '两人约定联手' }],
+        cast: [
+          { chapter: 'C1', kind: 'enter', name: '白衣人', description: '雨夜出手的剑客', reason: '' },
+          { chapter: 'C1', kind: 'exit', name: '顾寒衣', description: '坠崖', reason: '' },
+        ],
+      }),
+    );
+
+  async function ready(relationChanges: boolean) {
+    const ctx = start({ relationChanges });
+    const { service, store, user, deps } = ctx;
+    await createWork(user, '长夜问刀');
+    for (const title of ['第一章 雪夜', '第二章 联手', '第三章 断崖']) await addChapter(user, title);
+    await store.getState().createEntity('character', '沈孤舟');
+    await store.getState().createEntity('character', '顾寒衣');
+    const idOf = (name: string) => store.getState().entities.find((e) => e.name === name)?.id ?? '';
+    expect((await service.addRelationship({ fromId: idOf('沈孤舟'), toId: idOf('顾寒衣'), category: 'enemy', label: '灭门仇敌', mutual: true, description: '', secret: false, validFromChapterId: null, validToChapterId: null })).ok).toBe(true);
+    const ids = store.getState().work?.chapters.map((c) => c.id) ?? [];
+    for (const id of ids) expect((await service.savePlan(id, plan([idOf('沈孤舟'), idOf('顾寒衣')]))).ok).toBe(true);
+    await addTestedModel(service, deps);
+    return { ...ctx, ids, idOf };
+  }
+
+  it('写手写完一章、整理完长篇记忆后找出变化，存为待确认；导航上显示条数；在关系页逐条采用、忽略与全部采用；按章节查看时退场的人物不显示', async () => {
+    const { store, user, deps, ids } = await ready(true);
+    const asked: string[] = [];
+    deps.llmRoute.current = (body) => {
+      if (body.includes('你是一位中文长篇小说的写手')) return reply('写到这里。');
+      if (body.includes('整理一章正文的要点')) return memoryReply('梗概。');
+      if (!body.includes(RELATIONS)) return null;
+      asked.push(body);
+      return asked.length === 2 ? secondChapter() : nothing();
+    };
+    const summary = await store.getState().writeChapters(ids, {});
+    expect(summary).toBe('写手依次写 3 章：写完了《第一章 雪夜》《第二章 联手》《第三章 断崖》；找到 3 条人物关系与人物进出的变化，等作者在人物关系页确认');
+    // 一章一次，读的是这一章的长篇记忆；第三章找的时候，第二章的变化还没确认，也算进“现在的关系”。
+    expect(asked).toHaveLength(3);
+    expect(asked[2]).toContain('沈孤舟与顾寒衣：暂时联手');
+    expect(store.getState().tasks.filter((t) => t.kind === 'relations').map((t) => t.status)).toEqual(['done', 'done', 'done']);
+
+    const nav = screen.getByRole('navigation', { name: '作品导航' });
+    await user.click(await within(nav).findByRole('button', { name: /人物关系（待确认 3）/ }));
+    const page = await screen.findByRole('region', { name: '人物关系' });
+    const list = within(page).getByRole('list', { name: '待确认的变化' });
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      expect.stringContaining('新人物出场：白衣人——雨夜出手的剑客'),
+      expect.stringContaining('关系改变：沈孤舟与顾寒衣从“灭门仇敌”变为“暂时联手”（原来的到上一章为止）'),
+      expect.stringContaining('人物退场：顾寒衣——坠崖'),
+    ]);
+    expect(list.textContent).toContain('《第二章 联手》');
+    await user.click(within(list).getByRole('button', { name: '忽略：新人物出场：白衣人' }));
+    await waitFor(() => expect(within(page).getAllByRole('button', { name: /^采用：/ })).toHaveLength(2));
+    await user.click(within(page).getByRole('button', { name: '采用：人物退场：顾寒衣' }));
+    await waitFor(() => expect(within(page).getAllByRole('button', { name: /^采用：/ })).toHaveLength(1));
+    await user.click(within(page).getByRole('button', { name: '全部采用' }));
+    await waitFor(() => expect(within(page).queryByRole('list', { name: '待确认的变化' })).toBeNull());
+    expect(within(nav).getByRole('button', { name: '人物关系' })).toBeTruthy();
+    expect(store.getState().relations?.relationships.map((r) => r.label)).toEqual(['灭门仇敌', '暂时联手']);
+    expect(store.getState().entities.some((e) => e.name === '白衣人')).toBe(false);
+
+    const graph = within(page).getByRole('img', { name: '人物关系图' });
+    expect(within(graph).getByRole('button', { name: '顾寒衣（人物，已退场）' })).toBeTruthy();
+    await user.selectOptions(within(page).getByRole('combobox', { name: '按章节查看' }), ids[2]!);
+    expect(within(graph).queryByRole('button', { name: /顾寒衣/ })).toBeNull();
+    expect(within(page).getByText('只显示这一章时已出场、没有退场的人物。')).toBeTruthy();
+    await user.selectOptions(within(page).getByRole('combobox', { name: '按章节查看' }), ids[1]!);
+    expect(within(graph).getByRole('button', { name: '沈孤舟与顾寒衣：暂时联手' })).toBeTruthy();
+    await user.click(within(graph).getByRole('button', { name: /顾寒衣（人物/ }));
+    expect(within(page).getByRole('list', { name: '顾寒衣的出场与退场' }).textContent).toContain('《第二章 联手》退场：坠崖');
+  });
+
+  it('这一步没找成不挡住后面的写作，结束的那句话里说明；关掉开关后不再找', async () => {
+    const { store, user, deps, ids } = await ready(true);
+    let asked = 0;
+    deps.llmRoute.current = (body) => {
+      if (body.includes('你是一位中文长篇小说的写手')) return reply('写到这里。');
+      if (body.includes('整理一章正文的要点')) return memoryReply('梗概。');
+      if (!body.includes(RELATIONS)) return null;
+      asked += 1;
+      return { status: 400, body: JSON.stringify({ error: { message: 'bad request', type: 'invalid_request_error' } }) };
+    };
+    const summary = await store.getState().writeChapters(ids.slice(0, 2), {});
+    expect(summary).toContain('写完了《第一章 雪夜》《第二章 联手》');
+    expect(summary).toContain('；这些章的人物关系变化没有找出，可以在人物关系页“从已写的章节找出变化”补上：《第一章 雪夜》');
+    expect(store.getState().tasks.filter((t) => t.kind === 'relations').map((t) => t.status)).toEqual(['failed', 'failed']);
+    expect(asked).toBe(2);
+
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '人物关系' }));
+    const page = await screen.findByRole('region', { name: '人物关系' });
+    await user.click(within(page).getByRole('checkbox', { name: '写完一章后自动找出关系变化' }));
+    await waitFor(() => expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: { autoRelationChanges: boolean } }).preferences.autoRelationChanges).toBe(false));
+    expect(await store.getState().writeChapters([ids[2]!], {})).toBe('写手依次写 1 章：写完了《第三章 断崖》');
+    expect(asked).toBe(2);
+  });
+
+  it('从已写的章节找出变化：按书中顺序只找还没找过的；人物的出场与退场在设定里记下与删除', async () => {
+    const { service, store, user, deps, ids, idOf } = await ready(false);
+    // 三章都有正文，前两章整理过长篇记忆。
+    for (const [i, id] of ids.entries()) {
+      const opened = await service.openChapter(id);
+      if (!opened.ok) throw new Error('打开章节');
+      expect((await service.saveChapter(id, opened.value.saved, [{ id: `p-${id}`, text: '正文。', source: 'handwritten' }], { splits: [], merges: [] })).ok).toBe(true);
+      if (i === 2) continue;
+      deps.llmResponses.push(memoryReply('梗概。'));
+      expect((await service.buildMemory(id)).ok).toBe(true);
+    }
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '人物关系' }));
+    const page = await screen.findByRole('region', { name: '人物关系' });
+    expect(within(page).getByRole<HTMLInputElement>('checkbox', { name: '写完一章后自动找出关系变化' }).checked).toBe(false);
+    expect(within(page).getByText(/有 1 章还没有有效的长篇记忆/)).toBeTruthy();
+    deps.llmResponses.push(secondChapter());
+    await user.click(within(page).getByRole('button', { name: '从已写的章节找出变化（2 章）' }));
+    await waitFor(() => expect(within(page).getAllByRole('button', { name: /^采用：/ })).toHaveLength(3));
+    // 两章一次找完：C1 是第一章，变化记在第一章。
+    expect(store.getState().relations?.changes.suggestions.every((s) => s.chapterId === ids[0])).toBe(true);
+    expect(within(page).getByRole<HTMLButtonElement>('button', { name: '从已写的章节找出变化' }).disabled).toBe(true);
+    expect(store.getState().tasks.find((t) => t.kind === 'relations')).toMatchObject({ status: 'done', text: '找过 2 章，找到 3 条待确认的变化' });
+
+    await store.getState().openSettings(idOf('顾寒衣'));
+    const editor = await screen.findByRole('region', { name: '出场与退场' });
+    expect(editor.textContent).toContain('首次出场：《第一章 雪夜》');
+    const row = within(editor).getByRole('form', { name: '新的一条' });
+    await user.selectOptions(within(row).getByRole('combobox', { name: '新的一条的章节' }), ids[1]!);
+    await user.type(within(row).getByRole('textbox', { name: '新的一条的说明' }), '远走西域');
+    await user.click(within(row).getByRole('button', { name: '添加' }));
+    await waitFor(() => expect(within(editor).getByRole('form', { name: '退场记录' })).toBeTruthy());
+    expect(store.getState().castPresence?.records).toEqual([expect.objectContaining({ entityId: idOf('顾寒衣'), chapterId: ids[1], kind: 'exit', note: '远走西域' })]);
+    await user.click(within(editor).getByRole('button', { name: '删除退场记录' }));
+    await waitFor(() => expect(store.getState().castPresence?.records).toEqual([]));
   });
 });
 

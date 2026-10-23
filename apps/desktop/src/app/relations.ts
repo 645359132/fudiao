@@ -15,15 +15,20 @@ import {
   type RepoError,
   type SqlPort,
 } from '@fudiao/store';
-import { relationApplies } from '@fudiao/writing';
+import { castTimelines, presentAt, relationApplies, type CastTimeline } from '@fudiao/writing';
 import type { AppError } from './errors';
 import type { AppDeps } from './ports';
+import { castPresenceOf, relationChangesOf, type CastPresenceView, type RelationChangesView } from './relation-changes';
 
 /** 关系页的数据：全部关系、可以作为一端的设定（人物、组织，以及已有关系涉及的其他设定）与作者拖定的位置。 */
 export type RelationsView = {
   readonly relationships: readonly Relationship[];
   readonly members: readonly Entity[];
   readonly positions: readonly RelationPosition[];
+  /** 人物的出场与退场（B73 补充）：按章节查看时只显示已出场、没有退场的人物。 */
+  readonly presence: CastPresenceView;
+  /** 模型找出、待作者确认的关系与人物变化，以及还要找的章节。 */
+  readonly changes: RelationChangesView;
 };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
@@ -36,11 +41,17 @@ export function relationUseCases(deps: AppDeps, project: () => SqlPort | null) {
     if (!relationships.ok) return err(repo(relationships.error));
     if (!entities.ok) return err(repo(entities.error));
     if (!positions.ok) return err(repo(positions.error));
+    const presence = await castPresenceOf(port);
+    if (!presence.ok) return presence;
+    const changes = await relationChangesOf(port, ctx());
+    if (!changes.ok) return changes;
     const linked = new Set(relationships.value.flatMap((r) => [r.fromId, r.toId]));
     return ok({
       relationships: relationships.value,
       members: entities.value.filter((e) => e.kind === 'character' || e.kind === 'organization' || linked.has(e.id)),
       positions: positions.value,
+      presence: presence.value,
+      changes: changes.value,
     });
   }
 
@@ -89,6 +100,25 @@ export function relationsAt(relationships: readonly Relationship[], chapterOrder
   if (index === null) return [...relationships];
   const order = new Map(chapterOrder.map((id, i) => [id, i]));
   return relationships.filter((r) => relationApplies(r, index, order));
+}
+
+/** 各人物在书中的进出（第一次出场取推算的与记下的里最早的）。chapterOrder 是书中顺序。 */
+export function presenceTimelines(presence: CastPresenceView, chapterOrder: readonly string[]): Map<string, CastTimeline> {
+  return castTimelines({
+    order: new Map(chapterOrder.map((id, i) => [id, i])),
+    appearances: Object.entries(presence.firstChapter).map(([entityId, chapterId]) => ({ entityId, chapterId })),
+    records: presence.records,
+  });
+}
+
+/**
+ * 书中第 index 章时关系图上的设定：人物只留已出场、没有退场的；组织、地点等不按出场筛选。index 为 null 时不筛选。
+ * 整本书还没有任何出场的记录时（没有章节计划与长篇记忆）推算不出，人物照旧都显示。
+ */
+export function membersAt<M extends { readonly id: string; readonly kind: string }>(members: readonly M[], timelines: ReadonlyMap<string, CastTimeline>, index: number | null): M[] {
+  if (index === null) return [...members];
+  const known = [...timelines.values()].some((t) => t.first !== null);
+  return members.filter((m) => m.kind !== 'character' || (known ? presentAt(timelines.get(m.id), index) : true));
 }
 
 export type Point = { readonly x: number; readonly y: number };

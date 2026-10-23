@@ -32,6 +32,7 @@ import {
   BookAuditOutput,
   BookSeedOutput,
   CastCompletionOutput,
+  RelationChangesOutput,
   DirectorProposalOutput,
   VolumeOutlineOutput,
   BookVolumesOutput,
@@ -76,6 +77,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   VolumeOutlineOutput,
   BookVolumesOutput,
   CastCompletionOutput,
+  RelationChangesOutput,
   BenchmarkBookOutput,
   BenchmarkCompareOutput,
   AssistantTurnOutput,
@@ -830,6 +832,34 @@ export function renderCastCompletion(input: CastCompletionInput): Result<Rendere
     relations: [...input.relations],
     hasRelations: input.relations.length > 0,
     chapters: input.chapters.map((c) => ({ label: c.label, title: c.title, summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(), cast: c.cast.join('、') })),
+  });
+}
+
+/** 找人物关系变化时一次最多列的关系变化与人物进出数。 */
+export const RELATION_CHANGES_LIMIT = 20;
+
+export type RelationChangesInput = {
+  readonly title: string;
+  readonly genre: string;
+  /** 人物卡片与待确认的新人物；status 写明还没出场、第 N 章退场等，没有时为空。 */
+  readonly characters: readonly { readonly name: string; readonly aliases: readonly string[]; readonly description: string; readonly status: string }[];
+  /** 这几章开始时的关系：label 为 R1、R2……，text 读作“甲是乙的师父”“甲与乙：盟友”。 */
+  readonly relations: readonly { readonly label: string; readonly text: string; readonly description: string }[];
+  /** 这几章：label 为 C1、C2……；cast 为“人物：章末的状态”。 */
+  readonly chapters: readonly { readonly label: string; readonly title: string; readonly summary: string; readonly cast: readonly string[] }[];
+};
+
+/** 人物关系随剧情的变化（B73 补充）：材料是这几章开始时的人物与关系，以及这几章的长篇记忆。 */
+export function renderRelationChanges(input: RelationChangesInput): Result<RenderedPrompt, string> {
+  return renderTemplate('relation_changes', {
+    title: input.title,
+    genre: input.genre,
+    limit: RELATION_CHANGES_LIMIT,
+    characters: input.characters.map((c) => ({ name: c.name, aliases: c.aliases.join('、'), description: c.description.trim(), status: c.status })),
+    hasCharacters: input.characters.length > 0,
+    relations: input.relations.map((r) => ({ label: r.label, text: r.text, description: r.description.trim() })),
+    hasRelations: input.relations.length > 0,
+    chapters: input.chapters.map((c) => ({ label: c.label, title: c.title, summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(), cast: [...c.cast] })),
   });
 }
 

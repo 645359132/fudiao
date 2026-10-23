@@ -152,6 +152,14 @@ const sample: Statement[] = [
     "INSERT INTO workflow_step (run_id, idx, key, status, output, edited, attempt, note, changes, usage, based_on, created_at, updated_at) VALUES ('01W1', 1, 'seed', 'awaiting_author', '{\"title\":\"夜当\"}', 1, 1, '', '[{\"kind\":\"project\",\"id\":\"project\",\"before\":null,\"after\":null}]', '{\"input\":1200,\"output\":800,\"cost\":0.002,\"unknown\":0}', '{\"01G1\":2}', ?, ?)",
     ...T,
   ),
+  s("INSERT INTO cast_presence (id, entity_id, chapter_id, kind, note, version, created_at, updated_at) VALUES ('01X1', '01E3', '01C1', 'exit', '被沈砚失手打死', 2, ?, ?)", ...T),
+  s("INSERT INTO cast_presence (id, entity_id, chapter_id, kind, created_at, updated_at) VALUES ('01X2', '01E1', '01C1', 'enter', ?, ?)", ...T),
+  s(
+    "INSERT INTO relation_suggestion (id, chapter_id, kind, relationship_id, from_id, from_name, to_id, to_name, category, label, old_label, mutual, secret, description, valid_to_chapter_id, reason, status, memory_version, llm_call_id, result_id, version, created_at, updated_at) VALUES ('01Y1', '01C1', 'relation_change', '01R1', '01E3', '钱四', '01E1', '沈砚', 'ally', '暂时的盟友', '债主', 1, 0, '两人联手对付漕帮', '01C1', '章末两人约定联手', 'pending', 3, '01L1', NULL, 1, ?, ?)",
+    ...T,
+  ),
+  s("INSERT INTO relation_suggestion (id, chapter_id, kind, from_name, description, status, memory_version, result_id, version, created_at, updated_at) VALUES ('01Y2', '01C1', 'cast_enter', '白衣人', '雨夜里出手的剑客', 'adopted', 3, '01E9', 2, ?, ?)", ...T),
+  s("INSERT INTO relation_scan (chapter_id, memory_version, llm_call_id, created_at, updated_at) VALUES ('01C1', 3, '01L1', ?, ?)", ...T),
 ];
 
 async function seeded(): Promise<ProjectDb> {
@@ -424,6 +432,32 @@ describe('扫榜拆书的样章（迁移 0022）', () => {
   });
 });
 
+describe('人物的出场与退场、关系变化的建议（迁移 0024）', () => {
+  it('种类与状态只能取规定的值；关系的变化两端须有名字、不是同一人、有称谓与类别；同一人物同一章同种记录只有一条；随设定与章节删除', async () => {
+    const db = await seeded();
+    const presence = 'INSERT INTO cast_presence (id, entity_id, chapter_id, kind, created_at, updated_at) VALUES';
+    await rejects(db, `${presence} ('x', '01E1', '01C1', 'die', ?, ?)`, ...T);
+    await rejects(db, `${presence} ('x', '01E3', '01C1', 'exit', ?, ?)`, ...T);
+    await rejects(db, `${presence} ('x', 'none', '01C1', 'exit', ?, ?)`, ...T);
+    const suggestion = 'INSERT INTO relation_suggestion (id, chapter_id, kind, from_name, to_name, category, label, status, memory_version, created_at, updated_at) VALUES';
+    await rejects(db, `${suggestion} ('x', '01C1', 'relation_grow', '甲', '乙', 'ally', '朋友', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'relation_add', '甲', '', 'ally', '朋友', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'relation_add', '甲', '甲', 'ally', '朋友', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'relation_add', '甲', '乙', NULL, '朋友', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'relation_add', '甲', '乙', 'ally', ' ', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'cast_exit', ' ', '', NULL, '', 'pending', 1, ?, ?)`, ...T);
+    await rejects(db, `${suggestion} ('x', '01C1', 'cast_exit', '甲', '', NULL, '', 'done', 1, ?, ?)`, ...T);
+    expect((await db.transaction([s(`${suggestion} ('x', '01C1', 'cast_exit', '甲', '', NULL, '', 'pending', 1, ?, ?)`, ...T)])).ok).toBe(true);
+    // 关系删除后建议留着（采用时按两端重新找），人物删除后与它有关的建议与出场记录一并删除。
+    expect((await db.transaction([s("DELETE FROM relationship WHERE id = '01R1'")])).ok).toBe(true);
+    const kept = await db.query("SELECT relationship_id FROM relation_suggestion WHERE id = '01Y1'");
+    expect(kept.ok && kept.value).toEqual([{ relationship_id: null }]);
+    expect((await db.transaction([s("DELETE FROM relationship WHERE from_id = '01E3' OR to_id = '01E3'"), s("DELETE FROM entity WHERE id = '01E3'")])).ok).toBe(true);
+    const left = await db.query("SELECT (SELECT count(*) FROM relation_suggestion WHERE id = '01Y1') AS s, (SELECT count(*) FROM cast_presence WHERE entity_id = '01E3') AS p");
+    expect(left.ok && left.value[0]).toEqual({ s: 0, p: 0 });
+  });
+});
+
 describe('写作工作流（迁移 0019）', () => {
   it('模式、状态与步骤的状态只能取规定的值；参数须是对象；同一运行里步骤的键不重复；删除运行时步骤一并删除', async () => {
     const db = await seeded();
@@ -581,10 +615,12 @@ describe('数据层导出导入（硬性规则 20）', () => {
 
   it('结构版本 11 导出的数据（没有人物关系）导入后关系与位置为空', async () => {
     const data = await exported(await seeded());
-    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'relationship' && name !== 'relation_position'));
+    // 关系变化的建议（迁移 0024）引用关系，那时也还没有。
+    const later = ['relationship', 'relation_position', 'cast_presence', 'relation_suggestion', 'relation_scan'];
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => !later.includes(name)));
     const target = fresh();
     expect(await importData(target, { schemaVersion: 11, tables })).toMatchObject({ ok: true });
-    expect((await exported(target)).tables).toEqual({ ...data.tables, relationship: [], relation_position: [] });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, ...Object.fromEntries(later.map((name) => [name, []])) });
   });
 
   it('结构版本 10 导出的数据（没有助手的对话）导入后对话为空', async () => {
@@ -604,6 +640,15 @@ describe('数据层导出导入（硬性规则 20）', () => {
     const back = (await exported(target)).tables;
     expect(back['assistant_conversation']).toEqual([{ id: '00000000000000000000000000', created_at: NOW, updated_at: NOW }]);
     expect(back['assistant_message']?.map((row) => row['conversation_id'])).toEqual(['00000000000000000000000000', '00000000000000000000000000', '00000000000000000000000000', '00000000000000000000000000']);
+  });
+
+  it('结构版本 23 导出的数据（没有出场记录与关系变化的建议）导入后这三张表为空', async () => {
+    const data = await exported(await seeded());
+    const added = ['cast_presence', 'relation_suggestion', 'relation_scan'];
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => !added.includes(name)));
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 23, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, cast_presence: [], relation_suggestion: [], relation_scan: [] });
   });
 
   it('结构版本 9 导出的数据（没有卷，章节没有 volume_id 列）经转换后导入，章节都是未分卷', async () => {
