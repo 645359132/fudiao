@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DropdownMenu } from 'radix-ui';
-import { undoTarget, type AssistantItem, type AssistantUsage } from '../app/assistant';
+import { undoTarget, waitingItem, type AssistantConversationView, type AssistantItem, type AssistantUsage } from '../app/assistant';
 import { toolLabel } from '../app/assistant-tools';
 import type { AssistantEffort } from '../app/library';
 import { Icon } from './Icon';
@@ -18,6 +18,75 @@ const SELECTION_ASKS: readonly (readonly [string, string])[] = [
 /** 动作结果里的标识是给模型看的，界面上不显示。 */
 const ID_TAG = /\s*\[[0-9A-HJKMNP-TV-Z]{26}\]/g;
 const withoutIds = (text: string) => text.replace(ID_TAG, '');
+
+const when = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** 历史对话：这部作品的各段对话，点一段切过去接着看、接着说；正在看的那一段可以删掉。 */
+function History({
+  conversations,
+  current,
+  disabled,
+  onOpen,
+  onDelete,
+}: {
+  readonly conversations: readonly AssistantConversationView[];
+  readonly current: string | null;
+  readonly disabled: boolean;
+  readonly onOpen: (id: string) => void;
+  readonly onDelete: (id: string) => void;
+}) {
+  const saved = conversations.some((c) => c.id === current);
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className="ghost" disabled={disabled} aria-label="历史对话" title="这部作品之前的对话">
+          <Icon name="history" size={14} />
+          历史
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="menu-content composer-menu" side="bottom" align="end" sideOffset={6} collisionPadding={8}>
+          <DropdownMenu.Label className="menu-label">这部作品的对话</DropdownMenu.Label>
+          {saved ? null : (
+            <DropdownMenu.Item className="menu-item composer-option" disabled>
+              <span className="composer-check">
+                <Icon name="check" size={13} />
+              </span>
+              <span className="composer-option-name">新对话</span>
+              <span className="muted composer-option-note">还没有说话</span>
+            </DropdownMenu.Item>
+          )}
+          {conversations.map((c) => (
+            <DropdownMenu.Item key={c.id} className="menu-item composer-option" onSelect={() => onOpen(c.id)}>
+              <span className="composer-check">{c.id === current ? <Icon name="check" size={13} /> : null}</span>
+              <span className="composer-option-name">{c.title}</span>
+              <span className="muted composer-option-note">
+                {when(c.updatedAt)} · {c.messages} 条
+              </span>
+            </DropdownMenu.Item>
+          ))}
+          {conversations.length === 0 ? (
+            <DropdownMenu.Item className="menu-item" disabled>
+              还没有之前的对话
+            </DropdownMenu.Item>
+          ) : null}
+          {saved && current !== null ? (
+            <>
+              <DropdownMenu.Separator className="menu-separator" />
+              <DropdownMenu.Item className="menu-item" onSelect={() => onDelete(current)}>
+                <Icon name="trash" size={14} />
+                删除正在看的这段对话
+              </DropdownMenu.Item>
+            </>
+          ) : null}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
 
 function Steps({ item }: { readonly item: Extract<AssistantItem, { role: 'results' }> }) {
   return (
@@ -228,6 +297,10 @@ export function AssistantPanel() {
   const send = useApp((s) => s.sendAssistant);
   const stop = useApp((s) => s.stopAssistant);
   const clear = useApp((s) => s.clearAssistant);
+  const conversations = useApp((s) => s.assistantConversations);
+  const currentConversation = useApp((s) => s.assistantConversationId);
+  const openConversation = useApp((s) => s.openAssistantConversation);
+  const deleteConversation = useApp((s) => s.deleteAssistantConversation);
   const toggle = useApp((s) => s.toggleAssistant);
   const openModelServices = useApp((s) => s.openModelServices);
   const draft = useApp((s) => s.assistantDraft);
@@ -261,8 +334,9 @@ export function AssistantPanel() {
       if (!sent) setText((now) => (now === '' ? value : now));
     });
   };
-  const last = items.at(-1);
-  const undoable = running || last?.role === 'pending' ? null : undoTarget(items);
+  // 后台做完的改动记录可能排在等待确认的那一条后面：确认按钮照旧有效。
+  const waiting = waitingItem(items);
+  const undoable = running || waiting !== null ? null : undoTarget(items);
   const renderItem = (item: AssistantItem) => {
     switch (item.role) {
       case 'user':
@@ -280,7 +354,7 @@ export function AssistantPanel() {
       case 'results':
         return <Steps key={item.id} item={item} />;
       case 'pending':
-        return <Pending key={item.id} item={item} active={!running && last?.id === item.id} />;
+        return <Pending key={item.id} item={item} active={!running && waiting?.id === item.id} />;
       case 'changes':
         return null;
       case 'undo':
@@ -300,7 +374,16 @@ export function AssistantPanel() {
           <Icon name="sparkle" /> AI 助手
         </span>
         <span className="spacer" />
-        <button type="button" className="ghost" disabled={running || items.length === 0} title="清空对话，重新开始" onClick={() => void clear()}>
+        {hasWork ? (
+          <History
+            conversations={conversations}
+            current={currentConversation}
+            disabled={running}
+            onOpen={(id) => void openConversation(id)}
+            onDelete={(id) => void deleteConversation(id)}
+          />
+        ) : null}
+        <button type="button" className="ghost" disabled={running || items.length === 0} title="另开一段新对话，之前的对话留在“历史对话”里" onClick={() => void clear()}>
           新对话
         </button>
         <button type="button" className="ghost icon-only" aria-label="收起助手" title="收起助手" onClick={toggle}>

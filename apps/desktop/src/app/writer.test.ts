@@ -78,6 +78,81 @@ describe('写手成章', () => {
     expect(body).not.toContain('【三幕】');
   });
 
+  it('前面还没写的章节（同时写几卷时前一卷还在写）用它的章节计划顶上前文梗概', async () => {
+    const { deps, app, c2 } = await setup();
+    const c3 = value(await app.createChapter('第三章 雨歇', c2)).chapters.find((c) => c.title === '第三章 雨歇')!.id;
+    value(await app.savePlan(c3, { goal: '钱四找上门', castIds: [], beats: ['敲门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+    deps.llmResponses.push(reply('钱四敲了门。'));
+    value(await app.writeChapter(c3));
+    const sent = bodyText(deps, 0);
+    expect(sent).toContain('（还没写，按计划）林舟再访当铺');
+    expect(sent).toContain('林舟深夜当玉，被掌柜压价。');
+  });
+
+  it('上一章正由写手在写（同时写几卷时另一条线在写）：它的半截正文不当作上一章的结尾，前文梗概用它的计划顶上', async () => {
+    const { deps, app, c2 } = await setup();
+    const c3 = value(await app.createChapter('第三章 雨歇', c2)).chapters.find((c) => c.title === '第三章 雨歇')!.id;
+    value(await app.savePlan(c3, { goal: '钱四找上门', castIds: [], beats: ['敲门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+    // 第二章写完第一段后，第二段的回复迟迟不来：这期间写第三章。
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let second = () => {};
+    const secondAsked = new Promise<void>((resolve) => (second = resolve));
+    let calls = 0;
+    deps.llmRoute.current = async (body) => {
+      if (!body.includes('本章：第二章 夜雨')) return null;
+      calls += 1;
+      if (calls === 1) return reply('林舟又叩响了门。');
+      second();
+      await gate;
+      return reply('林舟转身走进雨里。');
+    };
+    const writing = app.writeChapter(c2);
+    await secondAsked;
+    deps.llmResponses.push(reply('钱四敲了门。'));
+    value(await app.writeChapter(c3));
+    const sent = JSON.stringify(deps.llmRequests.find((r) => JSON.stringify(r.body).includes('本章：第三章 雨歇'))?.body ?? {});
+    expect(sent).toContain('（还没写完，按计划）林舟再访当铺');
+    expect(sent).not.toContain('林舟又叩响了门。');
+    release();
+    expect(value(await writing)).toMatchObject({ status: 'written' });
+  });
+
+  it('写手停下后作者自己写完的上一章：照常把它的结尾交给下一章', async () => {
+    const { deps, app, c2 } = await setup();
+    deps.llmResponses.push(reply('林舟又叩响了门。'));
+    expect(value(await app.writeChapter(c2))).toMatchObject({ status: 'stopped', segmentsDone: 1 });
+    const c3 = value(await app.createChapter('第三章 雨歇', c2)).chapters.find((c) => c.title === '第三章 雨歇')!.id;
+    value(await app.savePlan(c3, { goal: '钱四找上门', castIds: [], beats: ['敲门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('钱四敲了门。'));
+    value(await app.writeChapter(c3));
+    expect(bodyText(deps, 0)).toContain('林舟又叩响了门。');
+  });
+
+  it('一段调用过却没写进正文，接着写时前文已经变了：换一个步骤键重新调用这一段，不卡在“请求内容不同”', async () => {
+    const { deps, app, c2 } = await setup();
+    const c3 = value(await app.createChapter('第三章 雨歇', c2)).chapters.find((c) => c.title === '第三章 雨歇')!.id;
+    value(await app.savePlan(c3, { goal: '钱四找上门', castIds: [], beats: ['敲门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+    // 第一次：调用完成，写入正文时失败（测试注入的写入故障）。
+    deps.llmRoute.current = () => {
+      deps.sqlFaults.push(/INSERT INTO paragraph/);
+      deps.llmRoute.current = null;
+      return null;
+    };
+    deps.llmResponses.push(reply('钱四敲了门。'));
+    expect((await app.writeChapter(c3)).ok).toBe(false);
+    expect(await texts(app, c3)).toEqual([]);
+    // 前文变了（第二章的计划改了，例如另一条线把它写完、整理了记忆）：这一段的请求跟着变。
+    value(await app.savePlan(c2, { goal: '林舟三访当铺', castIds: [], beats, foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    const before = deps.llmRequests.length;
+    deps.llmResponses.push(reply('钱四又敲了门。'));
+    expect(value(await app.writeChapter(c3))).toMatchObject({ status: 'written' });
+    expect(deps.llmRequests.length - before).toBe(1);
+    expect(bodyText(deps, before)).toContain('林舟三访当铺');
+    expect(await texts(app, c3)).toEqual(['钱四又敲了门。']);
+  });
+
   it('同一章同时只有一个写手：写作期间再写或回退这一章都被拒绝，停下以后可以接着写', async () => {
     const { deps, app, c2 } = await setup();
     const abort = new AbortController();

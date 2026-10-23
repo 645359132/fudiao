@@ -1314,6 +1314,104 @@ describe('成书流程看板（B65）', () => {
     return { ...ctx, ids };
   }
 
+  it('同时写两卷：每卷一条线同时写，同一卷里一章一章写、后一章接上前一章的结尾；看板上可以选同时写几卷', async () => {
+    const { service, store, user, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    expect(await store.getState().createVolume('第一卷')).toBe(true);
+    expect(await store.getState().createVolume('第二卷')).toBe(true);
+    const [first, second] = store.getState().work?.volumes ?? [];
+    if (first === undefined || second === undefined) throw new Error('卷');
+    for (const title of ['甲一', '甲二']) expect(await store.getState().createChapterIn(first.id, title)).toBe(true);
+    for (const title of ['乙一', '乙二']) expect(await store.getState().createChapterIn(second.id, title)).toBe(true);
+    const ids = store.getState().work?.chapters.map((c) => c.id) ?? [];
+    for (const id of ids) expect((await service.savePlan(id, plan)).ok).toBe(true);
+    // 写手的请求按章节回复，故意慢一点：看同时有几章在写。
+    let inFlight = 0;
+    let most = 0;
+    const writing: string[] = [];
+    deps.llmRoute.current = async (body) => {
+      if (body.includes('你是一位中文长篇小说的写手')) {
+        writing.push(body);
+        const title = /本章：([^\\"]+)/.exec(body)?.[1] ?? '';
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        inFlight -= 1;
+        return reply(`${title}写到这里。`);
+      }
+      return body.includes('整理一章正文的要点') ? memory('梗概。') : null;
+    };
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    const board = await screen.findByRole('region', { name: '成书进度' });
+    expect(within(board).getByRole('combobox', { name: '同时写几卷' })).toHaveProperty('value', '2');
+    const summary = await store.getState().writeChapters(ids, {});
+    expect(summary).toBe('写手分 2 卷同时写 4 章：写完了《甲一》《甲二》《乙一》《乙二》');
+    expect(most).toBe(2);
+    // 同一卷里第二章接上第一章的结尾；两卷的第一章同时开写。
+    expect(writing.find((b) => b.includes('本章：甲二'))).toContain('甲一写到这里。');
+    expect(writing.slice(0, 2).map((b) => /本章：([^\\"]+)/.exec(b)?.[1]).sort()).toEqual(['乙一', '甲一']);
+    expect(store.getState().writerJobs).toEqual([]);
+    // 选 1 卷：之后一次只写一章。
+    await user.selectOptions(within(board).getByRole('combobox', { name: '同时写几卷' }), '1');
+    expect(store.getState().library?.preferences.writer.parallel).toBe(1);
+  });
+
+  it('交来的章节几卷交错时照样按卷分线，同一卷不会两条线同时写；停下落在两章之间时记为停下，不当成写完了', async () => {
+    const { service, store, user, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    expect(await store.getState().createVolume('第一卷')).toBe(true);
+    expect(await store.getState().createVolume('第二卷')).toBe(true);
+    const [first, second] = store.getState().work?.volumes ?? [];
+    if (first === undefined || second === undefined) throw new Error('卷');
+    for (const title of ['甲一', '甲二']) expect(await store.getState().createChapterIn(first.id, title)).toBe(true);
+    for (const title of ['乙一', '乙二']) expect(await store.getState().createChapterIn(second.id, title)).toBe(true);
+    const id = (title: string) => store.getState().work?.chapters.find((c) => c.title === title)?.id ?? '';
+    for (const c of store.getState().work?.chapters ?? []) expect((await service.savePlan(c.id, plan)).ok).toBe(true);
+    // 第一卷写得慢、第二卷写得快：乙一写完时甲一还在写。
+    const inFlight = new Map<string, number>();
+    let overlap = false;
+    const writing: string[] = [];
+    let memoryAnswered = false;
+    deps.llmRoute.current = async (body) => {
+      if (body.includes('你是一位中文长篇小说的写手')) {
+        writing.push(body);
+        const title = /本章：([^\\"]+)/.exec(body)?.[1] ?? '';
+        const volume = title.slice(0, 1);
+        inFlight.set(volume, (inFlight.get(volume) ?? 0) + 1);
+        if ((inFlight.get(volume) ?? 0) > 1) overlap = true;
+        await new Promise((resolve) => setTimeout(resolve, volume === '甲' ? 60 : 5));
+        inFlight.set(volume, (inFlight.get(volume) ?? 1) - 1);
+        return reply(`${title}写到这里。`);
+      }
+      if (!body.includes('整理一章正文的要点')) return null;
+      memoryAnswered = true;
+      return memory('梗概。');
+    };
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await screen.findByRole('region', { name: '成书进度' });
+    const summary = await store.getState().writeChapters([id('甲一'), id('乙一'), id('甲二')], {});
+    expect(summary).toBe('写手分 2 卷同时写 3 章：写完了《甲一》《乙一》《甲二》');
+    expect(overlap).toBe(false);
+    expect(writing.find((b) => b.includes('本章：甲二'))).toContain('甲一写到这里。');
+
+    // 一次写一章：乙二的长篇记忆整理好、还没开始写下一章时停下。
+    await store.getState().setWriterParallel(1);
+    // 甲二回退到写手写入前，与还没写的乙二排成一批。
+    expect((await service.rollbackWriter(id('甲二'))).ok).toBe(true);
+    memoryAnswered = false;
+    const planningView = service.planningView.bind(service);
+    service.planningView = () => {
+      if (memoryAnswered) store.getState().cancelWriting();
+      return planningView();
+    };
+    const stopped = await store.getState().writeChapters([id('乙二'), id('甲二')], {});
+    service.planningView = planningView;
+    expect(stopped).toBe('写手依次写 2 章：写完了《乙二》；停在这里：已停下：还有 1 章没有写，可以再点“依次写完”接着写');
+    expect(store.getState().message).toContain('已停下');
+  });
+
   it('按章显示计划、写作、长篇记忆与审核；排定一段章节并在写完后审核；从看板打开一章的问题', async () => {
     const { deps, store, user } = await ready(['第一章', '第二章', '第三章']);
     const board = screen.getByRole('region', { name: '成书进度' });
@@ -2539,6 +2637,28 @@ describe('后台任务不被打断', () => {
     await user.click(screen.getByRole('button', { name: '作品列表' }));
     await screen.findByRole('button', { name: '新建作品' });
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+});
+
+describe('AI 助手的历史对话', () => {
+  it('新对话后之前的对话在“历史”里，点一段切回去；正在看的一段可以删掉', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '雨夜');
+    await addTestedModel(service, deps);
+    const panel = await screen.findByRole('complementary', { name: 'AI 助手' });
+    deps.llmResponses.push(reply(JSON.stringify({ message: '大纲还空着。', actions: [], done: true })));
+    await user.type(within(panel).getByRole('textbox', { name: '给助手的话' }), '看看大纲{Enter}');
+    await within(panel).findByText('大纲还空着。');
+    await user.click(within(panel).getByRole('button', { name: '新对话' }));
+    await waitFor(() => expect(within(panel).queryByText('大纲还空着。')).toBeNull());
+    await user.click(within(panel).getByRole('button', { name: '历史对话' }));
+    await user.click(await screen.findByRole('menuitem', { name: /看看大纲/ }));
+    await within(panel).findByText('大纲还空着。');
+    expect(store.getState().assistantConversations.map((c) => c.title)).toEqual(['看看大纲']);
+    await user.click(within(panel).getByRole('button', { name: '历史对话' }));
+    await user.click(await screen.findByRole('menuitem', { name: '删除正在看的这段对话' }));
+    await waitFor(() => expect(store.getState().assistantConversations).toEqual([]));
+    expect(within(panel).queryByText('大纲还空着。')).toBeNull();
   });
 });
 

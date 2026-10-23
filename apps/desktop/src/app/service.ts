@@ -6,6 +6,7 @@ import {
   interruptRunningSteps,
   purgeBenchmarkSamples,
   latestCallWithUsage,
+  listAssistantMessages,
   getCover,
   getCoverThumbnail,
   removeCover,
@@ -724,8 +725,10 @@ export function createAppService(deps: AppDeps) {
     /** 恢复到备份（现稿先存为恢复前备份），重新读取作品。 */
     async restoreBackup(name: string): Promise<Result<WorkView, AppError>> {
       if (session === null) return err({ code: 'no_work' });
+      if (assistant.assistantBusy()) return err({ code: 'settings', detail: 'AI 助手正在处理一句话：等它说完或先停止，再恢复备份' });
       const restored = await deps.backups.restore(name, deps.clock.now());
       if (!restored.ok) return err({ code: 'library', detail: restored.error });
+      assistant.resetAssistantConversation();
       // 作品列表里的书名与封面是缓存：恢复后按作品库更新，不然列表里还是恢复前的。
       const project = await getProject(session.port);
       const thumbnail = await getCoverThumbnail(session.port);
@@ -895,6 +898,15 @@ export function createAppService(deps: AppDeps) {
       if (!call.ok) return err(repo(call.error));
       const usage = call.value?.usage ?? null;
       if (call.value === null || usage === null) return ok(null);
+      // 最近一步要是在正在看的这段对话里：这段对话里助手最后一次回话早于那一步（那一步在别的对话里、或那段已删掉）时不显示别人的用量。
+      // 看助手的回话而不看对话的时间：撤销等不调用模型的记录也会让对话的时间往后走。
+      const talks = await assistant.assistantConversations();
+      if (!talks.ok) return talks;
+      const current = talks.value.current;
+      const rows = current === null ? ok([]) : await listAssistantMessages(session.port, current);
+      if (!rows.ok) return err(repo(rows.error));
+      const answered = rows.value.findLast((r) => r.role === 'assistant')?.createdAt;
+      if (answered === undefined || call.value.finishedAt > answered) return ok(null);
       const view = await services.loadModelServices();
       if (!view.ok) return view;
       const model = view.value.models.find((m) => m.providerId === call.value?.provider && m.modelId === call.value.model);

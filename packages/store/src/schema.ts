@@ -254,8 +254,15 @@ export const TABLES: readonly TableSpec[] = [
     json: ['target', 'base_versions'],
   },
   {
+    // AI 助手的各段对话（迁移 0023）：消息引用它，排在消息前面。
+    name: 'assistant_conversation',
+    columns: ['id', 'created_at', 'updated_at'],
+    primaryKey: ['id'],
+    json: [],
+  },
+  {
     name: 'assistant_message',
-    columns: ['id', 'seq', 'role', 'payload', 'created_at'],
+    columns: ['id', 'conversation_id', 'seq', 'role', 'payload', 'created_at'],
     primaryKey: ['id'],
     json: ['payload'],
   },

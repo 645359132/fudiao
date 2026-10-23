@@ -52,6 +52,7 @@ export function ChapterPanel() {
   const exportChapter = useApp((s) => s.exportChapter);
   const busy = useApp((s) => s.busy);
   const writerJob = useApp((s) => s.writerJob);
+  const mine = useApp((s) => s.writerJobs.find((j) => j.chapterId === chapter?.id));
   const writeChapters = useApp((s) => s.writeChapters);
   const cancelWriting = useApp((s) => s.cancelWriting);
   const openReview = useApp((s) => s.openReview);
@@ -101,12 +102,12 @@ export function ChapterPanel() {
           <span>写手正在修订这一章的一段，完成之前正文只读。</span>
         </div>
       ) : null}
-      {lock === 'writer' && writerJob !== null ? (
+      {lock === 'writer' && mine !== undefined ? (
         <div className="writer-banner" role="status" aria-label="写手进度">
           <span>
-            {writerJob.stage === 'writing'
-              ? `写手正在写这一章${writerJob.total > 0 ? `（已写 ${writerJob.done} / ${writerJob.total} 段）` : ''}`
-              : writerJob.stage === 'memory'
+            {mine.stage === 'writing'
+              ? `写手正在写这一章${mine.total > 0 ? `（已写 ${mine.done} / ${mine.total} 段）` : ''}`
+              : mine.stage === 'memory'
                 ? '这一章已写完，正在整理长篇记忆'
                 : '这一章已写完，正在审核'}
             ，完成之前正文只读。

@@ -32,10 +32,11 @@ const sample: Statement[] = [
   s("INSERT INTO chapter (id, order_key, title, summary, created_at, updated_at) VALUES ('01C1', 'a0', '第一章 雨夜', '两人在当铺重逢', ?, ?)", ...T),
   s("INSERT INTO chapter (id, order_key, title, status, trashed_at, created_at, updated_at) VALUES ('01C2', 'a1', '废稿', 'trashed', ?, ?, ?)", NOW, ...T),
   s("INSERT INTO volume (id, order_key, title, summary, version, created_at, updated_at) VALUES ('01O1', 'a0', '第一卷 雨夜', '两人重逢', 2, ?, ?)", ...T),
-  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q1', 1, 'user', '{\"text\":\"新建一卷\"}', ?)", NOW),
-  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q2', 2, 'assistant', '{\"output\":{\"message\":\"好\",\"actions\":[],\"done\":true}}', ?)", NOW),
-  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q3', 3, 'changes', '{\"tool\":\"create_volume\",\"entries\":[{\"kind\":\"volume\",\"id\":\"01V1\",\"before\":null,\"after\":{\"title\":\"第一卷\",\"summary\":\"\",\"after\":null}}],\"kept\":false}', ?)", NOW),
-  s("INSERT INTO assistant_message (id, seq, role, payload, created_at) VALUES ('01Q4', 4, 'undo', '{\"undid\":[\"01Q3\"],\"report\":\"已撤销\",\"ok\":true,\"source\":\"button\"}', ?)", NOW),
+  s("INSERT INTO assistant_conversation (id, created_at, updated_at) VALUES ('01QC', ?, ?)", ...T),
+  s("INSERT INTO assistant_message (id, conversation_id, seq, role, payload, created_at) VALUES ('01Q1', '01QC', 1, 'user', '{\"text\":\"新建一卷\"}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, conversation_id, seq, role, payload, created_at) VALUES ('01Q2', '01QC', 2, 'assistant', '{\"output\":{\"message\":\"好\",\"actions\":[],\"done\":true}}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, conversation_id, seq, role, payload, created_at) VALUES ('01Q3', '01QC', 3, 'changes', '{\"tool\":\"create_volume\",\"entries\":[{\"kind\":\"volume\",\"id\":\"01V1\",\"before\":null,\"after\":{\"title\":\"第一卷\",\"summary\":\"\",\"after\":null}}],\"kept\":false}', ?)", NOW),
+  s("INSERT INTO assistant_message (id, conversation_id, seq, role, payload, created_at) VALUES ('01Q4', '01QC', 4, 'undo', '{\"undid\":[\"01Q3\"],\"report\":\"已撤销\",\"ok\":true,\"source\":\"button\"}', ?)", NOW),
   s("INSERT INTO chapter (id, order_key, title, volume_id, created_at, updated_at) VALUES ('01C3', 'a0', '第二章 当铺', '01O1', ?, ?)", ...T),
   s("INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('01G1', '01C1', 'a0', '雨下得更紧了。', ?, ?)", ...T),
   s(
@@ -588,10 +589,21 @@ describe('数据层导出导入（硬性规则 20）', () => {
 
   it('结构版本 10 导出的数据（没有助手的对话）导入后对话为空', async () => {
     const data = await exported(await seeded());
-    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'assistant_message'));
+    const tables = Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'assistant_message' && name !== 'assistant_conversation'));
     const target = fresh();
     expect(await importData(target, { schemaVersion: 10, tables })).toMatchObject({ ok: true });
-    expect((await exported(target)).tables).toEqual({ ...data.tables, assistant_message: [] });
+    expect((await exported(target)).tables).toEqual({ ...data.tables, assistant_message: [], assistant_conversation: [] });
+  });
+
+  it('结构版本 22 导出的数据（对话没有分段）导入后消息都归入一段对话，时间取最早与最晚一条消息', async () => {
+    const data = await exported(await seeded());
+    const messages = (data.tables['assistant_message'] ?? []).map(({ conversation_id: _, ...row }) => row);
+    const tables = { ...Object.fromEntries(Object.entries(data.tables).filter(([name]) => name !== 'assistant_conversation')), assistant_message: messages };
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 22, tables })).toMatchObject({ ok: true });
+    const back = (await exported(target)).tables;
+    expect(back['assistant_conversation']).toEqual([{ id: '00000000000000000000000000', created_at: NOW, updated_at: NOW }]);
+    expect(back['assistant_message']?.map((row) => row['conversation_id'])).toEqual(['00000000000000000000000000', '00000000000000000000000000', '00000000000000000000000000', '00000000000000000000000000']);
   });
 
   it('结构版本 9 导出的数据（没有卷，章节没有 volume_id 列）经转换后导入，章节都是未分卷', async () => {

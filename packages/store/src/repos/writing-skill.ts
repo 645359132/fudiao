@@ -64,8 +64,9 @@ export async function ensureBuiltinSkills(
     const existing = byKey.get(b.key);
     const stages = formatSkillStages(b.stages);
     if (existing === undefined) {
+      // 两个写手同时开写时会同时来登记（都还没看到对方建的）：后到的什么也不做。
       statements.push({
-        sql: 'INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        sql: 'INSERT INTO writing_skill (id, key, name, builtin_version, stages, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING',
         params: [newId(), b.key, b.name, b.version, stages, ctx.now, ctx.now],
       });
     } else if (existing.builtinVersion !== null && (existing.builtinVersion !== b.version || existing.name !== b.name || formatSkillStages(existing.stages) !== stages)) {

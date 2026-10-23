@@ -299,6 +299,7 @@ function FollowUp({ text, label, disabled, onAccept }: { readonly text: string; 
 /** 一章的写作状态与写手操作：写这一章、接着写、回退到写手写入前。 */
 function WriterActions({ item }: { readonly item: PlanChapterView }) {
   const writerJob = useApp((s) => s.writerJob);
+  const mine = useApp((s) => s.writerJobs.find((j) => j.chapterId === item.chapter.id));
   const write = useApp((s) => s.writeChapters);
   const rollback = useApp((s) => s.rollbackWriter);
   const cancel = useApp((s) => s.cancelWriting);
@@ -306,16 +307,16 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
   const [confirming, setConfirming] = useState(false);
   const plan = item.plan;
   if (plan === null) return null;
-  const here = writerJob?.chapterId === item.chapter.id;
+  const here = mine !== undefined;
   const queued = writerJob?.queued.includes(item.chapter.id) === true;
   const progress = plan.progress;
   return (
     <div className="skill-actions" role="group" aria-label={`${item.chapter.title}的写作`}>
       <span className="muted">
-        {here
-          ? writerJob.stage === 'writing'
-            ? `写手正在写${writerJob.total > 0 ? `（${writerJob.done} / ${writerJob.total} 段）` : ''}`
-            : writerJob.stage === 'memory'
+        {mine !== undefined
+          ? mine.stage === 'writing'
+            ? `写手正在写${mine.total > 0 ? `（${mine.done} / ${mine.total} 段）` : ''}`
+            : mine.stage === 'memory'
               ? '已写完，正在整理长篇记忆'
               : '已写完，正在审核'
           : queued
@@ -359,11 +360,13 @@ function MemoryBlock({ item }: { readonly item: PlanChapterView }) {
   const planning = useApp((s) => s.planning);
   const building = useApp((s) => s.memoryBuilding);
   const writerJob = useApp((s) => s.writerJob);
+  // 同时写几卷时几条线可能同时在整理记忆，memoryBuilding 只记得一章：写手手上的各章另外看。
+  const writerMemory = useApp((s) => s.writerJobs.some((j) => j.chapterId === item.chapter.id && j.stage === 'memory'));
   const build = useApp((s) => s.buildMemory);
   const busy = useApp((s) => s.busy);
   const { memory } = item;
   if (planning === null || (!item.hasText && memory === null)) return null;
-  const here = building === item.chapter.id;
+  const here = building === item.chapter.id || writerMemory;
   const status = here
     ? '正在生成…'
     : memory === null

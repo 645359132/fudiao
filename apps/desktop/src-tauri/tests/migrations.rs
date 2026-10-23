@@ -273,6 +273,7 @@ fn embedded_migrations_apply_on_a_fresh_database() {
         "sim_event",
         "sim_snapshot",
         "beat_sheet",
+        "assistant_conversation",
         "assistant_message",
         "relationship",
         "relation_position",

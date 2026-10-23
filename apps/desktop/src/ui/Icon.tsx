@@ -33,6 +33,7 @@ import {
   Square,
   Sun,
   TriangleAlert,
+  Trash2,
   Undo2,
   Upload,
   Users,
@@ -82,6 +83,7 @@ const ICONS = {
   chevronDown: ChevronDown,
   brain: Brain,
   model: Cpu,
+  trash: Trash2,
 } as const satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

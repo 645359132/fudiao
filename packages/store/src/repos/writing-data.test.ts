@@ -133,6 +133,13 @@ describe('写作技能', () => {
     { key: 'cliffhanger', name: '章末钩子', version: '1', stages: ['writing'] as const },
   ];
 
+  it('两处同时登记内置技能（两个写手同时开写）：都成功，每个技能只有一条', async () => {
+    const db = await fresh();
+    const [a, b] = await Promise.all([ensureBuiltinSkills(db, builtins, newId, ctx), ensureBuiltinSkills(db, builtins, newId, ctx)]);
+    expect([a.ok, b.ok]).toEqual([true, true]);
+    expect(value(await ensureBuiltinSkills(db, builtins, newId, ctx)).map((s) => s.key).sort()).toEqual(builtins.map((x) => x.key).sort());
+  });
+
   it('登记内置技能；内置技能升级时保留作者的启用状态与改动', async () => {
     const db = await fresh();
     const first = value(await ensureBuiltinSkills(db, builtins, newId, ctx));

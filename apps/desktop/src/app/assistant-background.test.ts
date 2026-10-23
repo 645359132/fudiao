@@ -3,7 +3,7 @@ import type { AssistantTurnOutput } from '@fudiao/prompts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
-import type { AssistantItem } from './assistant';
+import { waitingItem, type AssistantItem } from './assistant';
 import type { BackgroundJob, BackgroundJobs } from './assistant-tools';
 import { createAppService } from './service';
 
@@ -58,6 +58,17 @@ function backgroundJobs() {
   };
   return { background, jobs, finish };
 }
+
+describe('等待确认的动作', () => {
+  const pending: AssistantItem = { id: 'p', role: 'pending', action: { tool: 'trash_chapter', chapter: '第二章' }, summary: '移入回收站', rest: [] };
+  const changes = (turnOf?: string): AssistantItem => ({ id: `c${turnOf ?? ''}`, role: 'changes', tool: 'write_chapter', entries: [], kept: false, ...(turnOf !== undefined && { turnOf }) });
+  it('排在它后面的后台改动记录（带 turnOf）不挡住确认；确认后执行的动作自己的改动记录（不带 turnOf）说明已经确认过', () => {
+    expect(waitingItem([pending])).toBe(pending);
+    expect(waitingItem([pending, changes('u1'), changes('u2')])).toBe(pending);
+    expect(waitingItem([pending, changes()])).toBeNull();
+    expect(waitingItem([pending, { id: 'r', role: 'results', results: [] }])).toBeNull();
+  });
+});
 
 describe('AI 助手把单章的写作、审核与修订交给后台（M5-23）', () => {
   it('写手写章：排上就返回；写完后下一句话的现状里有结果（只说一次）；撤销发起的那一轮时回退写手写入', async () => {
@@ -157,5 +168,58 @@ describe('AI 助手把单章的写作、审核与修订交给后台（M5-23）',
     step(deps, { message: '第一章停下了。', actions: [], done: true });
     value(await app.sendToAssistant('写完了吗', { background: batch }));
     expect(lastBody(deps)).toContain('- 写手依次写 1 章：一章也没有写完；停在这里：第 1 段的输出被截断');
+  });
+
+  it('后台做完的改动记回发起它的那段对话：排在等待确认的动作后面时照样能确认；不算作者用过那一段；那段删掉了不重建', async () => {
+    const { deps, app } = await setup();
+    const chapter = async (title: string, after: string | null) => {
+      const created = value(await app.createChapter(title, after ?? undefined)).chapters.find((c) => c.title === title)!.id;
+      value(await app.savePlan(created, { goal: title, castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+      return created;
+    };
+    const c1 = await chapter('第一章 夜叩', null);
+    const c2 = await chapter('第二章 夜雨', c1);
+    const c3 = await chapter('第三章 雨歇', c2);
+    await chapter('第四章 天明', c3);
+    const memoryReply = reply(JSON.stringify({ summary: '梗概。', cast: [], foreshadows: [], openThreads: [] }));
+    const { background, jobs, finish } = backgroundJobs();
+
+    // 在 A 里排上写第一章，接着让助手做一件要确认的事；确认之前后台写完了。
+    step(deps, { message: '', actions: [{ tool: 'write_chapter', chapter: '第一章 夜叩' }], done: false });
+    step(deps, { message: '在写了。', actions: [], done: true });
+    value(await app.sendToAssistant('写第一章', { background }));
+    step(deps, { message: '要把第二章移入回收站，请确认。', actions: [{ tool: 'trash_chapter', chapter: '第二章 夜雨' }], done: false });
+    expect(value(await app.sendToAssistant('把第二章删了', { background })).pending).toBe(true);
+    deps.llmResponses.push(reply('林舟叩响了门。'), memoryReply);
+    expect(await finish(jobs[0]!)).toMatchObject({ ok: true });
+    const items = value(await app.assistantItems());
+    expect(items.at(-1)?.role).toBe('changes');
+    expect(waitingItem(items)).toMatchObject({ role: 'pending', action: { tool: 'trash_chapter' } });
+    step(deps, { message: '移好了。', actions: [], done: true });
+    const resolved = value(await app.resolveAssistantPending(true, { background }));
+    expect(lastResults(resolved.items)?.results[0]).toMatchObject({ tool: 'trash_chapter', ok: true });
+    expect(value(await app.reloadWork()).trashed.map((c) => c.title)).toEqual(['第二章 夜雨']);
+
+    // A 里再排一章，然后在新的一段 B 里说话；后台这时做完：改动记回 A，但最近用过的仍是 B。
+    step(deps, { message: '', actions: [{ tool: 'write_chapter', chapter: '第三章 雨歇' }], done: false });
+    step(deps, { message: '在写了。', actions: [], done: true });
+    value(await app.sendToAssistant('写第三章', { background }));
+    const a = value(await app.assistantConversations()).current;
+    value(await app.clearAssistant());
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('聊聊第四章', { background }));
+    const b = value(await app.assistantConversations()).current;
+    deps.llmResponses.push(reply('钱四开了门。'), memoryReply);
+    expect(await finish(jobs[1]!)).toMatchObject({ ok: true });
+    expect(value(await app.assistantConversations()).conversations.map((c) => c.id)).toEqual([b, a]);
+
+    // B 里排上写第四章，写着的时候作者删掉了 B：做完时不把 B 重新建出来。
+    step(deps, { message: '', actions: [{ tool: 'write_chapter', chapter: '第四章 天明' }], done: false });
+    step(deps, { message: '在写了。', actions: [], done: true });
+    value(await app.sendToAssistant('写第四章', { background }));
+    value(await app.deleteAssistantConversation(b!));
+    deps.llmResponses.push(reply('天亮了。'), memoryReply);
+    expect(await finish(jobs[2]!)).toMatchObject({ ok: true });
+    expect(value(await app.assistantConversations()).conversations.map((c) => c.id)).toEqual([a]);
   });
 });

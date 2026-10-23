@@ -148,6 +148,28 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     expect(value(await app.relationsView()).relationships).toEqual([]);
   });
 
+  it('另一段对话里删掉又撤销回来的卷（重建后换了标识）：回到建它的那段对话撤销时照样找得到', async () => {
+    const { deps, app } = await setup();
+    const titles = async () => value(await app.reloadWork()).volumes.map((v) => v.title).filter((t) => t === '第二卷 雨夜');
+    step(deps, { message: '', actions: [{ tool: 'create_volume', title: '第二卷 雨夜', summary: '林舟当玉', after: null }], done: true });
+    value(await app.sendToAssistant('建一卷'));
+    const a = value(await app.assistantConversations()).current!;
+    // 新的一段对话里删掉它、再撤销：卷重建了，标识换了，记在这一段的撤销记录里。
+    value(await app.clearAssistant());
+    step(deps, { message: '要删掉这一卷，请确认。', actions: [{ tool: 'delete_volume', volume: '第二卷 雨夜' }], done: false });
+    value(await app.sendToAssistant('删掉第二卷'));
+    step(deps, { message: '删了。', actions: [], done: true });
+    value(await app.resolveAssistantPending(true));
+    expect(await titles()).toEqual([]);
+    value(await app.undoAssistantTurn());
+    expect(await titles()).toEqual(['第二卷 雨夜']);
+    // 回到最初那段撤销“建一卷”：去掉的是重建后的那一卷。
+    value(await app.openAssistantConversation(a));
+    const undone = value(await app.undoAssistantTurn());
+    expect(lastUndo(undone.items)).toMatchObject({ ok: true });
+    expect(await titles()).toEqual([]);
+  });
+
   it('助手改过之后又被作者改过的不动，在说明里写明；锁定的设定不改回', async () => {
     const { deps, app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;

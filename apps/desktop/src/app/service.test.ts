@@ -39,9 +39,10 @@ describe('作品列表', () => {
     expect(value(await app.loadLibrary()).preferences).toEqual(DEFAULT_PREFERENCES);
     expect(value(await app.setPreferences({ showParagraphSource: false })).preferences).toEqual({ ...DEFAULT_PREFERENCES, showParagraphSource: false });
     const layout = { sidebar: 300, assistant: 420, sidebarHidden: true };
-    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' } });
+    expect(value(await app.setPreferences({ theme: 'dark', layout })).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'medium' }, writer: { parallel: 2 } });
     expect(value(await app.setPreferences({ assistant: { effort: 'high' } })).preferences.assistant).toEqual({ effort: 'high' });
-    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' } });
+    expect(value(await app.setPreferences({ writer: { parallel: 3 } })).preferences.writer).toEqual({ parallel: 3 });
+    expect((JSON.parse(readFileSync(deps.libraryFile, 'utf8')) as { preferences: unknown }).preferences).toEqual({ showParagraphSource: false, theme: 'dark', layout, assistant: { effort: 'high' }, writer: { parallel: 3 } });
   });
 
   it('新建作品：在作品库下建文件夹与作品库，加入列表并成为当前作品', async () => {

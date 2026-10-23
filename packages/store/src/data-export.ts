@@ -1,6 +1,7 @@
 // 数据层的导出与导入：每张表一个 JSONL（施工文档第四章“完整项目导出”的 data/ 部分）。
 // 只依赖 SqlPort，桌面端与 Node 端通用；zip、manifest 与章节 Markdown 在 M1-07。
 import { err, ok, type Result } from '@fudiao/shared';
+import { LEGACY_CONVERSATION_ID } from './repos/assistant';
 import { TABLES, type TableSpec } from './schema';
 import type { SqlError, SqlPort, SqlValue, Statement } from './sql';
 
@@ -72,6 +73,19 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
   21: (tables) => tables,
   // 0022：扫榜拆书的样章原文，只留在本机、不导出，导出的表不变。
   22: (tables) => tables,
+  // 0023：AI 助手的对话分段；旧数据的消息都归入一段（与迁移相同：固定的标识，时间取最早与最晚一条消息）。
+  // 已经带着分段的数据（例如只去掉了别的列的测试数据）原样保留。
+  23: (tables) => {
+    const loose = (tables['assistant_message'] ?? []).filter((row) => row['conversation_id'] === undefined);
+    if (loose.length === 0) return tables;
+    const times = loose.map((row) => String(row['created_at'])).sort();
+    const legacy = { id: LEGACY_CONVERSATION_ID, created_at: times[0] ?? '', updated_at: times.at(-1) ?? '' };
+    return {
+      ...tables,
+      assistant_conversation: [...(tables['assistant_conversation'] ?? []).filter((row) => row['id'] !== LEGACY_CONVERSATION_ID), legacy],
+      assistant_message: (tables['assistant_message'] ?? []).map((row) => ({ conversation_id: LEGACY_CONVERSATION_ID, ...row })),
+    };
+  },
   // 0014：写作技能增加阶段 stages（旧数据都是写章节用的；“作者偏好”在规划时也要遵守，与迁移相同）。
   14: (tables) => ({
     ...tables,

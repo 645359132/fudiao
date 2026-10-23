@@ -28,6 +28,7 @@ import {
   type RepoError,
   type SavedParagraph,
   type SqlPort,
+  listChapterPlans,
 } from '@fudiao/store';
 import { effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
 import type { AppError } from './errors';
@@ -80,10 +81,13 @@ export async function retryableStepKey(port: SqlPort, base: string): Promise<Res
 
 export function writerUseCases(deps: AppDeps, session: () => { readonly port: SqlPort; readonly path: string } | null, runner: ReturnType<typeof modelRunner>) {
   const ctx = () => ({ now: deps.clock.now() });
+  // 正在写的章节。同一章同时只能有一个写手：作者在成书进度里点了“依次写完”，AI 助手又被要求写同一章时，
+  // 两个写手会互相当成“作者改了本章”而停下。写作期间也不能回退这一章。
+  const writing = new Set<string>();
 
   /** 本章不随分段变化的材料：作品、技能、人物、事实、伏笔、前文梗概与上一章的结尾。 */
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
-    const [work, skills, entities, facts, foreshadows, memories, withText, volumes, relations] = await Promise.all([
+    const [work, skills, entities, facts, foreshadows, memories, withText, volumes, relations, plans] = await Promise.all([
       getProject(port),
       skillsForStage(port, 'writing', deps),
       listEntities(port),
@@ -93,6 +97,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       listChaptersWithText(port),
       listVolumes(port),
       listRelationships(port),
+      listChapterPlans(port),
     ]);
     if (!work.ok) return err(repo(work.error));
     if (!skills.ok) return err(repo(skills.error));
@@ -103,6 +108,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     if (!withText.ok) return err(repo(withText.error));
     if (!volumes.ok) return err(repo(volumes.error));
     if (!relations.ok) return err(repo(relations.error));
+    if (!plans.ok) return err(repo(plans.error));
     const volume = volumes.value.find((v) => v.id === chapter.volumeId);
 
     const order = new Map(chapters.map((c, i) => [c.id, i]));
@@ -118,8 +124,20 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     const memoryOf = new Map(memories.value.filter((m) => hasText.has(m.chapterId)).map((m) => [m.chapterId, m]));
     const earlier: { title: string; summary: string }[] = [];
     let used = 0;
+    // 前面还没写完或还没整理记忆的章节（同时写几卷时，前一卷可能还在写）：用它的章节计划顶上，至少知道那里要发生什么。
+    const planOf = new Map(plans.value.map((p) => [p.chapterId, p]));
+    /**
+     * 写手此刻正在写的章节（同时写几卷时另一条线在写）：它的正文还不是完整的一章，不当作上一章的结尾。
+     * 写手停下后作者自己写完的章节计划仍停在“写作中”，所以看的是此刻在不在写，不看计划的状态。
+     */
+    const unfinished = (id: string) => writing.has(id);
+    const planned = (c: Chapter) => {
+      const goal = planOf.get(c.id)?.goal.trim() ?? '';
+      if (goal === '') return '';
+      return `（${!hasText.has(c.id) ? '还没写，' : unfinished(c.id) ? '还没写完，' : ''}按计划）${goal}`;
+    };
     for (const c of chapters.slice(0, index).reverse()) {
-      const summary = (memoryOf.get(c.id)?.summary ?? c.summary).trim();
+      const summary = (memoryOf.get(c.id)?.summary ?? c.summary).trim() || planned(c);
       if (summary === '') continue;
       if (used + summary.length > MEMORY_CHARS) break;
       used += summary.length;
@@ -138,7 +156,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
 
     const previous = chapters[index - 1];
     let previousEnding = '';
-    if (previous !== undefined) {
+    if (previous !== undefined && !unfinished(previous.id)) {
       const before = await listParagraphs(port, previous.id);
       if (!before.ok) return err(repo(before.error));
       previousEnding = tail(body(before.value));
@@ -245,7 +263,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
         if (!prompt.ok) return err(settings(prompt.error));
         const stepKey = await retryableStepKey(port, `writer:${chapterId}:${progress.runId}:${i}`);
         if (!stepKey.ok) return err(repo(stepKey.error));
-        const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value }, events);
+        // 这一段调用过、却没写进正文（例如写入时冲突）时，接着写复用那次的结果；同时写几卷时前文可能已经变了，对不上就重新调用。
+        const result = await runner.text({ prompt: prompt.value, maxOutputTokens: segmentOutputTokens(progress.words[i] ?? 1500), effort: 'high', stepKey: stepKey.value, recallOnChange: true }, events);
         if (!result.ok) return outcome(aborted() ? 'cancelled' : 'stopped', result.error.code === 'settings' ? result.error.detail : '调用模型失败');
         if (result.value.outcome === 'cancelled') return outcome('cancelled', null);
         if (result.value.outcome === 'refused') return outcome('stopped', `模型拒绝了这一段${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`);
@@ -284,9 +303,6 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     },
   };
 
-  // 正在写的章节。同一章同时只能有一个写手：作者在成书进度里点了“依次写完”，AI 助手又被要求写同一章时，
-  // 两个写手会互相当成“作者改了本章”而停下。写作期间也不能回退这一章。
-  const writing = new Set<string>();
   const busy = (chapterId: string) => (writing.has(chapterId) ? err(settings('写手正在写这一章：等它写完，或在“任务”里停下以后再说')) : null);
   /** 在这一章的写手锁里做 f：写手写章与写手修订共用，同一章同时只有一个在改正文。 */
   async function locked<T>(chapterId: string, f: () => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {

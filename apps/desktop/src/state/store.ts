@@ -9,7 +9,7 @@ import type { SceneSpecInput } from '@fudiao/domain';
 import type { ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
-import type { AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
+import type { AssistantConversationView, AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
 import type { SearchHit as WebSearchHit, SearchServiceForm, SearchServicesView, SearchServiceView } from '../app/web-search';
 import type { HookOutcome, StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
@@ -17,7 +17,7 @@ import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluatio
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { SaveStatus } from '../app/autosave';
-import type { AssistantEffort, Layout, Preferences, Theme } from '../app/library';
+import { MAX_WRITER_LANES, type AssistantEffort, type Layout, type Preferences, type Theme } from '../app/library';
 import type { RelationsView } from '../app/relations';
 import { describeError } from '../app/errors';
 import type { BackupInfo, DecodedText } from '../app/ports';
@@ -160,6 +160,9 @@ export type AppState = {
   readonly assistantRunning: boolean;
   /** 对话属于哪部作品（作品标识；作品列表页为空字符串），切换作品时据此重新读取。 */
   readonly assistantFor: string | null;
+  /** 这部作品的历史对话（最近用过的在前）与正在看的那一段；没有打开作品时为空。 */
+  readonly assistantConversations: readonly AssistantConversationView[];
+  readonly assistantConversationId: string | null;
   /** 模型正在输出的这一步里给作者的话（逐字显示）；没有时为 null。 */
   readonly assistantDraft: string | null;
   /** 助手正在执行的耗时动作的进展（写手写到第几段、正在审核等）。 */
@@ -174,8 +177,10 @@ export type AppState = {
   readonly selectionDismissed: string | null;
   readonly planUnmatched: readonly string[];
   readonly planDrafting: boolean;
-  /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。 */
+  /** 写手正在进行的工作（B59）：正在写的章节与段数进度、排在后面的章节；没有时为 null。同时写几卷时是其中第一条。 */
   readonly writerJob: WriterJob | null;
+  /** 写手手上的各章（同时写几卷时每卷一章）；没有在写时为空。只问“写手在不在写”时用 writerJob。 */
+  readonly writerJobs: readonly WriterJob[];
   /** AI 助手交给后台的单章写作、审核与修订（M5-23）；写作与修订期间那一章只读。 */
   readonly assistantJobs: readonly { readonly id: string; readonly kind: 'writing' | 'review' | 'revise'; readonly chapterId: string }[];
   /** AI 上下文清单（B18）：最近一次的清单、计算时的选区，以及作者的增减（按章节，本次打开作品期间有效）。 */
@@ -329,7 +334,12 @@ export type AppState = {
   /** 撤销助手最近一轮对作品的改动（不调用模型）。 */
   readonly undoAssistant: () => Promise<void>;
   readonly stopAssistant: () => void;
+  /** 新对话：另开一段，之前的对话留在历史对话里。 */
   readonly clearAssistant: () => Promise<void>;
+  /** 切到历史对话里的一段，接着看、接着说。 */
+  readonly openAssistantConversation: (id: string) => Promise<void>;
+  /** 删除历史对话里的一段（作品不变）。 */
+  readonly deleteAssistantConversation: (id: string) => Promise<void>;
   /** 助手每一步的思考深度（对所有作品生效）。 */
   readonly setAssistantEffort: (effort: AssistantEffort) => Promise<void>;
   /** 正在后台进行的任务（写手在写哪一章、排着几章、审核、推演、AI 写作等），一句话一项；AI 助手的现状与离开前的确认都用它。 */
@@ -373,6 +383,8 @@ export type AppState = {
   /** 打开一章并显示它的审核抽屉。 */
   readonly openChapterReview: (chapterId: string) => Promise<void>;
   readonly cancelWriting: () => void;
+  /** 写手同时写几卷（1 至 4，对所有作品生效）。 */
+  readonly setWriterParallel: (lanes: number) => Promise<void>;
   readonly rollbackWriter: (chapterId: string) => Promise<boolean>;
   /** 角色推演（B22 起）：场景列表、选中的场景（'new' 为新建）与还没有保存的场景配置草稿（B39）。 */
   readonly simScenes: readonly SimScene[] | null;
@@ -542,7 +554,7 @@ export type AppStore = StoreApi<AppState>;
 export type ChapterLock = 'writer' | 'revise' | 'assistant';
 export function chapterLock(state: AppState, chapterId: string | null): ChapterLock | null {
   if (chapterId === null) return null;
-  if (state.writerJob?.chapterId === chapterId) return 'writer';
+  if (state.writerJobs.some((j) => j.chapterId === chapterId)) return 'writer';
   const job = state.assistantJobs.find((j) => j.chapterId === chapterId && j.kind !== 'review');
   if (job !== undefined) return job.kind === 'writing' ? 'writer' : 'revise';
   if (state.review !== null && state.review.revisingId !== null && state.review.chapterId === chapterId) return 'revise';
@@ -725,13 +737,13 @@ export function createAppStore(service: AppService): AppStore {
     ): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean }> {
       // 先保存编辑器里的内容：写手不会覆盖未保存的修改。
       if (!(await get().leaveChapter())) return { summary: '本章正文没有保存成功，写手没有开始', complete: false, cancelled: false };
-      const written: string[] = [];
+      const written = new Set<string>();
       /** 写完了、但审核重试后仍没有完成的章节（带原因），在结束的那句话里列出。 */
       const unreviewed: string[] = [];
-      /** 停在哪里、为什么（显示给作者的那句话）；写完全部时为 null。 */
-      let stop: string | null = null;
+      /** 停在哪里、为什么（显示给作者的话）；同时写几卷时可能有几处。 */
+      const stops: string[] = [];
       const halt = (note: string) => {
-        stop = note;
+        stops.push(note);
         set({ message: note });
       };
       const abort = new AbortController();
@@ -758,58 +770,112 @@ export function createAppStore(service: AppService): AppStore {
           if (content.ok) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
         }
       };
-      for (const [i, chapterId] of chapterIds.entries()) {
+
+      // 同一卷里后一章要接上前一章（上一章的结尾与长篇记忆），只能一章一章写；不同的卷可以同时写（每卷一条线），
+      // 每卷的开头靠卷纲、章节计划与已写好的前文接上前一卷。一卷写完，这条线接着写还没开始的下一卷。
+      // 按卷分组（交来的章节可能几卷交错，例如 AI 助手列出的），卷里按书中的顺序：同一卷绝不分给两条线。
+      const position = new Map((get().work?.chapters ?? []).map((c, i) => [c.id, i]));
+      const byVolume = new Map<string, string[]>();
+      for (const id of chapterIds) {
+        const volume = chapter(id)?.volumeId ?? '';
+        byVolume.set(volume, [...(byVolume.get(volume) ?? []), id]);
+      }
+      const groups = [...byVolume.values()].map((ids) => ids.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0)));
+      const lanes = Math.max(1, Math.min(get().library?.preferences.writer.parallel ?? 1, MAX_WRITER_LANES, groups.length));
+      const waiting = [...chapterIds];
+      const jobs = new Map<string, Omit<WriterJob, 'queued'>>();
+      const publish = () => {
+        const list = [...jobs.values()].map((j) => ({ ...j, queued: [...waiting] }));
+        set({ writerJobs: list, writerJob: list[0] ?? null });
+      };
+      const put = (job: Omit<WriterJob, 'queued'>) => {
+        jobs.set(job.chapterId, job);
+        publish();
+      };
+      let halted = false;
+
+      /** 写一章：写正文、整理长篇记忆、（要审核时）审核。返回能不能接着写后面的。 */
+      async function one(chapterId: string): Promise<boolean> {
         const title = chapter(chapterId)?.title ?? '';
+        waiting.splice(waiting.indexOf(chapterId), 1);
         const t = startTask('writer', `写手 · ${title}`, chapterId, abort);
-        const queued = chapterIds.slice(i + 1);
-        set({ writerJob: { chapterId, stage: 'writing', done: 0, total: 0, queued }, message: null });
-        const result = await service.writeChapter(chapterId, {
-          ...tee(t.options()),
-          onSegment: (done, total) => {
-            set({ writerJob: { chapterId, stage: 'writing', done, total, queued } });
-            void refresh(chapterId);
-          },
-        });
-        await refresh(chapterId);
-        if (!result.ok) {
-          halt(`“${title}”没有写成：${describeError(result.error)}`);
-          t.fail(describeError(result.error));
-          break;
-        }
-        const { status, reason, segmentsDone, segmentsTotal } = result.value;
-        if (status === 'written') {
-          t.finish('done');
-          const rest = queued.length > 0 ? `；后面的 ${queued.length} 章没有接着写，处理好以后再点“依次写完”接着写` : '';
-          // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
-          set({ writerJob: { chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal, queued } });
-          written.push(title);
-          if (!(await memoryTask(chapterId, abort, tee))) {
-            halt(`“${title}”已写完，但长篇记忆没有生成：${get().message ?? ''}${rest}`);
-            break;
+        const rest = () => (waiting.length > 0 ? `；后面的 ${waiting.length} 章没有接着写，处理好以后再点“依次写完”接着写` : '');
+        put({ chapterId, stage: 'writing', done: 0, total: 0 });
+        if (stops.length === 0) set({ message: null });
+        try {
+          const result = await service.writeChapter(chapterId, {
+            ...tee(t.options()),
+            onSegment: (done, total) => {
+              put({ chapterId, stage: 'writing', done, total });
+              void refresh(chapterId);
+            },
+          });
+          await refresh(chapterId);
+          if (!result.ok) {
+            halt(`“${title}”没有写成：${describeError(result.error)}`);
+            t.fail(describeError(result.error));
+            return false;
           }
-          if (options.review !== true) continue;
+          const { status, reason, segmentsDone, segmentsTotal } = result.value;
+          if (status !== 'written') {
+            const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
+            halt(note);
+            t.finish(status === 'cancelled' ? 'cancelled' : 'failed', { error: note });
+            return false;
+          }
+          t.finish('done');
+          // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
+          put({ chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal });
+          written.add(chapterId);
+          if (!(await memoryTask(chapterId, abort, tee))) {
+            halt(`“${title}”已写完，但长篇记忆没有生成：${get().message ?? ''}${rest()}`);
+            return false;
+          }
+          if (options.review !== true) return true;
           // 审核提出的问题留给作者处理，不挡住后面的章节；模型审核没有完成时重试一次，仍没完成就记下这一章、接着写后面的。
-          set({ writerJob: { chapterId, stage: 'review', done: segmentsTotal, total: segmentsTotal, queued } });
+          put({ chapterId, stage: 'review', done: segmentsTotal, total: segmentsTotal });
           const reviewed = await reviewWithRetry(() => reviewTask(chapterId, abort, tee), abort.signal);
           await refresh(chapterId);
           if (abort.signal.aborted) {
-            halt(`“${title}”已写完，审核时停下了。可以在“成书进度”里单独审核这一章${rest}`);
-            break;
+            halt(`“${title}”已写完，审核时停下了。可以在“成书进度”里单独审核这一章${rest()}`);
+            return false;
           }
           if (!reviewed.complete) unreviewed.push(`《${title}》（${reviewed.reason ?? ''}）`);
-          continue;
+          return true;
+        } finally {
+          jobs.delete(chapterId);
+          publish();
         }
-        const note = status === 'cancelled' ? `已取消：“${title}”写了 ${segmentsDone} / ${segmentsTotal} 段，可以接着写` : (reason ?? `“${title}”没有写完`);
-        halt(note);
-        t.finish(status === 'cancelled' ? 'cancelled' : 'failed', { error: note });
-        break;
       }
+
+      /** 一条线：一卷一卷地写，一卷里一章一章地写；哪条线停下了，其余的线写完手上这一章也不再接着写。 */
+      async function lane(): Promise<void> {
+        for (let group = groups.shift(); group !== undefined; group = groups.shift()) {
+          for (const id of group) {
+            if (halted || abort.signal.aborted) return;
+            if (!(await one(id))) {
+              halted = true;
+              return;
+            }
+          }
+        }
+      }
+
+      publish();
+      await Promise.all(Array.from({ length: lanes }, () => lane()));
+      // 停下落在两章之间（或这一批还没开始写）时没有哪一章说“停在这里”：照样记为停下，不当成写完了。
+      const left = chapterIds.filter((id) => !written.has(id)).length;
+      if (abort.signal.aborted && stops.length === 0 && left > 0) halt(`已停下：还有 ${left} 章没有写，可以再点“依次写完”接着写`);
       if (writerAbort === abort) writerAbort = null;
-      set({ writerJob: null });
-      const done = written.length === 0 ? '一章也没有写完' : `写完了${written.map((t) => `《${t}》`).join('')}`;
+      jobs.clear();
+      waiting.length = 0;
+      publish();
+      const titles = chapterIds.filter((id) => written.has(id)).map((id) => `《${chapter(id)?.title ?? ''}》`);
+      const done = titles.length === 0 ? '一章也没有写完' : `写完了${titles.join('')}`;
       const missed = unreviewedNote(unreviewed);
-      if (stop === null && missed !== '') set({ message: missed.slice(1) });
-      return { summary: `写手依次写 ${chapterIds.length} 章：${done}${missed}${stop === null ? '' : `；停在这里：${stop as string}`}`, complete: stop === null, cancelled: abort.signal.aborted };
+      if (stops.length === 0 && missed !== '') set({ message: missed.slice(1) });
+      const how = lanes > 1 ? `写手分 ${lanes} 卷同时写 ${chapterIds.length} 章` : `写手依次写 ${chapterIds.length} 章`;
+      return { summary: `${how}：${done}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
     }
 
     /** 写作工作流的一次运行有了新的样子：换进列表（新的放在最前）。 */
@@ -904,7 +970,11 @@ export function createAppStore(service: AppService): AppStore {
       if (result.ok) t.finish('done');
       else t.fail(describeError(result.error));
       const planning = get().planning === null ? null : await service.planningView();
-      set({ memoryBuilding: null, ...(planning?.ok === true && { planning: planning.value }), ...(!result.ok && { message: describeError(result.error) }) });
+      set({
+        memoryBuilding: get().memoryBuilding === chapterId ? null : get().memoryBuilding,
+        ...(planning?.ok === true && { planning: planning.value }),
+        ...(!result.ok && { message: describeError(result.error) }),
+      });
       return result.ok;
     }
 
@@ -1083,6 +1153,12 @@ export function createAppStore(service: AppService): AppStore {
       const text = editor.selectedText();
       return range === null || text.trim() === '' ? null : { chapterId: info.chapterId, range, text };
     };
+    /** 重新读取历史对话的列表与正在看的那一段。 */
+    async function refreshConversations() {
+      const list = await service.assistantConversations();
+      if (list.ok) set({ assistantConversations: list.value.conversations, assistantConversationId: list.value.current });
+    }
+
     async function assistantTurn(
       title: string,
       selection: AssistantSelection | null,
@@ -1108,8 +1184,8 @@ export function createAppStore(service: AppService): AppStore {
           },
           async writeChapters(chapterIds, review, onEnd) {
             const busy = () => {
-              const job = get().writerJob;
-              return writerRunning || job !== null ? `写手正在写${job === null ? '' : `《${chapter(job.chapterId)?.title ?? ''}》`}，等这一批写完或在“任务”里停下以后再排` : null;
+              const jobs = get().writerJobs;
+              return writerRunning || jobs.length > 0 ? `写手正在写${jobs.map((j) => `《${chapter(j.chapterId)?.title ?? ''}》`).join('')}，等这一批写完或在“任务”里停下以后再排` : null;
             };
             const before = busy();
             if (before !== null) return before;
@@ -1135,12 +1211,12 @@ export function createAppStore(service: AppService): AppStore {
           },
           simulating: () => get().simAdvancing,
           writing() {
-            const job = get().writerJob;
+            const jobs = get().writerJobs;
             const single = get().assistantJobs.flatMap((j) => (j.kind === 'review' ? [] : [j.chapterId]));
-            return [...(job === null ? [] : [job.chapterId, ...job.queued]), ...single];
+            return [...jobs.map((j) => j.chapterId), ...(jobs[0]?.queued ?? []), ...single];
           },
           async run(job) {
-            if (job.kind !== 'review' && (get().writerJob?.chapterId === job.chapterId || get().assistantJobs.some((j) => j.chapterId === job.chapterId && j.kind !== 'review'))) {
+            if (job.kind !== 'review' && (get().writerJobs.some((j) => j.chapterId === job.chapterId) || get().assistantJobs.some((j) => j.chapterId === job.chapterId && j.kind !== 'review'))) {
               return `《${chapter(job.chapterId)?.title ?? ''}》正在后台写作或修订，等它做完或在“任务”里停下以后再说`;
             }
             // 写手不覆盖未保存的修改：先保存编辑器里的内容，保存不了就不排。
@@ -1181,12 +1257,13 @@ export function createAppStore(service: AppService): AppStore {
               const title = chapter(get().assistantJobs.find((x) => x.id === id)?.chapterId ?? '')?.title ?? '';
               stopped.push(`${j.kind === 'writing' ? '写手写' : j.kind === 'review' ? '审核' : '写手修订'}《${title}》${j.kind === 'review' ? '' : '（已写入的部分保留）'}`);
             }
-            const job = get().writerJob;
+            const jobs = get().writerJobs;
             // 只停作者要停的那一种：停推演或工作流时不动写手队列与依次审核。
-            if ((what === 'writing' || what === 'all') && (writerRunning || job !== null)) {
+            if ((what === 'writing' || what === 'all') && (writerRunning || jobs.length > 0)) {
               writerAbort?.abort();
-              const later = job?.queued.length ?? 0;
-              stopped.push(`写手${job === null ? '' : `在《${chapter(job.chapterId)?.title ?? ''}》停下（已写完的段落保留，可以接着写）`}${later > 0 ? `，后面排着的 ${later} 章不再写` : ''}`);
+              const later = jobs[0]?.queued.length ?? 0;
+              const where = jobs.map((j) => `《${chapter(j.chapterId)?.title ?? ''}》`).join('');
+              stopped.push(`写手${where === '' ? '' : `在${where}停下（已写完的段落保留，可以接着写）`}${later > 0 ? `，后面排着的 ${later} 章不再写` : ''}`);
             }
             const queue = get().reviewQueue;
             if ((what === 'review' || what === 'all') && reviewQueueAbort !== null) {
@@ -1229,6 +1306,8 @@ export function createAppStore(service: AppService): AppStore {
         ...(result.ok && { assistantItems: result.value.items }),
         ...(!result.ok && !abort.signal.aborted && { message: describeError(result.error) }),
       });
+      // 这一轮可能新建了一段对话（第一句话时才存下）或换了作品：历史对话的列表随之更新。
+      await refreshConversations();
       // 正文可能被写手、续写或章节操作改过：重新载入正在看的这一章。
       if (get().panel === 'chapter' && get().selectedChapterId !== null) set({ chapterContent: null, contentRevision: get().contentRevision + 1 });
       return result.ok;
@@ -1283,6 +1362,8 @@ export function createAppStore(service: AppService): AppStore {
       assistantItems: [],
       assistantRunning: false,
       assistantFor: null,
+      assistantConversations: [],
+      assistantConversationId: null,
       assistantDraft: null,
       assistantProgress: null,
       assistantContext: null,
@@ -1293,6 +1374,7 @@ export function createAppStore(service: AppService): AppStore {
       planUnmatched: [],
       planDrafting: false,
       writerJob: null,
+      writerJobs: [],
       assistantJobs: [],
       memoryBuilding: null,
       review: null,
@@ -1377,7 +1459,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -1669,6 +1751,8 @@ export function createAppStore(service: AppService): AppStore {
         }));
         if (!ok) return;
         await loadEntities();
+        // AI 助手的对话也在作品库里：换成恢复后最近用过的那一段。
+        await get().loadAssistant();
         await run(service.listBackups(), (backups) => ({ backups }));
       },
       async openSettings(entityId) {
@@ -1718,6 +1802,7 @@ export function createAppStore(service: AppService): AppStore {
         // 换了作品就是另一段对话；对话还在时（重新打开、重启之后），上下文用量取调用记录里最近的一步。
         const usage = items.value.length === 0 ? null : await service.assistantContextUsage();
         set({ assistantItems: items.value, assistantFor: owner, assistantContext: usage?.ok === true ? usage.value : null });
+        await refreshConversations();
       },
       async sendAssistant(text) {
         if (get().assistantRunning || text.trim() === '') return false;
@@ -1748,22 +1833,51 @@ export function createAppStore(service: AppService): AppStore {
       async clearAssistant() {
         if (get().assistantRunning) return;
         await run(service.clearAssistant(), () => ({ assistantItems: [], assistantContext: null }));
+        await refreshConversations();
+      },
+      async openAssistantConversation(id) {
+        if (get().assistantRunning || id === get().assistantConversationId) return;
+        const items = await service.openAssistantConversation(id);
+        if (!items.ok) {
+          set({ message: describeError(items.error) });
+          return;
+        }
+        set({ assistantItems: items.value, assistantContext: null });
+        await refreshConversations();
+      },
+      async deleteAssistantConversation(id) {
+        if (get().assistantRunning) return;
+        const removed = await service.deleteAssistantConversation(id);
+        if (!removed.ok) {
+          set({ message: describeError(removed.error) });
+          return;
+        }
+        // 删的是正在看的那一段：换到最近用过的另一段（没有时是一段新的）。
+        if (id === get().assistantConversationId) {
+          const items = await service.assistantItems();
+          if (items.ok) set({ assistantItems: items.value, assistantContext: null });
+        }
+        await refreshConversations();
       },
       setAssistantEffort: (effort) => savePreferences({ assistant: { effort } }),
       backgroundWork() {
         const s = get();
         const title = (id: string) => `《${chapter(id)?.title ?? ''}》`;
         const out: string[] = [];
-        const job = s.writerJob;
-        if (job !== null) {
-          const now =
-            job.stage === 'writing'
-              ? `写手在写${title(job.chapterId)}${job.total > 0 ? `（已写 ${job.done} / ${job.total} 段）` : ''}`
-              : job.stage === 'memory'
-                ? `写手写完了${title(job.chapterId)}，正在整理它的长篇记忆`
-                : `写手写完了${title(job.chapterId)}，正在审核`;
-          const later = job.queued.slice(0, 10).map(title).join('、');
-          out.push(job.queued.length === 0 ? now : `${now}；后面还排着 ${job.queued.length} 章：${later}${job.queued.length > 10 ? '等' : ''}`);
+        const jobs = s.writerJobs;
+        if (jobs.length > 0) {
+          const now = jobs
+            .map((job) =>
+              job.stage === 'writing'
+                ? `写手在写${title(job.chapterId)}${job.total > 0 ? `（已写 ${job.done} / ${job.total} 段）` : ''}`
+                : job.stage === 'memory'
+                  ? `写手写完了${title(job.chapterId)}，正在整理它的长篇记忆`
+                  : `写手写完了${title(job.chapterId)}，正在审核`,
+            )
+            .join('；');
+          const queued = jobs[0]?.queued ?? [];
+          const later = queued.slice(0, 10).map(title).join('、');
+          out.push(queued.length === 0 ? now : `${now}；后面还排着 ${queued.length} 章：${later}${queued.length > 10 ? '等' : ''}`);
         }
         const queue = s.reviewQueue;
         if (queue !== null) {
@@ -1773,7 +1887,7 @@ export function createAppStore(service: AppService): AppStore {
         // 写手一章里的写作、记忆与审核，以及依次审核正在审的这一章，已经在上面说了；助手自己的这一轮不算。
         for (const t of s.tasks) {
           if (t.status !== 'running' || t.kind === 'assistant') continue;
-          if (job !== null && t.chapterId === job.chapterId && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'review')) continue;
+          if (jobs.some((j) => j.chapterId === t.chapterId) && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'review')) continue;
           if (queue !== null && t.chapterId === queue.chapterId && t.kind === 'review') continue;
           out.push(t.title);
         }
@@ -2167,6 +2281,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       cancelReviewQueue: () => reviewQueueAbort?.abort(),
       cancelWriting: () => writerAbort?.abort(),
+      setWriterParallel: (lanes) => savePreferences({ writer: { parallel: Math.max(1, Math.min(MAX_WRITER_LANES, Math.round(lanes))) } }),
       async openReview() {
         const chapterId = get().selectedChapterId;
         if (chapterId === null) return;

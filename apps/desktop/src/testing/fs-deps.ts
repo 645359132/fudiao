@@ -49,6 +49,11 @@ export type TestDeps = AppDeps & {
   readonly beforeLlm: ((() => Promise<void>) | null)[];
   /** 到达“模型服务”的请求（经模拟的凭据代理注入凭据之后）。 */
   readonly llmRequests: { url: string; headers: Record<string, string>; body: unknown }[];
+  /**
+   * 按请求的内容回复（同时发出的几个请求谁先到不一定，排好的队列对不上时用它）：收到请求体的文字，返回这次的回复；
+   * 返回 null 时照旧取排好的下一个。
+   */
+  readonly llmRoute: { current: ((body: string) => Promise<FakeResponse | null> | FakeResponse | null) | null };
   /** 搜索服务（B84）的预设响应与到达的请求；读网页的预设页面（按网址）。 */
   readonly searchResponses: FakeResponse[];
   readonly searchRequests: { url: string; headers: Record<string, string>; body: unknown }[];
@@ -93,8 +98,16 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
   const webPages = new Map<string, WebPage>();
   let settings: ProjectDb | null = null;
   // 模型服务：每次请求取下一个预设响应，并记下到达服务的请求。
+  const llmRoute: TestDeps['llmRoute'] = { current: null };
   const service = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     if (options.fetch !== undefined) return options.fetch(input, init);
+    const routed = llmRoute.current === null ? null : await llmRoute.current(typeof init?.body === 'string' ? init.body : '');
+    if (routed !== null) {
+      const { fetch, requests } = fakeFetch([routed]);
+      const response = fetch(input, init);
+      llmRequests.push(...requests);
+      return response;
+    }
     await beforeLlm.shift()?.();
     const { fetch, requests } = fakeFetch([llmResponses.shift() ?? { networkError: true }]);
     const response = fetch(input, init);
@@ -177,6 +190,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
     llmResponses,
     beforeLlm,
     llmRequests,
+    llmRoute,
     searchResponses,
     searchRequests,
     webPages,

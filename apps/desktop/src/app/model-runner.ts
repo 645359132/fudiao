@@ -123,6 +123,11 @@ export type RunRequest = {
   readonly maxOutputTokens: number;
   readonly effort?: LlmRequest['effort'];
   readonly stepKey?: string;
+  /**
+   * 这个步骤已有完成的记录、但这次的请求内容变了时，换一个键（“:c1”“:c2”……）重新调用，不报 step_conflict。
+   * 只给结果还没写进作品的步骤用（写手的一段：前文在别的线写完后变了，旧的结果对不上这次的前文）。
+   */
+  readonly recallOnChange?: boolean;
   /** 不用默认模型、指定用哪个模型（模型自带的联网搜索按搜索服务里选的模型，M7-02）。 */
   readonly model?: ModelChoice;
   /** 服务端工具（目前只有联网搜索）；适配器按模型能力传参，不支持时返回明确的错误。 */
@@ -240,13 +245,25 @@ export function modelRunner({ deps, project, defaultModel, learn }: RunnerDeps) 
     async text(request: RunRequest, options: CallOptions = {}): Promise<Result<LlmResult, AppError>> {
       const blocked = options.beforeCall?.() ?? null;
       if (blocked !== null) return err({ code: 'interrupted', detail: blocked });
-      const prepared = await prepare(request, false);
+      let sent = request;
+      let prepared = await prepare(sent, false);
       if (!prepared.ok) return prepared;
-      const first = await prepared.value.port.complete(prepared.value.llmRequest, options);
+      let first = await prepared.value.port.complete(prepared.value.llmRequest, options);
+      for (let n = 1; !first.ok && first.error.code === 'step_conflict' && request.recallOnChange === true && request.stepKey !== undefined; n++) {
+        const key = `${request.stepKey}:c${n}`;
+        // 截断的记录不复用（与写手的 retryableStepKey 一样），跳到下一个键。
+        const db = project();
+        const done = db === null ? null : await findCompletedCall(db, key);
+        if (done?.ok === true && done.value?.status === 'truncated') continue;
+        sent = { ...request, stepKey: key };
+        prepared = await prepare(sent, false);
+        if (!prepared.ok) return prepared;
+        first = await prepared.value.port.complete(prepared.value.llmRequest, options);
+      }
       if (first.ok) return first;
       const learned = await learnFrom(first.error.message, prepared.value.choice, prepared.value.llmRequest.maxOutputTokens);
       if (learned.retryWith === null) return err(settings(`调用${prepared.value.name}失败（${first.error.code}）：${first.error.message}${learned.hint}`));
-      const again = await prepare({ ...request, maxOutputTokens: Math.min(request.maxOutputTokens, learned.retryWith) }, false, learned.choice);
+      const again = await prepare({ ...sent, maxOutputTokens: Math.min(request.maxOutputTokens, learned.retryWith) }, false, learned.choice);
       if (!again.ok) return again;
       const second = await again.value.port.complete(again.value.llmRequest, options);
       return second.ok ? second : err(settings(`调用${again.value.name}失败（${second.error.code}）：${second.error.message}${learned.hint}`));

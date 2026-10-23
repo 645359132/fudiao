@@ -279,6 +279,91 @@ describe('AI 助手（B69）', () => {
     expect(value(await app.assistantItems())).toEqual([]);
   });
 
+  it('历史对话：新对话另开一段，之前的留着；可以切回去接着说，新的一段只带它自己的对话；可以删掉；重新打开作品时是最近用过的一段', async () => {
+    const { deps, app } = await setup();
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('先看看大纲'));
+    // 新对话：还没说话时不存，列表里只有旧的那一段，正在看的是一段新的。
+    value(await app.clearAssistant());
+    expect(value(await app.assistantItems())).toEqual([]);
+    const fresh = value(await app.assistantConversations());
+    expect(fresh.conversations.map((c) => c.title)).toEqual(['先看看大纲']);
+    expect(fresh.conversations.some((c) => c.id === fresh.current)).toBe(false);
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('给主角起个名字，要有古风的味道，两个字就够了，最好带点江湖气'));
+    const both = value(await app.assistantConversations());
+    expect(both.conversations.map((c) => [c.title, c.messages])).toEqual([
+      ['给主角起个名字，要有古风的味道，两个字就够了，最…', 2],
+      ['先看看大纲', 2],
+    ]);
+    // 切回旧的那一段接着说：发给模型的对话只有那一段。
+    const old = both.conversations[1]!;
+    expect(roles(value(await app.openAssistantConversation(old.id)))).toEqual(['user', 'assistant']);
+    step(deps, { message: '大纲还空着。', actions: [], done: true });
+    deps.llmRequests.length = 0;
+    value(await app.sendToAssistant('大纲写了什么'));
+    const sent = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    expect(sent).toContain('先看看大纲');
+    expect(sent).not.toContain('给主角起个名字');
+    expect(value(await app.assistantConversations()).conversations.map((c) => c.id)[0]).toBe(old.id);
+    // 删掉正在看的那一段：换到最近用过的另一段。
+    value(await app.deleteAssistantConversation(old.id));
+    const left = value(await app.assistantConversations());
+    expect(left.conversations.map((c) => c.messages)).toEqual([2]);
+    expect(left.current).toBe(left.conversations[0]?.id);
+    expect(roles(value(await app.assistantItems()))).toEqual(['user', 'assistant']);
+    // 换到别的作品再回来：正在看的是最近用过的那一段。
+    const first = value(await app.reloadWork()).project.id;
+    value(await app.createWork('另一部'));
+    expect(value(await app.assistantItems())).toEqual([]);
+    value(await app.openWork(first));
+    expect((value(await app.assistantItems())[0] as { text?: string }).text).toContain('给主角起个名字');
+  });
+
+  it('上下文用量只算正在看的这段对话里最近的一步；从备份恢复后正在看的是恢复后最近用过的一段', async () => {
+    const { deps, app } = await setup();
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('先看看大纲'));
+    const a = value(await app.assistantConversations()).current!;
+    expect(value(await app.assistantContextUsage())).toMatchObject({ promptTokens: 1000 });
+    const backup = value(await app.createBackup());
+    // 新的一段里说一句，再切回 A：最近一步是 B 的，A 不显示它的用量。
+    value(await app.clearAssistant());
+    step(deps, { message: '好。', actions: [], done: true });
+    value(await app.sendToAssistant('另起一段'));
+    const b = value(await app.assistantConversations()).current!;
+    value(await app.openAssistantConversation(a));
+    expect(value(await app.assistantContextUsage())).toBeNull();
+    // 在 B 里时恢复到建 B 之前的备份：B 不在了，正在看的是 A，接着说话接在 A 后面。
+    value(await app.openAssistantConversation(b));
+    value(await app.restoreBackup(backup.name));
+    const restored = value(await app.assistantConversations());
+    expect(restored.conversations.map((c) => c.id)).toEqual([a]);
+    expect(restored.current).toBe(a);
+    expect((value(await app.assistantItems())[0] as { text?: string }).text).toBe('先看看大纲');
+  });
+
+  it('助手正在处理一句话时不恢复备份（恢复会换掉这一轮正在写的对话）', async () => {
+    const { deps, app } = await setup();
+    const backup = value(await app.createBackup());
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let asked = () => {};
+    const thinking = new Promise<void>((resolve) => (asked = resolve));
+    deps.llmRoute.current = async () => {
+      asked();
+      await gate;
+      return reply(JSON.stringify({ message: '好。', actions: [], done: true }));
+    };
+    const turn = app.sendToAssistant('先看看大纲');
+    await thinking;
+    expect(await app.restoreBackup(backup.name)).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('AI 助手正在处理') } });
+    release();
+    value(await turn);
+    deps.llmRoute.current = null;
+    expect(value(await app.restoreBackup(backup.name)).project.title).toBe('当铺夜谈');
+  });
+
   it('一句话最多走固定的步数，不会无休止地调用；走满时告诉作者停在这里、说“继续”接着做', async () => {
     const { deps, app } = await setup();
     for (let i = 0; i < MAX_ASSISTANT_STEPS + 2; i++) step(deps, { message: '', actions: [{ tool: 'list_chapters', volume: null }], done: false });

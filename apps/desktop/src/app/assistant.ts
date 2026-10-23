@@ -13,7 +13,17 @@ import {
 } from '@fudiao/prompts';
 import { partialStringField, type LlmStreamEvent, type LlmUsage } from '@fudiao/llm';
 import { err, ok, type Result } from '@fudiao/shared';
-import { appendAssistantMessages, chapterLengths, clearAssistantMessages, listAssistantMessages, listChapterPlans, listRelationships, type SqlPort } from '@fudiao/store';
+import {
+  appendAssistantMessages,
+  chapterLengths,
+  deleteAssistantConversation,
+  listAssistantConversations,
+  listAssistantMessages,
+  listAssistantMessagesByRole,
+  listChapterPlans,
+  listRelationships,
+  type SqlPort,
+} from '@fudiao/store';
 import { clip, confirmationFor, PREFERENCES_KEY, preferenceLines, runTool, toolEnv, toolLabel, undoModeOf, type AssistantHost, type BackgroundJob, type BackgroundJobs, type Outcome, type ToolEvents } from './assistant-tools';
 import { captureWork, CHANGE_KINDS, chapterDigest, diffWork, textUndoSummary, undoChanges, type ChangeEntry } from './assistant-undo';
 import { ENTITY_KIND_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL } from './labels';
@@ -64,6 +74,19 @@ export function undoTarget(items: readonly AssistantItem[], skipCurrent = false)
     const userId = turn[0]?.id;
     const changes = [...turn.filter((i): i is Changes => open(i) && (i.turnOf === undefined || i.turnOf === userId)), ...later.filter((c) => c.turnOf === userId && !turn.includes(c))];
     if (changes.length > 0) return { changes, lastId: turn.at(-1)?.id ?? '' };
+  }
+  return null;
+}
+
+/**
+ * 等待作者确认的动作：对话最后一条（不算其后后台做完的改动记录——它们可能在作者确认之前记进来，带 turnOf）是等待确认的那一条时给出它。
+ * 确认后执行的动作自己的改动记录（不带 turnOf）照旧算数：确认过的不再当成等待确认。
+ */
+export function waitingItem(items: readonly AssistantItem[]): Extract<AssistantItem, { role: 'pending' }> | null {
+  for (let at = items.length - 1; at >= 0; at--) {
+    const item = items[at];
+    if (item?.role === 'changes' && item.turnOf !== undefined) continue;
+    return item?.role === 'pending' ? item : null;
   }
   return null;
 }
@@ -161,6 +184,11 @@ export function assistantUseCases({
   const ctx = () => ({ now: deps.clock.now() });
   /** 没有打开作品时的对话。 */
   let memory: AssistantItem[] = [];
+  /**
+   * 正在看的那段对话（作品里的对话分段，迁移 0023）与它所属的作品。打开作品后默认是最近用过的一段；
+   * “新对话”换成一段新的标识，第一句话时才存下（不留空的对话）。
+   */
+  let conversation: { readonly id: string; readonly work: string | null } | null = null;
   /** 正在进行的一轮：取消用。 */
   let running = false;
   /** 后台做完、还没有在某一轮的现状里告诉过模型的事（一句话一件）。 */
@@ -170,10 +198,22 @@ export function assistantUseCases({
   /** 各模型每字约多少 Token（按服务报回的用量校准）。 */
   const tokensPerChar = new Map<string, number>();
 
+  /** 当前作品里正在看的那段对话的标识：换了作品或还没定时，取这部作品最近用过的一段；一段也没有时是一段新的。 */
+  async function currentConversation(port: SqlPort): Promise<Result<string, AppError>> {
+    const work = workKey();
+    if (conversation !== null && conversation.work === work) return ok(conversation.id);
+    const list = await listAssistantConversations(port);
+    if (!list.ok) return err({ code: 'repo', error: list.error });
+    conversation = { id: list.value[0]?.id ?? deps.ids.next(), work };
+    return ok(conversation.id);
+  }
+
   async function load(): Promise<Result<AssistantItem[], AppError>> {
     const port = project();
     if (port === null) return ok([...memory]);
-    const rows = await listAssistantMessages(port);
+    const id = await currentConversation(port);
+    if (!id.ok) return id;
+    const rows = await listAssistantMessages(port, id.value);
     if (!rows.ok) return err({ code: 'repo', error: rows.error });
     return ok(rows.value.flatMap((r): AssistantItem[] => fromStored(r.id, r.role, r.payload)));
   }
@@ -183,7 +223,9 @@ export function assistantUseCases({
   async function append(items: AssistantItem[], added: readonly AssistantItem[], events: AssistantEvents): Promise<Result<void, AppError>> {
     const port = project();
     if (port !== null) {
-      const saved = await appendAssistantMessages(port, added.map((a) => ({ id: a.id, role: a.role, payload: toStored(a) })), ctx());
+      const id = await currentConversation(port);
+      if (!id.ok) return id;
+      const saved = await appendAssistantMessages(port, id.value, added.map((a) => ({ id: a.id, role: a.role, payload: toStored(a) })), ctx());
       if (!saved.ok) return err({ code: 'repo', error: saved.error });
     }
     items.push(...added);
@@ -354,7 +396,9 @@ export function assistantUseCases({
       // 作品换了：这一轮的对话存进新的作品，之后的对话都记在那里。
       const now = project();
       if (workKey() !== turn.workBefore && now !== null) {
-        const moved = await appendAssistantMessages(now, items.slice(Math.max(0, turn.turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
+        // 在新作品里另开一段对话（不接到那部作品原有的对话后面）。
+        conversation = { id: deps.ids.next(), work: workKey() };
+        const moved = await appendAssistantMessages(now, conversation.id, items.slice(Math.max(0, turn.turnStart)).map((i) => ({ id: i.id, role: i.role, payload: toStored(i) })), ctx());
         if (!moved.ok) return err({ code: 'repo', error: moved.error });
         items.splice(0, Math.max(0, turn.turnStart));
         memory = [];
@@ -403,6 +447,9 @@ export function assistantUseCases({
     if (kind !== 'review' && jobs.writing().includes(chapterId)) return { ok: false, detail: `《${title}》正在后台写作或修订：等它做完，或在“任务”里停下以后再说` };
     const key = workKey();
     const turnOf = [...items].reverse().find((i) => i.role === 'user')?.id;
+    // 做完时把改动记在发起它的那段对话里（作者这时可能已经切到别的对话）。
+    const where = await currentConversation(port);
+    if (!where.ok) return { ok: false, detail: '对话读不出来' };
     const refused = await jobs.run({
       kind,
       title: `${label} · ${title}`,
@@ -413,7 +460,8 @@ export function assistantUseCases({
         const { outcome, entries } = await runText(action, toolEnv(host, project, quiet));
         if (workKey() === key && entries.length > 0) {
           const item: AssistantItem = { id: deps.ids.next(), role: 'changes', tool: action.tool, entries, kept: false, ...(turnOf !== undefined && { turnOf }) };
-          await appendAssistantMessages(port, [{ id: item.id, role: item.role, payload: toStored(item) }], ctx());
+          // 作者这期间删掉了那段对话就不记（不把它重新建出来）；记回去也不算作者用过那一段。
+          await appendAssistantMessages(port, where.value, [{ id: item.id, role: item.role, payload: toStored(item) }], ctx(), { existing: true });
         }
         if (workKey() === key) finished = [...finished, `${label}《${title}》${outcome.ok ? '' : '没有做完'}：${outcome.detail}`].slice(-FINISHED_LIMIT);
         return outcome;
@@ -499,8 +547,16 @@ export function assistantUseCases({
   async function undoLast(items: AssistantItem[], events: AssistantEvents, source: 'button' | 'action'): Promise<Outcome> {
     const target = undoTarget(items, source === 'action');
     if (target === null) return { ok: false, detail: '没有可以撤销的改动（更早的改动已经撤销过，或那几轮没有改动作品）' };
+    // 重建记录的新标识看这部作品所有对话里的撤销（另一段对话里删掉又撤销回来的卷，标识已经换了）。
+    let undos: readonly AssistantItem[] = items;
+    const port = project();
+    if (port !== null) {
+      const stored = await listAssistantMessagesByRole(port, 'undo');
+      if (!stored.ok) return { ok: false, detail: '对话读不出来，撤销没有做' };
+      undos = stored.value.flatMap((m) => fromStored(m.id, m.role, m.payload));
+    }
     const rebuilt: Record<string, string> = {};
-    for (const i of items) if (i.role === 'undo') Object.assign(rebuilt, i.rebuilt);
+    for (const i of undos) if (i.role === 'undo') Object.assign(rebuilt, i.rebuilt);
     const done = await undoChanges(
       host,
       project,
@@ -637,8 +693,8 @@ export function assistantUseCases({
         const loaded = await load();
         if (!loaded.ok) return loaded;
         const items = loaded.value;
-        const last = items.at(-1);
-        if (last?.role === 'pending') {
+        const last = waitingItem(items);
+        if (last !== null) {
           const declined = await append(
             items,
             [{ id: deps.ids.next(), role: 'results', results: [{ tool: last.action.tool, ok: false, detail: '作者没有确认，接着说了别的，这个动作没有执行。' }, ...skipped(last.rest, '排在等待确认的动作后面，也没有执行；需要的话重新给出。')] }],
@@ -662,8 +718,8 @@ export function assistantUseCases({
         const loaded = await load();
         if (!loaded.ok) return loaded;
         const items = loaded.value;
-        const last = items.at(-1);
-        if (last?.role !== 'pending') return err(settings('没有等待确认的动作'));
+        const last = waitingItem(items);
+        if (last === null) return err(settings('没有等待确认的动作'));
         const turn = turnState(items);
         const performed = approve ? await perform(last.action, toolEnv(host, project, reporting(events), () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
         events.onProgress?.(null);
@@ -692,7 +748,7 @@ export function assistantUseCases({
         const loaded = await load();
         if (!loaded.ok) return loaded;
         const items = loaded.value;
-        if (items.at(-1)?.role === 'pending') return err(settings('先确认或拒绝等待中的动作'));
+        if (waitingItem(items) !== null) return err(settings('先确认或拒绝等待中的动作'));
         const done = await undoLast(items, events, 'button');
         if (!done.ok && undoTarget(items) !== null) return err(settings(done.detail));
         return ok({ items, pending: false });
@@ -701,15 +757,68 @@ export function assistantUseCases({
       }
     },
 
-    /** 清空对话，重新开始。 */
-    async clearAssistant(): Promise<Result<void, AppError>> {
+    /** 新对话：另开一段（第一句话时才存下），之前的对话留在“历史对话”里。 */
+    clearAssistant(): Promise<Result<void, AppError>> {
+      if (running) return Promise.resolve(err(settings('助手正在处理，请稍候')));
       memory = [];
+      if (project() !== null) conversation = { id: deps.ids.next(), work: workKey() };
+      return Promise.resolve(ok(undefined));
+    },
+
+    /** 这部作品的各段对话（最近用过的在前）与正在看的那一段；没有打开作品时为空。 */
+    async assistantConversations(): Promise<Result<{ readonly current: string | null; readonly conversations: readonly AssistantConversationView[] }, AppError>> {
       const port = project();
-      if (port === null) return ok(undefined);
-      const cleared = await clearAssistantMessages(port);
-      return cleared.ok ? ok(undefined) : err({ code: 'repo', error: cleared.error });
+      if (port === null) return ok({ current: null, conversations: [] });
+      const current = await currentConversation(port);
+      if (!current.ok) return current;
+      const list = await listAssistantConversations(port);
+      if (!list.ok) return err({ code: 'repo', error: list.error });
+      return ok({ current: current.value, conversations: list.value.map((c) => ({ id: c.id, title: conversationTitle(c.firstText), updatedAt: c.updatedAt, messages: c.messages })) });
+    },
+
+    /** 切到另一段对话（之后说的话接在它后面）。 */
+    async openAssistantConversation(id: string): Promise<Result<AssistantItem[], AppError>> {
+      if (running) return err(settings('助手正在处理，请稍候'));
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const list = await listAssistantConversations(port);
+      if (!list.ok) return err({ code: 'repo', error: list.error });
+      if (!list.value.some((c) => c.id === id)) return err({ code: 'not_found' });
+      conversation = { id, work: workKey() };
+      return load();
+    },
+
+    /** 删除一段对话（作品不变；那段对话里的改动不能再从对话里撤销）。删的是正在看的那一段时，换到最近用过的另一段。 */
+    async deleteAssistantConversation(id: string): Promise<Result<void, AppError>> {
+      if (running) return err(settings('助手正在处理，请稍候'));
+      const port = project();
+      if (port === null) return err({ code: 'no_work' });
+      const removed = await deleteAssistantConversation(port, id);
+      if (!removed.ok) return err({ code: 'repo', error: removed.error });
+      if (conversation?.id === id) conversation = null;
+      return ok(undefined);
+    },
+
+    /** 助手是否正在处理一轮（从备份恢复前要等它结束：恢复会换掉这一轮正在写的对话）。 */
+    assistantBusy: (): boolean => running,
+
+    /** 作品库整个换了（从备份恢复）：正在看的那段对话重新取恢复后最近用过的一段（之前看的那段可能不在备份里）。 */
+    resetAssistantConversation(): void {
+      conversation = null;
     },
   };
+}
+
+/** 历史对话里的一段：标题取作者说的第一句话。 */
+export type AssistantConversationView = { readonly id: string; readonly title: string; readonly updatedAt: string; readonly messages: number };
+
+const CONVERSATION_TITLE_CHARS = 24;
+/** 对话的标题：作者的第一句话，太长时截断；一句话也没有时写“空对话”。 */
+export function conversationTitle(firstText: string): string {
+  const text = firstText.replace(/\s+/g, ' ').trim();
+  if (text === '') return '空对话';
+  const chars = [...text];
+  return chars.length <= CONVERSATION_TITLE_CHARS ? text : `${chars.slice(0, CONVERSATION_TITLE_CHARS).join('')}…`;
 }
 
 type Limits = Awaited<ReturnType<ReturnType<typeof modelRunner>['modelLimits']>>;

@@ -5,10 +5,10 @@ import { PLAN_STATUS_LABEL } from '../app/labels';
 import { useApp } from './store-context';
 
 
-function writingCell(item: PlanChapterView, job: WriterJob | null): string {
+function writingCell(item: PlanChapterView, job: WriterJob | undefined, queued: boolean): string {
   const { plan } = item;
-  if (job?.chapterId === item.chapter.id && job.stage === 'writing') return `正在写${job.total > 0 ? `（${job.done} / ${job.total} 段）` : ''}`;
-  if (job?.queued.includes(item.chapter.id) === true) return '排队中';
+  if (job !== undefined && job.stage === 'writing') return `正在写${job.total > 0 ? `（${job.done} / ${job.total} 段）` : ''}`;
+  if (queued) return '排队中';
   if (plan === null) return item.hasText ? '有正文' : '—';
   if (plan.status === 'writing' && plan.progress !== null) return `写作中（${plan.progress.done} / ${plan.progress.segments.length} 段）`;
   // 审核状态在“审核”一列，这里只说写没写完。
@@ -36,6 +36,9 @@ function reviewCell(item: PlanChapterView, busy: boolean): string {
 export function PipelineBoard() {
   const planning = useApp((s) => s.planning);
   const job = useApp((s) => s.writerJob);
+  const jobs = useApp((s) => s.writerJobs);
+  const parallel = useApp((s) => s.library?.preferences.writer.parallel ?? 1);
+  const setParallel = useApp((s) => s.setWriterParallel);
   const reviewing = useApp((s) => s.reviewingChapterId);
   const building = useApp((s) => s.memoryBuilding);
   const busy = useApp((s) => s.busy);
@@ -63,6 +66,9 @@ export function PipelineBoard() {
   const titleOf = (id: string) => planning.chapters.find((c) => c.chapter.id === id)?.chapter.title ?? '';
   const count = (f: (c: PlanChapterView) => boolean) => planning.chapters.filter(f).length;
   const issues = planning.chapters.reduce((n, c) => n + c.pendingIssues, 0);
+  const queued = new Set(job?.queued ?? []);
+  // 待写的章节分在几卷里：同一卷里一章一章写，不同的卷可以同时写。
+  const volumes = new Set(pending.map((c) => c.chapter.volumeId ?? '')).size;
 
   return (
     <section aria-label="成书进度">
@@ -95,14 +101,14 @@ export function PipelineBoard() {
         <tbody>
           {planning.chapters.map((item) => {
             const id = item.chapter.id;
-            const here = job?.chapterId === id;
+            const mine = jobs.find((j) => j.chapterId === id);
             return (
               <tr key={id} aria-label={item.chapter.title}>
                 <th scope="row">{item.chapter.title}</th>
                 <td>{item.plan === null ? '没有' : item.problems.length > 0 ? `有（${item.problems.length} 处要核对）` : '有'}</td>
-                <td>{writingCell(item, job)}</td>
-                <td>{memoryCell(item, (here && job.stage === 'memory') || building === id)}</td>
-                <td>{reviewCell(item, (here && job.stage === 'review') || reviewing === id)}</td>
+                <td>{writingCell(item, mine, queued.has(id))}</td>
+                <td>{memoryCell(item, mine?.stage === 'memory' || building === id)}</td>
+                <td>{reviewCell(item, mine?.stage === 'review' || reviewing === id)}</td>
                 <td>
                   {item.hasText ? (
                     <button type="button" disabled={!idle} aria-label={`审核${item.chapter.title}`} onClick={() => void reviewOne(id)}>
@@ -131,6 +137,16 @@ export function PipelineBoard() {
           <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} />
           写完后审核
         </label>
+        <label title="同一卷里后一章要接上前一章，一章一章写；不同的卷可以同时写，每卷的开头靠卷纲、章节计划与已写好的前文接上">
+          同时写
+          <select aria-label="同时写几卷" value={parallel} disabled={job !== null} onChange={(e) => void setParallel(Number(e.target.value))}>
+            {[1, 2, 3, 4].map((n) => (
+              <option key={n} value={n}>
+                {n} 卷
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" disabled={!idle || written.length === 0} onClick={() => void reviewAll(written)}>
           依次审核已写好的 {written.length} 章
         </button>
@@ -140,6 +156,12 @@ export function PipelineBoard() {
           </button>
         ) : null}
       </div>
+      {jobs.length > 1 ? (
+        <p role="status" className="muted" aria-label="同时在写">
+          同时在写：{jobs.map((j) => `《${titleOf(j.chapterId)}》`).join('')}
+        </p>
+      ) : null}
+      {parallel > 1 && volumes === 1 && ids.length > 1 ? <p className="muted">待写的章节都在同一卷里：同一卷里后一章要接上前一章，一章一章写。</p> : null}
       {ids.length > 1 ? (
         <div className="skill-actions">
           <label>

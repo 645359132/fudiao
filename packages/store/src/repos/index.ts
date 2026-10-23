@@ -3,8 +3,17 @@ export type { Chapter, ChapterStatus } from './chapter';
 export type { ChapterTarget } from './chapter';
 export { createChapter, listChapters, moveChapter, renameChapter, restoreChapter, trashChapter, updateChapterNotes } from './chapter';
 export type { Volume } from './volume';
-export type { AssistantRole, StoredAssistantMessage } from './assistant';
-export { appendAssistantMessages, ASSISTANT_ROLES, chapterLengths, clearAssistantMessages, listAssistantMessages } from './assistant';
+export type { AssistantRole, StoredAssistantConversation, StoredAssistantMessage } from './assistant';
+export {
+  appendAssistantMessages,
+  ASSISTANT_ROLES,
+  chapterLengths,
+  deleteAssistantConversation,
+  LEGACY_CONVERSATION_ID,
+  listAssistantConversations,
+  listAssistantMessages,
+  listAssistantMessagesByRole,
+} from './assistant';
 export { createVolume, deleteVolume, listVolumes, moveVolume, updateVolume } from './volume';
 export type { Cover, CoverImage } from './cover';
 export { getCover, getCoverThumbnail, MAX_COVER_CHARS, MAX_THUMBNAIL_CHARS, removeCover, saveCover } from './cover';
