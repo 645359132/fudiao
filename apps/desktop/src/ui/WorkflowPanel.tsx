@@ -1,13 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import { VOLUME_MODES, type VolumeMode, type VolumeOutline } from '../app/planning';
 import { benchmarkAnalysesOf, benchmarkResultOf, bookVolumesOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, MAX_BOOK_CHAPTERS, PLAN_CHAPTERS_PER_CALL, quickBookVolumeIssue, type BookVolumesStep, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
+import { Icon, type IconName } from './Icon';
+import { IconButton } from './IconButton';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { useApp } from './store-context';
+
+/** “一路做完”时哪些地方仍会停下、哪些直接采用。 */
+const AUTO_NOTE: Readonly<Record<WorkflowKey, string>> = {
+  quick_book: '会替换大纲或覆盖计划时仍停下',
+  book_audit: '找到的疑点直接核对',
+  next_volume: '卷纲与计划直接采用',
+  opening_polish: '处理问题这一步仍等你',
+  cast_completion: '草稿全部采用',
+  benchmark: '对标分析直接存为规划技能',
+};
 
 /** 开始表单：一键成书的参数、模式与预算；先估算再开始。模型还不能用时不能开始。 */
 function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly info: WorkflowInfo; readonly modelReady: boolean; readonly initialIdea?: string; readonly onStarted?: () => void }) {
@@ -64,6 +76,8 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   // 分卷方式与章数搭不搭：不搭时不能开始，提示怎样改。
+  // 这次会走的几步：一键成书按章数在“章节计划”与“全书卷纲、逐卷拆章”之间换。
+  const flow = info.stepsFor(params);
   const volumeIssue = key === 'quick_book' ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null }) : null;
   const totalWords = chapters * words;
   return (
@@ -75,9 +89,17 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
         if (submitting) return;
         setSubmitting(true);
         const started = key === 'benchmark' ? startBenchmark({ rankText, books: samples, idea, mode, budgetUsd }) : startWorkflow({ workflow: key, params, mode, budgetUsd });
-        void started.then(() => onStarted?.()).finally(() => setSubmitting(false));
+        void started.then((id) => (id === null ? null : onStarted?.())).finally(() => setSubmitting(false));
       }}
     >
+      <ol className="wf-flow" aria-label={`${info.title}的步骤`}>
+        {flow.map((s, i) => (
+          <li key={s.key}>
+            <span className="wf-flow-n">{i + 1}</span>
+            {s.label}
+          </li>
+        ))}
+      </ol>
       {key === 'benchmark' ? (
         <>
           <p className="muted">榜单可以粘贴，也可以联网搜（要在“模型服务”里配好搜索服务）；样章不自动抓取：把几本对标作品开头几章的样章粘贴进来，或从 TXT 读入。样章只用来拆结构与技法，不随作品导出，拆完就从作品库删除。</p>
@@ -309,33 +331,43 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
         </p>
         </>
       )}
-      <fieldset>
+      <fieldset className="wf-mode">
         <legend>做法</legend>
-        <label className="check">
+        <label className="wf-mode-option">
           <input type="radio" name="workflow-mode" checked={mode === 'step'} onChange={() => setMode('step')} />
-          每步停下给我看（草稿改过再采用）
+          <span>
+            <strong>每步停下给我看</strong>
+            <span className="muted">草稿改过再采用</span>
+          </span>
         </label>
-        <label className="check">
+        <label className="wf-mode-option">
           <input type="radio" name="workflow-mode" checked={mode === 'auto'} onChange={() => setMode('auto')} />
-          {key === 'benchmark' ? '一路做完（对标分析直接存为规划技能）' : key === 'cast_completion' ? '一路做完（草稿全部采用）' : key === 'opening_polish' ? '一路做完（处理问题这一步仍等你）' : key === 'book_audit' ? '一路做完（找到的疑点直接核对）' : key === 'next_volume' ? '一路做完（卷纲与计划直接采用）' : '一路做完（会替换大纲或覆盖计划时仍停下）'}
+          <span>
+            <strong>一路做完</strong>
+            <span className="muted">{AUTO_NOTE[key]}</span>
+          </span>
         </label>
       </fieldset>
-      <label>
-        费用上限（美元，可不填）
-        <input inputMode="decimal" value={budget} onChange={(e) => setBudget(e.currentTarget.value)} />
-      </label>
-      <p className="muted" aria-live="polite">
-        {quote === null
-          ? '开始前可以先估算用量与费用。'
-          : `预计约 ${quote.calls} 次调用、${Math.round((quote.inputTokens + quote.outputTokens) / 1000)} 千 Token，${quote.costUsd === null ? `${quote.model ?? '默认模型'}没有配置价格，费用未知（预算上限因此不起作用）` : `约 $${quote.costUsd.toFixed(2)}（${quote.model ?? ''}）`}。思考的多少因模型而异，只作参考。`}
-      </p>
-      <div className="form-actions">
-        <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
-          估算费用
-        </button>
-        <button type="submit" className="primary" disabled={!modelReady || submitting || advancing !== null || volumeIssue !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
-          开始
-        </button>
+      <div className="wf-start-foot">
+        <label className="wf-budget">
+          费用上限（美元，可不填）
+          <input inputMode="decimal" placeholder="不限" value={budget} onChange={(e) => setBudget(e.currentTarget.value)} />
+        </label>
+        <p className="wf-quote muted" aria-live="polite">
+          {quote === null
+            ? '开始前可以先估算用量与费用。'
+            : `预计约 ${quote.calls} 次调用、${Math.round((quote.inputTokens + quote.outputTokens) / 1000)} 千 Token，${quote.costUsd === null ? `${quote.model ?? '默认模型'}没有配置价格，费用未知（预算上限因此不起作用）` : `约 $${quote.costUsd.toFixed(2)}（${quote.model ?? ''}）`}。思考的多少因模型而异，只作参考。`}
+        </p>
+        <div className="form-actions">
+          <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
+            <Icon name="coins" size={14} />
+            估算费用
+          </button>
+          <button type="submit" className="primary" disabled={!modelReady || submitting || advancing !== null || volumeIssue !== null || (budgetUsd !== null && !(budgetUsd > 0))}>
+            <Icon name="play" size={14} />
+            开始
+          </button>
+        </div>
       </div>
     </form>
   );
@@ -812,6 +844,34 @@ function AuditReportView({ step }: { readonly step: WorkflowStepView }) {
   );
 }
 
+/** 状态的色调：徽标与步骤圆点共用。 */
+type Tone = 'idle' | 'active' | 'wait' | 'ok' | 'danger' | 'warn';
+const RUN_TONE: Readonly<Record<WorkflowView['state'], Tone>> = { ready: 'idle', running: 'active', waiting: 'wait', failed: 'danger', paused: 'warn', done: 'ok', abandoned: 'idle' };
+const STEP_TONE: Readonly<Record<WorkflowStepView['status'], Tone>> = {
+  pending: 'idle',
+  running: 'active',
+  awaiting_author: 'wait',
+  done: 'ok',
+  failed: 'danger',
+  skipped: 'idle',
+  interrupted: 'warn',
+  stale: 'warn',
+};
+
+function Badge({ tone, children }: { readonly tone: Tone; readonly children: ReactNode }) {
+  return <span className={`wf-badge tone-${tone}`}>{children}</span>;
+}
+
+/** 工作流卡片的图标与一句话的用途（只用于显示；步骤以工作流的定义为准）。 */
+const WORKFLOW_LOOK: Readonly<Record<WorkflowKey, { readonly icon: IconName; readonly tagline: string }>> = {
+  quick_book: { icon: 'wand', tagline: '从一句想法写成一整本书' },
+  book_audit: { icon: 'review', tagline: '查跨章矛盾、伏笔遗漏与各章的问题' },
+  next_volume: { icon: 'layers', tagline: '接着已写的章节规划并写下一卷' },
+  opening_polish: { icon: 'pen', tagline: '按开篇的要求诊断前几章，改完对比' },
+  cast_completion: { icon: 'people', tagline: '补齐人物小传与关系网，只增不改' },
+  benchmark: { icon: 'trending', tagline: '拆解对标作品，找出开书方向' },
+};
+
 /** 一步的结果与操作。 */
 function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step: WorkflowStepView }) {
   const act = useApp((s) => s.workflowStepAction);
@@ -824,32 +884,38 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
   const findings = step.key === 'foreshadow' ? findingsOf(step) : null;
   const chapters = useApp((s) => s.work?.chapters ?? []);
   const button = (label: string, action: 'adopt' | 'skip' | 'redo' | 'keep' | 'withdraw', primary = false) => (
-    <button type="button" className={primary ? 'primary' : undefined} disabled={busy || closed} onClick={() => void act(view.run.id, step.idx, action)}>
+    <button key={action} type="button" className={primary ? 'primary' : undefined} disabled={busy || closed} onClick={() => void act(view.run.id, step.idx, action)}>
       {label}
     </button>
   );
-  const actions = (
-    <div className="form-actions">
-      {waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null}
-      {waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null}
-      {step.status === 'stale' ? button('保留结果', 'keep', true) : null}
-      {step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null}
-      {['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null}
-      {step.status === 'done' && step.kind === 'draft' && step.changes !== null ? button('撤回这次采用', 'withdraw') : null}
-    </div>
-  );
+  const buttons = [
+    waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null,
+    waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null,
+    step.status === 'stale' ? button('保留结果', 'keep', true) : null,
+    step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null,
+    ['pending', 'interrupted', 'failed', 'awaiting_author', 'stale'].includes(step.status) ? button('跳过', 'skip') : null,
+    step.status === 'done' && step.kind === 'draft' && step.changes !== null ? button('撤回这次采用', 'withdraw') : null,
+  ].filter((b) => b !== null);
+  const actions = buttons.length === 0 ? null : <div className="form-actions wf-detail-actions">{buttons}</div>;
+  const usage = step.usage;
   return (
-    <section className="workflow-detail" aria-label={`第 ${step.idx + 1} 步：${step.label}`}>
-      <h3>
-        第 {step.idx + 1} 步：{step.label}
-        <span className={`workflow-chip status-${step.status}`}>{WORKFLOW_STEP_STATUS_LABEL[step.status]}</span>
-      </h3>
-      {step.note === '' ? null : <p>{step.note}</p>}
-      {step.usage === null ? null : (
-        <p className="muted">
-          用量：输入 {step.usage.input.toLocaleString()}、输出 {step.usage.output.toLocaleString()} Token
-          {step.usage.cost > 0 ? `，$${step.usage.cost.toFixed(4)}` : ''}
-          {step.usage.unknown > 0 ? `（${step.usage.unknown} 次费用未知）` : ''}
+    <section className="wf-detail" aria-label={`第 ${step.idx + 1} 步：${step.label}`}>
+      <header className="wf-detail-head">
+        <div>
+          <p className="wf-eyebrow">
+            第 {step.idx + 1} 步 · 共 {view.steps.length} 步
+          </p>
+          <h3>{step.label}</h3>
+        </div>
+        <Badge tone={STEP_TONE[step.status]}>{WORKFLOW_STEP_STATUS_LABEL[step.status]}</Badge>
+      </header>
+      {step.note === '' ? null : <p className={`wf-note tone-${STEP_TONE[step.status]}`}>{step.note}</p>}
+      {usage === null || (usage.input === 0 && usage.output === 0 && usage.unknown === 0) ? null : (
+        <p className="wf-usage">
+          <Icon name="coins" size={14} />
+          输入 {usage.input.toLocaleString()}、输出 {usage.output.toLocaleString()} Token
+          {usage.cost > 0 ? `，$${usage.cost.toFixed(4)}` : ''}
+          {usage.unknown > 0 ? `（${usage.unknown} 次费用未知）` : ''}
         </p>
       )}
       {waiting && step.key === 'seed' && !closed ? <SeedStep key={`${step.version}`} view={view} step={step} /> : null}
@@ -886,13 +952,23 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
           </p>
           <PipelineBoard />
         </>
-      ) : null}
-      {step.key === 'write' ? null : actions}
+      ) : (
+        actions
+      )}
     </section>
   );
 }
 
-/** 一次运行：步骤列表、选中的一步与运行的操作。 */
+/** 步骤条上的圆点：做完是对勾，进行中转圈，出错是叹号，跳过与中断各有图标，其余是序号。 */
+function StepDot({ step }: { readonly step: WorkflowStepView }) {
+  const icon: IconName | null =
+    step.status === 'done' ? 'check' : step.status === 'running' ? 'loader' : step.status === 'failed' ? 'alert' : step.status === 'skipped' ? 'skip' : step.status === 'interrupted' ? 'pause' : null;
+  return <span className="wf-dot">{icon === null ? step.idx + 1 : <Icon name={icon} size={13} />}</span>;
+}
+
+const startedAt = (iso: string) => new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+/** 一次运行：头部（状态、操作、进度），左边竖排的步骤，右边选中那一步的结果。 */
 function RunView({ view }: { readonly view: WorkflowView }) {
   const continueWorkflow = useApp((s) => s.continueWorkflow);
   const stopWorkflow = useApp((s) => s.stopWorkflow);
@@ -908,52 +984,73 @@ function RunView({ view }: { readonly view: WorkflowView }) {
   const [picked, setPicked] = useState<{ readonly idx: number; readonly at: number | undefined } | null>(null);
   const shown = view.steps[picked !== null && picked.at === current?.idx ? picked.idx : (current?.idx ?? 0)];
   const running = advancing === view.run.id;
+  const finished = view.steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
+  const total = view.steps.length;
   return (
-    <section className="workflow-run" aria-label={`运行：${view.run.title}`}>
-      <header className="workflow-run-head">
-        <h3>{view.run.title}</h3>
-        <span className={`workflow-chip state-${view.state}`}>{WORKFLOW_STATE_LABEL[view.state]}</span>
-        <span className="muted">
-          {view.run.mode === 'step' ? '每步停下' : '一路做完'}
-          {view.spent.cost > 0 ? ` · 已用 $${view.spent.cost.toFixed(3)}` : ''}
-          {view.run.budgetUsd === null ? '' : ` · 上限 $${view.run.budgetUsd}`}
-        </span>
+    <section className="wf-run" aria-label={`运行：${view.run.title}`}>
+      <header className="wf-run-head">
+        <div className="wf-run-title">
+          <h3>{view.run.title}</h3>
+          <Badge tone={RUN_TONE[view.state]}>{WORKFLOW_STATE_LABEL[view.state]}</Badge>
+        </div>
+        <div className="form-actions wf-run-actions">
+          {running ? (
+            <button type="button" onClick={stopWorkflow}>
+              <Icon name="stop" size={14} />
+              停下
+            </button>
+          ) : failed !== undefined ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || advancing !== null}
+              onClick={() => void act(view.run.id, failed.idx, 'redo').then((redone) => (redone ? continueWorkflow(view.run.id) : null))}
+            >
+              重试第 {failed.idx + 1} 步
+            </button>
+          ) : view.state !== 'ready' && view.state !== 'paused' ? null : (
+            <button type="button" className="primary" disabled={busy || advancing !== null} onClick={() => continueWorkflow(view.run.id)}>
+              <Icon name="play" size={14} />
+              {view.state === 'ready' ? '开始' : '继续'}
+            </button>
+          )}
+          {view.state === 'abandoned' || running ? null : (
+            <button type="button" className="ghost" disabled={busy} onClick={() => void abandon(view.run.id)}>
+              放弃这次运行
+            </button>
+          )}
+        </div>
+        <p className="wf-run-meta">
+          <span>{view.run.mode === 'step' ? '每步停下' : '一路做完'}</span>
+          <span>
+            进度 {finished} / {total} 步
+          </span>
+          {view.spent.cost > 0 ? <span>已用 ${view.spent.cost.toFixed(3)}</span> : null}
+          {view.run.budgetUsd === null ? null : <span>上限 ${view.run.budgetUsd}</span>}
+          <span>开始于 {startedAt(view.run.createdAt)}</span>
+        </p>
+        <div className="wf-progress" role="progressbar" aria-label="完成的步骤" aria-valuemin={0} aria-valuemax={total} aria-valuenow={finished}>
+          <span style={{ width: `${total === 0 ? 0 : (finished / total) * 100}%` }} />
+        </div>
       </header>
-      {running && progress !== null ? <p aria-live="polite">{progress}</p> : null}
-      <div className="form-actions">
-        {running ? (
-          <button type="button" onClick={stopWorkflow}>
-            停下
-          </button>
-        ) : failed !== undefined ? (
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || advancing !== null}
-            onClick={() => void act(view.run.id, failed.idx, 'redo').then((redone) => (redone ? continueWorkflow(view.run.id) : null))}
-          >
-            重试第 {failed.idx + 1} 步
-          </button>
-        ) : view.state !== 'ready' && view.state !== 'paused' ? null : (
-          <button type="button" className="primary" disabled={busy || advancing !== null} onClick={() => continueWorkflow(view.run.id)}>
-            {view.state === 'ready' ? '开始' : '继续'}
-          </button>
-        )}
-        {view.state === 'abandoned' || running ? null : (
-          <button type="button" className="ghost" disabled={busy} onClick={() => void abandon(view.run.id)}>
-            放弃这次运行
-          </button>
-        )}
-      </div>
-      <div className="workflow-body">
-        <ol className="workflow-steps" aria-label="步骤">
+      {running && progress !== null ? (
+        <p className="wf-live" aria-live="polite">
+          <span className="wf-spin">
+            <Icon name="loader" size={14} />
+          </span>
+          {progress}
+        </p>
+      ) : null}
+      <div className="wf-run-body">
+        <ol className="wf-steps" aria-label="步骤">
           {view.steps.map((s) => (
-            <li key={s.key}>
-              <button type="button" className="workflow-step" aria-current={shown?.idx === s.idx ? 'step' : undefined} data-status={s.status} onClick={() => setPicked({ idx: s.idx, at: current?.idx })}>
-                <span className="book-step-n">{s.status === 'done' ? '✓' : s.idx + 1}</span>
-                <span>
-                  {s.label}
-                  <span className="muted"> · {WORKFLOW_STEP_STATUS_LABEL[s.status]}</span>
+            <li key={s.key} className={`wf-step tone-${STEP_TONE[s.status]}`} data-status={s.status}>
+              <button type="button" aria-current={shown?.idx === s.idx ? 'step' : undefined} onClick={() => setPicked({ idx: s.idx, at: current?.idx })}>
+                <StepDot step={s} />
+                <span className="wf-step-text">
+                  <span className="wf-step-label">{s.label}</span>
+                  <span className="visually-hidden">，</span>
+                  <span className="wf-step-status">{WORKFLOW_STEP_STATUS_LABEL[s.status]}</span>
                 </span>
               </button>
             </li>
@@ -965,34 +1062,72 @@ function RunView({ view }: { readonly view: WorkflowView }) {
   );
 }
 
-/** 默认模型能不能用，以及这部作品走到了哪里（大纲、人物、计划、写完的章数）。 */
+/** 页头右侧：默认模型已连接时显示它，点开“模型服务”。不能用时的说明在作品现状上方。 */
+function ModelStatus() {
+  const status = useApp((s) => s.quickBook);
+  const openModelServices = useApp((s) => s.openModelServices);
+  if (status === null || !status.model.ready) return null;
+  return (
+    <button type="button" className="wf-model" title="打开“模型服务”" onClick={() => void openModelServices()}>
+      <span className="wf-model-dot" aria-hidden="true" />
+      已连接：{status.model.name}
+    </button>
+  );
+}
+
+function Stat({ label, value, unit, tone, bar }: { readonly label: string; readonly value: string | number; readonly unit?: string; readonly tone?: 'warn'; readonly bar?: number }) {
+  return (
+    <div className={tone === undefined ? 'wf-stat' : `wf-stat ${tone}`}>
+      <dt>{label}</dt>
+      <dd>
+        <span className="wf-stat-value">{typeof value === 'number' ? value.toLocaleString('zh-CN') : value}</span>
+        {unit === undefined ? null : <span className="wf-stat-unit">{unit}</span>}
+      </dd>
+      {bar === undefined ? null : (
+        <dd className="wf-stat-bar" aria-hidden="true">
+          <span style={{ width: `${bar}%` }} />
+        </dd>
+      )}
+    </div>
+  );
+}
+
+/** 默认模型不能用时的说明，以及这部作品走到了哪里（大纲、人物、计划、写完的章数、待处理的问题）。 */
 function BookStatus() {
   const status = useApp((s) => s.quickBook);
   const openModelServices = useApp((s) => s.openModelServices);
   const showPanel = useApp((s) => s.showPanel);
   if (status === null) return <p className="muted">正在读取…</p>;
   const { model } = status;
+  const written = status.chapters === 0 ? 0 : Math.round((status.written / status.chapters) * 100);
   return (
-    <div className="book-status" aria-label="作品现状">
-      {model.ready ? (
-        <p>已连接：{model.name}</p>
-      ) : (
-        <p>
-          {model.problem}。
-          {model.name === null ? '在“模型服务”里添加服务、填写 API Key、获取模型列表，运行能力自检后设为默认模型。' : '打开“模型服务”，对这个模型运行能力自检；通不过时换一个模型设为默认。'}
-          <button type="button" className="link" onClick={() => void openModelServices()}>
+    <>
+      {model.ready ? null : (
+        <div className="wf-callout" role="note">
+          <Icon name="alert" size={18} />
+          <div>
+            <strong>{model.problem}</strong>
+            <p className="muted">{model.name === null ? '在“模型服务”里添加服务、填写 API Key、获取模型列表，运行能力自检后设为默认模型。' : '打开“模型服务”，对这个模型运行能力自检；通不过时换一个模型设为默认。'}</p>
+          </div>
+          <button type="button" className="primary" onClick={() => void openModelServices()}>
             设置模型服务
           </button>
-        </p>
+        </div>
       )}
-      <p className="muted">
-        {status.outline ? `大纲已写好，人物 ${status.characters} 个` : '还没有大纲'}；{status.chapters} 章，{status.planned} 章有计划，已写 {status.written} 章
-        {status.pendingIssues > 0 ? `，待处理的审核问题 ${status.pendingIssues} 条` : ''}。
-        <button type="button" className="link" onClick={() => void showPanel('info')}>
-          查看或修改作品信息
+      <section className="wf-stats" aria-label="作品现状">
+        <dl>
+          <Stat label="大纲" value={status.outline ? '已写好' : '还没有'} />
+          <Stat label="人物" value={status.characters} unit="个" />
+          <Stat label="章节计划" value={status.planned} unit={`/ ${status.chapters.toLocaleString('zh-CN')} 章`} />
+          <Stat label="已写" value={status.written} unit={`/ ${status.chapters.toLocaleString('zh-CN')} 章`} bar={written} />
+          <Stat label="待处理的审核问题" value={status.pendingIssues} unit="条" {...(status.pendingIssues > 0 && { tone: 'warn' as const })} />
+        </dl>
+        <button type="button" className="ghost wf-stats-edit" onClick={() => void showPanel('info')}>
+          <Icon name="pen" size={14} />
+          作品信息
         </button>
-      </p>
-    </div>
+      </section>
+    </>
   );
 }
 
@@ -1019,44 +1154,83 @@ export function WorkflowPanel() {
   }, [modelServicesOpen, refresh]);
   const selected = runs?.find((v) => v.run.id === selectedId) ?? null;
   const info = catalog.find((w) => w.key === open) ?? null;
+  const close = () => {
+    setStarting(null);
+    clearPrefill();
+  };
   return (
     <section className="workflow-page" aria-label="成书">
-      <h2>成书</h2>
-      <p className="muted">选一个写作工作流，软件按固定的步骤依次做；每步的结果都可以看、改、采用，随时停下，关掉软件后也能接着做。</p>
+      <header className="wf-header">
+        <div>
+          <h2>成书</h2>
+          <p className="muted">选一个写作工作流，软件按固定的步骤依次做；每步的结果都可以看、改、采用，随时停下，关掉软件后也能接着做。</p>
+        </div>
+        <ModelStatus />
+      </header>
       <BookStatus />
-      <ul className="workflow-cards" aria-label="可用的工作流">
-        {catalog.map((w) => (
-          <li key={w.key} className="workflow-card">
-            <strong>{w.title}</strong>
-            <span className="muted">{w.description}</span>
-            <button
-              type="button"
-              aria-pressed={open === w.key}
-              onClick={() => {
-                setStarting(open === w.key ? null : w.key);
-                clearPrefill();
-              }}
-            >
-              {open === w.key ? '收起' : `新的${w.title}`}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {info === null ? null : <StartForm key={`${info.key}:${prefill ?? ''}`} info={info} modelReady={modelReady} initialIdea={info.key === 'quick_book' ? (prefill ?? '') : ''} onStarted={clearPrefill} />}
+      <div className="wf-section">
+        <h3 className="wf-section-title">开始新的工作流</h3>
+        <ul className="wf-cards" aria-label="可用的工作流">
+          {catalog.map((w) => (
+            <li key={w.key}>
+              <button
+                type="button"
+                className="wf-card"
+                aria-pressed={open === w.key}
+                aria-label={`新的${w.title}`}
+                aria-describedby={`wf-card-${w.key}`}
+                title={w.description}
+                onClick={() => {
+                  setStarting(open === w.key ? null : w.key);
+                  clearPrefill();
+                }}
+              >
+                <span className="wf-card-icon">
+                  <Icon name={WORKFLOW_LOOK[w.key].icon} size={18} />
+                </span>
+                <span className="wf-card-text">
+                  <span className="wf-card-title">{w.title}</span>
+                  <span className="wf-card-desc" id={`wf-card-${w.key}`}>
+                    {WORKFLOW_LOOK[w.key].tagline}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {info === null ? null : (
+          <div className="wf-start">
+            <header className="wf-start-head">
+              <span className="wf-card-icon">
+                <Icon name={WORKFLOW_LOOK[info.key].icon} size={18} />
+              </span>
+              <div className="wf-start-title">
+                <h3>新的{info.title}</h3>
+                <p className="muted">{WORKFLOW_LOOK[info.key].tagline}</p>
+              </div>
+              <IconButton icon="close" label="收起" onClick={close} />
+            </header>
+            <StartForm key={`${info.key}:${prefill ?? ''}`} info={info} modelReady={modelReady} initialIdea={info.key === 'quick_book' ? (prefill ?? '') : ''} onStarted={close} />
+          </div>
+        )}
+      </div>
       {runs === null || runs.length === 0 ? null : (
-        <>
-          <label className="workflow-pick">
-            运行
-            <select value={selected?.run.id ?? ''} onChange={(e) => select(e.currentTarget.value || null)}>
-              {runs.map((v) => (
-                <option key={v.run.id} value={v.run.id}>
-                  {v.run.title}（{WORKFLOW_STATE_LABEL[v.state]}）
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="wf-section">
+          <div className="wf-section-head">
+            <h3 className="wf-section-title">运行</h3>
+            <label className="wf-pick">
+              <span className="visually-hidden">选择运行</span>
+              <select value={selected?.run.id ?? ''} onChange={(e) => select(e.currentTarget.value || null)}>
+                {runs.map((v) => (
+                  <option key={v.run.id} value={v.run.id}>
+                    {v.run.title}（{WORKFLOW_STATE_LABEL[v.state]}）· {startedAt(v.run.createdAt)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {selected === null ? null : <RunView key={selected.run.id} view={selected} />}
-        </>
+        </div>
       )}
     </section>
   );

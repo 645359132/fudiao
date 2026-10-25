@@ -1370,6 +1370,8 @@ export type WorkflowInfo = {
   readonly title: string;
   readonly description: string;
   readonly steps: readonly { readonly key: string; readonly label: string; readonly kind: StepKind }[];
+  /** 按开始表单的参数，这次运行会走的步骤（一键成书的长篇换成全书卷纲与逐卷拆章）；参数不合格时为全部步骤。 */
+  readonly stepsFor: (params: unknown) => readonly { readonly key: string; readonly label: string }[];
 };
 
 export type WorkflowStepView = Omit<WorkflowStepRow, 'output'> & {
@@ -1672,7 +1674,14 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     workflowCatalog(): readonly WorkflowInfo[] {
       return WORKFLOW_KEYS.map((key) => {
         const def = ERASED[key];
-        return { key, title: def.title, description: def.description, steps: def.steps.map((s) => ({ key: s.key, label: s.label, kind: s.kind })) };
+        const labels = new Map(def.steps.map((s) => [s.key, s.label]));
+        return {
+          key,
+          title: def.title,
+          description: def.description,
+          steps: def.steps.map((s) => ({ key: s.key, label: s.label, kind: s.kind })),
+          stepsFor: (params) => def.stepsFor(params).map((k) => ({ key: k, label: labels.get(k) ?? k })),
+        };
       });
     },
 

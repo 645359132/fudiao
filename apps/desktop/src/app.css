@@ -3799,37 +3799,431 @@ body.resizing .assistant {
   flex: 1;
 }
 
-/* 写作工作流（B78）：卡片、开始表单、运行的步骤列表与选中一步的结果 */
-.workflow-page {
-  max-width: 960px;
+/* 写作工作流（B78）：页头与作品现状、工作流卡片与开始表单、运行（左边竖排的步骤，右边选中一步的结果） */
+.work-main-inner:has(.workflow-page) {
+  max-width: 1180px;
 }
 
-.workflow-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+/* 栏位按这一页自己的宽度排（两侧栏开着时主区可能很窄），不按窗口宽度。 */
+.workflow-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  container-type: inline-size;
+}
+
+.wf-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.wf-header h2 {
+  margin: 0 0 4px;
+}
+
+.wf-header p {
+  max-width: 640px;
+  margin: 0;
+}
+
+/* 已连接的默认模型：一颗绿点加模型名，点开“模型服务” */
+.wf-model {
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 4px 12px;
+  border-color: var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.wf-model-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent);
+}
+
+.wf-callout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.wf-callout > .icon {
+  margin-top: 1px;
+  color: var(--accent-strong);
+}
+
+.wf-callout > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.wf-callout p {
+  margin: 2px 0 0;
+}
+
+/* 作品现状：一排数字卡片 */
+.wf-stats {
+  display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+.wf-stats dl {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.wf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.wf-stat dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wf-stat dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.wf-stat-value {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-stat-unit {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wf-stat.warn .wf-stat-value {
+  color: var(--accent-strong);
+}
+
+.wf-stat dd.wf-stat-bar {
+  display: block;
+  height: 4px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.wf-stat-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.wf-stats-edit {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.wf-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-section-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wf-section-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wf-pick select {
+  max-width: 380px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+/* 工作流卡片：图标、名称与一句话的用途，选中时与下面展开的开始表单连成一组 */
+.wf-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.workflow-card {
+.wf-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border-color: var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: left;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    background 0.12s;
+}
+
+.wf-card:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: inherit;
+}
+
+.wf-card[aria-pressed='true'],
+.wf-card[aria-pressed='true']:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: inherit;
+}
+
+.wf-card-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.wf-card[aria-pressed='true'] .wf-card-icon {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.wf-card-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wf-card-title {
+  font-weight: 600;
+}
+
+.wf-card-desc {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* 开始表单：上面是这个工作流的几步，下面一栏是费用上限、预计与开始 */
+.wf-start {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.wf-start-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-start-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.wf-start-title h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+
+.wf-start-title p {
+  margin: 0;
+}
+
+.wf-flow {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 12px 14px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  list-style: none;
+}
+
+.wf-flow li {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.wf-flow li + li::before {
+  width: 12px;
+  height: 1px;
+  background: var(--border-strong);
+  content: '';
+}
+
+.wf-flow-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-start .panel-form {
+  max-width: none;
+}
+
+.wf-start .panel-form fieldset:not(.wf-mode) {
+  padding: 12px 14px 14px;
+  border-radius: var(--radius-sm);
+}
+
+.panel-form fieldset.wf-mode {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.wf-mode legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panel-form .wf-mode-option {
+  flex-direction: row;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
 }
 
-.workflow-card button {
-  align-self: flex-start;
+.wf-mode-option:hover {
+  border-color: var(--border-strong);
+}
+
+.wf-mode-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 单选框自己的焦点环与选中卡片同色，看不出来：键盘聚焦时给整张卡片描边。 */
+.wf-mode-option:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wf-mode-option input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.wf-mode-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wf-mode-option strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.wf-start-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin: 4px -20px 0;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--surface-2);
+}
+
+.panel-form .wf-budget {
+  width: 180px;
+  font-size: 13px;
+}
+
+.wf-quote {
+  flex: 1;
+  align-self: center;
+  min-width: 200px;
+  margin: 0;
+}
+
+.wf-start-foot .form-actions {
+  margin-left: auto;
 }
 
 .workflow-page .form-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
 }
 
 .workflow-page label.check {
@@ -3844,79 +4238,411 @@ body.resizing .assistant {
   gap: 6px;
 }
 
-.workflow-pick {
-  display: flex;
+/* 状态徽标：前面一颗颜色点，进行中的点会闪 */
+.wf-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
-  margin: 16px 0 8px;
-}
-
-.workflow-run-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.workflow-run-head h3 {
-  margin: 0;
-}
-
-.workflow-chip {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
+  padding: 1px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: normal;
+  background: var(--surface-2);
   color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
-.workflow-chip.status-awaiting_author,
-.workflow-chip.status-stale,
-.workflow-chip.state-waiting {
+.wf-badge::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  content: '';
+}
+
+.wf-badge.tone-ok {
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.wf-badge.tone-active,
+.wf-badge.tone-wait {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.wf-badge.tone-active::before {
+  animation: wf-pulse 1.4s ease-in-out infinite;
+}
+
+.wf-badge.tone-danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.wf-badge.tone-warn {
+  border-color: color-mix(in srgb, var(--source-mixed) 40%, transparent);
+  background: color-mix(in srgb, var(--source-mixed) 10%, transparent);
+  color: var(--source-mixed);
+}
+
+/* 一次运行：头部、进行中的进展、步骤与结果 */
+.wf-run {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.wf-run-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-run-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.wf-run-title h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.wf-run-actions {
+  justify-content: flex-end;
+}
+
+.wf-run-meta {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wf-run-meta span + span::before {
+  margin: 0 8px;
+  color: var(--border-strong);
+  content: '·';
+}
+
+.wf-progress {
+  grid-column: 1 / -1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.wf-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+.wf-live {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+}
+
+.wf-spin {
+  display: inline-flex;
+}
+
+.wf-spin .icon,
+.wf-step.tone-active .wf-dot .icon {
+  animation: wf-spin 1s linear infinite;
+}
+
+@keyframes wf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wf-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-spin .icon,
+  .wf-step.tone-active .wf-dot .icon,
+  .wf-badge.tone-active::before {
+    animation: none;
+  }
+}
+
+.wf-run-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 步骤条：圆点之间连一条竖线，做完的那段是强调色 */
+.wf-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  list-style: none;
+}
+
+.wf-step {
+  position: relative;
+}
+
+.wf-step:not(:last-child)::after {
+  position: absolute;
+  z-index: 1;
+  top: 34px;
+  bottom: -7px;
+  left: 22px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  content: '';
+  pointer-events: none;
+}
+
+.wf-step.tone-ok:not(:last-child)::after {
+  background: var(--accent);
+}
+
+.wf-step button {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 7px 10px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.wf-step button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-2);
+  color: inherit;
+}
+
+.wf-step button[aria-current='step'],
+.wf-step button[aria-current='step']:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+
+.wf-dot {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wf-step.tone-ok .wf-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.wf-step.tone-active .wf-dot {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.workflow-chip.status-failed,
-.workflow-chip.state-failed {
+.wf-step.tone-wait .wf-dot {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.wf-step.tone-danger .wf-dot {
   border-color: var(--danger);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
-.workflow-body {
-  display: grid;
-  grid-template-columns: minmax(180px, 220px) 1fr;
-  gap: 16px;
-  margin-top: 12px;
+.wf-step.tone-warn .wf-dot {
+  border-color: var(--source-mixed);
+  color: var(--source-mixed);
 }
 
-.workflow-steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.wf-step[data-status='skipped'] .wf-dot {
+  border-style: dashed;
 }
 
-.workflow-step {
+.wf-step-text {
   display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.wf-step-label {
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+
+.wf-step button[aria-current='step'] .wf-step-label {
+  font-weight: 600;
+}
+
+.wf-step[data-status='pending'] .wf-step-label,
+.wf-step[data-status='skipped'] .wf-step-label {
+  color: var(--muted);
+}
+
+.wf-step-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wf-step.tone-wait .wf-step-status {
+  color: var(--accent-strong);
+}
+
+.wf-step.tone-danger .wf-step-status {
+  color: var(--danger);
+}
+
+/* 选中一步的结果：标题与状态、说明、用量、内容，操作在最下面 */
+.wf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 22px 22px;
+}
+
+.wf-detail-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.wf-detail-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.wf-eyebrow {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wf-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13.5px;
+}
+
+.wf-note.tone-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.wf-note.tone-wait,
+.wf-note.tone-warn {
+  background: var(--accent-soft);
+}
+
+.wf-usage {
+  display: flex;
+  gap: 6px;
   align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  margin-bottom: 4px;
-  text-align: left;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
-.workflow-step[aria-current='step'] {
-  border-color: var(--accent);
+/* 成书进度放在卡片里：长篇滚动框的表头随卡片的底色 */
+.wf-detail .board-scroll thead th {
+  background: var(--surface);
 }
 
-.workflow-step[data-status='done'] .book-step-n {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-contrast);
+.wf-detail > .wf-detail-actions:last-child {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+@container (min-width: 760px) {
+  .wf-run-body {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .wf-steps {
+    border-right: 1px solid var(--border);
+    border-bottom: none;
+  }
+}
+
+@container (max-width: 600px) {
+  .wf-header,
+  .wf-stats {
+    flex-direction: column;
+  }
+
+  .wf-stats {
+    align-items: stretch;
+  }
+
+  .wf-stats-edit {
+    align-self: flex-end;
+  }
+
+  .wf-run-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wf-run-actions {
+    justify-content: flex-start;
+  }
 }
 
 .workflow-suspects li,
@@ -3946,14 +4672,4 @@ body.resizing .assistant {
 
 .workflow-analyses p {
   margin: 4px 0;
-}
-
-.workflow-detail h3 {
-  margin-top: 0;
-}
-
-@media (max-width: 720px) {
-  .workflow-body {
-    grid-template-columns: 1fr;
-  }
 }

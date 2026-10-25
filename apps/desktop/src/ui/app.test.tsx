@@ -2234,6 +2234,9 @@ describe('写作工作流的界面（B78）', () => {
     await user.click(within(form).getByRole('button', { name: '开始' }));
     const seedStep = await within(page).findByRole('region', { name: '第 2 步：大纲与人物' });
     const skeleton = await within(seedStep).findByRole('form', { name: '作品骨架草稿' });
+    // 开始以后开始表单收起；运行的进度条记下做完的一步（检查模型）。
+    expect(within(page).queryByRole('form', { name: '开始一键成书' })).toBeNull();
+    expect(within(page).getByRole('progressbar', { name: '完成的步骤' }).getAttribute('aria-valuenow')).toBe('1');
     // 采用之前作品不变。
     expect(store.getState().work?.project.outline).toBe('');
     const title = within(skeleton).getByRole('textbox', { name: '作品名' });
@@ -2270,6 +2273,7 @@ describe('写作工作流的界面（B78）', () => {
     await user.click(await within(exportStep).findByRole('button', { name: '导出' }));
     await waitFor(() => expect(deps.exported.map((e) => e.name)).toEqual(['夜当.txt']));
     await waitFor(() => expect(within(page).getByRole('region', { name: /^运行：/ }).textContent).toContain('已完成'));
+    expect(within(page).getByRole('progressbar', { name: '完成的步骤' }).getAttribute('aria-valuenow')).toBe('5');
   });
 });
 
