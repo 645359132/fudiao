@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Foreshadow, ForeshadowFields, ForeshadowStatus } from '@fudiao/store';
 import type { PlanChapterView } from '../app/planning';
-import { PipelineBoard } from './PipelineBoard';
+import { PipelineBoard, PLAN_VIRTUAL_FROM } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL } from '../app/labels';
 import { useApp } from './store-context';
@@ -13,6 +14,20 @@ const PROBLEM: Record<string, string> = {
   foreshadow_closed: '伏笔已回收或废弃，又被安排',
 };
 const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+
+/**
+ * 收起时不渲染内容的 details：展开时才建里面的表单与列表。每章一份计划表单（人物与伏笔的勾选框）全部建出来，
+ * 200 章的书有四万多个元素、一万多个输入框，点“计划”要等一两秒（作者反馈 2026-10-25）。
+ */
+function LazyDetails({ summary, children }: { readonly summary: ReactNode; readonly children: () => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>{summary}</summary>
+      {open ? children() : null}
+    </details>
+  );
+}
 
 /** 由大纲生成计划草稿；草稿要作者看过并“采用”后才写入。 */
 function DraftSection() {
@@ -389,36 +404,98 @@ function MemoryBlock({ item }: { readonly item: PlanChapterView }) {
         </button>
       </div>
       {memory !== null ? (
-        <details>
-          <summary>查看记忆</summary>
-          <p>{memory.summary}</p>
-          {cast.length > 0 ? (
-            <ul aria-label="人物状态">
-              {cast.map((c) => (
-                <li key={c.id}>
-                  {c.name}：{c.text}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {progress.length > 0 ? (
-            <ul aria-label="伏笔进展">
-              {progress.map((f) => (
-                <li key={f.id}>
-                  {f.name}：{f.text}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {memory.openThreads.length > 0 ? (
-            <ul aria-label="章尾留给后面的事">
-              {memory.openThreads.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
-          ) : null}
-        </details>
+        <LazyDetails summary="查看记忆">
+          {() => (
+            <>
+              <p>{memory.summary}</p>
+              {cast.length > 0 ? (
+                <ul aria-label="人物状态">
+                  {cast.map((c) => (
+                    <li key={c.id}>
+                      {c.name}：{c.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {progress.length > 0 ? (
+                <ul aria-label="伏笔进展">
+                  {progress.map((f) => (
+                    <li key={f.id}>
+                      {f.name}：{f.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {memory.openThreads.length > 0 ? (
+                <ul aria-label="章尾留给后面的事">
+                  {memory.openThreads.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          )}
+        </LazyDetails>
       ) : null}
+    </div>
+  );
+}
+
+/** 一章的计划、写作与长篇记忆。measure 是虚拟列表量行高用的（章节不多、不虚拟时为 undefined）。 */
+function PlanChapterItem({ item, index, foreshadows, measure }: { readonly item: PlanChapterView; readonly index: number; readonly foreshadows: readonly Foreshadow[]; readonly measure: ((el: Element | null) => void) | undefined }) {
+  return (
+    <li ref={measure} data-index={index} className="skill" aria-label={item.chapter.title}>
+      <LazyDetails
+        summary={
+          <>
+            {item.chapter.title}
+            {item.plan === null ? <span className="muted">（还没有计划）</span> : <span className="muted">：{item.plan.goal}</span>}
+          </>
+        }
+      >
+        {() => <PlanEditor item={item} />}
+      </LazyDetails>
+      <WriterActions item={item} />
+      <MemoryBlock item={item} />
+      {item.problems.map((p) => (
+        <p key={`${p.code}:${p.foreshadowId}`} className="field-error">
+          {PROBLEM[p.code]}：{foreshadows.find((f) => f.id === p.foreshadowId)?.title ?? p.foreshadowId}
+        </p>
+      ))}
+    </li>
+  );
+}
+
+/**
+ * 各章的计划。章数多于 PLAN_VIRTUAL_FROM 时放进一个滚动框，只渲染看得见的几十章，上下用内边距占住其余各章的高度，
+ * 每章的实际高度渲染后量出（展开计划表单时会变高）；做法同章节目录。
+ */
+function ChapterPlanList({ chapters, foreshadows }: { readonly chapters: readonly PlanChapterView[]; readonly foreshadows: readonly Foreshadow[] }) {
+  // useVirtualizer 的实例在滚动时原地更新，React Compiler 的缓存会让列表停在旧的范围，这一个组件不交给编译器（同章节目录）。
+  'use no memo';
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtual = chapters.length > PLAN_VIRTUAL_FROM;
+  const virtualizer = useVirtualizer({
+    count: chapters.length,
+    enabled: virtual,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 110,
+    getItemKey: (i) => chapters[i]?.chapter.id ?? i,
+    gap: 16,
+    overscan: 4,
+    initialRect: { width: 0, height: 800 },
+  });
+  const items = virtual ? virtualizer.getVirtualItems() : null;
+  const shown = items === null ? chapters.map((item, index) => ({ item, index })) : items.flatMap((v) => (chapters[v.index] === undefined ? [] : [{ item: chapters[v.index]!, index: v.index }]));
+  const padding = items === null ? undefined : { paddingTop: items[0]?.start ?? 0, paddingBottom: Math.max(0, virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0)) };
+  const measure = virtual ? virtualizer.measureElement : undefined;
+  return (
+    <div className={virtual ? 'plan-scroll' : undefined} ref={scrollRef}>
+      <ol className="skill-list" aria-label="章节计划" style={padding}>
+        {shown.map(({ item, index }) => (
+          <PlanChapterItem key={`${item.chapter.id}:${item.plan?.version ?? 0}`} item={item} index={index} foreshadows={foreshadows} measure={measure} />
+        ))}
+      </ol>
     </div>
   );
 }
@@ -433,26 +510,7 @@ export function PlanningPanel() {
       <DraftSection />
       <PipelineBoard />
       <h3>章节计划</h3>
-      <ol className="skill-list">
-        {planning.chapters.map((item) => (
-          <li key={`${item.chapter.id}:${item.plan?.version ?? 0}`} className="skill" aria-label={item.chapter.title}>
-            <details>
-              <summary>
-                {item.chapter.title}
-                {item.plan === null ? <span className="muted">（还没有计划）</span> : <span className="muted">：{item.plan.goal}</span>}
-              </summary>
-              <PlanEditor item={item} />
-            </details>
-            <WriterActions item={item} />
-            <MemoryBlock item={item} />
-            {item.problems.map((p) => (
-              <p key={`${p.code}:${p.foreshadowId}`} className="field-error">
-                {PROBLEM[p.code]}：{planning.foreshadows.find((f) => f.id === p.foreshadowId)?.title ?? p.foreshadowId}
-              </p>
-            ))}
-          </li>
-        ))}
-      </ol>
+      <ChapterPlanList chapters={planning.chapters} foreshadows={planning.foreshadows} />
       <Ledger />
     </section>
   );

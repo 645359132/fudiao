@@ -1210,6 +1210,9 @@ describe('写手成章界面（B59、B60）', () => {
     await user.click(screen.getByRole('button', { name: '写下一章' }));
     const memory = await screen.findByRole('group', { name: '第一章 夜叩的长篇记忆' });
     await waitFor(() => expect(memory.textContent).toContain('长篇记忆：有效'));
+    // 记忆的内容展开时才渲染（长篇的计划页不卡）。
+    expect(memory.textContent).not.toContain('林舟深夜叩响当铺的门。');
+    await user.click(within(memory).getByText('查看记忆'));
     expect(memory.textContent).toContain('林舟深夜叩响当铺的门。');
     expect(within(within(memory).getByRole('list', { name: '人物状态' })).getByText('林舟：站在当铺门外')).toBeTruthy();
     expect(store.getState().tasks.map((t) => [t.kind, t.status])).toEqual(expect.arrayContaining([['writer', 'done'], ['memory', 'done']]));
@@ -1223,8 +1226,9 @@ describe('写手成章界面（B59、B60）', () => {
     // 重写后重建。
     deps.llmResponses.push(reply('门没有开。'), reply(JSON.stringify({ summary: '林舟叩门，门没有开。', cast: [], foreshadows: [] })));
     await user.click(screen.getByRole('button', { name: '写下一章' }));
-    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('林舟叩门，门没有开。'));
-    expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('长篇记忆：有效');
+    await waitFor(() => expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('长篇记忆：有效'));
+    await user.click(within(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' })).getByText('查看记忆'));
+    expect(screen.getByRole('group', { name: '第一章 夜叩的长篇记忆' }).textContent).toContain('林舟叩门，门没有开。');
   });
 
   it('长篇记忆没有生成时说明原因，不接着写后面的章节；之后可以单独生成', async () => {
@@ -2845,6 +2849,67 @@ describe('长篇的目录（施工文档第七章：虚拟列表）', () => {
       await store.getState().selectChapter(target?.id ?? '');
       await waitFor(() => expect(chapterTitles()).toContain('第200章'));
       expect(chapterTitles()).not.toContain('第1章');
+    } finally {
+      for (const [name, descriptor] of own) {
+        if (descriptor === undefined) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        else Object.defineProperty(HTMLElement.prototype, name, descriptor);
+      }
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo;
+    }
+  });
+});
+
+describe('长篇的计划页（作者反馈 2026-10-25：200 章的书点“计划”卡很久）', () => {
+  it('章数多时成书进度与章节计划各自只渲染看得见的几十章，滚动后换成那里的章节；计划表单展开时才渲染', async () => {
+    // jsdom 不排版：两个滚动框高 600，表格每行高 38、计划每章高 110；滚动时更新位置，随后发出 scroll 事件。
+    const own = (['offsetHeight', 'clientHeight'] as const).map((name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const);
+    const isScroller = (el: Element) => el.classList.contains('board-scroll') || el.classList.contains('plan-scroll');
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (isScroller(this)) return 600;
+        if (this.tagName === 'TR' && this.closest('.board-scroll') !== null) return 38;
+        return this.tagName === 'LI' && this.parentElement?.getAttribute('aria-label') === '章节计划' ? 110 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return isScroller(this) ? 600 : 0;
+      },
+    });
+    HTMLElement.prototype.scrollTo = function (this: HTMLElement, options?: ScrollToOptions | number) {
+      if (typeof options === 'object' && options.top !== undefined) this.scrollTop = options.top;
+      setTimeout(() => this.dispatchEvent(new Event('scroll')), 0);
+    };
+    try {
+      const { user, service } = start();
+      await createWork(user, '长篇');
+      for (let i = 1; i <= 100; i++) expect((await service.createChapter(`第${i}章`)).ok).toBe(true);
+      await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '计划' }));
+      const board = await screen.findByRole('table', { name: '各章进度' });
+      const rows = () => within(board).queryAllByRole('row').map((r) => r.getAttribute('aria-label'));
+      expect(rows()).toContain('第1章');
+      expect(rows().length).toBeLessThan(60);
+      expect(rows()).not.toContain('第100章');
+      const boardScroller = board.closest<HTMLElement>('.board-scroll');
+      if (boardScroller === null) throw new Error('缺少成书进度的滚动框');
+      boardScroller.scrollTo({ top: 100 * 38 });
+      await waitFor(() => expect(rows()).toContain('第100章'));
+      expect(rows()).not.toContain('第1章');
+
+      const plans = screen.getByRole('list', { name: '章节计划' });
+      const items = () => within(plans).queryAllByRole('listitem').map((li) => li.getAttribute('aria-label'));
+      expect(items()).toContain('第1章');
+      expect(items().length).toBeLessThan(30);
+      // 计划表单收起时不渲染，展开才有。
+      expect(screen.queryByRole('form', { name: '第1章的计划' })).toBeNull();
+      await user.click(within(within(plans).getByRole('listitem', { name: '第1章' })).getByText('第1章'));
+      expect(screen.getByRole('form', { name: '第1章的计划' })).toBeTruthy();
+      const planScroller = plans.closest<HTMLElement>('.plan-scroll');
+      if (planScroller === null) throw new Error('缺少章节计划的滚动框');
+      planScroller.scrollTo({ top: 100 * 126 });
+      await waitFor(() => expect(items()).toContain('第100章'));
     } finally {
       for (const [name, descriptor] of own) {
         if (descriptor === undefined) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];

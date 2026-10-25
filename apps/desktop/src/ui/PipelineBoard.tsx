@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { PlanChapterView } from '../app/planning';
 import type { WriterJob } from '../state/store';
 import { PLAN_STATUS_LABEL } from '../app/labels';
@@ -27,6 +28,98 @@ function reviewCell(item: PlanChapterView, busy: boolean): string {
   if (item.pendingIssues > 0) return `待处理 ${item.pendingIssues} 条`;
   if (item.plan?.status === 'reviewed') return '已审核';
   return item.hasText ? '未审核' : '—';
+}
+
+/**
+ * 章数多于这些时，成书进度的表格与下面的章节计划各自放进一个滚动框，只渲染看得见的几十章（同章节目录的虚拟列表）。
+ * 以前每章都全部渲染，200 章的书点“计划”要等一两秒（作者反馈 2026-10-25）。
+ */
+export const PLAN_VIRTUAL_FROM = 60;
+
+type RowState = {
+  readonly jobs: readonly WriterJob[];
+  readonly queued: ReadonlySet<string>;
+  readonly building: string | null;
+  readonly reviewing: string | null;
+  readonly idle: boolean;
+  readonly reviewOne: (id: string) => void;
+  readonly openIssues: (id: string) => void;
+};
+
+/** 各章进度的表格。章数多于 PLAN_VIRTUAL_FROM 时只渲染看得见的行，上下用空行占住其余行的高度。 */
+function ProgressTable({ chapters, state }: { readonly chapters: readonly PlanChapterView[]; readonly state: RowState }) {
+  // useVirtualizer 的实例在滚动时原地更新，React Compiler 的缓存会让表格停在旧的范围，这一个组件不交给编译器（同章节目录）。
+  'use no memo';
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtual = chapters.length > PLAN_VIRTUAL_FROM;
+  const virtualizer = useVirtualizer({
+    count: chapters.length,
+    enabled: virtual,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 38,
+    getItemKey: (i) => chapters[i]?.chapter.id ?? i,
+    overscan: 10,
+    initialRect: { width: 0, height: 480 },
+  });
+  const items = virtual ? virtualizer.getVirtualItems() : null;
+  const shown = items === null ? chapters.map((item, index) => ({ item, index })) : items.flatMap((v) => (chapters[v.index] === undefined ? [] : [{ item: chapters[v.index]!, index: v.index }]));
+  const top = items === null ? 0 : (items[0]?.start ?? 0);
+  const bottom = items === null ? 0 : Math.max(0, virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0));
+  const measure = virtual ? virtualizer.measureElement : undefined;
+  const { jobs, queued, building, reviewing, idle, reviewOne, openIssues } = state;
+  return (
+    <div className={virtual ? 'board-scroll' : undefined} ref={scrollRef}>
+      <table className="source-table" aria-label="各章进度">
+        <thead>
+          <tr>
+            <th scope="col">章节</th>
+            <th scope="col">计划</th>
+            <th scope="col">写作</th>
+            <th scope="col">长篇记忆</th>
+            <th scope="col">审核</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {top > 0 ? (
+            <tr aria-hidden="true" className="spacer-row" style={{ height: top }}>
+              <td colSpan={6} />
+            </tr>
+          ) : null}
+          {shown.map(({ item, index }) => {
+            const id = item.chapter.id;
+            const mine = jobs.find((j) => j.chapterId === id);
+            return (
+              <tr key={id} ref={measure} data-index={index} aria-label={item.chapter.title}>
+                <th scope="row">{item.chapter.title}</th>
+                <td>{item.plan === null ? '没有' : item.problems.length > 0 ? `有（${item.problems.length} 处要核对）` : '有'}</td>
+                <td>{writingCell(item, mine, queued.has(id))}</td>
+                <td>{memoryCell(item, mine?.stage === 'memory' || building === id)}</td>
+                <td>{reviewCell(item, mine?.stage === 'review' || reviewing === id)}</td>
+                <td>
+                  {item.hasText ? (
+                    <button type="button" disabled={!idle} aria-label={`审核${item.chapter.title}`} onClick={() => reviewOne(id)}>
+                      审核
+                    </button>
+                  ) : null}
+                  {item.pendingIssues > 0 ? (
+                    <button type="button" disabled={!idle} aria-label={`查看${item.chapter.title}的问题`} onClick={() => openIssues(id)}>
+                      查看问题
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            );
+          })}
+          {bottom > 0 ? (
+            <tr aria-hidden="true" className="spacer-row" style={{ height: bottom }}>
+              <td colSpan={6} />
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 /**
@@ -85,45 +178,10 @@ export function PipelineBoard() {
           </button>
         </p>
       ) : null}
-      <table className="source-table" aria-label="各章进度">
-        <thead>
-          <tr>
-            <th scope="col">章节</th>
-            <th scope="col">计划</th>
-            <th scope="col">写作</th>
-            <th scope="col">长篇记忆</th>
-            <th scope="col">审核</th>
-            <th scope="col">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {planning.chapters.map((item) => {
-            const id = item.chapter.id;
-            const mine = jobs.find((j) => j.chapterId === id);
-            return (
-              <tr key={id} aria-label={item.chapter.title}>
-                <th scope="row">{item.chapter.title}</th>
-                <td>{item.plan === null ? '没有' : item.problems.length > 0 ? `有（${item.problems.length} 处要核对）` : '有'}</td>
-                <td>{writingCell(item, mine, queued.has(id))}</td>
-                <td>{memoryCell(item, mine?.stage === 'memory' || building === id)}</td>
-                <td>{reviewCell(item, mine?.stage === 'review' || reviewing === id)}</td>
-                <td>
-                  {item.hasText ? (
-                    <button type="button" disabled={!idle} aria-label={`审核${item.chapter.title}`} onClick={() => void reviewOne(id)}>
-                      审核
-                    </button>
-                  ) : null}
-                  {item.pendingIssues > 0 ? (
-                    <button type="button" disabled={!idle} aria-label={`查看${item.chapter.title}的问题`} onClick={() => void openIssues(id)}>
-                      查看问题
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <ProgressTable
+        chapters={planning.chapters}
+        state={{ jobs, queued, building, reviewing, idle, reviewOne: (id) => void reviewOne(id), openIssues: (id) => void openIssues(id) }}
+      />
       <div className="skill-actions">
         <button type="button" disabled={!idle || ids.length === 0} onClick={() => void write(ids.slice(0, 1), { review })}>
           写下一章
