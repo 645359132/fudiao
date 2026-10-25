@@ -399,7 +399,15 @@ export function createAppService(deps: AppDeps) {
   const writer = writerUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
   const memory = memoryUseCases(deps, () => session?.port ?? null, runner);
   const narration = narrationUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
-  const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner);
+  /** 默认模型与它的价格（写作工作流与一键修订审核问题的预计费用）。 */
+  const pricing = async () => {
+    const choice = await services.defaultModel();
+    if (!choice.ok || choice.value === null) return null;
+    const { model } = choice.value;
+    return { model: model.displayName, prices: model.prices ?? undefined };
+  };
+  // 一键修订每一章在写手锁里做：写手正在写的章节不修订，修订期间也不开始写这一章。
+  const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner, { lock: writer.withWriterLock, pricing });
   const simEvaluation = simEvaluationUseCases(deps, () => session?.port ?? null);
   const relations = relationUseCases(deps, () => session?.port ?? null);
   const relationChanges = relationChangeUseCases(deps, () => session?.port ?? null, runner);
@@ -908,12 +916,7 @@ export function createAppService(deps: AppDeps) {
       diff: (before, after) => diffWork(before, after),
       undo: (entries) => undoChanges(hostBase, () => session?.port ?? null, [asChangeEntries(entries)]),
     },
-    async pricing() {
-      const choice = await services.defaultModel();
-      if (!choice.ok || choice.value === null) return null;
-      const { model } = choice.value;
-      return { model: model.displayName, prices: model.prices ?? undefined };
-    },
+    pricing,
     hooks: {
       // 审核没完成时重试一次，仍没完成就记下这一章、接着审后面的（REVIEW_RETRIES）；被停下时这一步记为中断（cancelled）。
       async reviewChapters(chapterIds, options) {

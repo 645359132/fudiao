@@ -50,7 +50,7 @@ import { chapterLengths, type Chapter } from '@fudiao/store';
 import type { AppDeps } from './ports';
 import { seedContentTokens, type BookSeed, type BookSeedRequest, type QuickBookStatus } from './quick-book';
 import { segmentContentTokens } from './writer';
-import { THINKING_ALLOWANCE } from './thinking';
+import { THINKING_ALLOWANCE, THINKING_TOKENS_PER_CALL, TOKENS_PER_CHAR } from './thinking';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
 export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion', 'benchmark'] as const;
@@ -400,13 +400,6 @@ export type WorkflowHost = {
   addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<unknown, AppError>>;
 };
 
-/** 中文正文每字约合的 Token 数（估算用，偏保守）。 */
-const TOKENS_PER_CHAR = 1.5;
-/**
- * 每次调用另计的思考 Token（先思考的模型思考计入输出）。M6-08 的真实试用（DeepSeek flash）里各工作流平均每次调用输出约 5,700，
- * 一键成书约 7,400，按各步正文估算的输出只有实际的三到五成；加上这一项后预计不再低于实际。
- */
-const THINKING_TOKENS_PER_CALL = 6_000;
 
 /**
  * 一键成书的一步要写的内容最多约多少 Token（不含思考）：骨架随章数，计划每章约 1,200，写手一段最多整章的目标字数。

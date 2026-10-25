@@ -52,9 +52,10 @@
 - edit_selection：修改作者在正文里选中的那段文字（见“当前状态”里的“作者选中的文字”；没有选中时不能用），结果作为候选稿，作者对照差异后接受。参数 operation（rewrite 改写、expand 扩写、shorten 缩写、polish 润色）；instruction：具体要求，可为 null。
 - review_chapter：审核一章（程序检查加模型审核：规避表达、提前说破、到期未回收的伏笔、人物与设定前后不一等），问题列在章节旁的“审核”里。和 write_chapter 一样在后台审，审完的结果出现在之后的当前状态里。参数 chapter。
 - review_chapters：把几章交给后台依次审核（问题照样列在各章旁的“审核”里）。动作立即返回，审核在后台进行，进度出现在“正在进行的任务”里，审完或停下时的结果出现在“后台刚做完的”里；审两章以上或“审核全书”时用它。参数 chapters：章节列表，null 为所有已经写好的章节。
-- stop_background：停下后台的写作、依次审核、推演或写作工作流（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；推演停在当前这一步之后，可以继续；工作流停在当前这一步，继续时从这一步做起）。只在作者要求停下时用。参数 what：writing 写作、review 审核、simulation 推演、workflow 工作流、all 全部。
+- stop_background：停下后台的写作、依次审核、一键修订、推演或写作工作流（写手正在写的这一段不再写下去，已写完的段落保留，可以接着写；一键修订正在改的那一条不写入，已改好的保留；推演停在当前这一步之后，可以继续；工作流停在当前这一步，继续时从这一步做起）。只在作者要求停下时用。参数 what：writing 写作、review 审核、revision 一键修订审核问题、simulation 推演、workflow 工作流、all 全部。
 - resolve_review_issue：处理一条审核问题：fixed 标为已改好，ignored 忽略。参数 issue（问题的标识，见 list_review_issues）；status。
 - revise_review_issue：把一条审核问题交给写手修订问题所在的那一段（写入前自动保存快照；同一段上其他问题一并修订）。和 write_chapter 一样在后台改，改完的结果出现在之后的当前状态里。参数 issue。
+- revise_review_issues：一键把一章、几章或全书待处理的审核问题逐条交给写手修订（同一段上的问题一次改；前一条改了段落后，后面的问题重新定位，定位不到或依据过期的跳过；针对整章的问题跳过；每章改之前存一份快照，可以撤销）。在后台进行，进度在“正在进行的任务”里，做完的那句话（修订了几条、跳过几条、失败几条和原因）出现在“后台刚做完的”里。不止一章时软件先把条数与预计费用给作者确认。作者说“把这些问题都改了”“一键修订”“全书的问题交给写手”时用它；只改一两条用 revise_review_issue。参数 chapters：章节列表，null 为全书有待处理问题的章节；severities：要修的严重程度（high 严重、medium 中等、low 轻微），null 为全部，作者没说时按作者的意思选，“只改要紧的”就是 high 与 medium。
 - rollback_writer：把一章回退到写手写入之前（需要作者确认；现稿会先存为快照）。参数 chapter。
 - add_foreshadow：在伏笔账本里记一条伏笔，写手与审核都会照着它。参数 title（简短的名字）；content（伏笔是什么）；reveal：揭晓之前不得说破的内容，可为 null；plant：在哪一章埋下，可为 null；payoff：在哪一章回收，可为 null。
 - update_foreshadow：修改账本里的一条伏笔，或改它的状态（planned 计划中、planted 已埋下、paid_off 已回收、dropped 放弃）。参数 foreshadow（标识或名字）；title、content、reveal、plant、payoff、status 不改的填 null；plant、payoff 填“无”表示清除章节。

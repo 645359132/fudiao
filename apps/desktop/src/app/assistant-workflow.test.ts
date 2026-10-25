@@ -51,6 +51,7 @@ function backgroundJobs() {
   const background: BackgroundJobs = {
     writeChapters: () => null,
     reviewChapters: () => null,
+    reviseIssues: () => Promise.resolve(null),
     workflow(runId) {
       advanced.push(runId);
       return null;

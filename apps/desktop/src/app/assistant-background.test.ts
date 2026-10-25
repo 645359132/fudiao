@@ -5,6 +5,7 @@ import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import { waitingItem, type AssistantItem } from './assistant';
 import type { BackgroundJob, BackgroundJobs } from './assistant-tools';
+import type { BatchRevisionOutcome, RevisionScope } from './review';
 import { createAppService } from './service';
 
 const all: TestDeps[] = [];
@@ -41,6 +42,7 @@ function backgroundJobs() {
   const background: BackgroundJobs = {
     writeChapters: () => null,
     reviewChapters: () => null,
+    reviseIssues: () => Promise.resolve(null),
     workflow: () => null,
     simulating: () => false,
     writing: () => jobs.filter((j) => !done.has(j) && j.kind !== 'review').map((j) => j.chapterId),
@@ -221,5 +223,79 @@ describe('AI 助手把单章的写作、审核与修订交给后台（M5-23）',
     deps.llmResponses.push(reply('天亮了。'), memoryReply);
     expect(await finish(jobs[2]!)).toMatchObject({ ok: true });
     expect(value(await app.assistantConversations()).conversations.map((c) => c.id)).toEqual([a]);
+  });
+});
+
+describe('AI 助手一键交给写手修订（B64 补充）', () => {
+  /** 一章一段，审核出一条节奏问题。 */
+  async function chapterWithIssue(app: Awaited<ReturnType<typeof setup>>['app'], deps: TestDeps, title: string, text: string, quote: string, after?: string) {
+    const id = value(await app.createChapter(title, after)).chapters.find((c) => c.title === title)!.id;
+    const opened = value(await app.openChapter(id));
+    value(await app.saveChapter(id, opened.saved, [{ id: `p-${id}`, text, source: 'handwritten' }], { splits: [], merges: [] }));
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [{ paragraph: 'P1', quote, kind: 'pacing', severity: 'medium', evidence: [], description: `${title}的动作描写太长`, suggestion: '压缩成一句' }] })));
+    value(await app.reviewChapter(id));
+    return id;
+  }
+  const texts = async (app: Awaited<ReturnType<typeof setup>>['app'], id: string) => value(await app.openChapter(id)).saved.map((p) => p.text);
+
+  it('没有后台时就地做完一章：结果写明修订了几条；撤销这一轮时恢复改之前的快照', async () => {
+    const { deps, app } = await setup();
+    const id = await chapterWithIssue(app, deps, '第一章 夜叩', '林舟推门进来，雨水顺着衣角往下滴。', '雨水顺着衣角往下滴');
+    step(deps, { message: '', actions: [{ tool: 'revise_review_issues', chapters: ['第一章 夜叩'], severities: null }], done: true });
+    deps.llmResponses.push(reply('林舟推门进来，带进一身雨气。'));
+    const outcome = value(await app.sendToAssistant('把第一章的问题都改了'));
+    expect(outcome.pending).toBe(false);
+    expect(lastResults(outcome.items)?.results[0]).toMatchObject({ tool: 'revise_review_issues', ok: true, detail: expect.stringMatching(/^交给写手修订 1 条：修订了 1 条（写手改了 1 段）/) });
+    expect(await texts(app, id)).toEqual(['林舟推门进来，带进一身雨气。']);
+    expect(outcome.items.find((i) => i.role === 'changes')).toMatchObject({ tool: 'revise_review_issues', entries: [{ kind: 'text', id, title: '第一章 夜叩' }] });
+
+    const undone = value(await app.undoAssistantTurn());
+    expect(undone.items.at(-1)).toMatchObject({ role: 'undo', ok: true });
+    expect(await texts(app, id)).toEqual(['林舟推门进来，雨水顺着衣角往下滴。']);
+  });
+
+  it('不止一章时先给作者看条数与预计费用；确认后交给后台；做完的那句话放进之后的现状，撤销发起的那一轮时各章恢复', async () => {
+    const { deps, app } = await setup();
+    const c1 = await chapterWithIssue(app, deps, '第一章 夜叩', '林舟推门进来，雨水顺着衣角往下滴。', '雨水顺着衣角往下滴');
+    const c2 = await chapterWithIssue(app, deps, '第二章 夜雨', '雨下得更紧了，檐下的灯笼被风吹得乱晃。', '被风吹得乱晃', c1);
+    const scopes: RevisionScope[] = [];
+    const ends: ((outcome: BatchRevisionOutcome | null, summary: string) => void)[] = [];
+    const { background } = backgroundJobs();
+    const jobs: BackgroundJobs = {
+      ...background,
+      reviseIssues(scope, onEnd) {
+        scopes.push(scope);
+        if (onEnd !== undefined) ends.push(onEnd);
+        return Promise.resolve(null);
+      },
+    };
+
+    step(deps, { message: '全书有两条问题，确认后交给写手。', actions: [{ tool: 'revise_review_issues', chapters: null, severities: ['medium'] }], done: false });
+    const asked = value(await app.sendToAssistant('把全书的问题都交给写手改', { background: jobs }));
+    expect(asked.pending).toBe(true);
+    expect(waitingItem(asked.items)).toMatchObject({ summary: expect.stringMatching(/^把 2 章里 2 条一般的待处理审核问题交给写手修订：预计调用模型 2 次，费用未知/) });
+    expect(scopes).toEqual([]);
+
+    step(deps, { message: '已排上。', actions: [], done: true });
+    const resolved = value(await app.resolveAssistantPending(true, { background: jobs }));
+    expect(lastResults(resolved.items)?.results[0]).toMatchObject({ tool: 'revise_review_issues', ok: true, detail: expect.stringContaining('已排上：写手在后台依次修订 2 章里 2 条一般的待处理审核问题') });
+    expect(scopes).toEqual([{ chapterIds: [c1, c2], severities: ['medium'] }]);
+
+    // 状态层在后台做完这一批，把结果交回。
+    deps.llmResponses.push(reply('林舟推门进来，带进一身雨气。'), reply('雨下得更紧了，灯笼乱晃。'));
+    const done = value(await app.reviseIssues(scopes[0]!));
+    expect(done).toMatchObject({ total: 2, revised: 2 });
+    ends[0]!(done, done.summary);
+    for (let i = 0; i < 50 && !value(await app.assistantItems()).some((x) => x.role === 'changes' && x.tool === 'revise_review_issues'); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(value(await app.assistantItems()).find((x) => x.role === 'changes')).toMatchObject({ tool: 'revise_review_issues', entries: [{ kind: 'text', id: c1 }, { kind: 'text', id: c2 }], turnOf: expect.any(String) });
+
+    step(deps, { message: '两章都改好了。', actions: [], done: true });
+    value(await app.sendToAssistant('改好了吗', { background: jobs }));
+    expect(lastBody(deps)).toContain('一键修订审核问题：交给写手修订 2 条：修订了 2 条');
+
+    const undone = value(await app.undoAssistantTurn());
+    expect(undone.items.at(-1)).toMatchObject({ role: 'undo', ok: true });
+    expect(await texts(app, c1)).toEqual(['林舟推门进来，雨水顺着衣角往下滴。']);
+    expect(await texts(app, c2)).toEqual(['雨下得更紧了，檐下的灯笼被风吹得乱晃。']);
   });
 });

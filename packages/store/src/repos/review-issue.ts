@@ -146,6 +146,47 @@ export function setIssueStatus(port: SqlPort, current: ReviewIssue, status: Excl
 }
 
 /**
+ * 重新定位一条过期的问题（一键交给写手修订，B64 补充）：同一章里前一条修订改了这一段，问题的引文仍在现在的正文里时，
+ * 锚点换成现在的段落与版本，重新标为待处理。只改过期的问题，依据不变（依据过期的问题由调用方跳过）。
+ */
+export function reanchorIssue(port: SqlPort, current: ReviewIssue, anchor: ParagraphAnchor, ctx: WriteContext): Promise<Result<ReviewIssue, RepoError>> {
+  return guardedUpdate(port, IssueRow, 'review_issue', current.id, {
+    sql: `UPDATE review_issue SET anchor = ?, status = 'pending', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'stale' RETURNING ${COLUMNS}`,
+    params: [JSON.stringify(anchor), ctx.now, current.id, current.version],
+  });
+}
+
+/** 待处理的问题与它所在段落的字数（一键修订开始前估算费用用）。 */
+export type PendingIssueSize = {
+  readonly id: string;
+  readonly chapterId: string;
+  readonly severity: IssueSeverity;
+  readonly source: IssueSource;
+  readonly paragraphId: string;
+  readonly quote: string;
+  /** 锚点所在段落现在的字数。 */
+  readonly length: number;
+};
+
+/**
+ * 回收站以外各章待处理的问题与所在段落的字数，一条查询读完（几百章的书不逐章读段落）。
+ * 锚点所在段落已改过或删掉的问题（实际已过期，只是还没标出）不列。
+ */
+export async function listPendingIssueSizes(port: SqlPort): Promise<Result<PendingIssueSize[], RepoError>> {
+  const rows = await queryAll(
+    port,
+    z.object({ id: z.string(), chapter_id: z.string(), severity: z.enum(['high', 'medium', 'low']), source: z.enum(ISSUE_SOURCES), paragraph_id: z.string(), quote: z.string(), length: z.number().int() }),
+    `SELECT i.id, i.chapter_id, i.severity, i.source, p.id AS paragraph_id, json_extract(i.anchor, '$.quote') AS quote, length(p.text) AS length
+     FROM review_issue i
+     JOIN chapter c ON c.id = i.chapter_id
+     JOIN paragraph p ON p.id = json_extract(i.anchor, '$.paragraphId') AND p.version = json_extract(i.anchor, '$.paragraphVersion')
+     WHERE i.status = 'pending' AND c.status = 'normal'
+     ORDER BY i.chapter_id, i.id`,
+  );
+  return rows.ok ? ok(rows.value.map((r) => ({ id: r.id, chapterId: r.chapter_id, severity: r.severity, source: r.source, paragraphId: r.paragraph_id, quote: r.quote, length: r.length }))) : rows;
+}
+
+/**
  * 锚点所在段落改过或删掉的待处理问题标为过期；依据是另一章的段落（带版本）时，那一段改过或删掉同样过期。
  * 返回过期的问题标识。
  */

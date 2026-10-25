@@ -7,7 +7,7 @@ import { createChapter, trashChapter } from './chapter';
 import { getChapterMemory, listChapterMemories, reviewStaleMemories, saveChapterMemory } from './chapter-memory';
 import { deleteChapterPlan, getChapterPlan, listChapterPlans, saveChapterPlan, setPlanStatus, type PlanFields } from './chapter-plan';
 import { createForeshadow, deleteForeshadow, getForeshadow, listForeshadows, updateForeshadow, type ForeshadowFields } from './foreshadow';
-import { addIssues, countPendingIssues, getIssue, listIssues, replacePendingIssues, reviewStaleIssues, setIssueStatus, type IssueInput } from './review-issue';
+import { addIssues, countPendingIssues, getIssue, listIssues, listPendingIssueSizes, reanchorIssue, replacePendingIssues, reviewStaleIssues, setIssueStatus, type IssueInput } from './review-issue';
 import { createCustomSkill, deleteCustomSkill, ensureBuiltinSkills, listSkills, updateSkill } from './writing-skill';
 
 const ctx = { now: '2026-10-10T00:00:00.000Z' };
@@ -293,5 +293,49 @@ describe('审核问题', () => {
     value(await replacePendingIssues(db, 'c1', 'model', [], later));
     expect(value(await listIssues(db, 'c1')).map((i) => i.id)).toEqual(['i3']);
     expect(value(await getIssue(db, 'none'))).toBeNull();
+  });
+
+  it('过期的问题可以重新定位到现在的段落版本，重新待处理；待处理或处理过的不改', async () => {
+    const db = await fresh();
+    value(await addIssues(db, [issue('i1', { source: 'model' }), issue('i2', { anchor: anchor('g2') })], ctx));
+    value(await db.transaction([{ sql: "UPDATE paragraph SET text = '雨下得更紧了，风也起了。', version = 2 WHERE id = 'g1'", params: [] }]));
+    expect(value(await reviewStaleIssues(db, 'c1', later))).toEqual(['i1']);
+    const stale = value(await getIssue(db, 'i1'))!;
+    const moved = value(await reanchorIssue(db, stale, anchor('g1', 2), later));
+    expect(moved).toMatchObject({ status: 'pending', anchor: { paragraphId: 'g1', paragraphVersion: 2 }, evidence: stale.evidence, version: stale.version + 1 });
+    expect(value(await reviewStaleIssues(db, 'c1', later))).toEqual([]);
+    // 拿着旧版本再改一次：已经不是过期的了。
+    expect(await reanchorIssue(db, stale, anchor('g1', 2), later)).toMatchObject({ ok: false, error: { code: 'conflict' } });
+    expect(await reanchorIssue(db, value(await getIssue(db, 'i2'))!, anchor('g1', 2), later)).toMatchObject({ ok: false, error: { code: 'conflict' } });
+  });
+
+  it('待处理的问题与所在段落的字数一条查询读出；锚点所在段落改过的、回收站里的章节不列', async () => {
+    const db = await fresh();
+    value(
+      await db.transaction([
+        { sql: "INSERT INTO paragraph (id, chapter_id, order_key, text, created_at, updated_at) VALUES ('g3', 'c2', 'a0', '天亮了。', ?, ?)", params: [ctx.now, ctx.now] },
+      ]),
+    );
+    value(
+      await addIssues(
+        db,
+        [
+          issue('i1', { severity: 'high' }),
+          issue('i2', { anchor: { ...anchor('g2'), quote: '' }, source: 'model' }),
+          issue('i3', { chapterId: 'c2', anchor: anchor('g3') }),
+          issue('i4', { anchor: anchor('g1', 5) }),
+        ],
+        ctx,
+      ),
+    );
+    value(await setIssueStatus(db, value(await getIssue(db, 'i1'))!, 'ignored', later));
+    value(await addIssues(db, [issue('i5', { severity: 'high' })], ctx));
+    expect(value(await listPendingIssueSizes(db))).toEqual([
+      { id: 'i2', chapterId: 'c1', severity: 'medium', source: 'model', paragraphId: 'g2', quote: '', length: 6 },
+      { id: 'i5', chapterId: 'c1', severity: 'high', source: 'program', paragraphId: 'g1', quote: '雨下', length: 7 },
+      { id: 'i3', chapterId: 'c2', severity: 'medium', source: 'program', paragraphId: 'g3', quote: '雨下', length: 4 },
+    ]);
+    value(await trashChapter(db, 'c2', 1, later));
+    expect(value(await listPendingIssueSizes(db)).map((i) => i.id)).toEqual(['i2', 'i5']);
   });
 });

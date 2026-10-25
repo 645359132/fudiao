@@ -1334,6 +1334,94 @@ describe('审核界面（B64）', () => {
   });
 });
 
+describe('一键修订审核问题（B64 补充）', () => {
+  const issue = (quote: string, description: string) => ({ paragraph: 'P1', quote, kind: 'pacing', severity: 'high', evidence: [], description, suggestion: '压缩' });
+
+  it('审核抽屉：按严重程度把本章的问题全部交给写手；修订期间这一章只读；结束的那句话写在抽屉里', async () => {
+    const { deps, service, store, user } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await user.click(await screen.findByRole('textbox', { name: '正文' }));
+    await user.keyboard('林舟不禁叹了口气，用左手稳稳接过茶盏。');
+    await waitFor(() => expect(store.getState().chapterContent?.saved.map((p) => p.text)).toEqual(['林舟不禁叹了口气，用左手稳稳接过茶盏。']));
+    const chapterId = store.getState().selectedChapterId ?? '';
+    await addTestedModel(service, deps);
+    await user.click(screen.getByRole('button', { name: '审核' }));
+    const drawer = await screen.findByRole('complementary', { name: '审核' });
+    deps.llmResponses.push(reply(JSON.stringify({ issues: [issue('用左手稳稳接过茶盏', '动作拖沓')] })));
+    await user.click(within(drawer).getByRole('button', { name: '审核本章' }));
+    await within(drawer).findByRole('listitem', { name: '重复与节奏问题' });
+    expect(within(drawer).getByRole('listitem', { name: 'AI 腔问题' })).toBeTruthy();
+
+    // 只修严重的：同一段上的轻微问题（规避词）随之一并修订。
+    await user.selectOptions(within(drawer).getByRole('combobox', { name: '一键修订的范围' }), '只修严重');
+    let lockedDuring: string | null = null;
+    deps.beforeLlm.push(() => {
+      lockedDuring = chapterLock(store.getState(), chapterId);
+      return Promise.resolve();
+    });
+    deps.llmResponses.push(reply('林舟叹了口气，用右手接过茶盏。'));
+    await user.click(within(drawer).getByRole('button', { name: '全部交给写手修订' }));
+    await waitFor(() => expect(within(drawer).getByRole('status').textContent).toContain('交给写手修订 1 条：修订了 1 条（写手改了 1 段，同一段上另有 1 条一并修订）'));
+    expect(lockedDuring).toBe('revise');
+    expect(chapterLock(store.getState(), chapterId)).toBeNull();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '正文' }).textContent).toBe('林舟叹了口气，用右手接过茶盏。'));
+    expect(within(drawer).queryAllByRole('listitem', { name: /问题$/ })).toHaveLength(0);
+    expect(store.getState().tasks.find((t) => t.title === '写手修订审核问题 · 第一章')).toMatchObject({ kind: 'writer', status: 'done' });
+  });
+
+  it('成书进度：先估算条数与费用，确认后在后台逐章修订；进行中写手不接别的活，可以停下，停下时正在改的那一条不写入', async () => {
+    const { service, store, user, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章');
+    await addChapter(user, '第二章');
+    await addTestedModel(service, deps);
+    const [c1, c2] = store.getState().work?.chapters.map((c) => c.id) ?? [];
+    if (c1 === undefined || c2 === undefined) throw new Error('章节');
+    for (const [id, text, quote] of [
+      [c1, '门开了一条缝，风灌了进来。', '风灌了进来'],
+      [c2, '灯火晃了晃，他没有说话。', '他没有说话'],
+    ] as const) {
+      const content = await service.openChapter(id);
+      if (!content.ok) throw new Error('正文');
+      expect((await service.saveChapter(id, content.value.saved, [{ id: `p-${id}`, text, source: 'handwritten' }], { splits: [], merges: [] })).ok).toBe(true);
+      deps.llmResponses.push(reply(JSON.stringify({ issues: [issue(quote, '节奏拖沓')] })));
+      expect((await service.reviewChapter(id)).ok).toBe(true);
+    }
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    const panel = await screen.findByRole('region', { name: '一键修订审核问题' });
+    const requests = deps.llmRequests.length;
+    await user.click(within(panel).getByRole('button', { name: '估算 2 章 2 条问题的费用' }));
+    const confirm = await within(panel).findByRole('group', { name: '修订前确认' });
+    expect(confirm.textContent).toContain('范围里待处理：严重 2 条、中等 0 条、轻微 0 条。交给写手 2 条，涉及 2 章：预计调用模型 2 次');
+    expect(confirm.textContent).toContain('m没有配置价格，费用未知');
+    // 估算不调用模型。
+    expect(deps.llmRequests).toHaveLength(requests);
+
+    deps.llmResponses.push(reply('门开了一条缝。'), { chunks: openaiChunks('m', { text: ['灯火'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    await user.click(within(confirm).getByRole('button', { name: '开始修订' }));
+    await waitFor(() => expect(within(panel).getByRole('status').textContent).toContain('写手正在修订审核问题：第 2 / 2 章《第二章》'));
+    await waitFor(() => expect(deps.llmRequests).toHaveLength(requests + 2));
+    expect(chapterLock(store.getState(), c2)).toBe('revise');
+    expect(store.getState().backgroundWork().join('\n')).toContain('写手正在修订审核问题：第 2 / 2 章《第二章》');
+    // 一本书一个写手：修订的时候不开始写章。
+    expect(await store.getState().writeChapters([c1])).toBeNull();
+    expect(store.getState().message).toContain('写手正在修订审核问题');
+
+    await user.click(within(panel).getByRole('button', { name: '停下修订' }));
+    await waitFor(() => expect(within(panel).getByRole('status').textContent).toContain('中途停下了，还有 1 条没有处理'));
+    expect(within(panel).getByRole('status').textContent).toContain('修订了 1 条');
+    const texts = async (id: string) => {
+      const content = await service.openChapter(id);
+      return content.ok ? content.value.saved.map((p) => p.text) : [];
+    };
+    expect(await texts(c1)).toEqual(['门开了一条缝。']);
+    expect(await texts(c2)).toEqual(['灯火晃了晃，他没有说话。']);
+    expect(store.getState().tasks.find((t) => t.title === '写手修订审核问题')).toMatchObject({ kind: 'writer', status: 'cancelled' });
+    expect(store.getState().reviseQueue).toBeNull();
+  });
+});
+
 describe('成书流程看板（B65）', () => {
   const plan = { goal: '目标', castIds: [], beats: ['一'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 };
   const memory = (summary: string) => reply(JSON.stringify({ summary, cast: [], foreshadows: [] }));

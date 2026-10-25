@@ -21,6 +21,9 @@ export const ASSISTANT_WORKFLOWS = ['quick_book', 'book_audit', 'next_volume', '
 /** 人物关系的类别（与存储层的取值相同）。 */
 export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;
 
+/** 审核问题的严重程度（与存储层的取值相同）：一键修订按它筛选。 */
+export const ISSUE_SEVERITIES_FOR_ASSISTANT = ['high', 'medium', 'low'] as const;
+
 /** 伏笔账本的状态（与存储层的取值相同）。 */
 export const FORESHADOW_STATUSES_FOR_ASSISTANT = ['planned', 'planted', 'paid_off', 'dropped'] as const;
 
@@ -101,9 +104,10 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('edit_selection'), operation: z.enum(SELECTION_EDITS), instruction: opt }),
   z.object({ tool: z.literal('review_chapter'), chapter: text }),
   z.object({ tool: z.literal('review_chapters'), chapters: list }),
-  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'simulation', 'workflow', 'all']) }),
+  z.object({ tool: z.literal('stop_background'), what: z.enum(['writing', 'review', 'revision', 'simulation', 'workflow', 'all']) }),
   z.object({ tool: z.literal('resolve_review_issue'), issue: text, status: z.enum(['fixed', 'ignored']) }),
   z.object({ tool: z.literal('revise_review_issue'), issue: text }),
+  z.object({ tool: z.literal('revise_review_issues'), chapters: list, severities: z.array(z.enum(ISSUE_SEVERITIES_FOR_ASSISTANT)).nullable() }),
   z.object({ tool: z.literal('rollback_writer'), chapter: text }),
   z.object({ tool: z.literal('add_foreshadow'), title: text, content: text, reveal: opt, plant: opt, payoff: opt }),
   z.object({

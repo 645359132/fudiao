@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
 import { createAppService, type AppService } from './service';
-import { REVIEW_RETRIES, reviewWithRetry, type ReviewOutcome } from './review';
+import { REVIEW_RETRIES, reviewWithRetry, type ReviewOutcome, type RevisionProgress } from './review';
+import { addIssues } from '@fudiao/store';
 import { err, ok } from '@fudiao/shared';
 
 const all: TestDeps[] = [];
@@ -282,5 +283,164 @@ describe('连续处理多章时的审核重试（M6-08 之后）', () => {
       return Promise.resolve(ok(outcome(false)));
     }, stop.signal);
     expect(calls).toBe(1);
+  });
+});
+
+describe('一键交给写手修订（B64 补充）', () => {
+  /** 第二章写上几段（没有规避词，也不涉及伏笔）。 */
+  async function fillSecond(app: AppService, c2: string, texts: readonly string[]) {
+    const content = value(await app.openChapter(c2));
+    value(await app.saveChapter(c2, content.saved, texts.map((text, i) => ({ id: `q${i}`, text, source: 'handwritten' as const })), { splits: [], merges: [] }));
+    return paragraphs(app, c2);
+  }
+
+  it('同一段上有引文的问题一次修订；前一条改了段落后，后面的问题在现在的正文里重新定位；针对整章的跳过；每章只存一份快照', async () => {
+    const { deps, app, c1 } = await setup();
+    deps.llmResponses.push(review([draft({}), draft({ quote: '', kind: 'pacing', severity: 'medium', evidence: [], description: '这一段节奏拖沓', suggestion: '删掉叹气' })]));
+    expect(kinds(value(await app.reviewChapter(c1)).issues)).toEqual([
+      'model:pacing:',
+      'model:setting_conflict:用左手稳稳接过茶盏',
+      'program:ai_tone:不禁',
+      'program:foreshadow:这玉是你父亲的遗物',
+      'program:off_plan:',
+    ]);
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('钱四在当铺里打量着那块玉。'), reply('林舟叹了口气，用右手接过茶盏。'), reply('林舟伸出右手，接过茶盏。'));
+    const progress: RevisionProgress[] = [];
+    const outcome = value(await app.reviseIssues({ chapterIds: [c1], severities: null }, { onProgress: (p) => progress.push(p) }));
+
+    // 严重的在前：先改第二段的伏笔；再改第一段（规避词随设定冲突一并修订，程序检查重新标出时换了标识，对回原来那一条）；
+    // 没有引文的节奏问题跟着第一段走，读的是第二次修订后的文字；计划中的人物没有出场针对整章，跳过。
+    expect(outcome).toMatchObject({ total: 5, revised: 4, calls: 3, alongside: 0, failed: [], untouched: 0, cancelled: false, halted: null });
+    expect(outcome.skipped.map((s) => s.reason)).toEqual([expect.stringContaining('针对整章')]);
+    expect(bodyText(deps, 0)).toContain('钱四在当铺里说');
+    expect(bodyText(deps, 1)).toContain('“不禁”：命中规避表达“不禁”');
+    expect(bodyText(deps, 2)).toContain('林舟叹了口气，用右手接过茶盏。');
+    expect(bodyText(deps, 2)).toContain('这一段节奏拖沓');
+    expect((await paragraphs(app, c1)).map((p) => [p.text, p.source])).toEqual([
+      ['林舟伸出右手，接过茶盏。', 'ai_generated'],
+      ['钱四在当铺里打量着那块玉。', 'ai_generated'],
+    ]);
+    const snapshots = value(await app.listSnapshots(c1));
+    expect(snapshots.map((s) => s.reason)).toEqual(['writer']);
+    expect(outcome.chapters).toEqual([{ chapterId: c1, title: '第一章 夜叩', snapshotId: snapshots[0]!.id, revised: 4 }]);
+    // 快照是第一次修订之前的正文：恢复它就回到一键修订之前。
+    expect(value(await app.getSnapshot(snapshots[0]!.id)).paragraphs.map((p) => p.text)).toEqual(['林舟不禁叹了口气，用左手稳稳接过茶盏。', '钱四在当铺里说：“这玉是你父亲的遗物吧。”']);
+    expect(kinds(value(await app.reviewIssues(c1)))).toEqual(['program:off_plan:']);
+    expect(progress.at(-1)).toMatchObject({ chapterId: c1, chapterIndex: 0, chapters: 1, done: 5, total: 5, revised: 4, skipped: 1, failed: 0 });
+    expect(outcome.summary).toMatch(/^交给写手修订 5 条：修订了 4 条（写手改了 3 段），跳过 1 条（针对整章/);
+  });
+
+  it('按严重程度筛选；同一段上不在范围里的问题随之一并修订；依据的段落被前面的修订改过的跳过', async () => {
+    const { deps, app, c1, c2 } = await setup();
+    const [q0] = await fillSecond(app, c2, ['雨夜，林舟又来到当铺。']);
+    deps.llmResponses.push(review([draft({}), draft({ quote: '叹了口气', kind: 'pacing', severity: 'low', evidence: [], description: '多余的动作' })]));
+    value(await app.reviewChapter(c1));
+    // 全书体检的跨章连贯问题：依据是第一章第一段当时的版本。
+    const [p0] = await paragraphs(app, c1);
+    const db = value(await deps.opener.open(value(await app.reloadWork()).entry.path, deps.clock.now()));
+    value(
+      await addIssues(
+        db.port,
+        [
+          {
+            id: 'continuity-1',
+            chapterId: c2,
+            kind: 'timeline',
+            severity: 'medium',
+            anchor: { paragraphId: q0!.id, paragraphVersion: q0!.version, start: 3, end: 5, quote: '林舟' },
+            evidence: [{ type: 'paragraph', id: p0!.id, chapterId: c1, version: p0!.version }],
+            description: '前一章林舟还在当铺里',
+            suggestion: '写明他离开过',
+            llmCallId: null,
+            source: 'continuity',
+          },
+        ],
+        { now: deps.clock.now() },
+      ),
+    );
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('钱四在当铺里打量着那块玉。'), reply('林舟用右手接过茶盏。'));
+    const quote = value(await app.quoteRevision({ chapterIds: null, severities: ['high', 'medium'] }));
+    expect(quote).toMatchObject({ bySeverity: { high: 2, medium: 1, low: 3 }, issues: 3, chapterIds: [c1, c2], wholeChapter: 0, calls: 3, costUsd: null, model: 'm' });
+
+    const outcome = value(await app.reviseIssues({ chapterIds: null, severities: ['high', 'medium'] }));
+    expect(outcome).toMatchObject({ total: 3, revised: 2, calls: 2, alongside: 2, failed: [] });
+    expect(outcome.skipped).toEqual([{ chapterId: c2, issueId: 'continuity-1', description: '前一章林舟还在当铺里', reason: expect.stringContaining('依据的段落改过了') }]);
+    expect(deps.llmRequests).toHaveLength(2);
+    expect(outcome.chapters.map((c) => c.chapterId)).toEqual([c1]);
+    expect(value(await app.listSnapshots(c2))).toEqual([]);
+    expect(outcome.summary).toContain('同一段上另有 2 条一并修订');
+  });
+
+  it('一条失败不挡住其余，结束时写明原因；连续三条同样的原因失败时停下，后面的不再调用', async () => {
+    const { deps, app, c1, c2 } = await setup();
+    deps.llmResponses.push(review([draft({})]));
+    value(await app.reviewChapter(c1));
+    deps.llmRequests.length = 0;
+    // 伏笔那一段改好了；设定冲突那一段写手原样交回（失败）。
+    deps.llmResponses.push(reply('钱四在当铺里打量着那块玉。'), reply('林舟不禁叹了口气，用左手稳稳接过茶盏。'));
+    const first = value(await app.reviseIssues({ chapterIds: [c1], severities: ['high'] }));
+    expect(first).toMatchObject({ total: 2, revised: 1, calls: 1, halted: null });
+    expect(first.failed).toEqual([expect.objectContaining({ reason: expect.stringContaining('没有改动') })]);
+    expect(first.summary).toContain('失败 1 条（写手没有改动这一段');
+    expect(value(await app.reviewIssues(c1)).some((i) => i.kind === 'setting_conflict')).toBe(true);
+
+    const texts = ['门开了一条缝。', '风灌了进来。', '灯火晃了晃。', '他没有说话。'];
+    await fillSecond(app, c2, texts);
+    deps.llmResponses.push(review(texts.map((t, i) => draft({ paragraph: `P${i + 1}`, quote: t.slice(0, 2), kind: 'pacing', evidence: [], description: `第 ${i + 1} 段拖沓` }))));
+    value(await app.reviewChapter(c2));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(...texts.map((t) => reply(t)));
+    const halted = value(await app.reviseIssues({ chapterIds: [c2], severities: ['high'] }));
+    expect(halted).toMatchObject({ revised: 0, calls: 0, untouched: 1, halted: expect.stringContaining('没有改动') });
+    expect(halted.failed).toHaveLength(3);
+    expect(deps.llmRequests).toHaveLength(3);
+    expect(halted.summary).toContain('连续 3 条因为同一个原因失败，停下了，还有 1 条没有处理');
+  });
+
+  it('取消：正在修订的那一条不写入，后面的不再做；已经改好的保留', async () => {
+    const { deps, app, c1 } = await setup();
+    deps.llmResponses.push(review([draft({})]));
+    value(await app.reviewChapter(c1));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('钱四在当铺里打量着那块玉。'), { chunks: openaiChunks('m', { text: ['林舟'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    const abort = new AbortController();
+    const running = app.reviseIssues({ chapterIds: [c1], severities: ['high'] }, { signal: abort.signal });
+    while (deps.llmRequests.length < 2) await new Promise((r) => setTimeout(r, 5));
+    abort.abort();
+    const outcome = value(await running);
+    expect(outcome).toMatchObject({ total: 2, revised: 1, failed: [], untouched: 1, cancelled: true });
+    expect(outcome.summary).toContain('中途停下了，还有 1 条没有处理');
+    expect((await paragraphs(app, c1)).map((p) => p.text)).toEqual(['林舟不禁叹了口气，用左手稳稳接过茶盏。', '钱四在当铺里打量着那块玉。']);
+    expect(value(await app.reviewIssues(c1)).some((i) => i.kind === 'setting_conflict')).toBe(true);
+  });
+
+  it('写手正在写的章节、有未保存修改的章节跳过，不调用模型', async () => {
+    const { deps, app, c1, c2, lin } = await setup();
+    deps.llmResponses.push(review([draft({})]));
+    value(await app.reviewChapter(c1));
+    value(await deps.drafts.write(value(await app.reloadWork()).entry.path, c1, '{"paragraphs":[]}'));
+    deps.llmRequests.length = 0;
+    const drafted = value(await app.reviseIssues({ chapterIds: [c1], severities: ['high'] }));
+    expect(drafted).toMatchObject({ total: 2, revised: 0, calls: 0, chapters: [] });
+    expect(drafted.skipped.map((s) => s.reason)).toEqual([expect.stringContaining('未保存的修改'), expect.stringContaining('未保存的修改')]);
+    expect(deps.llmRequests).toHaveLength(0);
+    value(await deps.drafts.remove(value(await app.reloadWork()).entry.path, c1));
+
+    // 写手正在写第二章时，第二章的问题跳过（修订与写章共用写手锁）。
+    await fillSecond(app, c2, ['门开了一条缝。']);
+    deps.llmResponses.push(review([draft({ quote: '门开了', kind: 'pacing', evidence: [], description: '拖沓' })]));
+    value(await app.reviewChapter(c2));
+    value(await app.savePlan(c2, { goal: '真相揭晓', castIds: [lin], beats: ['对质'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1500 }));
+    let during: Awaited<ReturnType<typeof app.reviseIssues>> | null = null;
+    deps.beforeLlm.push(async () => {
+      during = await app.reviseIssues({ chapterIds: [c2], severities: null });
+    });
+    deps.llmResponses.push(reply('林舟把玉放在柜台上。'));
+    value(await app.writeChapter(c2));
+    expect(during).toMatchObject({ ok: true, value: { revised: 0, calls: 0 } });
+    expect(value(during!).skipped.every((s) => s.reason.includes('写手正在写这一章'))).toBe(true);
+    expect(value(await app.reviseIssues({ chapterIds: [], severities: null })).summary).toBe('范围里没有待处理的审核问题');
   });
 });

@@ -38,7 +38,7 @@ import type { SceneDraft, SimRunDetail, SimRunOptions, SimRunView } from './simu
 import type { AppliedDraft, PlanningView } from './planning';
 import type { RelationsView } from './relations';
 import type { SkillsView } from './writing-skills';
-import type { ReviewIssueView, ReviewOutcome, RevisionOutcome } from './review';
+import type { BatchRevisionEvents, BatchRevisionOutcome, ReviewIssueView, ReviewOutcome, RevisionOutcome, RevisionQuote, RevisionScope } from './review';
 import type { EditorSelection } from './writing-context';
 import type { WriterEvents, WriterOutcome } from './writer';
 import type { AUTHOR_STARTED_WORKFLOWS, WorkflowKey, WorkflowUseCases, WorkflowView } from './workflows';
@@ -75,8 +75,13 @@ export type BackgroundJobs = {
   writing(): readonly string[];
   /** 在后台连续推进这次推演，直到结束、等待作者、暂停或被停下。返回 null 表示已经开始推进，否则是原因。 */
   simulate(runId: string, sceneId: string): string | null;
-  /** 停下后台的写作、依次审核、推演或写作工作流；返回说明（停下了什么，或没有在进行的）。 */
-  stop(what: 'writing' | 'review' | 'simulation' | 'workflow' | 'all'): string;
+  /** 停下后台的写作、依次审核、一键修订、推演或写作工作流；返回说明（停下了什么，或没有在进行的）。 */
+  stop(what: 'writing' | 'review' | 'revision' | 'simulation' | 'workflow' | 'all'): string;
+  /**
+   * 一键把审核问题交给写手修订（B64 补充），登记为任务、在后台逐章逐条做；onEnd 在结束时给出结果（没有做成时为 null）与那句话。
+   * 排上返回 null，否则是没排上的原因（已有一批在修订、写手在写、本章正文保存不了）。
+   */
+  reviseIssues(scope: RevisionScope, onEnd?: (outcome: BatchRevisionOutcome | null, summary: string) => void): Promise<string | null>;
   /**
    * 在后台推进一次写作工作流（到需要作者、出错、预算用完或做完为止）；onEnd 给出停在哪里的一句话。
    * 返回 null 表示已经开始推进，否则是原因（例如已有一个在推进）。
@@ -113,6 +118,8 @@ export type ToolEvents = CallOptions & {
    * 排上时才取：回调记住排上时打开的是哪部作品。
    */
   readonly backgroundReport?: () => (summary: string) => void;
+  /** 排上一键修订时取一个回调：结束时把那句话放进之后的现状，并把改过的章节记进发起的那一轮（撤销即恢复各章的快照）。 */
+  readonly revisionReport?: () => (outcome: BatchRevisionOutcome | null, summary: string) => void;
 };
 
 /** 作品的现状（章节、回收站与卷），由应用服务的 reloadWork 给出。 */
@@ -187,6 +194,8 @@ export type AssistantHost = {
   reviewIssues(chapterId: string): Promise<Result<ReviewIssueView[], AppError>>;
   resolveIssue(issueId: string, status: 'ignored' | 'fixed'): Promise<Result<ReviewIssueView[], AppError>>;
   reviseIssue(issueId: string, options?: CallOptions): Promise<Result<RevisionOutcome, AppError>>;
+  quoteRevision(scope: RevisionScope): Promise<Result<RevisionQuote, AppError>>;
+  reviseIssues(scope: RevisionScope, events?: BatchRevisionEvents): Promise<Result<BatchRevisionOutcome, AppError>>;
   issueChapterId(issueId: string): Promise<Result<string | null, AppError>>;
   exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   runSelectionOperation(
@@ -205,8 +214,15 @@ export type AssistantHost = {
   narrateBeatSheet(id: string, chapterId: string, options?: CallOptions): Promise<Result<{ readonly id: string }, AppError>>;
 };
 
-/** 一个动作的结果：成功与否，以及告诉模型（也显示给作者）的说明。 */
-export type Outcome = { readonly ok: boolean; readonly detail: string };
+/**
+ * 一个动作的结果：成功与否，以及告诉模型（也显示给作者）的说明。texts 是写手改过正文的章节与改之前存的快照
+ * （就地做完的一键修订给出，撤销时恢复它们）。
+ */
+export type Outcome = {
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly texts?: readonly { readonly chapterId: string; readonly title: string; readonly snapshotId: string }[];
+};
 const done = (detail: string): Outcome => ({ ok: true, detail });
 const failed = (detail: string): Outcome => ({ ok: false, detail });
 
@@ -233,6 +249,22 @@ const CLEARS = new Set(['', '无', '不限', '清除']);
 const UNVOLUMED = '未分卷';
 
 const SEVERITY_LABEL = { high: '严重', medium: '一般', low: '轻微' } as const;
+
+/** 一键修订的范围：章节按名称或标识找（null 为全书），严重程度为空或 null 时全部。 */
+async function revisionScope(action: ActionOf<'revise_review_issues'>, env: ToolEnv): Promise<Result<RevisionScope, string>> {
+  const severities = action.severities === null || action.severities.length === 0 ? null : [...new Set(action.severities)];
+  if (action.chapters === null) return ok({ chapterIds: null, severities });
+  const ids: string[] = [];
+  for (const ref of action.chapters) {
+    const c = await env.findChapter(ref);
+    if (!c.ok) return c;
+    if (!ids.includes(c.value.id)) ids.push(c.value.id);
+  }
+  return ok({ chapterIds: ids, severities });
+}
+
+/** 一键修订的范围读成几个字（“严重、一般的”）；全部时为空。 */
+const severityText = (scope: RevisionScope): string => (scope.severities === null ? '' : `${scope.severities.map((s) => SEVERITY_LABEL[s]).join('、')}的`);
 const EDIT_LABEL = { rewrite: '改写', expand: '扩写', shorten: '缩写', polish: '润色' } as const;
 
 /** 按标识或名称找一项：标识相同、名称相同、名称包含（只有一项时）；找不到或有几项对得上时说明。 */
@@ -1442,6 +1474,52 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       return done(
         `写手已修订这一段（修订前的正文存为了快照，可以恢复）；这一章还有 ${revised.value.issues.length} 条待处理（修订后程序检查会重新标出，标识可能变了，处理前先用 list_review_issues 看）。这一章的长篇记忆因此过时，后面的章节要接着写时用 build_chapter_memory 重新整理。`,
       );
+    },
+  },
+  revise_review_issues: {
+    label: '一键交给写手修订',
+    undo: 'revise',
+    // 不止一章时先把条数与预计费用给作者确认（书一级的修订可能要调用上千次）；确认的范围即这里找到的章节。
+    confirm: async (action, env) => {
+      const scope = await revisionScope(action, env);
+      if (!scope.ok || (scope.value.chapterIds !== null && scope.value.chapterIds.length <= 1)) return null;
+      const quote = await env.host.quoteRevision(scope.value);
+      if (!quote.ok || quote.value.issues === 0) return null;
+      const q = quote.value;
+      const cost = q.costUsd === null ? '费用未知（默认模型没有登记价格）' : `约 $${q.costUsd.toFixed(2)}（按 ${q.model ?? '默认模型'} 的价格估计）`;
+      return {
+        summary: `把 ${q.chapterIds.length} 章里 ${q.issues} 条${severityText(scope.value)}待处理审核问题交给写手修订${q.wholeChapter > 0 ? `（其中 ${q.wholeChapter} 条针对整章，会跳过）` : ''}：预计调用模型 ${q.calls} 次，${cost}；每章改之前存快照，可以撤销`,
+        action: { ...action, chapters: [...q.chapterIds] },
+      };
+    },
+    async run(action, env) {
+      const scope = await revisionScope(action, env);
+      if (!scope.ok) return failed(scope.error);
+      const jobs = env.events.background;
+      if (jobs !== undefined) {
+        const quote = await env.host.quoteRevision(scope.value);
+        if (!quote.ok) return failWith(quote.error);
+        if (quote.value.issues === 0) return failed(`范围里没有${severityText(scope.value)}待处理审核问题`);
+        const refused = await jobs.reviseIssues(scope.value, env.events.revisionReport?.());
+        if (refused !== null) return failed(refused);
+        return done(
+          `已排上：写手在后台依次修订 ${quote.value.chapterIds.length} 章里 ${quote.value.issues} 条${severityText(scope.value)}待处理审核问题。这一轮不用等，进度在“任务”页与当前状态的“正在进行的任务”；做完的那句话会出现在之后的当前状态里（“后台刚做完的”），没看到之前不要说已经改好。`,
+        );
+      }
+      env.events.onProgress?.('写手正在修订审核问题');
+      const revised = await env.host.reviseIssues(scope.value, {
+        ...env.call(),
+        onProgress: (p) => env.events.onProgress?.(`写手正在修订审核问题：已处理 ${p.done}/${p.total} 条`),
+        afterChapter: (chapterId, wrote) => {
+          if (wrote) env.events.onEffect?.({ kind: 'chapter_changed', chapterId });
+          return Promise.resolve();
+        },
+      });
+      if (!revised.ok) return failWith(revised.error);
+      const o = revised.value;
+      if (o.chapters.length > 0) env.changed();
+      const memory = o.chapters.length > 0 ? '。改过的章节长篇记忆因此过时，后面的章节要接着写时用 build_chapter_memory 重新整理' : '';
+      return { ok: !o.cancelled && o.halted === null, detail: `${o.summary}${memory}。`, texts: o.chapters.map((c) => ({ chapterId: c.chapterId, title: c.title, snapshotId: c.snapshotId })) };
     },
   },
   review_chapter: {

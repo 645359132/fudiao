@@ -378,7 +378,7 @@ export function assistantUseCases({
         results.push(...skipped(actions.slice(at), '作者停止了，这个动作没有执行。'));
         return ok(false);
       }
-      const env = toolEnv(host, project, reporting(events), () => undoLast(items, events, 'action'), () => undoPreview(items));
+      const env = toolEnv(host, project, reporting(events, items), () => undoLast(items, events, 'action'), () => undoPreview(items));
       const asked = await confirmationFor(action.tool, action, env);
       if (asked !== null) {
         const added: AssistantItem[] = [];
@@ -429,7 +429,22 @@ export function assistantUseCases({
         entries: chapter?.ok === true && snapshot?.ok === true && revised?.ok === true ? [{ kind: 'text', id: chapter.value.id, title: chapter.value.title, snapshotId: snapshot.value.id, digest: revised.value.digest }] : [],
       };
     }
+    if (action.tool === 'revise_review_issues') {
+      // 就地做完的一键修订：每章改之前存的快照随结果给出，撤销即恢复它们（之后又改过的不动）。
+      const outcome = await runTool(action.tool, action, env);
+      return { outcome, entries: await revisedEntries(outcome.texts ?? []) };
+    }
     return { outcome: await runTool(action.tool, action, env), entries: [] };
+  }
+
+  /** 写手修订过的章节记成撤销用的改动：改之前的快照与现在正文的摘要。 */
+  async function revisedEntries(texts: readonly { readonly chapterId: string; readonly title: string; readonly snapshotId: string }[]): Promise<ChangeEntry[]> {
+    const entries: ChangeEntry[] = [];
+    for (const t of texts) {
+      const digest = await chapterDigest(host, t.chapterId);
+      if (digest.ok) entries.push({ kind: 'text', id: t.chapterId, title: t.title, snapshotId: t.snapshotId, digest: digest.value.digest });
+    }
+    return entries;
   }
 
   /**
@@ -474,13 +489,34 @@ export function assistantUseCases({
     };
   }
 
-  /** 交给后台的整批写作与审核结束时把结果记下，之后一轮的现状里告诉模型；作品换了就不记。 */
-  const reporting = (events: AssistantEvents): AssistantEvents => ({
+  /**
+   * 交给后台的整批写作、审核与一键修订结束时把结果记下，之后一轮的现状里告诉模型；作品换了就不记。
+   * 一键修订改过的章节记在发起它的那一轮（turnOf）与那段对话里，撤销那一轮时恢复各章改之前的快照。
+   */
+  const reporting = (events: AssistantEvents, items: readonly AssistantItem[]): AssistantEvents => ({
     ...events,
     backgroundReport: () => {
       const key = workKey();
       return (summary) => {
         if (workKey() === key) finished = [...finished, summary].slice(-FINISHED_LIMIT);
+      };
+    },
+    revisionReport: () => {
+      const key = workKey();
+      const port = project();
+      const turnOf = [...items].reverse().find((i) => i.role === 'user')?.id;
+      const where = conversation !== null && conversation.work === key ? conversation.id : null;
+      return (outcome, summary) => {
+        if (workKey() !== key) return;
+        finished = [...finished, `一键修订审核问题：${summary}`].slice(-FINISHED_LIMIT);
+        if (outcome === null || outcome.chapters.length === 0 || port === null || where === null) return;
+        void (async () => {
+          const entries = await revisedEntries(outcome.chapters);
+          if (entries.length === 0 || workKey() !== key) return;
+          const item: AssistantItem = { id: deps.ids.next(), role: 'changes', tool: 'revise_review_issues', entries, kept: false, ...(turnOf !== undefined && { turnOf }) };
+          // 作者这期间删掉了那段对话就不记；记回去也不算作者用过那一段（同单章的后台修订）。
+          await appendAssistantMessages(port, where, [{ id: item.id, role: item.role, payload: toStored(item) }], ctx(), { existing: true });
+        })();
       };
     },
   });
@@ -721,7 +757,7 @@ export function assistantUseCases({
         const last = waitingItem(items);
         if (last === null) return err(settings('没有等待确认的动作'));
         const turn = turnState(items);
-        const performed = approve ? await perform(last.action, toolEnv(host, project, reporting(events), () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
+        const performed = approve ? await perform(last.action, toolEnv(host, project, reporting(events, items), () => undoLast(items, events, 'action'), () => undoPreview(items)), items, events) : ok({ ok: false, detail: '作者没有同意，这个动作没有执行。' });
         events.onProgress?.(null);
         if (!performed.ok) return performed;
         const outcome = performed.value;

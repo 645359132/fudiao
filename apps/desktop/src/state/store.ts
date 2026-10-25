@@ -4,7 +4,7 @@ import type { CallOptions, LlmStreamEvent } from '@fudiao/llm';
 import type { Chapter, ChapterTarget, CurrentParagraph, Entity, EntityKind, EntityPatch, Fact, FactInput, FactStatus, LlmCallRow, ModelPatch, ProjectPatch, SavedParagraph, SearchHit, SearchResult, Snapshot, SnapshotSummary, SourceStats, StructuralEdits, UsageSummary, Candidate } from '@fudiao/store';
 import type { SkillsView } from '../app/writing-skills';
 import type { PlanDraft, PlanningView } from '../app/planning';
-import { reviewWithRetry, type ReviewIssueView } from '../app/review';
+import { reviewWithRetry, type BatchRevisionOutcome, type ReviewIssueView, type RevisionProgress, type RevisionQuote, type RevisionScope } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { CastPresenceFields, ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
 import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
@@ -56,6 +56,7 @@ export type EditorHandle = {
  * 网络中断后重新请求时 onRetry 清掉它）与结束。
  */
 type TaskHandle = {
+  readonly id: string;
   readonly signal: AbortSignal;
   readonly options: (choices?: { readonly text?: boolean; readonly onText?: (delta: string) => void; readonly onRetry?: () => void }) => CallOptions;
   readonly finish: (status: Exclude<TaskStatus, 'running'>, details?: { readonly text?: string; readonly cost?: number | null; readonly error?: string | null }) => void;
@@ -389,6 +390,17 @@ export type AppState = {
   /** 依次审核这些章；返回这一批怎样结束的一句话，已有一批在审时不开始、返回 null。 */
   readonly reviewChapters: (chapterIds: readonly string[]) => Promise<string | null>;
   readonly cancelReviewQueue: () => void;
+  /**
+   * 一键交给写手修订审核问题（B64 补充）：进行中的进度（正在修订的章、第几章、已处理几条）；没有时为 null。
+   * 同一时间只有一批，与写手写章不同时进行（一本书一个写手）。reviseResult 是最近一批结束时的那句话。
+   */
+  readonly reviseQueue: RevisionProgress | null;
+  readonly reviseResult: string | null;
+  /** 开始前的预计（条数、调用次数与费用）；读不出时显示原因、返回 null。 */
+  readonly quoteRevision: (scope: RevisionScope) => Promise<RevisionQuote | null>;
+  /** 一键修订：返回结束的那句话；没有开始时（已有一批、写手在写、正文保存不了）显示原因、返回 null。 */
+  readonly reviseIssues: (scope: RevisionScope) => Promise<string | null>;
+  readonly cancelReviseQueue: () => void;
   /** 在计划页审核一章（不打开抽屉）；reviewingChapterId 是正在审核的章节。 */
   readonly reviewingChapterId: string | null;
   /** 依次审核的进度：正在审的章、第几章、一共几章与后面排着的章；没有时为 null。 */
@@ -580,6 +592,7 @@ export type ChapterLock = 'writer' | 'revise' | 'assistant';
 export function chapterLock(state: AppState, chapterId: string | null): ChapterLock | null {
   if (chapterId === null) return null;
   if (state.writerJobs.some((j) => j.chapterId === chapterId)) return 'writer';
+  if (state.reviseQueue !== null && state.reviseQueue.chapterId === chapterId) return 'revise';
   const job = state.assistantJobs.find((j) => j.chapterId === chapterId && j.kind !== 'review');
   if (job !== undefined) return job.kind === 'writing' ? 'writer' : 'revise';
   if (state.review !== null && state.review.revisingId !== null && state.review.chapterId === chapterId) return 'revise';
@@ -627,12 +640,17 @@ export function createAppStore(service: AppService): AppStore {
      * 后一章要接上前一章的结尾与长篇记忆，两个写手同时写同一本书的不同章节会接不上。
      */
     const writerBusy = (): string | null => {
+      if (reviseAbort !== null) return '写手正在修订审核问题';
       const jobs = get().writerJobs;
       if (writerRunning || jobs.length > 0) return `写手正在写${jobs.map((j) => `《${chapter(j.chapterId)?.title ?? ''}》`).join('')}`;
       const single = get().assistantJobs.find((j) => j.kind === 'writing');
       return single === undefined ? null : `写手正在后台写《${chapter(single.chapterId)?.title ?? ''}》`;
     };
     let reviewQueueAbort: AbortController | null = null;
+    /** 一键修订审核问题：取消、正在做的那一批（关闭作品时等它停下）与它登记的任务（现状里不再另列一遍）。 */
+    let reviseAbort: AbortController | null = null;
+    let reviseLoop: Promise<unknown> | null = null;
+    let reviseTaskId: string | null = null;
     /** 正在后台推进的写作工作流（同一时间只推进一个）；关闭作品时停下并等它结束。 */
     let workflowAbort: AbortController | null = null;
     let workflowLoop: Promise<void> | null = null;
@@ -706,6 +724,7 @@ export function createAppStore(service: AppService): AppStore {
         task({ type: 'finished', id, status, finishedAt: service.now(), ...details });
       };
       return {
+        id,
         signal: abort.signal,
         options: ({ text = true, onText, onRetry } = {}) => ({
           signal: abort.signal,
@@ -1046,6 +1065,87 @@ export function createAppStore(service: AppService): AppStore {
       return { summary: `依次审核 ${chapterIds.length} 章：${reviewed.length === 0 ? '一章也没有审完' : `审完了${reviewed.join('、')}`}${unreviewedNote(unreviewed)}${stop === null ? '' : `；${stop}`}`, complete: stop === null, cancelled: abort.signal.aborted };
     }
 
+    /** 审核抽屉开着这一章时，重新读取它待处理的问题。 */
+    async function refreshReviewOf(chapterId: string) {
+      const current = get().review;
+      if (current === null || current.chapterId !== chapterId) return;
+      const issues = await service.reviewIssues(chapterId);
+      const now = get().review;
+      if (issues.ok && now !== null && now.chapterId === chapterId) set({ review: { ...now, issues: issues.value } });
+    }
+
+    /** 一键修订现在不能开始的原因：已有一批在修订，或写手在写（一本书一个写手）；能开始时为 null。 */
+    const reviseRefusal = (): string | null => {
+      if (reviseAbort !== null) return '已经有一批审核问题在交给写手修订：等它做完，或在“任务”里停下以后再开始';
+      const busy = writerBusy();
+      return busy === null ? null : `${busy}（一本书一次只由一个写手写或修订）：等它写完，或在“任务”里停下以后再修订`;
+    };
+
+    /**
+     * 开始一键修订（审核抽屉、成书进度与 AI 助手的后台修订都经这里）：先保存编辑器里的内容（写手不覆盖未保存的修改），
+     * 不能开始时返回原因；开始后返回这一批（run 在结束时给出那句话与结果）。
+     */
+    async function startRevision(scope: RevisionScope): Promise<string | { readonly run: Promise<{ readonly summary: string; readonly outcome: BatchRevisionOutcome | null }> }> {
+      const before = reviseRefusal();
+      if (before !== null) return before;
+      if (!(await get().leaveChapter())) return '本章正文没有保存成功，没有开始修订：先处理好本章（复制或导出后重新打开），再修订';
+      const after = reviseRefusal();
+      if (after !== null) return after;
+      return { run: reviseQueueRun(scope) };
+    }
+
+    /**
+     * 一键交给写手修订（B64 补充），同一时间只有一批。登记为任务，进度在 reviseQueue，正在修订的那一章只读（chapterLock）；
+     * 写手改完一章就重新载入那一章的正文与审核问题。调用方已保存好正文、检查过能不能开始。
+     */
+    function reviseQueueRun(scope: RevisionScope): Promise<{ readonly summary: string; readonly outcome: BatchRevisionOutcome | null }> {
+      const abort = new AbortController();
+      reviseAbort = abort;
+      const only = scope.chapterIds !== null && scope.chapterIds.length === 1 ? (scope.chapterIds[0] ?? null) : null;
+      const t = startTask('writer', `写手修订审核问题${only === null ? '' : ` · ${chapter(only)?.title ?? ''}`}`, only, abort);
+      reviseTaskId = t.id;
+      set({ reviseQueue: { chapterId: only ?? '', chapterIndex: 0, chapters: 0, done: 0, total: 0, revised: 0, skipped: 0, failed: 0 }, reviseResult: null, message: null });
+      const loop = (async () => {
+        try {
+          const result = await service.reviseIssues(scope, {
+            ...t.options({ text: false }),
+            onProgress: (progress) => set({ reviseQueue: progress }),
+            // 这一章正开在编辑器里：先保存作者手上的修改，之后它只读到这一章修订完。
+            beforeChapter: (chapterId) => (editor !== null && editor.chapterId === chapterId ? editor.flush() : Promise.resolve(true)),
+            afterChapter: async (chapterId, wrote) => {
+              if (wrote && get().selectedChapterId === chapterId) {
+                const content = await service.openChapter(chapterId);
+                if (content.ok && get().selectedChapterId === chapterId) set({ chapterContent: content.value, contentRevision: get().contentRevision + 1, saveStatus: { kind: 'saved' } });
+              }
+              await refreshReviewOf(chapterId);
+              await reloadPlanning();
+            },
+          });
+          if (!result.ok) {
+            const why = describeError(result.error);
+            t.fail(why);
+            return { summary: `一键修订没有做成：${why}`, outcome: null };
+          }
+          const { summary, cancelled, halted } = result.value;
+          if (cancelled) t.finish('cancelled', { text: summary });
+          else if (halted !== null) t.finish('failed', { text: summary, error: summary });
+          else t.finish('done', { text: summary });
+          return { summary, outcome: result.value };
+        } finally {
+          if (reviseAbort === abort) reviseAbort = null;
+          reviseTaskId = null;
+        }
+      })().then((done) => {
+        set({ reviseQueue: null, reviseResult: done.summary });
+        return done;
+      });
+      reviseLoop = loop;
+      void loop.finally(() => {
+        if (reviseLoop === loop) reviseLoop = null;
+      });
+      return loop;
+    }
+
     /** 审核重试后仍没有完成的章节，接在结束的那句话后面（以“；”开头）；没有时为空。 */
     const unreviewedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：${titles.join('、')}`);
     /** 人物关系的变化没有找成的章节，同上。 */
@@ -1304,11 +1404,18 @@ export function createAppStore(service: AppService): AppStore {
               });
             return null;
           },
+          async reviseIssues(scope, onEnd) {
+            const started = await startRevision(scope);
+            if (typeof started === 'string') return started;
+            void started.run.then((done) => onEnd?.(done.outcome, done.summary));
+            return null;
+          },
           simulating: () => get().simAdvancing,
           writing() {
             const jobs = get().writerJobs;
             const single = get().assistantJobs.flatMap((j) => (j.kind === 'review' ? [] : [j.chapterId]));
-            return [...jobs.map((j) => j.chapterId), ...(jobs[0]?.queued ?? []), ...single];
+            const revising = get().reviseQueue?.chapterId ?? '';
+            return [...jobs.map((j) => j.chapterId), ...(jobs[0]?.queued ?? []), ...single, ...(revising === '' ? [] : [revising])];
           },
           async run(job) {
             if (job.kind !== 'review' && (get().writerJobs.some((j) => j.chapterId === job.chapterId) || get().assistantJobs.some((j) => j.chapterId === job.chapterId && j.kind !== 'review'))) {
@@ -1353,7 +1460,7 @@ export function createAppStore(service: AppService): AppStore {
           stop(what) {
             const stopped: string[] = [];
             for (const [id, j] of assistantJobAborts) {
-              if (what === 'simulation' || what === 'workflow' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review')) continue;
+              if (what === 'simulation' || what === 'workflow' || (what === 'writing' && j.kind === 'review') || (what === 'review' && j.kind !== 'review') || (what === 'revision' && j.kind !== 'revise')) continue;
               j.abort.abort();
               const title = chapter(get().assistantJobs.find((x) => x.id === id)?.chapterId ?? '')?.title ?? '';
               stopped.push(`${j.kind === 'writing' ? '写手写' : j.kind === 'review' ? '审核' : '写手修订'}《${title}》${j.kind === 'review' ? '' : '（已写入的部分保留）'}`);
@@ -1371,6 +1478,11 @@ export function createAppStore(service: AppService): AppStore {
               reviewQueueAbort.abort();
               stopped.push(`依次审核${queue === null ? '' : `停在《${chapter(queue.chapterId)?.title ?? ''}》，后面的 ${queue.queued.length} 章不再审`}`);
             }
+            if ((what === 'revision' || what === 'all') && reviseAbort !== null) {
+              reviseAbort.abort();
+              const at = get().reviseQueue?.chapterId ?? '';
+              stopped.push(`一键修订审核问题${at === '' ? '' : `停在《${chapter(at)?.title ?? ''}》`}（已改好的保留，正在改的那一条不写入，后面的不再修订）`);
+            }
             if ((what === 'workflow' || what === 'all') && workflowAbort !== null) {
               workflowAbort.abort();
               stopped.push('写作工作流停在当前这一步（继续时从这一步做起）');
@@ -1380,7 +1492,14 @@ export function createAppStore(service: AppService): AppStore {
               stopped.push(`推演${simLoopRun === null ? '' : ` [${simLoopRun}]`}停在当前这一步之后（可以继续）`);
             }
             if (stopped.length > 0) return `已停下：${stopped.join('；')}。`;
-            const idle = { writing: '后台没有在写作。', review: '后台没有在依次审核。', simulation: '后台没有在推演。', workflow: '后台没有在推进的写作工作流。', all: '后台没有在进行的写作、审核、推演或工作流。' } as const;
+            const idle = {
+              writing: '后台没有在写作。',
+              review: '后台没有在依次审核。',
+              revision: '后台没有在修订审核问题。',
+              simulation: '后台没有在推演。',
+              workflow: '后台没有在推进的写作工作流。',
+              all: '后台没有在进行的写作、审核、修订、推演或工作流。',
+            } as const;
             return idle[what];
           },
         },
@@ -1484,6 +1603,8 @@ export function createAppStore(service: AppService): AppStore {
       review: null,
       reviewingChapterId: null,
       reviewQueue: null,
+      reviseQueue: null,
+      reviseResult: null,
       simScenes: null,
       simSceneId: null,
       sceneDraft: null,
@@ -1562,6 +1683,9 @@ export function createAppStore(service: AppService): AppStore {
         for (const j of assistantJobAborts.values()) j.abort.abort();
         assistantJobAborts.clear();
         reviewQueueAbort?.abort();
+        // 一键修订停下：正在改的那一条不写入，等它停下再关作品库。
+        reviseAbort?.abort();
+        await reviseLoop;
         relationScanAbort?.abort();
         // 写作工作流停在当前这一步（下次打开为中断，可以继续）。
         workflowAbort?.abort();
@@ -1570,7 +1694,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, writerJobs: [], assistantJobs: [], memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -2001,9 +2125,14 @@ export function createAppStore(service: AppService): AppStore {
           const later = queue.queued.slice(0, 10).map(title).join('、');
           out.push(`正在依次审核：第 ${queue.done + 1} / ${queue.total} 章${title(queue.chapterId)}${queue.queued.length > 0 ? `；后面还有 ${queue.queued.length} 章：${later}${queue.queued.length > 10 ? '等' : ''}` : ''}`);
         }
-        // 写手一章里的写作、记忆与审核，以及依次审核正在审的这一章，已经在上面说了；助手自己的这一轮不算。
+        const revising = s.reviseQueue;
+        if (revising !== null) {
+          const where = revising.chapters > 0 && revising.chapterId !== '' ? `第 ${revising.chapterIndex + 1} / ${revising.chapters} 章${title(revising.chapterId)}，` : '';
+          out.push(`写手正在修订审核问题：${where}已处理 ${revising.done} / ${revising.total} 条（修订 ${revising.revised}、跳过 ${revising.skipped}、失败 ${revising.failed}）`);
+        }
+        // 写手一章里的写作、记忆与审核，依次审核正在审的这一章，以及一键修订，已经在上面说了；助手自己的这一轮不算。
         for (const t of s.tasks) {
-          if (t.status !== 'running' || t.kind === 'assistant') continue;
+          if (t.status !== 'running' || t.kind === 'assistant' || t.id === reviseTaskId) continue;
           if (jobs.some((j) => j.chapterId === t.chapterId) && (t.kind === 'writer' || t.kind === 'memory' || t.kind === 'relations' || t.kind === 'review')) continue;
           if (queue !== null && t.chapterId === queue.chapterId && t.kind === 'review') continue;
           out.push(t.title);
@@ -2409,6 +2538,26 @@ export function createAppStore(service: AppService): AppStore {
         return (await reviewQueueRun(chapterIds))?.summary ?? null;
       },
       cancelReviewQueue: () => reviewQueueAbort?.abort(),
+      async quoteRevision(scope) {
+        const quote = await service.quoteRevision(scope);
+        if (quote.ok) return quote.value;
+        set({ message: describeError(quote.error) });
+        return null;
+      },
+      async reviseIssues(scope) {
+        const started = await startRevision(scope);
+        if (typeof started === 'string') {
+          set({ message: started });
+          return null;
+        }
+        const { summary } = await started.run;
+        // 审核抽屉开着这一章：结束的那句话写在抽屉里。
+        const only = scope.chapterIds?.length === 1 ? scope.chapterIds[0] : undefined;
+        const now = get().review;
+        if (only !== undefined && now !== null && now.chapterId === only) set({ review: { ...now, note: summary } });
+        return summary;
+      },
+      cancelReviseQueue: () => reviseAbort?.abort(),
       cancelWriting: () => writerAbort?.abort(),
       async openReview() {
         const chapterId = get().selectedChapterId;
@@ -2492,6 +2641,10 @@ export function createAppStore(service: AppService): AppStore {
       async reviseIssue(id) {
         const current = get().review;
         if (current === null || current.running || current.revisingId !== null || get().writerJob !== null) return;
+        if (reviseAbort !== null) {
+          set({ message: '写手正在一键修订审核问题：等它做完，或在“任务”里停下以后再单独修订' });
+          return;
+        }
         const chapterId = current.chapterId;
         // 先保存；修订期间正文只读，写手写入后重新载入。
         if (!(await get().leaveChapter())) return;

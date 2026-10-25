@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { PlanChapterView } from '../app/planning';
 import type { WriterJob } from '../state/store';
 import { PLAN_STATUS_LABEL } from '../app/labels';
+import { BookRevision } from './BookRevision';
 import { useApp } from './store-context';
 
 
@@ -124,7 +125,8 @@ function ProgressTable({ chapters, state }: { readonly chapters: readonly PlanCh
 
 /**
  * 成书流程看板（需求 B65）：按章显示计划、写作、长篇记忆与审核的状态；
- * 写下一章、依次写完或排定一段章节，可选写完后自动审核。作者随时可以停下，直接修改任何一步的结果。
+ * 写下一章、依次写完或排定一段章节，可选写完后自动审核；审核出的问题可以一键交给写手修订（先估算费用）。
+ * 作者随时可以停下，直接修改任何一步的结果。
  */
 export function PipelineBoard() {
   const planning = useApp((s) => s.planning);
@@ -142,6 +144,7 @@ export function PipelineBoard() {
   const reviewAll = useApp((s) => s.reviewChapters);
   const stopQueue = useApp((s) => s.cancelReviewQueue);
   const openIssues = useApp((s) => s.openChapterReview);
+  const revising = useApp((s) => s.reviseQueue !== null);
   const [review, setReview] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -153,7 +156,7 @@ export function PipelineBoard() {
   const fromId = ids.includes(from) ? from : (ids[0] ?? '');
   const toId = ids.includes(to) ? to : (ids.at(-1) ?? '');
   const range = ids.slice(ids.indexOf(fromId), ids.indexOf(toId) + 1);
-  const idle = !busy && job === null && !assistantWriting && reviewing === null && building === null && queue === null;
+  const idle = !busy && job === null && !assistantWriting && reviewing === null && building === null && queue === null && !revising;
   // 已经写好的章节（写手没在写的），按书中顺序：可以依次审核。
   const written = planning.chapters.filter((c) => c.hasText && c.plan?.status !== 'writing').map((c) => c.chapter.id);
   const titleOf = (id: string) => planning.chapters.find((c) => c.chapter.id === id)?.chapter.title ?? '';
@@ -229,6 +232,7 @@ export function PipelineBoard() {
           </button>
         </div>
       ) : null}
+      <BookRevision chapters={planning.chapters} idle={idle} />
     </section>
   );
 }

@@ -128,3 +128,50 @@ export function dropHandled<T extends { readonly kind: IssueKind; readonly ancho
 ): T[] {
   return issues.filter((issue) => !handled.some((h) => sameSpot(h, issue) && (issue.anchor.quote !== '' || h.description === issue.description)));
 }
+
+/** 重新定位的结果：有一条待处理的问题说的就是这一处（程序检查重新标出、换了标识）；锚点挪到现在的段落；或者已经定位不到。 */
+export type Relocation =
+  | { readonly kind: 'pending'; readonly id: string }
+  | { readonly kind: 'moved'; readonly anchor: IssueAnchor }
+  | { readonly kind: 'gone'; readonly reason: string };
+
+/**
+ * 一键交给写手修订时（B64 补充），前一条修订改了段落，后面的问题已经过期：在本章现在的段落里重新找它。
+ * 引文优先在原来那一段里找（离原位置最近的一处），找不到再在全章找，只有一处时才算定位到；没有引文的问题（针对整段）
+ * 跟着原来那一段走。定位到之后，有待处理的问题说的是同一处（同一类、同一段、同一引文，没有引文时同一说明）就用它；
+ * regenerated 的问题（程序检查）每次修订后会重新检查、重新标出，没有重新标出就是已经改掉了；
+ * 锚点没有动过却过期了，是这一章重新审核过、问题换成了新的。依据过期与否由调用方先判断。
+ */
+export function relocateIssue(
+  issue: { readonly kind: IssueKind; readonly anchor: IssueAnchor; readonly description: string; readonly regenerated: boolean },
+  paragraphs: readonly ParagraphText[],
+  pending: readonly { readonly id: string; readonly kind: IssueKind; readonly anchor: IssueAnchor; readonly description: string }[],
+): Relocation {
+  const { quote } = issue.anchor;
+  let anchor: IssueAnchor;
+  if (quote === '') {
+    const same = paragraphs.find((p) => p.id === issue.anchor.paragraphId);
+    if (same === undefined) return { kind: 'gone', reason: '问题所在的段落已经不在了' };
+    anchor = { paragraphId: same.id, paragraphVersion: same.version, start: 0, end: 0, quote: '' };
+  } else {
+    const same = paragraphs.find((p) => p.id === issue.anchor.paragraphId && p.text.includes(quote));
+    const hits = same !== undefined ? [same] : paragraphs.filter((p) => p.text.includes(quote));
+    if (hits.length === 0) return { kind: 'gone', reason: '修订后找不到这处原文了（多半已经一并改掉）' };
+    if (hits.length > 1) return { kind: 'gone', reason: '这处原文在本章有好几处，定位不准' };
+    const at = hits[0]!;
+    let start = at.text.indexOf(quote);
+    for (let i = start; i >= 0; i = at.text.indexOf(quote, i + 1)) {
+      if (Math.abs(i - issue.anchor.start) < Math.abs(start - issue.anchor.start)) start = i;
+    }
+    anchor = { paragraphId: at.id, paragraphVersion: at.version, start, end: start + quote.length, quote };
+  }
+  const match = pending.find(
+    (p) => p.kind === issue.kind && p.anchor.paragraphId === anchor.paragraphId && p.anchor.quote === quote && (quote !== '' || p.description === issue.description),
+  );
+  if (match !== undefined) return { kind: 'pending', id: match.id };
+  if (issue.regenerated) return { kind: 'gone', reason: '修订后重新检查，没有再标出这一处（多半已经一并改掉）' };
+  if (anchor.paragraphId === issue.anchor.paragraphId && anchor.paragraphVersion === issue.anchor.paragraphVersion) {
+    return { kind: 'gone', reason: '这一章重新审核过，这条问题已经换成新的' };
+  }
+  return { kind: 'moved', anchor };
+}

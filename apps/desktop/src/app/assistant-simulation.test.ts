@@ -58,6 +58,7 @@ function backgroundFor(app: Awaited<ReturnType<typeof setup>>['app']) {
   const jobs: BackgroundJobs = {
     writeChapters: () => null,
     reviewChapters: () => null,
+    reviseIssues: () => Promise.resolve(null),
     workflow: () => null,
     simulating: () => false,
     run: () => Promise.resolve(null),
