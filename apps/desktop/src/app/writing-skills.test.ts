@@ -89,7 +89,7 @@ describe('规避词表', () => {
     const added = value(await app.addCustomSkill('对话节奏', '对话三句内要有动作。', '写对话时使用。', ' dialogue-rhythm '));
     expect(added.skills.at(-1)?.skill).toMatchObject({ key: 'dialogue-rhythm', name: '对话节奏', description: '写对话时使用。' });
     expect(value(await app.addCustomSkill('无标识', '指令', '说明')).skills.at(-1)?.skill.key).toMatch(/^custom-/);
-    expect(await app.addCustomSkill('撞名', '指令', '说明', 'cliffhanger')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已被“章末钩子”使用') } });
+    expect(await app.addCustomSkill('撞名', '指令', '说明', 'cliffhanger')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已被“章尾收束”使用') } });
     expect(await app.addCustomSkill('撞名', '指令', '说明', 'dialogue-rhythm')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已被“对话节奏”使用') } });
     expect(await app.addCustomSkill('坏标识', '指令', '说明', 'a b')).toMatchObject({ ok: false, error: { detail: expect.stringContaining('不能有空格') } });
     expect(value(await app.listWritingSkills()).skills.filter((s) => s.skill.builtinVersion === null)).toHaveLength(2);
@@ -138,7 +138,7 @@ ${body}
     // 原样导回：仍是模板文字（不算改写）。
     expect(value(await app.importSkillMd(hookFile.content)).view.skills.find((s) => s.skill.key === 'cliffhanger')?.skill.instruction).toBe('');
     const edited = value(await app.importSkillMd(hookFile.content.replace(hook.builtinText!, '停在悬念上。')));
-    expect(edited).toMatchObject({ name: '章末钩子', replaced: true });
+    expect(edited).toMatchObject({ name: '章尾收束', replaced: true });
     expect(edited.view.skills.find((s) => s.skill.key === 'cliffhanger')?.skill).toMatchObject({ instruction: '停在悬念上。', builtinVersion: hook.skill.builtinVersion });
     expect(edited.view.skills.filter((s) => s.skill.key === 'cliffhanger')).toHaveLength(1);
   });

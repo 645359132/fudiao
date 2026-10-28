@@ -7,6 +7,9 @@ import { addTestedModel, reply } from '../../apps/desktop/src/testing/models';
 import { parseBook, type EvalBook } from '../m3-eval/book';
 import { benchmarkSamples, CONTRADICTION, EVAL_ORDER } from './material';
 import { planFlows, quoteFlows, renderReport, runWorkflowEval } from './run';
+import { formatReport } from '../prose-stats/report';
+import { splitChapters } from '../prose-stats/split';
+import { bookStats } from '../prose-stats/stats';
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -141,6 +144,14 @@ describe('写作工作流试用（M6-08）', () => {
     const lines: string[] = [];
     let clock = 0;
     const result = await runWorkflowEval(app, book, [...EVAL_ORDER], { log: (l) => lines.push(l), now: () => (clock += 1000) });
+    // 文风统计（B87）：同一份材料写出的整本 TXT 能算出各项数字，报告各节齐全。
+    const stats = bookStats(splitChapters(result.bookText), { names: ['林舟', '钱四', '阿青'] });
+    expect(stats.chapters).toBeGreaterThanOrEqual(3);
+    expect(stats.words).toBeGreaterThan(0);
+    expect(stats.chapterWords.count).toBe(stats.chapters);
+    expect(stats.rows.map((r) => r.title)).toContain('第一章 夜叩');
+    const styled = formatReport('试用', stats);
+    for (const heading of ['## 总览', '## 章尾方式', '## 高频实词', '## 跨章重复的片段']) expect(styled).toContain(heading);
 
     expect(deps.llmResponses, lines.join('\n')).toHaveLength(0);
     expect(result.flows.map((f) => [f.key, f.state, f.error])).toEqual(EVAL_ORDER.map((k) => [k, 'done', null]));

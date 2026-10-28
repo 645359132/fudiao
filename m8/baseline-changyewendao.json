@@ -1,0 +1,2959 @@
+{
+  "chapters": 200,
+  "words": 941425,
+  "chapterWords": {
+    "count": 200,
+    "mean": 4707.125,
+    "sd": 518.5504308888384,
+    "cv": 0.11016287667925503
+  },
+  "titleLengths": {
+    "4": 200
+  },
+  "dialogue": {
+    "overall": 0.12118225031202698,
+    "byVolume": [
+      {
+        "volume": "第1卷 塞上飞雪",
+        "chapters": 20,
+        "ratio": 0.07421370099095217
+      },
+      {
+        "volume": "第2卷 关山飞度",
+        "chapters": 20,
+        "ratio": 0.12286595440026435
+      },
+      {
+        "volume": "第3卷 烟波江南",
+        "chapters": 20,
+        "ratio": 0.14319085034735915
+      },
+      {
+        "volume": "第4卷 怒水惊涛",
+        "chapters": 20,
+        "ratio": 0.17426081419873454
+      },
+      {
+        "volume": "第5卷 中原风云",
+        "chapters": 20,
+        "ratio": 0.15844796666217462
+      },
+      {
+        "volume": "第6卷 夜锁皇都",
+        "chapters": 20,
+        "ratio": 0.1668995054300719
+      },
+      {
+        "volume": "第7卷 血染深宫",
+        "chapters": 20,
+        "ratio": 0.13353872763634397
+      },
+      {
+        "volume": "第8卷 绝域狂沙",
+        "chapters": 20,
+        "ratio": 0.07751904848413606
+      },
+      {
+        "volume": "第9卷 雪岭争锋",
+        "chapters": 20,
+        "ratio": 0.10551850282170819
+      },
+      {
+        "volume": "第10卷 长夜问刀",
+        "chapters": 20,
+        "ratio": 0.04134416778264521
+      }
+    ],
+    "lowest": [
+      {
+        "index": 159,
+        "title": "黑旗插峰",
+        "volume": "第8卷 绝域狂沙",
+        "words": 3977,
+        "dialogueRatio": 0,
+        "sentenceCv": 0.479467278674327,
+        "mtld": 190.21208956500305,
+        "ending": "narration"
+      },
+      {
+        "index": 140,
+        "title": "孤鸿西指",
+        "volume": "第7卷 血染深宫",
+        "words": 5102,
+        "dialogueRatio": 0.0003920031360250882,
+        "sentenceCv": 0.4279087313352474,
+        "mtld": 215.28719559256308,
+        "ending": "narration"
+      },
+      {
+        "index": 141,
+        "title": "塞外沙鸣",
+        "volume": "第8卷 绝域狂沙",
+        "words": 4330,
+        "dialogueRatio": 0.0006928406466512702,
+        "sentenceCv": 0.4701266329677747,
+        "mtld": 187.4106793744745,
+        "ending": "narration"
+      },
+      {
+        "index": 160,
+        "title": "踏雪登天",
+        "volume": "第8卷 绝域狂沙",
+        "words": 4527,
+        "dialogueRatio": 0.0028716589352772255,
+        "sentenceCv": 0.5094781430472238,
+        "mtld": 182.29696578161906,
+        "ending": "narration"
+      },
+      {
+        "index": 124,
+        "title": "玄铁寒牢",
+        "volume": "第7卷 血染深宫",
+        "words": 3381,
+        "dialogueRatio": 0.0029577048210588583,
+        "sentenceCv": 0.48962017747536635,
+        "mtld": 189.2771099575927,
+        "ending": "narration"
+      },
+      {
+        "index": 16,
+        "title": "心魔裂刃",
+        "volume": "第1卷 塞上飞雪",
+        "words": 4444,
+        "dialogueRatio": 0.0033753375337533752,
+        "sentenceCv": 0.5411666446766862,
+        "mtld": 176.57714991714874,
+        "ending": "narration"
+      },
+      {
+        "index": 185,
+        "title": "剑芒裂魄",
+        "volume": "第10卷 长夜问刀",
+        "words": 3815,
+        "dialogueRatio": 0.003669724770642202,
+        "sentenceCv": 0.5338009283364128,
+        "mtld": 187.93117823991236,
+        "ending": "freeze"
+      },
+      {
+        "index": 184,
+        "title": "残垣血战",
+        "volume": "第10卷 长夜问刀",
+        "words": 4573,
+        "dialogueRatio": 0.0039361469494861145,
+        "sentenceCv": 0.5374791022208633,
+        "mtld": 176.31181193142095,
+        "ending": "narration"
+      },
+      {
+        "index": 154,
+        "title": "紫金断芒",
+        "volume": "第8卷 绝域狂沙",
+        "words": 5333,
+        "dialogueRatio": 0.004687792987061692,
+        "sentenceCv": 0.5525007281958508,
+        "mtld": 181.95288292859158,
+        "ending": "freeze"
+      },
+      {
+        "index": 188,
+        "title": "寒泉照影",
+        "volume": "第10卷 长夜问刀",
+        "words": 4878,
+        "dialogueRatio": 0.004920049200492005,
+        "sentenceCv": 0.5000582700898298,
+        "mtld": 193.39939411839163,
+        "ending": "narration"
+      }
+    ]
+  },
+  "sentences": {
+    "count": 28419,
+    "mean": 29.119603082444844,
+    "sd": 14.760526059918885,
+    "cv": 0.5068931062737415
+  },
+  "paragraphs": {
+    "count": 21546,
+    "mean": 43.69372505337417,
+    "sd": 31.273013723336376,
+    "cv": 0.7157323777072051
+  },
+  "mtldMedian": 193.08632571996839,
+  "endings": {
+    "dialogue": 8,
+    "question": 0,
+    "ellipsis": 0,
+    "freeze": 30,
+    "narration": 162,
+    "summary": 0
+  },
+  "terms": [
+    {
+      "term": "断刀",
+      "count": 1404,
+      "chapters": 177,
+      "left": "庄截",
+      "right": "$刃",
+      "perTenThousand": 14.913561887564065
+    },
+    {
+      "term": "发出",
+      "count": 1244,
+      "chapters": 194,
+      "left": "^然",
+      "right": "擂几",
+      "perTenThousand": 13.214010675306051
+    },
+    {
+      "term": "生铁",
+      "count": 1103,
+      "chapters": 176,
+      "left": "块截",
+      "right": "$在",
+      "perTenThousand": 11.716281169503677
+    },
+    {
+      "term": "生生",
+      "count": 885,
+      "chapters": 170,
+      "left": "硬^",
+      "right": "按将",
+      "perTenThousand": 9.400642642802135
+    },
+    {
+      "term": "深处",
+      "count": 863,
+      "chapters": 192,
+      "left": "堂口",
+      "right": "$传",
+      "perTenThousand": 9.166954351116658
+    },
+    {
+      "term": "死死",
+      "count": 792,
+      "chapters": 183,
+      "left": "手面",
+      "right": "拖缠",
+      "perTenThousand": 8.412778500677165
+    },
+    {
+      "term": "皮肉",
+      "count": 632,
+      "chapters": 179,
+      "left": "^进",
+      "right": "冷$",
+      "perTenThousand": 6.7132272884191515
+    },
+    {
+      "term": "右手",
+      "count": 599,
+      "chapters": 180,
+      "left": "^起",
+      "right": "指悬",
+      "perTenThousand": 6.362694850890937
+    },
+    {
+      "term": "声音",
+      "count": 580,
+      "chapters": 169,
+      "left": "^的",
+      "right": "极渐",
+      "perTenThousand": 6.160873144435298
+    },
+    {
+      "term": "掌心",
+      "count": 563,
+      "chapters": 179,
+      "left": "的进",
+      "right": "$贴",
+      "perTenThousand": 5.980295828132884
+    },
+    {
+      "term": "彻底",
+      "count": 556,
+      "chapters": 171,
+      "left": "终^",
+      "right": "湮消",
+      "perTenThousand": 5.905940462596596
+    },
+    {
+      "term": "边缘",
+      "count": 548,
+      "chapters": 176,
+      "left": "台但",
+      "right": "$直",
+      "perTenThousand": 5.820962901983695
+    },
+    {
+      "term": "剧烈",
+      "count": 544,
+      "chapters": 170,
+      "left": "结嗽",
+      "right": "滚起",
+      "perTenThousand": 5.778474121677244
+    },
+    {
+      "term": "目光",
+      "count": 544,
+      "chapters": 163,
+      "left": "^的",
+      "right": "在所",
+      "perTenThousand": 5.778474121677244
+    },
+    {
+      "term": "真气",
+      "count": 529,
+      "chapters": 142,
+      "left": "的在",
+      "right": "依$",
+      "perTenThousand": 5.619141195528056
+    },
+    {
+      "term": "骤然",
+      "count": 477,
+      "chapters": 174,
+      "left": "声芯",
+      "right": "低一",
+      "perTenThousand": 5.0667870515442015
+    },
+    {
+      "term": "瞬间",
+      "count": 461,
+      "chapters": 165,
+      "left": "后风",
+      "right": "勒吞",
+      "perTenThousand": 4.896831930318401
+    },
+    {
+      "term": "身形",
+      "count": 452,
+      "chapters": 154,
+      "left": "的他",
+      "right": "陷单",
+      "perTenThousand": 4.801232174628887
+    },
+    {
+      "term": "风雪",
+      "count": 450,
+      "chapters": 88,
+      "left": "的^",
+      "right": "$撞",
+      "perTenThousand": 4.7799877844756615
+    },
+    {
+      "term": "冰冷",
+      "count": 448,
+      "chapters": 140,
+      "left": "在三",
+      "right": "的视",
+      "perTenThousand": 4.758743394322437
+    },
+    {
+      "term": "原本",
+      "count": 448,
+      "chapters": 161,
+      "left": "了^",
+      "right": "的灰",
+      "perTenThousand": 4.758743394322437
+    },
+    {
+      "term": "露出",
+      "count": 446,
+      "chapters": 171,
+      "left": "^嘴",
+      "right": "一贴",
+      "perTenThousand": 4.737499004169211
+    },
+    {
+      "term": "死士",
+      "count": 440,
+      "chapters": 87,
+      "left": "的南",
+      "right": "$不",
+      "perTenThousand": 4.6737658337095365
+    },
+    {
+      "term": "十年",
+      "count": 436,
+      "chapters": 119,
+      "left": "自整",
+      "right": "前$",
+      "perTenThousand": 4.631277053403085
+    },
+    {
+      "term": "重重",
+      "count": 412,
+      "chapters": 165,
+      "left": "碗靴",
+      "right": "墩踹",
+      "perTenThousand": 4.376344371564384
+    },
+    {
+      "term": "硬生生",
+      "count": 397,
+      "chapters": 161,
+      "left": "它^",
+      "right": "按将",
+      "perTenThousand": 4.217011445415195
+    },
+    {
+      "term": "左手",
+      "count": 394,
+      "chapters": 153,
+      "left": "^的",
+      "right": "探$",
+      "perTenThousand": 4.185144860185357
+    },
+    {
+      "term": "甚至",
+      "count": 372,
+      "chapters": 149,
+      "left": "时处",
+      "right": "连伤",
+      "perTenThousand": 3.9514565684998804
+    },
+    {
+      "term": "猛地",
+      "count": 364,
+      "chapters": 155,
+      "left": "便纸",
+      "right": "颠一",
+      "perTenThousand": 3.86647900788698
+    },
+    {
+      "term": "撕裂",
+      "count": 362,
+      "chapters": 150,
+      "left": "的处",
+      "right": "感开",
+      "perTenThousand": 3.845234617733755
+    },
+    {
+      "term": "指尖",
+      "count": 358,
+      "chapters": 150,
+      "left": "手的",
+      "right": "搭触",
+      "perTenThousand": 3.802745837427304
+    },
+    {
+      "term": "发出一声",
+      "count": 351,
+      "chapters": 163,
+      "left": "然^",
+      "right": "刺闷",
+      "perTenThousand": 3.728390471891016
+    },
+    {
+      "term": "胸口",
+      "count": 349,
+      "chapters": 159,
+      "left": "^住",
+      "right": "深旧",
+      "perTenThousand": 3.707146081737791
+    },
+    {
+      "term": "粗布",
+      "count": 343,
+      "chapters": 145,
+      "left": "的^",
+      "right": "夹衣",
+      "perTenThousand": 3.6434129112781157
+    },
+    {
+      "term": "手指",
+      "count": 339,
+      "chapters": 136,
+      "left": "右的",
+      "right": "尖$",
+      "perTenThousand": 3.600924130971665
+    },
+    {
+      "term": "沉重",
+      "count": 337,
+      "chapters": 139,
+      "left": "三车",
+      "right": "的$",
+      "perTenThousand": 3.57967974081844
+    },
+    {
+      "term": "化作",
+      "count": 332,
+      "chapters": 131,
+      "left": "^星",
+      "right": "冰一",
+      "perTenThousand": 3.526568765435377
+    },
+    {
+      "term": "两侧",
+      "count": 332,
+      "chapters": 132,
+      "left": "车^",
+      "right": "勒贴",
+      "perTenThousand": 3.526568765435377
+    },
+    {
+      "term": "暗红",
+      "count": 329,
+      "chapters": 150,
+      "left": "的^",
+      "right": "$的",
+      "perTenThousand": 3.4947021802055396
+    },
+    {
+      "term": "抬起",
+      "count": 328,
+      "chapters": 148,
+      "left": "^他",
+      "right": "右玉",
+      "perTenThousand": 3.484079985128927
+    }
+  ],
+  "openings": [
+    {
+      "term": "沈孤舟没有",
+      "count": 338,
+      "chapters": 122,
+      "perTenThousand": 3.5903019358950528
+    },
+    {
+      "term": "那是",
+      "count": 313,
+      "chapters": 111,
+      "perTenThousand": 3.3247470589797383
+    },
+    {
+      "term": "他的",
+      "count": 190,
+      "chapters": 67,
+      "perTenThousand": 2.0182170645563904
+    },
+    {
+      "term": "断刀",
+      "count": 145,
+      "chapters": 51,
+      "perTenThousand": 1.5402182861088245
+    },
+    {
+      "term": "十年",
+      "count": 127,
+      "chapters": 46,
+      "perTenThousand": 1.349018774729798
+    },
+    {
+      "term": "没有",
+      "count": 105,
+      "chapters": 43,
+      "perTenThousand": 1.1153304830443211
+    },
+    {
+      "term": "他没",
+      "count": 80,
+      "chapters": 33,
+      "perTenThousand": 0.8497756061290066
+    },
+    {
+      "term": "林啸",
+      "count": 73,
+      "chapters": 8,
+      "perTenThousand": 0.7754202405927185
+    },
+    {
+      "term": "整座",
+      "count": 63,
+      "chapters": 23,
+      "perTenThousand": 0.6691982898265927
+    },
+    {
+      "term": "风雪",
+      "count": 62,
+      "chapters": 26,
+      "perTenThousand": 0.6585760947499801
+    },
+    {
+      "term": "司空",
+      "count": 56,
+      "chapters": 3,
+      "perTenThousand": 0.5948429242903046
+    },
+    {
+      "term": "岳长",
+      "count": 54,
+      "chapters": 5,
+      "perTenThousand": 0.5735985341370794
+    },
+    {
+      "term": "头顶",
+      "count": 52,
+      "chapters": 20,
+      "perTenThousand": 0.5523541439838543
+    },
+    {
+      "term": "照夜",
+      "count": 50,
+      "chapters": 13,
+      "perTenThousand": 0.5311097538306291
+    },
+    {
+      "term": "这一",
+      "count": 49,
+      "chapters": 19,
+      "perTenThousand": 0.5204875587540165
+    },
+    {
+      "term": "原本",
+      "count": 48,
+      "chapters": 19,
+      "perTenThousand": 0.509865363677404
+    },
+    {
+      "term": "然而",
+      "count": 47,
+      "chapters": 19,
+      "perTenThousand": 0.4992431686007914
+    },
+    {
+      "term": "生铁",
+      "count": 45,
+      "chapters": 18,
+      "perTenThousand": 0.47799877844756616
+    },
+    {
+      "term": "他抬",
+      "count": 45,
+      "chapters": 21,
+      "perTenThousand": 0.47799877844756616
+    },
+    {
+      "term": "狂风",
+      "count": 44,
+      "chapters": 16,
+      "perTenThousand": 0.4673765833709536
+    }
+  ],
+  "crossChapter": [
+    {
+      "term": "发出一声",
+      "count": 351,
+      "chapters": 163,
+      "left": "然^",
+      "right": "刺闷",
+      "perTenThousand": 3.728390471891016
+    },
+    {
+      "term": "极阳真气",
+      "count": 289,
+      "chapters": 106,
+      "left": "分的",
+      "right": "$再",
+      "perTenThousand": 3.069814377141036
+    },
+    {
+      "term": "甚至没有",
+      "count": 154,
+      "chapters": 92,
+      "left": "他^",
+      "right": "回第",
+      "perTenThousand": 1.6358180417983377
+    },
+    {
+      "term": "生铁断刀",
+      "count": 269,
+      "chapters": 83,
+      "left": "^的",
+      "right": "的迎",
+      "perTenThousand": 2.8573704756087848
+    },
+    {
+      "term": "剧烈起伏",
+      "count": 87,
+      "chapters": 77,
+      "left": "嗽膛",
+      "right": "了$",
+      "perTenThousand": 0.9241309716652947
+    },
+    {
+      "term": "青黑色的",
+      "count": 162,
+      "chapters": 72,
+      "left": "着道",
+      "right": "狼手",
+      "perTenThousand": 1.7207956024112383
+    },
+    {
+      "term": "目光落在",
+      "count": 89,
+      "chapters": 71,
+      "left": "的^",
+      "right": "那赵",
+      "perTenThousand": 0.9453753618185198
+    },
+    {
+      "term": "密密麻麻",
+      "count": 94,
+      "chapters": 67,
+      "left": "^串",
+      "right": "扎如",
+      "perTenThousand": 0.9984863372015828
+    },
+    {
+      "term": "发出沉闷",
+      "count": 70,
+      "chapters": 64,
+      "left": "^中",
+      "right": "而的",
+      "perTenThousand": 0.7435536553628808
+    },
+    {
+      "term": "发出一阵",
+      "count": 74,
+      "chapters": 63,
+      "left": "处顶",
+      "right": "沉令",
+      "perTenThousand": 0.7860424356693311
+    },
+    {
+      "term": "一声闷响",
+      "count": 73,
+      "chapters": 63,
+      "left": "出的",
+      "right": "$自",
+      "perTenThousand": 0.7754202405927185
+    },
+    {
+      "term": "一声脆响",
+      "count": 72,
+      "chapters": 63,
+      "left": "的吱",
+      "right": "$在",
+      "perTenThousand": 0.7647980455161059
+    },
+    {
+      "term": "纯阳真气",
+      "count": 135,
+      "chapters": 62,
+      "left": "^的",
+      "right": "却灌",
+      "perTenThousand": 1.4339963353426985
+    },
+    {
+      "term": "划出一道",
+      "count": 83,
+      "chapters": 61,
+      "left": "刻上",
+      "right": "血细",
+      "perTenThousand": 0.8816421913588443
+    },
+    {
+      "term": "出沉闷的",
+      "count": 65,
+      "chapters": 60,
+      "left": "发磕",
+      "right": "咚裂",
+      "perTenThousand": 0.6904426799798178
+    },
+    {
+      "term": "死死盯着",
+      "count": 78,
+      "chapters": 59,
+      "left": "却^",
+      "right": "他$",
+      "perTenThousand": 0.8285312159757814
+    },
+    {
+      "term": "没有回头",
+      "count": 67,
+      "chapters": 59,
+      "left": "^至",
+      "right": "$看",
+      "perTenThousand": 0.711687070133043
+    },
+    {
+      "term": "话音未落",
+      "count": 64,
+      "chapters": 59,
+      "left": "^她",
+      "right": "$",
+      "perTenThousand": 0.6798204849032052
+    },
+    {
+      "term": "重重砸在",
+      "count": 68,
+      "chapters": 57,
+      "left": "^膝",
+      "right": "算泥",
+      "perTenThousand": 0.7223092652096555
+    },
+    {
+      "term": "暗红的血",
+      "count": 61,
+      "chapters": 54,
+      "left": "^线",
+      "right": "迹线",
+      "perTenThousand": 0.6479538996733675
+    },
+    {
+      "term": "压得极低",
+      "count": 60,
+      "chapters": 54,
+      "left": "吸音",
+      "right": "$的",
+      "perTenThousand": 0.6373317045967549
+    },
+    {
+      "term": "猎猎作响",
+      "count": 58,
+      "chapters": 54,
+      "left": "^空",
+      "right": "$",
+      "perTenThousand": 0.6160873144435297
+    },
+    {
+      "term": "出刺耳的",
+      "count": 59,
+      "chapters": 53,
+      "left": "擦发",
+      "right": "声钝",
+      "perTenThousand": 0.6267095095201424
+    },
+    {
+      "term": "没有半分",
+      "count": 64,
+      "chapters": 52,
+      "left": "得^",
+      "right": "滞迟",
+      "perTenThousand": 0.6798204849032052
+    },
+    {
+      "term": "垂在身侧",
+      "count": 58,
+      "chapters": 52,
+      "left": "还^",
+      "right": "$的",
+      "perTenThousand": 0.6160873144435297
+    },
+    {
+      "term": "声沉闷的",
+      "count": 57,
+      "chapters": 52,
+      "left": "几一",
+      "right": "脆擦",
+      "perTenThousand": 0.6054651193669172
+    },
+    {
+      "term": "令人牙酸",
+      "count": 52,
+      "chapters": 52,
+      "left": "出阵",
+      "right": "的$",
+      "perTenThousand": 0.5523541439838543
+    },
+    {
+      "term": "人牙酸的",
+      "count": 52,
+      "chapters": 51,
+      "left": "令教",
+      "right": "吱喀",
+      "perTenThousand": 0.5523541439838543
+    },
+    {
+      "term": "一声沉闷",
+      "count": 58,
+      "chapters": 50,
+      "left": "出来",
+      "right": "的至",
+      "perTenThousand": 0.6160873144435297
+    },
+    {
+      "term": "极细微的",
+      "count": 56,
+      "chapters": 48,
+      "left": "声点",
+      "right": "金破",
+      "perTenThousand": 0.5948429242903046
+    },
+    {
+      "term": "声音压得",
+      "count": 53,
+      "chapters": 48,
+      "left": "的^",
+      "right": "极很",
+      "perTenThousand": 0.5629763390604668
+    },
+    {
+      "term": "阳真气在",
+      "count": 47,
+      "chapters": 47,
+      "left": "极纯",
+      "right": "斩几",
+      "perTenThousand": 0.4992431686007914
+    },
+    {
+      "term": "吐出一口",
+      "count": 52,
+      "chapters": 46,
+      "left": "领缓",
+      "right": "浓带",
+      "perTenThousand": 0.5523541439838543
+    },
+    {
+      "term": "没有半点",
+      "count": 51,
+      "chapters": 46,
+      "left": "神得",
+      "right": "波颤",
+      "perTenThousand": 0.5417319489072416
+    },
+    {
+      "term": "头顶上方",
+      "count": 62,
+      "chapters": 45,
+      "left": "^有",
+      "right": "的极",
+      "perTenThousand": 0.6585760947499801
+    },
+    {
+      "term": "泛起一层",
+      "count": 54,
+      "chapters": 45,
+      "left": "心时",
+      "right": "极幽",
+      "perTenThousand": 0.5735985341370794
+    },
+    {
+      "term": "整个人如",
+      "count": 51,
+      "chapters": 45,
+      "left": "^他",
+      "right": "同一",
+      "perTenThousand": 0.5417319489072416
+    },
+    {
+      "term": "被硬生生",
+      "count": 53,
+      "chapters": 44,
+      "left": "人要",
+      "right": "从扯",
+      "perTenThousand": 0.5629763390604668
+    },
+    {
+      "term": "剧烈抽搐",
+      "count": 47,
+      "chapters": 44,
+      "left": "伤然",
+      "right": "$了",
+      "perTenThousand": 0.4992431686007914
+    },
+    {
+      "term": "喉咙深处",
+      "count": 44,
+      "chapters": 44,
+      "left": "得^",
+      "right": "一挤",
+      "perTenThousand": 0.4673765833709536
+    }
+  ],
+  "rows": [
+    {
+      "index": 1,
+      "title": "塞北残灯",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4198,
+      "dialogueRatio": 0.09623630300142925,
+      "sentenceCv": 0.475761334671705,
+      "mtld": 177.98829978441012,
+      "ending": "narration"
+    },
+    {
+      "index": 2,
+      "title": "古玉冷痕",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4854,
+      "dialogueRatio": 0.009476720230737536,
+      "sentenceCv": 0.4451342757072344,
+      "mtld": 162.35560239728173,
+      "ending": "narration"
+    },
+    {
+      "index": 3,
+      "title": "恶客临门",
+      "volume": "第1卷 塞上飞雪",
+      "words": 5284,
+      "dialogueRatio": 0.11336109008327025,
+      "sentenceCv": 0.46871225032674085,
+      "mtld": 178.95373389893217,
+      "ending": "dialogue"
+    },
+    {
+      "index": 4,
+      "title": "残刀夜奔",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4755,
+      "dialogueRatio": 0.03722397476340694,
+      "sentenceCv": 0.513842446282918,
+      "mtld": 180.50017354873142,
+      "ending": "narration"
+    },
+    {
+      "index": 5,
+      "title": "血溅算盘",
+      "volume": "第1卷 塞上飞雪",
+      "words": 5033,
+      "dialogueRatio": 0.11166302404132725,
+      "sentenceCv": 0.5321506774281833,
+      "mtld": 173.42660231934175,
+      "ending": "narration"
+    },
+    {
+      "index": 6,
+      "title": "古谱焦痕",
+      "volume": "第1卷 塞上飞雪",
+      "words": 5191,
+      "dialogueRatio": 0.1473704488537854,
+      "sentenceCv": 0.4716095270240967,
+      "mtld": 185.9883309054424,
+      "ending": "narration"
+    },
+    {
+      "index": 7,
+      "title": "铜匣行商",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4420,
+      "dialogueRatio": 0.16990950226244345,
+      "sentenceCv": 0.4534085938138837,
+      "mtld": 178.98774209501784,
+      "ending": "narration"
+    },
+    {
+      "index": 8,
+      "title": "铁骑合围",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4329,
+      "dialogueRatio": 0.08061908061908062,
+      "sentenceCv": 0.49282893234534514,
+      "mtld": 199.2056824905453,
+      "ending": "narration"
+    },
+    {
+      "index": 9,
+      "title": "红蝎横刀",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4804,
+      "dialogueRatio": 0.01144879267277269,
+      "sentenceCv": 0.5363517516062627,
+      "mtld": 190.23456718544966,
+      "ending": "freeze"
+    },
+    {
+      "index": 10,
+      "title": "暗影寒药",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4816,
+      "dialogueRatio": 0.06872923588039867,
+      "sentenceCv": 0.4742353840520082,
+      "mtld": 174.6990530894853,
+      "ending": "freeze"
+    },
+    {
+      "index": 11,
+      "title": "锈刀启封",
+      "volume": "第1卷 塞上飞雪",
+      "words": 3908,
+      "dialogueRatio": 0.042221084953940634,
+      "sentenceCv": 0.47204689527186855,
+      "mtld": 165.139953733811,
+      "ending": "narration"
+    },
+    {
+      "index": 12,
+      "title": "烈焰生门",
+      "volume": "第1卷 塞上飞雪",
+      "words": 3935,
+      "dialogueRatio": 0.149428208386277,
+      "sentenceCv": 0.51163667625143,
+      "mtld": 203.2338206497081,
+      "ending": "narration"
+    },
+    {
+      "index": 13,
+      "title": "一刀断风",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4570,
+      "dialogueRatio": 0.007439824945295405,
+      "sentenceCv": 0.5138691692447833,
+      "mtld": 203.38505533229704,
+      "ending": "narration"
+    },
+    {
+      "index": 14,
+      "title": "沙海惊澜",
+      "volume": "第1卷 塞上飞雪",
+      "words": 5172,
+      "dialogueRatio": 0.03480278422273782,
+      "sentenceCv": 0.49119570095206816,
+      "mtld": 180.76287625340808,
+      "ending": "narration"
+    },
+    {
+      "index": 15,
+      "title": "重铠喋血",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4129,
+      "dialogueRatio": 0.03705497699200775,
+      "sentenceCv": 0.5065180053055922,
+      "mtld": 175.20402006079073,
+      "ending": "narration"
+    },
+    {
+      "index": 16,
+      "title": "心魔裂刃",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4444,
+      "dialogueRatio": 0.0033753375337533752,
+      "sentenceCv": 0.5411666446766862,
+      "mtld": 176.57714991714874,
+      "ending": "narration"
+    },
+    {
+      "index": 17,
+      "title": "烽火尽焚",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4598,
+      "dialogueRatio": 0.009351892127011744,
+      "sentenceCv": 0.4984780087784972,
+      "mtld": 188.48684202810085,
+      "ending": "narration"
+    },
+    {
+      "index": 18,
+      "title": "荒原行囊",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4672,
+      "dialogueRatio": 0.2880993150684932,
+      "sentenceCv": 0.461929903645976,
+      "mtld": 201.2224913976551,
+      "ending": "narration"
+    },
+    {
+      "index": 19,
+      "title": "关山残雪",
+      "volume": "第1卷 塞上飞雪",
+      "words": 5043,
+      "dialogueRatio": 0.05552250644457664,
+      "sentenceCv": 0.47243478466890265,
+      "mtld": 206.16778437054933,
+      "ending": "narration"
+    },
+    {
+      "index": 20,
+      "title": "惊鸿度关",
+      "volume": "第1卷 塞上飞雪",
+      "words": 4685,
+      "dialogueRatio": 0.010032017075773746,
+      "sentenceCv": 0.49841975513526043,
+      "mtld": 182.07293545534924,
+      "ending": "freeze"
+    },
+    {
+      "index": 21,
+      "title": "黄沙尽处",
+      "volume": "第2卷 关山飞度",
+      "words": 4679,
+      "dialogueRatio": 0.11733276341098525,
+      "sentenceCv": 0.4301192279909921,
+      "mtld": 196.08354028506156,
+      "ending": "narration"
+    },
+    {
+      "index": 22,
+      "title": "风陵古驿",
+      "volume": "第2卷 关山飞度",
+      "words": 4418,
+      "dialogueRatio": 0.1738343141693074,
+      "sentenceCv": 0.45135021887533633,
+      "mtld": 224.42882975146676,
+      "ending": "narration"
+    },
+    {
+      "index": 23,
+      "title": "客栈试金",
+      "volume": "第2卷 关山飞度",
+      "words": 4389,
+      "dialogueRatio": 0.049441786283891544,
+      "sentenceCv": 0.4787946971711538,
+      "mtld": 188.51454633520638,
+      "ending": "narration"
+    },
+    {
+      "index": 24,
+      "title": "雨夜兼程",
+      "volume": "第2卷 关山飞度",
+      "words": 4486,
+      "dialogueRatio": 0.26749888542131073,
+      "sentenceCv": 0.4260459959823812,
+      "mtld": 193.0467186554143,
+      "ending": "narration"
+    },
+    {
+      "index": 25,
+      "title": "泥泞血辙",
+      "volume": "第2卷 关山飞度",
+      "words": 4856,
+      "dialogueRatio": 0.08669686985172982,
+      "sentenceCv": 0.4931587635392907,
+      "mtld": 168.5715814688344,
+      "ending": "narration"
+    },
+    {
+      "index": 26,
+      "title": "渭水渡口",
+      "volume": "第2卷 关山飞度",
+      "words": 5249,
+      "dialogueRatio": 0.16955610592493808,
+      "sentenceCv": 0.434729649802212,
+      "mtld": 202.7342046276034,
+      "ending": "narration"
+    },
+    {
+      "index": 27,
+      "title": "船舱机锋",
+      "volume": "第2卷 关山飞度",
+      "words": 4948,
+      "dialogueRatio": 0.2493936944219887,
+      "sentenceCv": 0.4407675525719453,
+      "mtld": 196.60052412831317,
+      "ending": "narration"
+    },
+    {
+      "index": 28,
+      "title": "古城暗潮",
+      "volume": "第2卷 关山飞度",
+      "words": 4886,
+      "dialogueRatio": 0.012893982808022923,
+      "sentenceCv": 0.5130947828590168,
+      "mtld": 196.69191979567006,
+      "ending": "narration"
+    },
+    {
+      "index": 29,
+      "title": "鹰犬嗅痕",
+      "volume": "第2卷 关山飞度",
+      "words": 3997,
+      "dialogueRatio": 0.030522892169126844,
+      "sentenceCv": 0.44022841483944436,
+      "mtld": 189.87251026129366,
+      "ending": "narration"
+    },
+    {
+      "index": 30,
+      "title": "指血惊疑",
+      "volume": "第2卷 关山飞度",
+      "words": 4837,
+      "dialogueRatio": 0.2075666735579905,
+      "sentenceCv": 0.4923577343678525,
+      "mtld": 202.32003382050266,
+      "ending": "narration"
+    },
+    {
+      "index": 31,
+      "title": "关城夜影",
+      "volume": "第2卷 关山飞度",
+      "words": 4747,
+      "dialogueRatio": 0.27259321676848536,
+      "sentenceCv": 0.5314808951482504,
+      "mtld": 241.5706469772505,
+      "ending": "narration"
+    },
+    {
+      "index": 32,
+      "title": "烽燧燃雪",
+      "volume": "第2卷 关山飞度",
+      "words": 4941,
+      "dialogueRatio": 0.03319166160696215,
+      "sentenceCv": 0.539855126361275,
+      "mtld": 184.53339929927645,
+      "ending": "narration"
+    },
+    {
+      "index": 33,
+      "title": "破关断索",
+      "volume": "第2卷 关山飞度",
+      "words": 4186,
+      "dialogueRatio": 0.06497849976110846,
+      "sentenceCv": 0.5104409456727313,
+      "mtld": 166.8424931858164,
+      "ending": "narration"
+    },
+    {
+      "index": 34,
+      "title": "机弩开道",
+      "volume": "第2卷 关山飞度",
+      "words": 4848,
+      "dialogueRatio": 0.07281353135313531,
+      "sentenceCv": 0.48225015897479,
+      "mtld": 197.42672611683724,
+      "ending": "narration"
+    },
+    {
+      "index": 35,
+      "title": "秦川古道",
+      "volume": "第2卷 关山飞度",
+      "words": 4086,
+      "dialogueRatio": 0.13240332843857072,
+      "sentenceCv": 0.5538440599414862,
+      "mtld": 205.66743762032613,
+      "ending": "freeze"
+    },
+    {
+      "index": 36,
+      "title": "幽谷迷雾",
+      "volume": "第2卷 关山飞度",
+      "words": 4058,
+      "dialogueRatio": 0.16683095120749136,
+      "sentenceCv": 0.48085031102528697,
+      "mtld": 183.35377816406265,
+      "ending": "narration"
+    },
+    {
+      "index": 37,
+      "title": "连环杀机",
+      "volume": "第2卷 关山飞度",
+      "words": 4238,
+      "dialogueRatio": 0.009674374705049551,
+      "sentenceCv": 0.5500919747020423,
+      "mtld": 184.34653404771507,
+      "ending": "narration"
+    },
+    {
+      "index": 38,
+      "title": "铁网惊魂",
+      "volume": "第2卷 关山飞度",
+      "words": 4192,
+      "dialogueRatio": 0.0057251908396946565,
+      "sentenceCv": 0.5131640894580584,
+      "mtld": 205.60316990480544,
+      "ending": "freeze"
+    },
+    {
+      "index": 39,
+      "title": "残刃断水",
+      "volume": "第2卷 关山飞度",
+      "words": 4558,
+      "dialogueRatio": 0.025669153137340937,
+      "sentenceCv": 0.4642538707311512,
+      "mtld": 176.84352915096432,
+      "ending": "narration"
+    },
+    {
+      "index": 40,
+      "title": "南向孤舟",
+      "volume": "第2卷 关山飞度",
+      "words": 4191,
+      "dialogueRatio": 0.28728227153424,
+      "sentenceCv": 0.48994158012585154,
+      "mtld": 185.4900934592194,
+      "ending": "narration"
+    },
+    {
+      "index": 41,
+      "title": "枫桥夜泊",
+      "volume": "第3卷 烟波江南",
+      "words": 5006,
+      "dialogueRatio": 0.14083100279664404,
+      "sentenceCv": 0.4844474328078918,
+      "mtld": 176.8468260683163,
+      "ending": "narration"
+    },
+    {
+      "index": 42,
+      "title": "暗巷问契",
+      "volume": "第3卷 烟波江南",
+      "words": 4560,
+      "dialogueRatio": 0.36776315789473685,
+      "sentenceCv": 0.5057835095202868,
+      "mtld": 195.95610552903048,
+      "ending": "narration"
+    },
+    {
+      "index": 43,
+      "title": "青石喋血",
+      "volume": "第3卷 烟波江南",
+      "words": 4361,
+      "dialogueRatio": 0.07131391882595735,
+      "sentenceCv": 0.4749759939064077,
+      "mtld": 164.87390322210757,
+      "ending": "narration"
+    },
+    {
+      "index": 44,
+      "title": "画舫机锋",
+      "volume": "第3卷 烟波江南",
+      "words": 5909,
+      "dialogueRatio": 0.18446437637502117,
+      "sentenceCv": 0.4855644411358014,
+      "mtld": 200.90205939452113,
+      "ending": "freeze"
+    },
+    {
+      "index": 45,
+      "title": "水市迷雾",
+      "volume": "第3卷 烟波江南",
+      "words": 4520,
+      "dialogueRatio": 0.04247787610619469,
+      "sentenceCv": 0.47856662332732597,
+      "mtld": 184.7915943370752,
+      "ending": "freeze"
+    },
+    {
+      "index": 46,
+      "title": "弃舟寻踪",
+      "volume": "第3卷 烟波江南",
+      "words": 5083,
+      "dialogueRatio": 0.0973834349793429,
+      "sentenceCv": 0.4934662092592362,
+      "mtld": 183.25641282069503,
+      "ending": "freeze"
+    },
+    {
+      "index": 47,
+      "title": "孤女鸣冤",
+      "volume": "第3卷 烟波江南",
+      "words": 5226,
+      "dialogueRatio": 0.21373899732108687,
+      "sentenceCv": 0.4803002306184797,
+      "mtld": 184.71382821042204,
+      "ending": "freeze"
+    },
+    {
+      "index": 48,
+      "title": "暗渠潜流",
+      "volume": "第3卷 烟波江南",
+      "words": 5971,
+      "dialogueRatio": 0.05041031652989449,
+      "sentenceCv": 0.4522295541013351,
+      "mtld": 157.68651034426142,
+      "ending": "freeze"
+    },
+    {
+      "index": 49,
+      "title": "血洗水牢",
+      "volume": "第3卷 烟波江南",
+      "words": 4821,
+      "dialogueRatio": 0.026757934038581208,
+      "sentenceCv": 0.5067909006940777,
+      "mtld": 170.6582483319273,
+      "ending": "narration"
+    },
+    {
+      "index": 50,
+      "title": "残玉断仇",
+      "volume": "第3卷 烟波江南",
+      "words": 3780,
+      "dialogueRatio": 0.012433862433862434,
+      "sentenceCv": 0.5199163549199665,
+      "mtld": 167.33189300436686,
+      "ending": "narration"
+    },
+    {
+      "index": 51,
+      "title": "破水突围",
+      "volume": "第3卷 烟波江南",
+      "words": 5343,
+      "dialogueRatio": 0.1070559610705596,
+      "sentenceCv": 0.5032270137740065,
+      "mtld": 162.0739925642087,
+      "ending": "narration"
+    },
+    {
+      "index": 52,
+      "title": "寒庐夜话",
+      "volume": "第3卷 烟波江南",
+      "words": 4757,
+      "dialogueRatio": 0.29871767920958586,
+      "sentenceCv": 0.5224738453004658,
+      "mtld": 198.19478145529163,
+      "ending": "narration"
+    },
+    {
+      "index": 53,
+      "title": "名门假面",
+      "volume": "第3卷 烟波江南",
+      "words": 5270,
+      "dialogueRatio": 0.3364326375711575,
+      "sentenceCv": 0.44027421181237913,
+      "mtld": 211.2951151642054,
+      "ending": "narration"
+    },
+    {
+      "index": 54,
+      "title": "雨幕交锋",
+      "volume": "第3卷 烟波江南",
+      "words": 4480,
+      "dialogueRatio": 0.09866071428571428,
+      "sentenceCv": 0.5216694811348996,
+      "mtld": 207.66160785660745,
+      "ending": "narration"
+    },
+    {
+      "index": 55,
+      "title": "请帖如刀",
+      "volume": "第3卷 烟波江南",
+      "words": 5034,
+      "dialogueRatio": 0.2665872069924513,
+      "sentenceCv": 0.524660122540934,
+      "mtld": 198.27692631374327,
+      "ending": "narration"
+    },
+    {
+      "index": 56,
+      "title": "横刀入局",
+      "volume": "第3卷 烟波江南",
+      "words": 5392,
+      "dialogueRatio": 0.10589762611275964,
+      "sentenceCv": 0.5349063335619605,
+      "mtld": 173.31375280194084,
+      "ending": "narration"
+    },
+    {
+      "index": 57,
+      "title": "望湖高会",
+      "volume": "第3卷 烟波江南",
+      "words": 4410,
+      "dialogueRatio": 0.1510204081632653,
+      "sentenceCv": 0.533538066117312,
+      "mtld": 195.77927254232222,
+      "ending": "narration"
+    },
+    {
+      "index": 58,
+      "title": "假面撕裂",
+      "volume": "第3卷 烟波江南",
+      "words": 5231,
+      "dialogueRatio": 0.22443127509080482,
+      "sentenceCv": 0.4608107040808174,
+      "mtld": 234.75842436258182,
+      "ending": "freeze"
+    },
+    {
+      "index": 59,
+      "title": "金刚授首",
+      "volume": "第3卷 烟波江南",
+      "words": 5114,
+      "dialogueRatio": 0.009777082518576457,
+      "sentenceCv": 0.5912888150538733,
+      "mtld": 199.79184993735709,
+      "ending": "narration"
+    },
+    {
+      "index": 60,
+      "title": "太湖锁江",
+      "volume": "第3卷 烟波江南",
+      "words": 4621,
+      "dialogueRatio": 0.018394286950876432,
+      "sentenceCv": 0.5307484624847895,
+      "mtld": 191.4775355860064,
+      "ending": "freeze"
+    },
+    {
+      "index": 61,
+      "title": "烟锁寒波",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4673,
+      "dialogueRatio": 0.09544190027819388,
+      "sentenceCv": 0.4578465921466573,
+      "mtld": 176.30959378385012,
+      "ending": "narration"
+    },
+    {
+      "index": 62,
+      "title": "芦荡燃骨",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5376,
+      "dialogueRatio": 0.15680803571428573,
+      "sentenceCv": 0.5595766293168049,
+      "mtld": 175.45730602495036,
+      "ending": "narration"
+    },
+    {
+      "index": 63,
+      "title": "暗窟停舟",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5162,
+      "dialogueRatio": 0.4308407593955831,
+      "sentenceCv": 0.4252206272948891,
+      "mtld": 165.3386582614811,
+      "ending": "freeze"
+    },
+    {
+      "index": 64,
+      "title": "艄夫鸣冤",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5323,
+      "dialogueRatio": 0.3261318805185046,
+      "sentenceCv": 0.40420012708779324,
+      "mtld": 176.84607331891493,
+      "ending": "narration"
+    },
+    {
+      "index": 65,
+      "title": "暗礁喋血",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5621,
+      "dialogueRatio": 0.13325031133250312,
+      "sentenceCv": 0.47835911260018277,
+      "mtld": 170.51940604051856,
+      "ending": "freeze"
+    },
+    {
+      "index": 66,
+      "title": "官船过境",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5037,
+      "dialogueRatio": 0.15167758586460195,
+      "sentenceCv": 0.4774251684411084,
+      "mtld": 206.73110496786143,
+      "ending": "dialogue"
+    },
+    {
+      "index": 67,
+      "title": "水底重锁",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4978,
+      "dialogueRatio": 0.0295299316994777,
+      "sentenceCv": 0.5009520123207816,
+      "mtld": 164.9118483676889,
+      "ending": "narration"
+    },
+    {
+      "index": 68,
+      "title": "玄铁罪证",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5208,
+      "dialogueRatio": 0.33448540706605223,
+      "sentenceCv": 0.5029834020840657,
+      "mtld": 187.88453714510612,
+      "ending": "dialogue"
+    },
+    {
+      "index": 69,
+      "title": "暗夜播火",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5557,
+      "dialogueRatio": 0.3505488572971028,
+      "sentenceCv": 0.48874412490168556,
+      "mtld": 160.17734695587126,
+      "ending": "freeze"
+    },
+    {
+      "index": 70,
+      "title": "龙骨覆铁",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5287,
+      "dialogueRatio": 0.018725174957442785,
+      "sentenceCv": 0.5033885116873066,
+      "mtld": 169.4568026065118,
+      "ending": "narration"
+    },
+    {
+      "index": 71,
+      "title": "残灯续命",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5579,
+      "dialogueRatio": 0.21813945151460834,
+      "sentenceCv": 0.4979405260253086,
+      "mtld": 175.77760142926985,
+      "ending": "narration"
+    },
+    {
+      "index": 72,
+      "title": "孤舟巡风",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4307,
+      "dialogueRatio": 0.4390527048990016,
+      "sentenceCv": 0.44656472107349837,
+      "mtld": 191.93938123250308,
+      "ending": "dialogue"
+    },
+    {
+      "index": 73,
+      "title": "蓄势惊雷",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4758,
+      "dialogueRatio": 0.20365699873896595,
+      "sentenceCv": 0.47136824430152974,
+      "mtld": 167.9165759030837,
+      "ending": "narration"
+    },
+    {
+      "index": 74,
+      "title": "怒涛行舟",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4965,
+      "dialogueRatio": 0.075730110775428,
+      "sentenceCv": 0.48906533725859164,
+      "mtld": 177.91595754438174,
+      "ending": "narration"
+    },
+    {
+      "index": 75,
+      "title": "困兽铁网",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5493,
+      "dialogueRatio": 0.012561441835062807,
+      "sentenceCv": 0.5679155610742048,
+      "mtld": 159.191614629407,
+      "ending": "freeze"
+    },
+    {
+      "index": 76,
+      "title": "赤火连环",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4308,
+      "dialogueRatio": 0.009285051067780872,
+      "sentenceCv": 0.5364736195997648,
+      "mtld": 169.00509624752243,
+      "ending": "narration"
+    },
+    {
+      "index": 77,
+      "title": "血甲登天",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5128,
+      "dialogueRatio": 0.0436817472698908,
+      "sentenceCv": 0.4994786301052048,
+      "mtld": 181.34936860367412,
+      "ending": "freeze"
+    },
+    {
+      "index": 78,
+      "title": "断刃分水",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4050,
+      "dialogueRatio": 0.03876543209876543,
+      "sentenceCv": 0.5363244688193504,
+      "mtld": 172.6398974600569,
+      "ending": "narration"
+    },
+    {
+      "index": 79,
+      "title": "恶犬哀鸣",
+      "volume": "第4卷 怒水惊涛",
+      "words": 4323,
+      "dialogueRatio": 0.1667823270876706,
+      "sentenceCv": 0.4533736103371259,
+      "mtld": 187.6790871152396,
+      "ending": "narration"
+    },
+    {
+      "index": 80,
+      "title": "惊涛北望",
+      "volume": "第4卷 怒水惊涛",
+      "words": 5383,
+      "dialogueRatio": 0.21437859929407393,
+      "sentenceCv": 0.47355358164909633,
+      "mtld": 204.1689631236977,
+      "ending": "freeze"
+    },
+    {
+      "index": 81,
+      "title": "中原鸣镝",
+      "volume": "第5卷 中原风云",
+      "words": 5449,
+      "dialogueRatio": 0.13708937419710038,
+      "sentenceCv": 0.4783204840433633,
+      "mtld": 206.07910332109216,
+      "ending": "narration"
+    },
+    {
+      "index": 82,
+      "title": "洛阳暗潮",
+      "volume": "第5卷 中原风云",
+      "words": 5311,
+      "dialogueRatio": 0.09056674825833176,
+      "sentenceCv": 0.47608739545033435,
+      "mtld": 192.66351468246177,
+      "ending": "narration"
+    },
+    {
+      "index": 83,
+      "title": "雀楼夜话",
+      "volume": "第5卷 中原风云",
+      "words": 4235,
+      "dialogueRatio": 0.4753246753246753,
+      "sentenceCv": 0.5287957944255897,
+      "mtld": 195.0727734327077,
+      "ending": "freeze"
+    },
+    {
+      "index": 84,
+      "title": "长街断法",
+      "volume": "第5卷 中原风云",
+      "words": 4967,
+      "dialogueRatio": 0.22105898932957518,
+      "sentenceCv": 0.48779106425008983,
+      "mtld": 197.75328364708247,
+      "ending": "narration"
+    },
+    {
+      "index": 85,
+      "title": "伊阙围杀",
+      "volume": "第5卷 中原风云",
+      "words": 5076,
+      "dialogueRatio": 0.059495665878644605,
+      "sentenceCv": 0.4979072151230656,
+      "mtld": 185.44135405325153,
+      "ending": "narration"
+    },
+    {
+      "index": 86,
+      "title": "荒寺调息",
+      "volume": "第5卷 中原风云",
+      "words": 4899,
+      "dialogueRatio": 0.30455194937742397,
+      "sentenceCv": 0.5224608620896527,
+      "mtld": 210.93961460530159,
+      "ending": "narration"
+    },
+    {
+      "index": 87,
+      "title": "少室夜潜",
+      "volume": "第5卷 中原风云",
+      "words": 4557,
+      "dialogueRatio": 0.04696071977177968,
+      "sentenceCv": 0.4614507453838412,
+      "mtld": 194.784046032022,
+      "ending": "narration"
+    },
+    {
+      "index": 88,
+      "title": "经阁鸣金",
+      "volume": "第5卷 中原风云",
+      "words": 4358,
+      "dialogueRatio": 0.019963285910968333,
+      "sentenceCv": 0.49191195806245025,
+      "mtld": 204.43877935309223,
+      "ending": "narration"
+    },
+    {
+      "index": 89,
+      "title": "雪刃分崖",
+      "volume": "第5卷 中原风云",
+      "words": 4713,
+      "dialogueRatio": 0.0120942075111394,
+      "sentenceCv": 0.5041242676801875,
+      "mtld": 176.38697910774448,
+      "ending": "narration"
+    },
+    {
+      "index": 90,
+      "title": "幽谷惊疑",
+      "volume": "第5卷 中原风云",
+      "words": 4444,
+      "dialogueRatio": 0.09765976597659766,
+      "sentenceCv": 0.5108812197068171,
+      "mtld": 204.62132722041366,
+      "ending": "narration"
+    },
+    {
+      "index": 91,
+      "title": "遗孤赴会",
+      "volume": "第5卷 中原风云",
+      "words": 4784,
+      "dialogueRatio": 0.23683110367892976,
+      "sentenceCv": 0.5250535542696029,
+      "mtld": 156.6636185267144,
+      "ending": "narration"
+    },
+    {
+      "index": 92,
+      "title": "火映蟠龙",
+      "volume": "第5卷 中原风云",
+      "words": 4453,
+      "dialogueRatio": 0.09858522344486863,
+      "sentenceCv": 0.47446004158047766,
+      "mtld": 196.4310238472906,
+      "ending": "narration"
+    },
+    {
+      "index": 93,
+      "title": "道心碎裂",
+      "volume": "第5卷 中原风云",
+      "words": 4236,
+      "dialogueRatio": 0.09348441926345609,
+      "sentenceCv": 0.5619768738368427,
+      "mtld": 175.0614856666577,
+      "ending": "narration"
+    },
+    {
+      "index": 94,
+      "title": "断刃无愧",
+      "volume": "第5卷 中原风云",
+      "words": 4447,
+      "dialogueRatio": 0.3217899707668091,
+      "sentenceCv": 0.49127392312667406,
+      "mtld": 186.2228638073462,
+      "ending": "narration"
+    },
+    {
+      "index": 95,
+      "title": "金顶大会",
+      "volume": "第5卷 中原风云",
+      "words": 5107,
+      "dialogueRatio": 0.24143332680634425,
+      "sentenceCv": 0.4505313412270202,
+      "mtld": 244.48184447950803,
+      "ending": "dialogue"
+    },
+    {
+      "index": 96,
+      "title": "阶前拾阶",
+      "volume": "第5卷 中原风云",
+      "words": 4649,
+      "dialogueRatio": 0.03914820391482039,
+      "sentenceCv": 0.5894283529461022,
+      "mtld": 224.5099891638311,
+      "ending": "freeze"
+    },
+    {
+      "index": 97,
+      "title": "铁证诛心",
+      "volume": "第5卷 中原风云",
+      "words": 5212,
+      "dialogueRatio": 0.23445894090560246,
+      "sentenceCv": 0.4357219082416276,
+      "mtld": 206.1078763152691,
+      "ending": "narration"
+    },
+    {
+      "index": 98,
+      "title": "逆血狂澜",
+      "volume": "第5卷 中原风云",
+      "words": 5079,
+      "dialogueRatio": 0.2368576491435322,
+      "sentenceCv": 0.4951520155184801,
+      "mtld": 208.69146797892984,
+      "ending": "narration"
+    },
+    {
+      "index": 99,
+      "title": "断刀染巅",
+      "volume": "第5卷 中原风云",
+      "words": 5047,
+      "dialogueRatio": 0.04339211412720428,
+      "sentenceCv": 0.5324136988118012,
+      "mtld": 183.07453128174558,
+      "ending": "narration"
+    },
+    {
+      "index": 100,
+      "title": "夜眺京华",
+      "volume": "第5卷 中原风云",
+      "words": 5444,
+      "dialogueRatio": 0.165686994856723,
+      "sentenceCv": 0.4804384042615615,
+      "mtld": 233.99336907517332,
+      "ending": "narration"
+    },
+    {
+      "index": 101,
+      "title": "混迹朱雀",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5084,
+      "dialogueRatio": 0.10129819040125886,
+      "sentenceCv": 0.47361417379444654,
+      "mtld": 219.1622654489513,
+      "ending": "narration"
+    },
+    {
+      "index": 102,
+      "title": "雨落寒巢",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4652,
+      "dialogueRatio": 0.3693035253654342,
+      "sentenceCv": 0.4482162707023026,
+      "mtld": 203.62132397023268,
+      "ending": "narration"
+    },
+    {
+      "index": 103,
+      "title": "地煞浮影",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5020,
+      "dialogueRatio": 0.3645418326693227,
+      "sentenceCv": 0.47968487738121496,
+      "mtld": 227.12696886911152,
+      "ending": "narration"
+    },
+    {
+      "index": 104,
+      "title": "长街巡夜",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5078,
+      "dialogueRatio": 0.09472233162662466,
+      "sentenceCv": 0.5590310116784873,
+      "mtld": 190.50986946340106,
+      "ending": "freeze"
+    },
+    {
+      "index": 105,
+      "title": "黑市伏杀",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4763,
+      "dialogueRatio": 0.022044929666176778,
+      "sentenceCv": 0.5726638230799876,
+      "mtld": 182.2631670860635,
+      "ending": "narration"
+    },
+    {
+      "index": 106,
+      "title": "铁胆空悬",
+      "volume": "第6卷 夜锁皇都",
+      "words": 6299,
+      "dialogueRatio": 0.1627242419431656,
+      "sentenceCv": 0.5123058745735579,
+      "mtld": 208.94745662760158,
+      "ending": "narration"
+    },
+    {
+      "index": 107,
+      "title": "帘内寒星",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4492,
+      "dialogueRatio": 0.39158504007123773,
+      "sentenceCv": 0.5365199310404779,
+      "mtld": 221.57163718335687,
+      "ending": "narration"
+    },
+    {
+      "index": 108,
+      "title": "古刹问律",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4513,
+      "dialogueRatio": 0.24196764901395967,
+      "sentenceCv": 0.4872151507008284,
+      "mtld": 205.6994755224544,
+      "ending": "narration"
+    },
+    {
+      "index": 109,
+      "title": "月魄凝霜",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4092,
+      "dialogueRatio": 0.016373411534701857,
+      "sentenceCv": 0.5095617044738107,
+      "mtld": 205.68038949714176,
+      "ending": "narration"
+    },
+    {
+      "index": 110,
+      "title": "残渊空桩",
+      "volume": "第6卷 夜锁皇都",
+      "words": 3970,
+      "dialogueRatio": 0.09622166246851385,
+      "sentenceCv": 0.447149081590692,
+      "mtld": 180.09399927759375,
+      "ending": "freeze"
+    },
+    {
+      "index": 111,
+      "title": "透骨阴锋",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4710,
+      "dialogueRatio": 0.027176220806794056,
+      "sentenceCv": 0.45879877208230146,
+      "mtld": 175.6451354670545,
+      "ending": "freeze"
+    },
+    {
+      "index": 112,
+      "title": "寒水残命",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5561,
+      "dialogueRatio": 0.02229814781514116,
+      "sentenceCv": 0.4848766699658731,
+      "mtld": 195.18486836082053,
+      "ending": "narration"
+    },
+    {
+      "index": 113,
+      "title": "犬牙四合",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5321,
+      "dialogueRatio": 0.16895320428490884,
+      "sentenceCv": 0.5212520026293765,
+      "mtld": 206.6126181490694,
+      "ending": "narration"
+    },
+    {
+      "index": 114,
+      "title": "绝境逢生",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4745,
+      "dialogueRatio": 0.32054794520547947,
+      "sentenceCv": 0.4625683065991948,
+      "mtld": 206.73147622610355,
+      "ending": "narration"
+    },
+    {
+      "index": 115,
+      "title": "铁锁悬首",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4858,
+      "dialogueRatio": 0.21449156031288596,
+      "sentenceCv": 0.47712044728185626,
+      "mtld": 238.47352941176473,
+      "ending": "narration"
+    },
+    {
+      "index": 116,
+      "title": "残刃凝心",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4517,
+      "dialogueRatio": 0.17378791233119326,
+      "sentenceCv": 0.5605132790971357,
+      "mtld": 164.15276183597726,
+      "ending": "narration"
+    },
+    {
+      "index": 117,
+      "title": "雷动前夕",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5682,
+      "dialogueRatio": 0.37011615628299893,
+      "sentenceCv": 0.45941356869525424,
+      "mtld": 210.6009136309266,
+      "ending": "narration"
+    },
+    {
+      "index": 118,
+      "title": "刑场断枷",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5277,
+      "dialogueRatio": 0.07314762175478491,
+      "sentenceCv": 0.5289084013764094,
+      "mtld": 209.47122631960042,
+      "ending": "narration"
+    },
+    {
+      "index": 119,
+      "title": "铁蹄碎浪",
+      "volume": "第6卷 夜锁皇都",
+      "words": 4368,
+      "dialogueRatio": 0.017857142857142856,
+      "sentenceCv": 0.4915243290740454,
+      "mtld": 221.8308940024524,
+      "ending": "freeze"
+    },
+    {
+      "index": 120,
+      "title": "夜锁皇都",
+      "volume": "第6卷 夜锁皇都",
+      "words": 5063,
+      "dialogueRatio": 0.06458621370728818,
+      "sentenceCv": 0.5028495203905924,
+      "mtld": 221.7848107149506,
+      "ending": "narration"
+    },
+    {
+      "index": 121,
+      "title": "暗巷潜龙",
+      "volume": "第7卷 血染深宫",
+      "words": 4416,
+      "dialogueRatio": 0.3811141304347826,
+      "sentenceCv": 0.5340862922129102,
+      "mtld": 203.8052399564996,
+      "ending": "narration"
+    },
+    {
+      "index": 122,
+      "title": "孤子敲枰",
+      "volume": "第7卷 血染深宫",
+      "words": 5166,
+      "dialogueRatio": 0.10007742934572203,
+      "sentenceCv": 0.47367725620257145,
+      "mtld": 204.8573680499242,
+      "ending": "narration"
+    },
+    {
+      "index": 123,
+      "title": "暗流并涌",
+      "volume": "第7卷 血染深宫",
+      "words": 4440,
+      "dialogueRatio": 0.361036036036036,
+      "sentenceCv": 0.5072451712153992,
+      "mtld": 203.0420518938264,
+      "ending": "narration"
+    },
+    {
+      "index": 124,
+      "title": "玄铁寒牢",
+      "volume": "第7卷 血染深宫",
+      "words": 3381,
+      "dialogueRatio": 0.0029577048210588583,
+      "sentenceCv": 0.48962017747536635,
+      "mtld": 189.2771099575927,
+      "ending": "narration"
+    },
+    {
+      "index": 125,
+      "title": "锁龙滴血",
+      "volume": "第7卷 血染深宫",
+      "words": 4659,
+      "dialogueRatio": 0.04614724189740287,
+      "sentenceCv": 0.4712510618469551,
+      "mtld": 192.47645599846805,
+      "ending": "narration"
+    },
+    {
+      "index": 126,
+      "title": "残躯毒蛊",
+      "volume": "第7卷 血染深宫",
+      "words": 4819,
+      "dialogueRatio": 0.3959327661340527,
+      "sentenceCv": 0.44637100956780246,
+      "mtld": 215.72919364970272,
+      "ending": "narration"
+    },
+    {
+      "index": 127,
+      "title": "离间双鹰",
+      "volume": "第7卷 血染深宫",
+      "words": 4969,
+      "dialogueRatio": 0.14248339706178306,
+      "sentenceCv": 0.6106641560543161,
+      "mtld": 211.33333793967535,
+      "ending": "narration"
+    },
+    {
+      "index": 128,
+      "title": "深夜宫禁",
+      "volume": "第7卷 血染深宫",
+      "words": 4876,
+      "dialogueRatio": 0.07260049220672682,
+      "sentenceCv": 0.5229023066046342,
+      "mtld": 209.19719614256667,
+      "ending": "narration"
+    },
+    {
+      "index": 129,
+      "title": "血染御阶",
+      "volume": "第7卷 血染深宫",
+      "words": 5389,
+      "dialogueRatio": 0.022453145295973278,
+      "sentenceCv": 0.5351451311884137,
+      "mtld": 183.65619538445262,
+      "ending": "narration"
+    },
+    {
+      "index": 130,
+      "title": "偏殿朝天",
+      "volume": "第7卷 血染深宫",
+      "words": 4076,
+      "dialogueRatio": 0.2934249263984298,
+      "sentenceCv": 0.4041425035732378,
+      "mtld": 239.62865436621615,
+      "ending": "dialogue"
+    },
+    {
+      "index": 131,
+      "title": "金匣血诏",
+      "volume": "第7卷 血染深宫",
+      "words": 4745,
+      "dialogueRatio": 0.12476290832455215,
+      "sentenceCv": 0.49281847063814666,
+      "mtld": 200.57264458041504,
+      "ending": "narration"
+    },
+    {
+      "index": 132,
+      "title": "帝心如铁",
+      "volume": "第7卷 血染深宫",
+      "words": 4673,
+      "dialogueRatio": 0.04365503958912904,
+      "sentenceCv": 0.5245567750930726,
+      "mtld": 196.3270214137271,
+      "ending": "narration"
+    },
+    {
+      "index": 133,
+      "title": "督府杀机",
+      "volume": "第7卷 血染深宫",
+      "words": 4954,
+      "dialogueRatio": 0.24323778764634638,
+      "sentenceCv": 0.5222939255447142,
+      "mtld": 211.3337417418624,
+      "ending": "narration"
+    },
+    {
+      "index": 134,
+      "title": "枭雄噬主",
+      "volume": "第7卷 血染深宫",
+      "words": 4407,
+      "dialogueRatio": 0.06557749035625142,
+      "sentenceCv": 0.4613102869858639,
+      "mtld": 189.51126803625203,
+      "ending": "narration"
+    },
+    {
+      "index": 135,
+      "title": "禁苑焚天",
+      "volume": "第7卷 血染深宫",
+      "words": 4790,
+      "dialogueRatio": 0.08726513569937369,
+      "sentenceCv": 0.4764923201783986,
+      "mtld": 189.75743738757438,
+      "ending": "narration"
+    },
+    {
+      "index": 136,
+      "title": "碎刃绝脉",
+      "volume": "第7卷 血染深宫",
+      "words": 3931,
+      "dialogueRatio": 0.01806156194352582,
+      "sentenceCv": 0.49264367502761325,
+      "mtld": 158.68289167412712,
+      "ending": "narration"
+    },
+    {
+      "index": 137,
+      "title": "铁甲残灯",
+      "volume": "第7卷 血染深宫",
+      "words": 4674,
+      "dialogueRatio": 0.0235344458707745,
+      "sentenceCv": 0.5057128956333172,
+      "mtld": 186.14744288296063,
+      "ending": "narration"
+    },
+    {
+      "index": 138,
+      "title": "药庐孤影",
+      "volume": "第7卷 血染深宫",
+      "words": 4913,
+      "dialogueRatio": 0.042540199470791774,
+      "sentenceCv": 0.5259037518196474,
+      "mtld": 186.29751128242282,
+      "ending": "narration"
+    },
+    {
+      "index": 139,
+      "title": "寒锋残照",
+      "volume": "第7卷 血染深宫",
+      "words": 4125,
+      "dialogueRatio": 0.2273939393939394,
+      "sentenceCv": 0.5402989128181869,
+      "mtld": 194.11306871016197,
+      "ending": "narration"
+    },
+    {
+      "index": 140,
+      "title": "孤鸿西指",
+      "volume": "第7卷 血染深宫",
+      "words": 5102,
+      "dialogueRatio": 0.0003920031360250882,
+      "sentenceCv": 0.4279087313352474,
+      "mtld": 215.28719559256308,
+      "ending": "narration"
+    },
+    {
+      "index": 141,
+      "title": "塞外沙鸣",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4330,
+      "dialogueRatio": 0.0006928406466512702,
+      "sentenceCv": 0.4701266329677747,
+      "mtld": 187.4106793744745,
+      "ending": "narration"
+    },
+    {
+      "index": 142,
+      "title": "烽燧残照",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4755,
+      "dialogueRatio": 0.04290220820189274,
+      "sentenceCv": 0.491019839485216,
+      "mtld": 198.24183592579345,
+      "ending": "narration"
+    },
+    {
+      "index": 143,
+      "title": "血蝎夜袭",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4519,
+      "dialogueRatio": 0.15866342111086523,
+      "sentenceCv": 0.4974741815671169,
+      "mtld": 183.18687037037034,
+      "ending": "narration"
+    },
+    {
+      "index": 144,
+      "title": "折钩结盟",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4379,
+      "dialogueRatio": 0.28705183831925096,
+      "sentenceCv": 0.5573158964953399,
+      "mtld": 195.40004196220696,
+      "ending": "narration"
+    },
+    {
+      "index": 145,
+      "title": "黑风噬日",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4488,
+      "dialogueRatio": 0.024732620320855617,
+      "sentenceCv": 0.45589435078922774,
+      "mtld": 208.33819743224723,
+      "ending": "narration"
+    },
+    {
+      "index": 146,
+      "title": "地穴残火",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4675,
+      "dialogueRatio": 0.2913368983957219,
+      "sentenceCv": 0.49565730866693436,
+      "mtld": 195.3983430920643,
+      "ending": "narration"
+    },
+    {
+      "index": 147,
+      "title": "古城伏煞",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4347,
+      "dialogueRatio": 0.13871635610766045,
+      "sentenceCv": 0.5177293546925376,
+      "mtld": 206.01699507446176,
+      "ending": "narration"
+    },
+    {
+      "index": 148,
+      "title": "断刃裂甲",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4678,
+      "dialogueRatio": 0.17571611799914494,
+      "sentenceCv": 0.4785509306939256,
+      "mtld": 200.44837585200753,
+      "ending": "narration"
+    },
+    {
+      "index": 149,
+      "title": "荒原聚寇",
+      "volume": "第8卷 绝域狂沙",
+      "words": 5219,
+      "dialogueRatio": 0.12990994443379958,
+      "sentenceCv": 0.4664017524078671,
+      "mtld": 198.3294694860561,
+      "ending": "narration"
+    },
+    {
+      "index": 150,
+      "title": "月泉陷坑",
+      "volume": "第8卷 绝域狂沙",
+      "words": 5378,
+      "dialogueRatio": 0.0238006693938267,
+      "sentenceCv": 0.5308878628321562,
+      "mtld": 205.98705725744986,
+      "ending": "narration"
+    },
+    {
+      "index": 151,
+      "title": "魔石惊魂",
+      "volume": "第8卷 绝域狂沙",
+      "words": 6146,
+      "dialogueRatio": 0.025219655060201757,
+      "sentenceCv": 0.5138079099965402,
+      "mtld": 179.53893306756498,
+      "ending": "narration"
+    },
+    {
+      "index": 152,
+      "title": "烈风焚石",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4788,
+      "dialogueRatio": 0.019005847953216373,
+      "sentenceCv": 0.5653112688707835,
+      "mtld": 173.54683771834686,
+      "ending": "narration"
+    },
+    {
+      "index": 153,
+      "title": "铁堡凶刀",
+      "volume": "第8卷 绝域狂沙",
+      "words": 3823,
+      "dialogueRatio": 0.06173162437876013,
+      "sentenceCv": 0.516969003848459,
+      "mtld": 178.00255286537003,
+      "ending": "narration"
+    },
+    {
+      "index": 154,
+      "title": "紫金断芒",
+      "volume": "第8卷 绝域狂沙",
+      "words": 5333,
+      "dialogueRatio": 0.004687792987061692,
+      "sentenceCv": 0.5525007281958508,
+      "mtld": 181.95288292859158,
+      "ending": "freeze"
+    },
+    {
+      "index": 155,
+      "title": "重甲围沙",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4464,
+      "dialogueRatio": 0.023969534050179212,
+      "sentenceCv": 0.5552606742928143,
+      "mtld": 193.12593278452243,
+      "ending": "narration"
+    },
+    {
+      "index": 156,
+      "title": "极阳刀魄",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4617,
+      "dialogueRatio": 0.014294996751137101,
+      "sentenceCv": 0.5424330852297542,
+      "mtld": 179.93745572380308,
+      "ending": "narration"
+    },
+    {
+      "index": 157,
+      "title": "狂沙尽赤",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4837,
+      "dialogueRatio": 0.0055819722968782305,
+      "sentenceCv": 0.4956970547016537,
+      "mtld": 210.24532585627273,
+      "ending": "narration"
+    },
+    {
+      "index": 158,
+      "title": "骨道天险",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4297,
+      "dialogueRatio": 0.15103560623690948,
+      "sentenceCv": 0.48346591148627227,
+      "mtld": 176.9238139235501,
+      "ending": "narration"
+    },
+    {
+      "index": 159,
+      "title": "黑旗插峰",
+      "volume": "第8卷 绝域狂沙",
+      "words": 3977,
+      "dialogueRatio": 0,
+      "sentenceCv": 0.479467278674327,
+      "mtld": 190.21208956500305,
+      "ending": "narration"
+    },
+    {
+      "index": 160,
+      "title": "踏雪登天",
+      "volume": "第8卷 绝域狂沙",
+      "words": 4527,
+      "dialogueRatio": 0.0028716589352772255,
+      "sentenceCv": 0.5094781430472238,
+      "mtld": 182.29696578161906,
+      "ending": "narration"
+    },
+    {
+      "index": 161,
+      "title": "寒峰断云",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4228,
+      "dialogueRatio": 0.07426679280983917,
+      "sentenceCv": 0.4457735980727184,
+      "mtld": 192.73875449770256,
+      "ending": "narration"
+    },
+    {
+      "index": 162,
+      "title": "冰碑刻痕",
+      "volume": "第9卷 雪岭争锋",
+      "words": 3607,
+      "dialogueRatio": 0.04435819240365955,
+      "sentenceCv": 0.42998360917388095,
+      "mtld": 176.30977440653987,
+      "ending": "freeze"
+    },
+    {
+      "index": 163,
+      "title": "残刹孤灯",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4176,
+      "dialogueRatio": 0.210727969348659,
+      "sentenceCv": 0.5090827755976602,
+      "mtld": 179.72378516624042,
+      "ending": "narration"
+    },
+    {
+      "index": 164,
+      "title": "炉火问心",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4762,
+      "dialogueRatio": 0.26480470390592187,
+      "sentenceCv": 0.532180359578862,
+      "mtld": 209.57614388227103,
+      "ending": "narration"
+    },
+    {
+      "index": 165,
+      "title": "雪崩夜袭",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4853,
+      "dialogueRatio": 0.027817844632186277,
+      "sentenceCv": 0.5191473194496756,
+      "mtld": 195.05772975556465,
+      "ending": "narration"
+    },
+    {
+      "index": 166,
+      "title": "幽谷合流",
+      "volume": "第9卷 雪岭争锋",
+      "words": 5650,
+      "dialogueRatio": 0.26300884955752213,
+      "sentenceCv": 0.5195953785340276,
+      "mtld": 217.68723656480506,
+      "ending": "narration"
+    },
+    {
+      "index": 167,
+      "title": "迷石锁道",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4324,
+      "dialogueRatio": 0.07678075855689177,
+      "sentenceCv": 0.4885029025531662,
+      "mtld": 178.80015591725748,
+      "ending": "narration"
+    },
+    {
+      "index": 168,
+      "title": "阵前喋血",
+      "volume": "第9卷 雪岭争锋",
+      "words": 5192,
+      "dialogueRatio": 0.1332819722650231,
+      "sentenceCv": 0.528560682478113,
+      "mtld": 198.09861590674342,
+      "ending": "freeze"
+    },
+    {
+      "index": 169,
+      "title": "刀劈玄甲",
+      "volume": "第9卷 雪岭争锋",
+      "words": 5350,
+      "dialogueRatio": 0.05813084112149533,
+      "sentenceCv": 0.5296024054262004,
+      "mtld": 189.03377891248778,
+      "ending": "narration"
+    },
+    {
+      "index": 170,
+      "title": "外殿惊魂",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4097,
+      "dialogueRatio": 0.08445203807664145,
+      "sentenceCv": 0.5242396412947217,
+      "mtld": 195.8489342263587,
+      "ending": "narration"
+    },
+    {
+      "index": 171,
+      "title": "星斗倒悬",
+      "volume": "第9卷 雪岭争锋",
+      "words": 3877,
+      "dialogueRatio": 0.0237296879030178,
+      "sentenceCv": 0.4824497457663837,
+      "mtld": 201.0591486988543,
+      "ending": "narration"
+    },
+    {
+      "index": 172,
+      "title": "踏星斩浪",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4167,
+      "dialogueRatio": 0.014878809695224381,
+      "sentenceCv": 0.4939935888766038,
+      "mtld": 166.04091377342917,
+      "ending": "narration"
+    },
+    {
+      "index": 173,
+      "title": "断索救芳",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4839,
+      "dialogueRatio": 0.027898326100433975,
+      "sentenceCv": 0.4635603728947716,
+      "mtld": 177.24312563157775,
+      "ending": "narration"
+    },
+    {
+      "index": 174,
+      "title": "残躯共誓",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4049,
+      "dialogueRatio": 0.3578661397876019,
+      "sentenceCv": 0.4733560777378493,
+      "mtld": 222.34909133796896,
+      "ending": "narration"
+    },
+    {
+      "index": 175,
+      "title": "血引残月",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4559,
+      "dialogueRatio": 0.04584338670761132,
+      "sentenceCv": 0.4523331859785823,
+      "mtld": 214.4159318570803,
+      "ending": "dialogue"
+    },
+    {
+      "index": 176,
+      "title": "巨门洞开",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4359,
+      "dialogueRatio": 0.09864647855012618,
+      "sentenceCv": 0.48485893640225536,
+      "mtld": 178.4170906863482,
+      "ending": "dialogue"
+    },
+    {
+      "index": 177,
+      "title": "穷途心魔",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4274,
+      "dialogueRatio": 0.057557323350491345,
+      "sentenceCv": 0.5310870280312459,
+      "mtld": 229.6296062780832,
+      "ending": "narration"
+    },
+    {
+      "index": 178,
+      "title": "寒光照夜",
+      "volume": "第9卷 雪岭争锋",
+      "words": 5297,
+      "dialogueRatio": 0.017934680007551444,
+      "sentenceCv": 0.5663795005688987,
+      "mtld": 204.1108022958388,
+      "ending": "narration"
+    },
+    {
+      "index": 179,
+      "title": "倒悬死机",
+      "volume": "第9卷 雪岭争锋",
+      "words": 4206,
+      "dialogueRatio": 0.10247265810746553,
+      "sentenceCv": 0.4491626445602589,
+      "mtld": 195.2143255327121,
+      "ending": "narration"
+    },
+    {
+      "index": 180,
+      "title": "长夜问刃",
+      "volume": "第9卷 雪岭争锋",
+      "words": 3796,
+      "dialogueRatio": 0.10405690200210749,
+      "sentenceCv": 0.5215522823319433,
+      "mtld": 194.46914212548015,
+      "ending": "narration"
+    },
+    {
+      "index": 181,
+      "title": "重渊毒雾",
+      "volume": "第10卷 长夜问刀",
+      "words": 3924,
+      "dialogueRatio": 0.028287461773700305,
+      "sentenceCv": 0.4489260286952738,
+      "mtld": 187.55612447982628,
+      "ending": "narration"
+    },
+    {
+      "index": 182,
+      "title": "虚妄丹卷",
+      "volume": "第10卷 长夜问刀",
+      "words": 4203,
+      "dialogueRatio": 0.06067094932191292,
+      "sentenceCv": 0.523510582389673,
+      "mtld": 180.41351642720613,
+      "ending": "narration"
+    },
+    {
+      "index": 183,
+      "title": "魔念吞心",
+      "volume": "第10卷 长夜问刀",
+      "words": 5134,
+      "dialogueRatio": 0.017140631086871836,
+      "sentenceCv": 0.5326477040897706,
+      "mtld": 194.4639357748727,
+      "ending": "narration"
+    },
+    {
+      "index": 184,
+      "title": "残垣血战",
+      "volume": "第10卷 长夜问刀",
+      "words": 4573,
+      "dialogueRatio": 0.0039361469494861145,
+      "sentenceCv": 0.5374791022208633,
+      "mtld": 176.31181193142095,
+      "ending": "narration"
+    },
+    {
+      "index": 185,
+      "title": "剑芒裂魄",
+      "volume": "第10卷 长夜问刀",
+      "words": 3815,
+      "dialogueRatio": 0.003669724770642202,
+      "sentenceCv": 0.5338009283364128,
+      "mtld": 187.93117823991236,
+      "ending": "freeze"
+    },
+    {
+      "index": 186,
+      "title": "古殿遗墨",
+      "volume": "第10卷 长夜问刀",
+      "words": 5359,
+      "dialogueRatio": 0.20432916588915842,
+      "sentenceCv": 0.481061092940272,
+      "mtld": 175.09250011912138,
+      "ending": "narration"
+    },
+    {
+      "index": 187,
+      "title": "机巧回天",
+      "volume": "第10卷 长夜问刀",
+      "words": 3780,
+      "dialogueRatio": 0.046296296296296294,
+      "sentenceCv": 0.4200445341506076,
+      "mtld": 202.99956965849327,
+      "ending": "narration"
+    },
+    {
+      "index": 188,
+      "title": "寒泉照影",
+      "volume": "第10卷 长夜问刀",
+      "words": 4878,
+      "dialogueRatio": 0.004920049200492005,
+      "sentenceCv": 0.5000582700898298,
+      "mtld": 193.39939411839163,
+      "ending": "narration"
+    },
+    {
+      "index": 189,
+      "title": "杀机临渊",
+      "volume": "第10卷 长夜问刀",
+      "words": 4921,
+      "dialogueRatio": 0.034139402560455195,
+      "sentenceCv": 0.47235645745468136,
+      "mtld": 212.3640473603315,
+      "ending": "narration"
+    },
+    {
+      "index": 190,
+      "title": "神兵断锋",
+      "volume": "第10卷 长夜问刀",
+      "words": 4173,
+      "dialogueRatio": 0.00958543014617781,
+      "sentenceCv": 0.5175746529287903,
+      "mtld": 201.05243607825142,
+      "ending": "freeze"
+    },
+    {
+      "index": 191,
+      "title": "破茧问心",
+      "volume": "第10卷 长夜问刀",
+      "words": 4731,
+      "dialogueRatio": 0.045867681251321075,
+      "sentenceCv": 0.609724764212356,
+      "mtld": 202.92792943086144,
+      "ending": "freeze"
+    },
+    {
+      "index": 192,
+      "title": "阳炎化刃",
+      "volume": "第10卷 长夜问刀",
+      "words": 4341,
+      "dialogueRatio": 0.006910850034554251,
+      "sentenceCv": 0.5231452424381695,
+      "mtld": 183.1373997913766,
+      "ending": "narration"
+    },
+    {
+      "index": 193,
+      "title": "雪巅断魂",
+      "volume": "第10卷 长夜问刀",
+      "words": 4122,
+      "dialogueRatio": 0.007035419699175158,
+      "sentenceCv": 0.549820768607982,
+      "mtld": 197.7528643199002,
+      "ending": "narration"
+    },
+    {
+      "index": 194,
+      "title": "照夜碎裂",
+      "volume": "第10卷 长夜问刀",
+      "words": 4002,
+      "dialogueRatio": 0.009995002498750625,
+      "sentenceCv": 0.5172033891549432,
+      "mtld": 205.30666851962712,
+      "ending": "narration"
+    },
+    {
+      "index": 195,
+      "title": "枭雄末路",
+      "volume": "第10卷 长夜问刀",
+      "words": 3414,
+      "dialogueRatio": 0.09431751611013474,
+      "sentenceCv": 0.5507544516107117,
+      "mtld": 203.89475489689767,
+      "ending": "narration"
+    },
+    {
+      "index": 196,
+      "title": "倒悬天锁",
+      "volume": "第10卷 长夜问刀",
+      "words": 5646,
+      "dialogueRatio": 0.07208643287283033,
+      "sentenceCv": 0.5209589852576606,
+      "mtld": 204.8330442519682,
+      "ending": "narration"
+    },
+    {
+      "index": 197,
+      "title": "断刃封魔",
+      "volume": "第10卷 长夜问刀",
+      "words": 4482,
+      "dialogueRatio": 0.009370816599732263,
+      "sentenceCv": 0.5745007678091428,
+      "mtld": 173.33313336952955,
+      "ending": "narration"
+    },
+    {
+      "index": 198,
+      "title": "绝岭狂奔",
+      "volume": "第10卷 长夜问刀",
+      "words": 4341,
+      "dialogueRatio": 0.009675190048375951,
+      "sentenceCv": 0.5447622118680948,
+      "mtld": 180.875,
+      "ending": "narration"
+    },
+    {
+      "index": 199,
+      "title": "雪掩人间",
+      "volume": "第10卷 长夜问刀",
+      "words": 3701,
+      "dialogueRatio": 0.04215077006214537,
+      "sentenceCv": 0.4957471600997257,
+      "mtld": 205.83252846847972,
+      "ending": "narration"
+    },
+    {
+      "index": 200,
+      "title": "长夜破晓",
+      "volume": "第10卷 长夜问刀",
+      "words": 4574,
+      "dialogueRatio": 0.08089199825098382,
+      "sentenceCv": 0.5579606667417534,
+      "mtld": 195.69190788092368,
+      "ending": "narration"
+    }
+  ]
+}

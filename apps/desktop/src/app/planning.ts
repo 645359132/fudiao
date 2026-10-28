@@ -39,7 +39,7 @@ import {
   type RepoError,
   type SqlPort,
 } from '@fudiao/store';
-import { checkPlan, suggestForeshadowStatus, type ForeshadowSuggestion, type PlanProblem } from '@fudiao/writing';
+import { checkPlan, planVariety, suggestForeshadowStatus, type ForeshadowSuggestion, type PlanProblem, type PlanVarietyProblem } from '@fudiao/writing';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -68,6 +68,8 @@ export type PlanningView = {
   readonly foreshadowSuggestions: readonly (ForeshadowSuggestion & { readonly progress: string | null })[];
   /** 可以选作出场人物的设定（人物类）。 */
   readonly characters: readonly Entity[];
+  /** 整本书计划的均一之处（B87）：章名长短、字数、章尾收法、过渡章。 */
+  readonly variety: readonly PlanVarietyProblem[];
 };
 
 /** 计划草稿；分卷字段可以省略（不分卷）。 */
@@ -162,6 +164,10 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         progress: memoryOf.get(s.chapterId)?.foreshadowProgress[s.foreshadowId] ?? null,
       })),
       characters: entities.value.filter((e) => e.kind === 'character'),
+      variety: planVariety(chapters.value.flatMap((c) => {
+        const plan = byChapter.get(c.id);
+        return plan === undefined ? [] : [{ title: c.title, targetWords: plan.targetWords, rhythm: plan.rhythm }];
+      })),
     });
   }
 
@@ -231,6 +237,7 @@ export function planningUseCases(deps: AppDeps, project: () => SqlPort | null, r
         foreshadowPayoff: foreshadowIds(planned.payoff),
         treatment: planned.treatment,
         targetWords: planned.targetWords,
+        rhythm: planned.rhythm ?? null,
       };
       const current = await getChapterPlan(port, chapterId);
       if (!current.ok) return err(repo(current.error));

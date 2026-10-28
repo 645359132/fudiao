@@ -150,6 +150,8 @@ export function PipelineBoard() {
   const stopQueue = useApp((s) => s.cancelReviewQueue);
   const openIssues = useApp((s) => s.openChapterReview);
   const revising = useApp((s) => s.reviseQueue !== null);
+  const polish = useApp((s) => s.library?.preferences.polishAfterWriting ?? false);
+  const setPolish = useApp((s) => s.setPolishAfterWriting);
   const [review, setReview] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -200,6 +202,10 @@ export function PipelineBoard() {
         <label>
           <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} />
           写完后审核
+        </label>
+        <label title="写手写完一章后，按程序统计出的毛病（用得太多的词、句首模板、对话占比、句长）用“润色与去 AI 味”技能再改一遍表达；每章约多两三次调用，只改表达，可一键回退">
+          <input type="checkbox" checked={polish} onChange={(e) => void setPolish(e.target.checked)} />
+          写完后做一遍去 AI 味修订
         </label>
         <button type="button" disabled={!idle || written.length === 0} onClick={() => void reviewAll(written)}>
           依次审核已写好的 {written.length} 章

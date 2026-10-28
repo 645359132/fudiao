@@ -24,8 +24,9 @@ export function planSegments(beats: readonly string[], targetWords: number | nul
     segments.push(beats.slice(at, at + size));
     at += size;
   }
-  const each = Math.max(1, Math.round(total / count));
-  return { segments, words: segments.map(() => each) };
+  // 每段的字数按它分到的情节点数分配（B87：分段不再一律 1,500 字；模板里还会写明字数只是参考）。
+  const words = segments.map((s) => Math.max(1, Math.round(beats.length === 0 ? total : (total * s.length) / beats.length)));
+  return { segments, words };
 }
 
 /**

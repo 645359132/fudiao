@@ -1,6 +1,6 @@
 # 施工文档
 
-版本：v0.7  
+版本：v0.8  
 更新日期：2026年10月19日  
 对应需求：[REQUIREMENTS.md](REQUIREMENTS.md) v0.10  
 配套文档：[DESIGN_PATTERNS.md](DESIGN_PATTERNS.md)  
@@ -384,7 +384,7 @@ stateDiagram-v2
 
 ### 写手与审核（M3）
 
-成书流程（B65）：章节计划 → 写手成章 → 长篇记忆更新 → 审核 → 作者修改或写手修订 → 下一章。每一步都是任务中心里的一个任务，可暂停、取消，结果写入作品库，应用重启后可以接着做。作者在任何一步都可以直接修改正文、计划或账本。
+成书流程（B65）：章节计划 → 写手成章 → 长篇记忆更新 → 审核 → 作者修改或写手修订 → 下一章。写手每章带上最近几章的风格账本与本章的节奏目标，审核按同一套文风统计量出问题（B87，见 M8）。每一步都是任务中心里的一个任务，可暂停、取消，结果写入作品库，应用重启后可以接着做。作者在任何一步都可以直接修改正文、计划或账本。
 
 成书流程看板（B65，M3-08，“计划”页的“成书进度”，`apps/desktop/src/ui/PipelineBoard.tsx`）：按章一行，显示计划（有没有、要核对的问题数）、写作（待写、写作中与已写的段数、已写、排队中）、长篇记忆（有效、待复核、没有）与审核（未审核、待处理的问题数、已审核）。操作有“写下一章”“依次写完待写的章节”与“排定第 N 章到第 M 章”，可勾选“写完后审核”；每章可以单独审核，有待处理问题的章节可以直接打开它的审核抽屉。一本书只由一个写手按书中顺序写（作者决定 2026-10-23）：后一章要接上前一章的结尾与长篇记忆，写手队列一次只写一章，AI 助手在后台写某一章时队列不开始、队列在写时助手也不另写一章；要并发，就在另一个窗口里写另一本书（见下文“多个窗口”）。前面的章节还没写、正在写或还没整理长篇记忆时（例如作者跳着写），写手的前文梗概用它的章节计划顶上；写手此刻正在写的上一章不当作上一章的结尾。连续处理多章时，一章的写作或长篇记忆没有完成就停下并说明原因，不接着处理后面的章节；停下落在两章之间时同样记为停下；模型审核没有完成时先重试一次，仍没完成就记下这一章、接着处理后面的，结束时列出这些章与原因（`app/review.ts` 的 `reviewWithRetry`；写手队列、依次审核与写作工作流同一规则；作者决定，2026-10-20，M6-08 试用之后）；审核提出的问题留给作者处理，不挡住后面的章节。排定的队列只在本次运行中有效，各章的进度在作品库里，重启后从看板接着做。没有章节计划的手写章节只有待处理的问题数，没有“已审核”的记录。
 
@@ -1003,6 +1003,48 @@ M7-02 的设计（模型自带的联网搜索）：
 - 能力表：`StoredCapabilities.webSearch`（旧记录读出来按 false）、`StoredPrices.webSearch`；内置表（`builtin-models.ts`）加入 Anthropic 的 Fable 5.1、Fable 5、Opus 5.5、Opus 5、Opus 4.8、4.7、4.6、Sonnet 5.5、Sonnet 5、Sonnet 4.6、Haiku 5.5 与 OpenAI 的 gpt-5.5、gpt-5.4、gpt-5、gpt-4.1（能力与价格按官方价格页与模型页核实，gpt-5.5 的上下文与最大输出没有读到、沿用保守值，来源记为内置）；“能力与价格”编辑增加“模型自带的联网搜索”勾选与“联网搜索（每千次）”价格；Anthropic 的 Models API（SDK 0.131）还没有返回 `server_tools`，所以服务返回的能力里没有这一项。
 - 应用层：app 迁移 `0004_search_provider.sql` 在 0003 的结构上重建 `search_service`（`kind` 增加 provider、`base_url` 对 provider 为空串、`credential_ref` 保留但 provider 不用、`model_id` 引用 `model_profile` 且模型删除后置空；`search_default` 引用它，开着外键时 DROP TABLE 会级联删掉默认项，所以先把 `search_default` 也重建到新表上再删旧表、改名）。`web-search.ts`：provider 种类不要凭据（从别的种类改过来时删掉原来自己的条目，删除时不碰模型服务的条目）；`webSearch` 与 `testSearchService` 对 provider 种类经调用器（`RunRequest.model` 指定所选模型、`tools` 声明搜索，`effort` 为 low，输出上限 1,500 加思考余量，最多搜 3 次）调用，调用记进当前作品的 `llm_call`（任务种类 `web_search`，费用含搜索费），结果取 `LlmResult.webSearch`：没有结果且工具报错时说明错误码，模型没登记能力或已删除时说明怎么改。模型服务页的“联网搜索”里可以选“模型自带的联网搜索”，只列登记了能力的模型，卡片显示所用模型；AI 助手、扫榜拆书与读网页的 DeepSeek 兜底不改（默认服务是哪种都一样）。浏览器预览的演示模型不搜索，结果为“没有搜到”。
 - 测试：存储层的升级测试（0003 的数据升到 0004 后服务、沿用的 Key 与默认项保留）与 provider 种类的约束；应用层经两家适配器的搜索（请求带工具与模型服务的凭据、不走搜索通道、调用记录与费用）、无结果、工具出错、能力未登记、模型删除；界面测试走完添加与测试搜索。真实模型没有调用，待作者在手工清单里验证。
+
+### M8 去 AI 味
+
+| 编号 | 任务 | 相关需求 |
+| --- | --- | --- |
+| M8-01 | 去 AI 味的系统性优化：`packages/writing` 的文风统计 `style.ts`（对话占比、句长与段长、MTLD、高频实词、句首模板、固定搭配、章尾方式、风格账本 `styleLedger`）、文风的程序检查 `style-checks.ts`、计划的均一检查 `plan-variety.ts`；章节计划的节奏目标（迁移 `0025_chapter_rhythm.sql`，`packages/shared` 的 `ChapterRhythm`）；写手带账本、属性与节奏（`writer_chapter` 版本 9），计划草稿的章名长短、字数浮动、过渡章与节奏（`plan_draft` 版本 7），审核模板版本 5；技能 `cliffhanger`（改为“章尾收束”）、`dialogue`、`tension` 版本 3 与 `polish` 版本 4；可选的第二遍修订（模板 `writer_polish` 版本 1、用例 `app/polish.ts`、偏好 `polishAfterWriting`）；全书体检报告的文风统计；度量脚本 `tools/prose-stats`（`pnpm prose:stats`）与《长夜问刀》的基线 `m8/PROSE.md` | B87，验收“去 AI 味” |
+
+M8 的依据（2026-10-28 查阅；出处按 arXiv 编号与会议，可核对）：
+
+| # | 文献 | 结论（与本任务相关的部分） | 支撑的措施 |
+| --- | --- | --- | --- |
+| P1 | Guo, Shang, Vazirgiannis, Clavel. *The Curious Decline of Linguistic Diversity: Training Language Models on Synthetic Text.* NAACL 2024 Findings, arXiv:2311.09807 | 模型文本的词汇、句法与语义多样性逐代下降，故事生成下降最猛，句法多样性比语义下降得更多 | 度量词汇多样性、句长方差与句式模板 |
+| P2 | Shaib et al. *Detection and Measurement of Syntactic Templates in Generated Text.* EMNLP 2024, arXiv:2407.00211 | 模型生成文本里“句法模板”远多于人写文本，模板来自预训练，RLHF 不会抹掉 | 句首模板与跨章重复片段；动态规避 |
+| P3 | Sun, Yin, Xu, Kolter, Liu. *Idiosyncrasies in Large Language Models.* ICML 2025, arXiv:2502.12150 | 分类器 97.1% 能从文本认出是哪家模型写的，信号主要在词级分布，改写、翻译后仍 >90%：换词去不掉指纹 | 按频率动态约束而不是扩黑名单；修订只改表达的边界 |
+| P4 | Kobak, González-Márquez, Horvát, Lause. *Delving into LLM-assisted writing in biomedical publications through excess vocabulary.* Science Advances 2025, arXiv:2406.07016 | 不需要标注语料，比较词频超出基线的“过量词汇”即可追踪模型写作 | 高频实词与最近几章的账本 |
+| P5 | Chakrabarty, Laban, Agarwal, Muresan, Wu. *Art or Artifice? Large Language Models and the False Promise of Creativity.* CHI 2024, arXiv:2309.14556 | TTCW 的 14 项测试（叙事节奏、场景与说明、结尾、结构灵活性等），模型故事通过的比职业作家少 3–10 倍；专家评语：陈词且重复、“AI 几乎不知道怎么结尾”、对白缺少潜台词、人物过度解释、比喻用力过猛、风格重复 | 章尾收法轮换；对白不交代；战斗按情形写；章尾分类 |
+| P6 | Chakrabarty, Laban, Wu. *Can AI writing be salvaged? Mitigating Idiosyncrasies and Improving Human-AI Alignment in the Writing Process through Edits.* CHI 2025, arXiv:2409.14509 | 职业作家对模型文字的七类毛病（陈词、不必要的说明等）达成一致；按分类做的自动编辑能拉近与人写文本的距离 | 第二遍有约束的修订；“不必要的说明”对应对白交代剧情 |
+| P7 | Madaan et al. *Self-Refine: Iterative Refinement with Self-Feedback.* NeurIPS 2023, arXiv:2303.17651 | 生成—反馈—修订的循环平均提高约 20%，反馈越具体越有效 | 修订的反馈由程序统计给出，不让模型自评 |
+| P8 | Mitchell et al. *DetectGPT.* ICML 2023, arXiv:2301.11305；Hans et al. *Spotting LLMs With Binoculars.* ICML 2024, arXiv:2401.12070 | 零样本检测靠模型文本落在对数概率的负曲率区域、困惑度低：“太可预测” | 句长方差、词汇多样性与重复率做困惑度的离线替身（本地不算困惑度） |
+| P9 | Muñoz-Ortiz, Gómez-Rodríguez, Vilares. *Contrasting Linguistic Patterns in Human and LLM-Generated News Text.* Artificial Intelligence Review 2024, arXiv:2308.09067；Herbold et al. *A large-scale comparison of human-written versus ChatGPT-generated essays.* Scientific Reports 2023 | 人写文本的句长分布更分散；ChatGPT 文本结构高度一致 | 句长方差；结构去均一；章尾轮换 |
+| P10 | Holtzman et al. *The Curious Case of Neural Text Degeneration.* ICLR 2020, arXiv:1904.09751；Welleck et al. *Neural Text Generation with Unlikelihood Training.* ICLR 2020, arXiv:1908.04319 | 最大化解码陷入重复；训练时压低重复词的概率能降重复 | 在提示词层做“反似然”：最近用多了的词与句式列给写手不要再用，再由审核量 |
+| P11 | Peeperkorn, Kouwenhoven, Brown, Jordanous. *Is Temperature the Creativity Parameter of Large Language Models?* ICCC 2024, arXiv:2405.00492 | 温度与新颖性只有弱相关、与不连贯中度相关 | 不靠调温度，靠计划层与约束层制造变化 |
+| P12 | Zhang et al. *Verbalized Sampling: How to Mitigate Mode Collapse and Unlock LLM Diversity.* ICML 2026, arXiv:2510.01171 | 对齐后的“典型性偏好”造成模式坍缩；要求模型先列出多个候选再选，创作任务多样性提高 1.6–2.1 倍 | 计划草稿先想好要用哪几种收法再分到各章 |
+| P13 | Xu, Jojic, Rao, Brockett, Dolan. *Echoes in AI: Quantifying lack of plot diversity in LLM outputs.* PNAS 2025, arXiv:2501.00273 | 模型故事由跨样本反复出现的情节元素拼成，人写的情节元素在模型分布的长尾 | 战斗与章尾不走固定步骤；跨章重复片段 |
+| P14 | Padmakumar, He. *Does Writing with Language Models Reduce Content Diversity?* ICLR 2024, arXiv:2309.05196；Doshi, Hauser. *Generative AI enhances individual creativity but reduces the collective diversity of novel content.* Science Advances 2024 | 与对齐后的模型合写使文本趋同；AI 辅助的故事彼此更相似 | 一本书 200 章由同一模型写就是 200 个趋同样本：跨章度量与跨章约束是必需的 |
+| P15 | McCarthy, Jarvis. *MTLD, vocd-D, and HD-D: A validation study of sophisticated approaches to lexical diversity assessment.* Behavior Research Methods 2010 | MTLD 是唯一不随文本长度变化的词汇多样性指标 | 用 MTLD（中文按字计）而不是原始 TTR |
+| P16 | Ismayilzada, Stevenson, van der Plas. *Evaluating Creative Short Story Generation in Humans and LLMs.* arXiv:2411.02316；Guo et al. *Benchmarking Linguistic Diversity of LLMs.* TACL 2025, arXiv:2412.10271 | 模型词汇与语义多样性、新颖性与意外都低于普通人；故事任务上模型的多样性最低 | 度量基线的参照方向 |
+| P17 | Lin, Zheng, Wang. *WebNovelBench: Placing LLM Novelists on the Web Novel Distribution.* EACL 2026 Findings, arXiv:2505.14818 | 用 4,000 余部中文网文作为人写分布，把模型作品映射成百分位 | 中文网文是参照体裁；对话占比 25%–45% 是作者给的行业经验，没有论文直接给出这个区间 |
+| P18 | Guo et al. *How Close is ChatGPT to Human Experts? (HC3).* arXiv:2301.07597 | 中英对照语料：ChatGPT 回答更正式、少口语、少情绪表达 | 对白口语化、人物各有说话方式 |
+
+M8-01 的设计（去 AI 味，B87，作者确认方案 2026-10-28）：
+
+- 证据与措施的对应：结构机械（200 章整、字数均一、章名全四字、每卷恒定）→ `plan_draft` 版本 7（章名两到七字混用、字数按轻重 ±30%、每五到八章一章过渡或日常、每章输出 rhythm、先想好几种收法再分配）、`distributeChapters` 按固定起伏分各卷章数、`planSegments` 每段字数按情节点分、写手模板写明字数只是参考、`planVariety` 标出均一之处（P9、P11、P12）；词汇指纹不衰减 → 风格账本与审核的高频词、跨章复用、固定搭配、句首模板四条检查（P2、P3、P4、P10、P14）；对话占比低 → 节奏目标的对话多少（少/中/高对应 12%/25%/40%），写手模板写明，审核低于目标六成时提出中等问题，`dialogue` 技能版本 3（P5、P18）；章尾定格与战斗固定步骤 → `cliffhanger` 技能版本 3“章尾收束”六种收法按计划轮换、账本带最近几章的收法、审核查连续三章同一收法，`tension` 技能版本 3 的“打斗与对抗”，审核模板版本 5 查固定步骤（P5、P9、P13）；对白交代 → 写手模板规则、程序检查一段对白 ≥120 字且含前情词、审核模板查对白交代（P5、P6）；细节漂移 → 出场人物带设定属性，写手照着写，审核查外貌等属性矛盾；全部 → 可选的第二遍修订（P6、P7）与度量脚本。
+- `packages/writing/src/style.ts`（纯函数）：`dialogueRatio`、`sentenceStats`、`paragraphStats`、`mtld`（按字或字二元组，阈值 0.72，正反各一遍）、`termCounts`（对白与名字以外的 2–4 字片段，去掉含虚字的，出现一次的也列）、`collocations`（4–8 字、重复三次以上）、`openingTemplates`（名字开头记名字加两个字）、`endingKind`（对白、问句、省略号、一句短的定格、一段叙述的画面、总结或预告）；片段是不是一个说法按左右两边的字有没有变化过判断（`isUnit`：“极阳真”右边总是“气”就只是“极阳真气”的一截），合并几章时左右两边的字也合并（`mergeTerms`）。`styleLedger` 看最近 8 章：每章一行、用得太多的说法（在一半以上的章出现，三字以上 ≥ max(3, 章数 × 0.75) 次、两字 ≥ max(10, 章数 × 3) 次、句首 ≥ max(6, 章数 × 1.5) 次）、最近的章尾。`describeLedger` 写成给写手的中文。
+- `style-checks.ts`：`ProgramCheckInput.style`（名字、账本的说法与句首、前几章的章尾、本章的对话目标）→ 账本里的说法本章又用了（ai_tone 低）、本章高频实词（两字 ≥ max(8, 1.6/千字)、三字以上 ≥ max(3, 0.6/千字)）、固定搭配、句首模板（账本里的又用两次，或本章 ≥ max(6, 1.2/千字) 句）、对话占比低于目标六成（pacing 中，800 字以下不查）、叙述句长变异系数 <0.35（40 句以上）、连续三章同一收法、长对白 ≥120 字且含前情词（pacing 低）；每条规则一章最多 5 处。不加新的 IssueKind、不改审核问题表的 CHECK。
+- 节奏目标：`packages/shared` 的 `CHAPTER_TYPES`、`DIALOGUE_LEVELS`、`ENDING_STYLES`、`DIALOGUE_TARGET`、中文名与写法说明；迁移 0025 给 `chapter_plan` 加 `rhythm`（JSON 对象，取值不认得的整份当作没有），`PlanFields.rhythm` 省略时沿用现有的；`PlanDraftOutput.chapters[].rhythm`（default null，旧样本照旧）；`writeDraftPlans` 写入；计划页的表单三个下拉（不定 / 各取值）；`planVariety`（章名至少三种长度且同一长度不超过六成、字数变异系数 ≥0.15、连续三章同一收法、连着十章没有过渡或日常章；少于六章不查）在计划视图的 `variety` 与草稿列表里显示。
+- 写手：`chapter-materials.ts` 增加 `style`（`app/style-ledger.ts` 的 `recentStyle` 读最近 8 章的段落，正在写的章跳过）、`rhythm`、`names` 与 `cast[].attributes`；`writer_chapter` 版本 9 的规则（字数只是参考、对白不交代、战斗按情形、感官不堆叠、规避的说法不换同义词、属性不改）、出场人物的“外貌与特征”、每章变化的“本章的节奏”“最近几章的文风账本”“这些说法本章不要再用”，最后一段按收法收尾；块的顺序仍是不变 → 只追加 → 每章都变。
+- 审核：`review.ts` 的程序检查带 `style`（同一个 `recentStyle`，对话目标按计划的节奏、没有按“中”）；`chapter_review` 版本 5 加外貌等属性矛盾、对白交代剧情、打斗固定步骤、感官堆叠；审核的设定本来就带属性。
+- 第二遍修订（`app/polish.ts`）：`polishChapter` 在写手锁内——程序统计（与审核同一套 `styleChecks`）的问题说明就是反馈，没有反馈不调用；段落按约 1,500 字分组、带 [P1]… 标签交给 `writer_polish` 版本 1（只带 `polish` 技能与规避词）；输出按标签对回（段数、顺序对不上整组跳过），设定名集合、数字串或对白条数变了的段不写入（`sameSubstance`）；第一次写入前存“写手写入”快照，经 `planRangeReplace`/`applyRangeReplace` 写入、段落仍是 AI 来源；`quotePolish` 按字数估。状态层的写手队列在写完、整理记忆之前做（偏好 `polishAfterWriting`，默认关，成书进度看板的开关），没做成不挡住后面的章，结束的一句话列出；`quoteWorkflow` 的 `polish` 选项每写一章另计 2 次调用。AI 助手没有加动作。
+- 全书体检：报告一步加 `style`（`styleReport`：范围内各章合起来的对话占比、句长变异、章尾分布与用得太多的说法），成书页显示；较早的运行没有这一项。
+- 度量脚本 `tools/prose-stats`：`split.ts` 拆章（第N卷、第N章，以及章名单独一行、段落全角缩进的导出写法）、`stats.ts` 整本书的汇总（每章字数、章名字数、分卷与最低十章的对话占比、章尾分布、高频实词与句首模板（每万字）、跨章重复片段）、`report.ts` 的 Markdown 与 `--compare` 并排差值；根目录依赖加 `@fudiao/writing`。《长夜问刀》的基线见 `m8/PROSE.md`（200 章、4,707 ± 519 字、章名全四字、对话 12.1%、162 章以一段叙述收尾，“如同”386 次说明换词绕过了规避词表）。
+- 取舍：不改采样温度（P11）；不扩静态黑名单（P3）；对话占比目标是体裁经验；真实模型的前后对比等作者确认费用后进行。
 
 ## 九 测试策略
 

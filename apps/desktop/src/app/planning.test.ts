@@ -220,3 +220,22 @@ describe('计划与伏笔账本的编辑', () => {
     expect(value(await app.deleteForeshadow(edited.foreshadows[0]!)).foreshadows).toEqual([]);
   });
 });
+
+describe('节奏目标（B87）', () => {
+  it('草稿里的 rhythm 写进章节计划，没有的为 null；计划视图给出整本书的均一之处', async () => {
+    const { app } = await setup();
+    const withRhythm: PlanDraftData = { ...draft, chapters: draft.chapters.map((c, i) => (i === 0 ? { ...c, rhythm: { type: 'confrontation', dialogue: 'high', ending: 'dialogue' } } : c)) };
+    const { view } = value(await app.applyPlanDraft(withRhythm));
+    expect(view.chapters[0]!.plan!.rhythm).toEqual({ type: 'confrontation', dialogue: 'high', ending: 'dialogue' });
+    expect(view.chapters[1]!.plan!.rhythm).toBeNull();
+    // 三章不查均一；六章章名都是六字、字数都一样时指出来。
+    expect(view.variety).toEqual([]);
+    for (let i = 4; i <= 6; i++) {
+      const made = value(await app.createChapter(`第${i}章 夜叩`));
+      const id = made.chapters.at(-1)!.id;
+      value(await app.savePlan(id, { goal: 'x', castIds: [], beats: [], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    }
+    const later = value(await app.planningView());
+    expect(later.variety.map((v) => v.kind)).toContain('titles');
+  });
+});

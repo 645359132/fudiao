@@ -18,12 +18,14 @@
     "assistant:eval": "tsx tools/assistant-eval/main.ts",
     "workflow:eval": "tsx tools/workflow-eval/main.ts",
     "prompts:build": "tsx tools/prompts/build-templates.ts",
-    "bench": "tsx tools/bench/main.ts"
+    "bench": "tsx tools/bench/main.ts",
+    "prose:stats": "tsx tools/prose-stats/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@fudiao/shared": "workspace:*",
     "@fudiao/store": "workspace:*",
+    "@fudiao/writing": "workspace:*",
     "@types/node": "^22.20.5",
     "dependency-cruiser": "^18.5.0",
     "eslint": "^10.12.0",

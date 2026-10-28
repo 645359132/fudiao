@@ -33,3 +33,9 @@ export type { CastTimeline, CastTimelineInput, PresenceKind, PresenceRecord } fr
 export { castTimelines, exitAt, exitNote, presentAt } from './presence';
 export type { ChangeChapter, ChangeKind, LabeledRelation, PendingChange, Person, ProjectedRelation, RelationChangeDraft, RelationRecord, ResolvedChange, ResolveInput } from './relation-changes';
 export { projectRelations, relationToChange, resolveRelationChanges, samePerson } from './relation-changes';
+export type { ChapterStyle, ChapterStyleLine, EndingKind, LedgerChapter, LedgerText, OverusedTerm, Stats, StyleLedger, TermCount } from './style';
+export { chapterStyle, collocations, describeLedger, dialogueRatio, ENDING_KIND_LABEL, ENDING_KINDS, endingKind, FREEZE_CHARS, isUnit, maskNames, MAX_OVERUSED, mergeTerms, mtld, narrationSentences, openingTemplates, paragraphStats, percent, plain, sentenceStats, stats, STYLE_WINDOW, styleLedger, termCounts } from './style';
+export type { StyleCheckInput } from './style-checks';
+export { DIALOGUE_FLOOR, DIALOGUE_MIN_WORDS, ENDING_RUN, HIGH_TERM_MIN, LONG_QUOTE_CHARS, OPENING_MIN, SENTENCE_CV_MIN, SENTENCE_MIN_COUNT, styleChecks } from './style-checks';
+export type { PlanVarietyItem, PlanVarietyProblem } from './plan-variety';
+export { planVariety, TITLE_SHARE_MAX, TRANSITION_WINDOW, VARIETY_MIN_CHAPTERS, WORDS_CV_MIN } from './plan-variety';

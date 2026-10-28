@@ -98,6 +98,7 @@ import { openingUseCases } from './opening';
 import { castCompletionUseCases } from './cast-completion';
 import { benchmarkUseCases } from './benchmark';
 import { asChangeEntries, captureWork, chapterDigest, diffWork, undoChanges } from './assistant-undo';
+import { polishUseCases } from './polish';
 import { reviewUseCases, reviewWithRetry } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
@@ -410,6 +411,8 @@ export function createAppService(deps: AppDeps) {
   };
   // 一键修订每一章在写手锁里做：写手正在写的章节不修订，修订期间也不开始写这一章。
   const review = reviewUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner, { lock: writer.withWriterLock, pricing });
+  // 第二遍去 AI 味的修订（B87）：与写手、修订共用一把锁。
+  const polish = polishUseCases(deps, () => (session === null ? null : { port: session.port, path: session.entry.path }), runner, { lock: writer.withWriterLock, pricing });
   const simEvaluation = simEvaluationUseCases(deps, () => session?.port ?? null);
   const relations = relationUseCases(deps, () => session?.port ?? null);
   const relationChanges = relationChangeUseCases(deps, () => session?.port ?? null, runner);
@@ -436,6 +439,7 @@ export function createAppService(deps: AppDeps) {
     ...memory,
     ...narration,
     ...review,
+    ...polish,
     ...simulation,
     ...simEvaluation,
     ...relations,

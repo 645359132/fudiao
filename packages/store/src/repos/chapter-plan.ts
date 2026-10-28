@@ -1,5 +1,5 @@
 // 章节计划（需求 B65）：每章的目标、出场人物、要写的情节点、要埋与要收的伏笔、详略说明与字数；成书流程按它推进。
-import { err, ok, type Result } from '@fudiao/shared';
+import { CHAPTER_TYPES, DIALOGUE_LEVELS, ENDING_STYLES, err, ok, type ChapterRhythm, type Result } from '@fudiao/shared';
 import { z } from 'zod';
 import type { SqlPort } from '../sql';
 import { guardedUpdate, insertReturning, jsonColumn, queryAll, queryOne, type RepoError, type WriteContext } from './common';
@@ -24,6 +24,10 @@ export const WriterProgress = z.object({
 });
 export type WriterProgress = z.infer<typeof WriterProgress>;
 
+/** 节奏目标（B87）：取值不认得的（更早的版本写入的）整份当作没有。 */
+const Rhythm = z.object({ type: z.enum(CHAPTER_TYPES), dialogue: z.enum(DIALOGUE_LEVELS), ending: z.enum(ENDING_STYLES) });
+const RhythmColumn = jsonColumn(Rhythm.nullable().catch(null));
+
 export const PlanRow = z
   .object({
     chapter_id: z.string(),
@@ -36,6 +40,7 @@ export const PlanRow = z
     target_words: z.number().int().nullable(),
     status: z.enum(PLAN_STATUSES),
     progress: jsonColumn(WriterProgress).nullable(),
+    rhythm: RhythmColumn.nullable(),
     version: z.number().int(),
     created_at: z.string(),
     updated_at: z.string(),
@@ -51,13 +56,14 @@ export const PlanRow = z
     targetWords: r.target_words,
     status: r.status,
     progress: r.progress,
+    rhythm: r.rhythm ?? null,
     version: r.version,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }));
 export type ChapterPlan = z.output<typeof PlanRow>;
 
-export const PLAN_COLUMNS = 'chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, status, progress, version, created_at, updated_at';
+export const PLAN_COLUMNS = 'chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, status, progress, rhythm, version, created_at, updated_at';
 const COLUMNS = PLAN_COLUMNS;
 
 export type PlanFields = {
@@ -68,6 +74,8 @@ export type PlanFields = {
   readonly foreshadowPayoff: readonly string[];
   readonly treatment: string;
   readonly targetWords: number | null;
+  /** 节奏目标（B87）；省略或 null 为没有。 */
+  readonly rhythm?: ChapterRhythm | null;
 };
 
 export async function getChapterPlan(port: SqlPort, chapterId: string): Promise<Result<ChapterPlan | null, RepoError>> {
@@ -97,16 +105,18 @@ export function saveChapterPlan(port: SqlPort, chapterId: string, current: Chapt
     JSON.stringify(fields.foreshadowPayoff),
     fields.treatment,
     fields.targetWords,
+    // 没传 rhythm（计划表单以外的调用方）沿用现有的；传 null 清掉。
+    (fields.rhythm === undefined ? (current?.rhythm ?? null) : fields.rhythm) === null ? null : JSON.stringify(fields.rhythm === undefined ? current?.rhythm : fields.rhythm),
   ];
   if (current === null) {
     return insertReturning(port, PlanRow, {
-      sql: `INSERT INTO chapter_plan (chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
+      sql: `INSERT INTO chapter_plan (chapter_id, goal, cast_ids, beats, foreshadow_plant, foreshadow_payoff, treatment, target_words, rhythm, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING ${COLUMNS}`,
       params: [chapterId, ...values, ctx.now, ctx.now],
     });
   }
   return guardedUpdate(port, PlanRow, 'chapter_plan', current.chapterId, {
-    sql: `UPDATE chapter_plan SET goal = ?, cast_ids = ?, beats = ?, foreshadow_plant = ?, foreshadow_payoff = ?, treatment = ?, target_words = ?,
+    sql: `UPDATE chapter_plan SET goal = ?, cast_ids = ?, beats = ?, foreshadow_plant = ?, foreshadow_payoff = ?, treatment = ?, target_words = ?, rhythm = ?,
             version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${COLUMNS}`,
     params: [...values, ctx.now, current.chapterId, current.version],
   }, 'chapter_id');

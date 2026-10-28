@@ -1,6 +1,7 @@
 // 一章的写作材料（需求 B59；B39 补充）：写手与按章节计划建推演场景共用，两边看到的是同一份作品。
 // 本章的目标、情节点与详略，出场人物（设定、最近的状态、各自知道的事、最近几章在不在场），本章成立的人物关系，
-// 适用于本章的世界事实，前文梗概，伏笔与上一章留下的事，本章提到的地点。不读正文（上一章的结尾由写手自己取）。
+// 适用于本章的世界事实，前文梗概，伏笔与上一章留下的事，本章提到的地点，以及最近几章的风格账本（B87：由前几章的正文算出，
+// 上一章的结尾本身由写手自己取）。
 import { createEntityMatcher } from '@fudiao/editor';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
@@ -21,8 +22,10 @@ import {
   type RepoError,
   type SqlPort,
 } from '@fudiao/store';
-import { effectiveAvoidPhrases, factApplies, foreshadowsForChapter, knowledgeForCast, relationsForCast } from '@fudiao/writing';
+import type { ChapterRhythm } from '@fudiao/shared';
+import { effectiveAvoidPhrases, factApplies, foreshadowsForChapter, knowledgeForCast, relationsForCast, type LedgerText } from '@fudiao/writing';
 import type { AppError } from './errors';
+import { recentStyle } from './style-ledger';
 
 /** 前文梗概最多带多少字，超出时先去掉最远的章节。 */
 export const MEMORY_CHARS = 6000;
@@ -52,6 +55,8 @@ export type CastMaterial = {
   readonly name: string;
   readonly aliases: readonly string[];
   readonly description: string;
+  /** 设定的属性（外貌、年龄、身形等，B87）：写手照着写、不改。 */
+  readonly attributes: readonly { readonly label: string; readonly value: string }[];
   /** 长篇记忆中这个人物最近一次出场后的状态，没有时为空。 */
   readonly state: string;
   readonly knows: readonly CastFact[];
@@ -70,6 +75,12 @@ export type ChapterMaterials = {
   readonly goal: string;
   readonly beats: readonly string[];
   readonly treatment: string;
+  /** 本章的节奏目标（B87），计划里没定时为 null。 */
+  readonly rhythm: ChapterRhythm | null;
+  /** 最近几章的风格账本（B87）。 */
+  readonly style: LedgerText;
+  /** 设定的名字与别名（账本与文风检查不把它们算作词）。 */
+  readonly names: readonly string[];
   readonly avoidPhrases: readonly string[];
   readonly cast: readonly CastMaterial[];
   readonly relations: readonly RelationMaterial[];
@@ -168,6 +179,11 @@ export async function gatherChapterMaterials(
   const previous = chapters[index - 1];
   const openThreads = previous === undefined ? [] : (memoryOf.get(previous.id)?.openThreads ?? []);
 
+  // 风格账本（B87）：最近几章的正文；正在写的章正文不完整，跳过。
+  const names = entities.value.flatMap((e) => [e.name, ...e.aliases]);
+  const style = await recentStyle(port, chapters, index, { names, skip: unfinished });
+  if (!style.ok) return err(repo(style.error));
+
   // 本章计划里提到的地点设定（按名字与别名匹配）。
   const matcher = createEntityMatcher(entities.value.filter((e) => e.kind === 'location').map((e) => ({ id: e.id, kind: e.kind, name: e.name, aliases: e.aliases })));
   const locationIds = [...new Set(matcher.find([plan.goal, ...plan.beats, plan.treatment, ...openThreads].join('\n')).map((m) => m.entityId))].slice(0, MAX_LOCATIONS);
@@ -184,6 +200,9 @@ export async function gatherChapterMaterials(
     goal: plan.goal,
     beats: plan.beats,
     treatment: plan.treatment,
+    rhythm: plan.rhythm,
+    style: style.value.text,
+    names,
     avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
     cast: cast.map((c) => {
       const k = knowledge.get(c.id);
@@ -192,6 +211,7 @@ export async function gatherChapterMaterials(
         name: c.name,
         aliases: c.aliases,
         description: c.description,
+        attributes: c.attributes,
         state: stateOf.get(c.id) ?? '',
         knows: (k?.knows ?? []).slice(0, MAX_KNOWS).map((f) => ({ text: f.content, kind: f.kind === 'claim' ? ('claim' as const) : ('belief' as const), modality: f.modality, confidence: f.confidence })),
         present: mentions(k?.present ?? [], PRESENT_CHAPTERS),

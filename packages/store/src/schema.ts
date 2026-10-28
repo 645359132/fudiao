@@ -154,9 +154,10 @@ export const TABLES: readonly TableSpec[] = [
   },
   {
     name: 'chapter_plan',
-    columns: ['chapter_id', 'goal', 'cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'treatment', 'target_words', 'status', 'progress', ...VERSIONED],
+    // rhythm 由迁移 0025 追加在末尾。
+    columns: ['chapter_id', 'goal', 'cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'treatment', 'target_words', 'status', 'progress', ...VERSIONED, 'rhythm'],
     primaryKey: ['chapter_id'],
-    json: ['cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'progress'],
+    json: ['cast_ids', 'beats', 'foreshadow_plant', 'foreshadow_payoff', 'progress', 'rhythm'],
   },
   {
     name: 'writing_skill',

@@ -1,3 +1,5 @@
+import { CHAPTER_TYPE_LABEL, ENDING_STYLE_LABEL, parseChapterRhythm } from '@fudiao/shared';
+import { planVariety } from '@fudiao/writing';
 import type { PlanDraft } from '../app/planning';
 
 /**
@@ -7,8 +9,22 @@ import type { PlanDraft } from '../app/planning';
 export function PlanDraftChapters({ draft, withBeats }: { readonly draft: PlanDraft; readonly withBeats: boolean }) {
   const summaryOf = new Map((draft.volumes ?? []).map((v) => [v.title.trim(), v.summary]));
   const volumes = new Set(draft.chapters.map((c) => (c.volume ?? '').trim()).filter((v) => v !== '')).size;
+  // 草稿的均一之处（B87）：章名长短、字数、章尾收法与过渡章。
+  const variety = planVariety(draft.chapters.map((c) => ({ title: c.title, targetWords: c.targetWords, rhythm: parseChapterRhythm(c.rhythm ?? null) })));
+  const rhythmNote = (c: PlanDraft['chapters'][number]) => {
+    const r = parseChapterRhythm(c.rhythm ?? null);
+    if (r === null) return null;
+    return `（${CHAPTER_TYPE_LABEL[r.type]}，${ENDING_STYLE_LABEL[r.ending]}收尾${c.targetWords === null ? '' : `，约 ${c.targetWords} 字`}）`;
+  };
   return (
     <>
+      {variety.length > 0 ? (
+        <ul className="muted" aria-label="草稿的均一之处">
+          {variety.map((v) => (
+            <li key={v.kind}>{v.description}</li>
+          ))}
+        </ul>
+      ) : null}
       {volumes > 0 ? (
         <p className="muted">
           共 {draft.chapters.length} 章，分 {volumes} 卷。
@@ -27,6 +43,7 @@ export function PlanDraftChapters({ draft, withBeats }: { readonly draft: PlanDr
                 </div>
               ) : null}
               <strong>{c.title}</strong>：{c.goal}
+              {rhythmNote(c) === null ? null : <span className="muted">{rhythmNote(c)}</span>}
               {withBeats ? (
                 <ul>
                   {c.beats.map((b, j) => (

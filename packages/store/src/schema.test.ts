@@ -651,6 +651,16 @@ describe('数据层导出导入（硬性规则 20）', () => {
     expect((await exported(target)).tables).toEqual({ ...data.tables, cast_presence: [], relation_suggestion: [], relation_scan: [] });
   });
 
+  it('结构版本 24 导出的数据（章节计划没有 rhythm 列）经转换后导入，节奏为空', async () => {
+    const data = await exported(await seeded());
+    const plans = data.tables['chapter_plan'] ?? [];
+    expect(plans.length).toBeGreaterThan(0);
+    const tables = { ...data.tables, chapter_plan: plans.map(({ rhythm: _dropped, ...row }) => row) };
+    const target = fresh();
+    expect(await importData(target, { schemaVersion: 24, tables })).toMatchObject({ ok: true });
+    expect((await exported(target)).tables['chapter_plan']).toEqual(plans.map((row) => ({ ...row, rhythm: null })));
+  });
+
   it('结构版本 9 导出的数据（没有卷，章节没有 volume_id 列）经转换后导入，章节都是未分卷', async () => {
     const data = await exported(await seeded());
     const chapters = (data.tables['chapter'] ?? []).filter((row) => row['volume_id'] === null);

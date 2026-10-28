@@ -12,3 +12,5 @@ export { formatSkillStages, parseSkillStages, SKILL_STAGES } from './skill-stage
 export type { SkillStage } from './skill-stage';
 export { WORKFLOW_MODES, WORKFLOW_STEP_STATUSES } from './workflow';
 export type { WorkflowMode, WorkflowStepStatus } from './workflow';
+export { CHAPTER_TYPE_LABEL, CHAPTER_TYPES, DIALOGUE_LEVEL_LABEL, DIALOGUE_LEVELS, DIALOGUE_TARGET, ENDING_STYLE_HINT, ENDING_STYLE_LABEL, ENDING_STYLES, parseChapterRhythm } from './rhythm';
+export type { ChapterRhythm, ChapterType, DialogueLevel, EndingStyle } from './rhythm';

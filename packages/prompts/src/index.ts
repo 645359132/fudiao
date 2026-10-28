@@ -41,6 +41,7 @@ export {
   renderContinuityCheck,
   BOOK_AUDIT_LIMIT,
   renderWriterRevise,
+  renderWriterPolish,
   renderPlanDraft,
   renderBookSeed,
   renderAssistantTurn,
@@ -81,7 +82,7 @@ export {
 export type { PlanDraftData, RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
 export type { AssistantHistoryItem, AssistantResult, AssistantState, EvidenceSecret } from './render';
-export type { BenchmarkBookInput, BenchmarkCompareInput, BookAuditInput, CastCompletionInput, RelationChangesInput, ContinuityCheckInput, OpeningReviewInput, VolumeOutlineInput, ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput, WriterRelation, CastKnowledgeFact, SceneChapterMaterials, SceneDraftInput } from './render';
+export type { BenchmarkBookInput, BenchmarkCompareInput, BookAuditInput, CastCompletionInput, RelationChangesInput, ContinuityCheckInput, OpeningReviewInput, VolumeOutlineInput, ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, WriterPolishInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput, WriterRelation, CastKnowledgeFact, SceneChapterMaterials, SceneDraftInput } from './render';
 export { knowledgeLine } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';

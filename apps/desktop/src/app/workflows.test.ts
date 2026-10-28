@@ -106,8 +106,13 @@ describe('写作工作流（B78）', () => {
     expect(await start({ chapters: 40, volumeMode: 'fixed', volumeCount: 41 })).toMatchObject({ ok: false, error: { detail: expect.stringContaining('卷数不能多于章数') } });
     expect(await start({ chapters: 2001 })).toMatchObject({ ok: false });
     expect(quickBookPlanning({ chapters: 30, volumeMode: 'auto', volumeCount: null })).toEqual({ kind: 'single' });
-    expect(quickBookPlanning({ chapters: 45, volumeMode: 'auto', volumeCount: null })).toEqual({ kind: 'volumes', chapters: [15, 15, 15] });
-    expect(quickBookPlanning({ chapters: 50, volumeMode: 'fixed', volumeCount: 3 })).toEqual({ kind: 'volumes', chapters: [17, 17, 16] });
+    // 各卷章数不必相等（B87）：按固定的起伏分配，总数不变；均值太小或太接近每卷上限时平均分。
+    expect(quickBookPlanning({ chapters: 45, volumeMode: 'auto', volumeCount: null })).toEqual({ kind: 'volumes', chapters: [16, 13, 16] });
+    expect(quickBookPlanning({ chapters: 50, volumeMode: 'fixed', volumeCount: 3 })).toEqual({ kind: 'volumes', chapters: [18, 14, 18] });
+    expect(distributeChapters(200, 10).reduce((a, b) => a + b, 0)).toBe(200);
+    expect(new Set(distributeChapters(200, 10)).size).toBeGreaterThan(2);
+    expect(distributeChapters(90, 3)).toEqual([30, 30, 30]);
+    expect(distributeChapters(20, 2)).toEqual([10, 10]);
     expect(distributeChapters(2000, 100)).toHaveLength(100);
     // 短篇的运行五步；长篇把“章节计划”换成卷纲与逐卷拆章。
     expect(value(await start({})).steps.map((s) => s.key)).toEqual(['model', 'seed', 'plan', 'write', 'export']);
@@ -120,6 +125,9 @@ describe('写作工作流（B78）', () => {
     const related = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 30 }, undefined, { relationChanges: true }));
     expect(related.calls - single.calls).toBe(30);
     expect(related.inputTokens).toBeGreaterThan(single.inputTokens);
+    // 写完一章后做第二遍去 AI 味的修订（B87，偏好开着时）：每写一章另计两次。
+    const polished = value(await app.quoteWorkflow('quick_book', { ...params, chapters: 30 }, undefined, { polish: true }));
+    expect(polished.calls - single.calls).toBe(60);
   });
 
   it('长篇先定全书卷纲再逐卷拆章：卷纲可改章数、采用时按顺序建卷；逐卷拆章写进各卷，一卷拆不成时中断、继续时只拆剩下的', async () => {

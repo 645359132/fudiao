@@ -2,6 +2,7 @@
 // 结果都定位到段落；针对整章的问题锚在相关段落上，引文为空。
 import type { CastMember, ChapterOrder, ForeshadowItem, IssueAnchor, ParagraphText, ProgramIssue } from './types';
 import { proseChecks } from './prose';
+import { styleChecks, type StyleCheckInput } from './style-checks';
 
 /** 揭晓内容短于此长度时不做字面检查：太短的词组在正文里出现未必是说破，交给模型审核。 */
 export const MIN_REVEAL_LENGTH = 6;
@@ -108,6 +109,8 @@ export type ProgramCheckInput = {
   readonly foreshadows: readonly ForeshadowItem[];
   readonly order: ChapterOrder;
   readonly cast: readonly CastMember[];
+  /** 文风检查（B87）的材料：风格账本与本章的节奏目标；没有时不查文风。 */
+  readonly style?: StyleCheckInput;
 };
 
 export function runProgramChecks(input: ProgramCheckInput): ProgramIssue[] {
@@ -118,5 +121,7 @@ export function runProgramChecks(input: ProgramCheckInput): ProgramIssue[] {
     ...missingCast(input.paragraphs, input.cast),
     // 文字体检（B74）：AI 常见句式、生成退化与写作材料泄漏。
     ...proseChecks(input.paragraphs),
+    // 文风（B87）：最近几章用得太多的说法、本章的高频词与固定搭配、对话占比、句长、章尾与长对白。
+    ...(input.style === undefined ? [] : styleChecks(input.paragraphs, input.style)),
   ];
 }

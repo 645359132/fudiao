@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { CHAPTER_TYPE_LABEL, CHAPTER_TYPES, DIALOGUE_LEVEL_LABEL, DIALOGUE_LEVELS, ENDING_STYLE_LABEL, ENDING_STYLES, type ChapterRhythm, type ChapterType, type DialogueLevel, type EndingStyle } from '@fudiao/shared';
 import type { Foreshadow, ForeshadowFields, ForeshadowStatus } from '@fudiao/store';
 import type { PlanChapterView } from '../app/planning';
 import { PipelineBoard, PLAN_VIRTUAL_FROM } from './PipelineBoard';
@@ -91,6 +92,12 @@ function PlanEditor({ item }: { readonly item: PlanChapterView }) {
   const [payoff, setPayoff] = useState<readonly string[]>(plan?.foreshadowPayoff ?? []);
   const [treatment, setTreatment] = useState(plan?.treatment ?? '');
   const [target, setTarget] = useState(plan?.targetWords === null || plan === null ? '' : String(plan.targetWords));
+  // 节奏目标（B87）：三项都没选时为没有。
+  const [type, setType] = useState<ChapterType | ''>(plan?.rhythm?.type ?? '');
+  const [dialogue, setDialogue] = useState<DialogueLevel | ''>(plan?.rhythm?.dialogue ?? '');
+  const [ending, setEnding] = useState<EndingStyle | ''>(plan?.rhythm?.ending ?? '');
+  const rhythm: ChapterRhythm | null =
+    type === '' && dialogue === '' && ending === '' ? null : { type: type === '' ? 'other' : type, dialogue: dialogue === '' ? 'mid' : dialogue, ending: ending === '' ? 'cliffhanger' : ending };
   const toggle = (list: readonly string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((x) => x !== id));
   const open = (planning?.foreshadows ?? []).filter((f) => f.status !== 'dropped' && f.status !== 'paid_off');
   return (
@@ -107,6 +114,7 @@ function PlanEditor({ item }: { readonly item: PlanChapterView }) {
           foreshadowPayoff: payoff,
           treatment,
           targetWords: target.trim() === '' ? null : Math.max(1, Math.round(Number(target))),
+          rhythm,
         });
       }}
     >
@@ -152,6 +160,41 @@ function PlanEditor({ item }: { readonly item: PlanChapterView }) {
         字数
         <input type="number" min={1} value={target} onChange={(e) => setTarget(e.target.value)} />
       </label>
+      <div className="skill-actions">
+        <label>
+          章节类型
+          <select value={type} onChange={(e) => setType(e.target.value as ChapterType | '')}>
+            <option value="">不定</option>
+            {CHAPTER_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {CHAPTER_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          对话多少
+          <select value={dialogue} onChange={(e) => setDialogue(e.target.value as DialogueLevel | '')}>
+            <option value="">不定</option>
+            {DIALOGUE_LEVELS.map((d) => (
+              <option key={d} value={d}>
+                {DIALOGUE_LEVEL_LABEL[d]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          章尾收法
+          <select value={ending} onChange={(e) => setEnding(e.target.value as EndingStyle | '')}>
+            <option value="">不定</option>
+            {ENDING_STYLES.map((s) => (
+              <option key={s} value={s}>
+                {ENDING_STYLE_LABEL[s]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <button type="submit" disabled={busy}>
         保存计划
       </button>
@@ -514,6 +557,13 @@ export function PlanningPanel() {
       <DraftSection />
       <PipelineBoard />
       <h3>章节计划</h3>
+      {planning.variety.length > 0 ? (
+        <ul className="muted" aria-label="计划的均一之处">
+          {planning.variety.map((v) => (
+            <li key={v.kind}>{v.description}</li>
+          ))}
+        </ul>
+      ) : null}
       <ChapterPlanList chapters={planning.chapters} foreshadows={planning.foreshadows} />
       <Ledger />
     </section>

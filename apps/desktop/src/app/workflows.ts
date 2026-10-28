@@ -51,6 +51,7 @@ import type { RunEvent } from '@fudiao/engine';
 import type { AppDeps } from './ports';
 import { seedContentTokens, type BookSeed, type BookSeedRequest, type QuickBookStatus } from './quick-book';
 import { segmentContentTokens } from './writer';
+import { POLISH_CALLS_PER_CHAPTER, POLISH_INPUT_PER_CHAPTER, POLISH_OUTPUT_PER_CHAPTER, type StyleReport } from './polish';
 import { THINKING_ALLOWANCE, THINKING_TOKENS_PER_CALL, TOKENS_PER_CHAR } from './thinking';
 import { PLAN_STATUS_LABEL, SIM_END_LABEL, SIM_PAUSE_LABEL } from './labels';
 import type { SceneDraft, SceneDraftRequest, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
@@ -300,11 +301,32 @@ export const AUTO_CHAPTERS_PER_VOLUME = 20;
 type VolumeChoice = { readonly chapters: number; readonly volumeMode: VolumeMode; readonly volumeCount: number | null };
 
 /** 各卷的章数：平均分，前面的卷多一章。 */
+/**
+ * 各卷的章数：按一个固定的起伏（长、短、中、短……在均值上下约两成之间）分配，总数不变，每卷至少 1 章、不超过一次能拆的章数；
+ * 均值太接近上限或太小时平均分。整本书每卷整整 20 章是机器排的痕迹（B87），作者在卷纲一步仍可逐卷改。
+ */
 export function distributeChapters(chapters: number, volumes: number): number[] {
   const count = Math.max(1, Math.min(volumes, chapters));
-  const base = Math.floor(chapters / count);
-  const extra = chapters % count;
-  return Array.from({ length: count }, (_, i) => base + (i < extra ? 1 : 0));
+  const mean = chapters / count;
+  const even = () => {
+    const base = Math.floor(chapters / count);
+    const extra = chapters % count;
+    return Array.from({ length: count }, (_, i) => base + (i < extra ? 1 : 0));
+  };
+  if (count < 3 || mean < 5 || Math.ceil(mean * 1.2) > PLAN_CHAPTERS_PER_CALL) return even();
+  const wave = [1.15, 0.85, 1.05, 0.9, 1.1, 0.95];
+  const sizes = Array.from({ length: count }, (_, i) => Math.max(1, Math.round(mean * (wave[i % wave.length] ?? 1))));
+  // 凑回总数：差额加到或减自最靠前、不会越界的卷。
+  let diff = chapters - sizes.reduce((a, b) => a + b, 0);
+  for (let i = 0; diff !== 0 && i < count * 4; i++) {
+    const at = i % count;
+    const step = diff > 0 ? 1 : -1;
+    const next = (sizes[at] ?? 1) + step;
+    if (next < 1 || next > PLAN_CHAPTERS_PER_CALL) continue;
+    sizes[at] = next;
+    diff -= step;
+  }
+  return diff === 0 ? sizes : even();
 }
 
 /** 分卷方式与章数搭不搭：不分卷与单卷最多 PLAN_CHAPTERS_PER_CALL 章；指定卷数时每卷不超过它。给作者看的问题，没有问题时为 null。 */
@@ -405,6 +427,8 @@ export type WorkflowHost = {
   draftPlans(request: PlanDraftRequest, options?: CallOptions): Promise<Result<PlanDraft, AppError>>;
   applyPlanDraft(draft: PlanDraft): Promise<Result<AppliedDraft, AppError>>;
   planningView(): Promise<Result<PlanningView, AppError>>;
+  /** 范围内各章正文的文风统计（B87），不调用模型。 */
+  styleReport(chapterIds: readonly string[]): Promise<Result<StyleReport, AppError>>;
   buildMemory(chapterId: string, options?: CallOptions): Promise<Result<unknown, AppError>>;
   auditChapters(from: string | null, to: string | null): Promise<Result<readonly Chapter[], AppError>>;
   draftSuspects(chapterIds: readonly string[], stepKey: string, options?: CallOptions): Promise<Result<{ readonly suspects: AuditSuspect[]; readonly dropped: number }, AppError>>;
@@ -705,10 +729,19 @@ const ChapterCount = z.object({ chapters: z.array(z.string()), note: z.string() 
 const ForeshadowReport = z.object({ findings: z.array(z.object({ foreshadowId: z.string(), title: z.string(), problem: z.enum(['overdue', 'not_planted', 'unscheduled']), chapterId: z.string().nullable() })) });
 const SuspectDraft = z.object({ suspects: z.array(AuditSuspect), dropped: z.number().int() });
 const LocateReport = z.object({ issues: z.number().int(), unconfirmed: z.number().int(), dropped: z.number().int(), failed: z.number().int() });
+/** 文风统计（B87）：范围内各章合起来算；较早的运行没有这一项。 */
+const StyleReportSchema = z.object({
+  words: z.number().int(),
+  dialogueRatio: z.number(),
+  sentenceCv: z.number(),
+  endings: z.record(z.string(), z.number().int()),
+  overused: z.array(z.object({ term: z.string(), count: z.number().int(), chapters: z.number().int() })),
+});
 const AuditReport = z.object({
   chapters: z.array(z.object({ chapterId: z.string(), title: z.string(), pending: z.number().int() })),
   foreshadows: z.number().int(),
   continuity: z.number().int(),
+  style: StyleReportSchema.nullable().default(null),
 });
 export type AuditReport = z.infer<typeof AuditReport>;
 
@@ -879,10 +912,20 @@ function bookAudit(host: WorkflowHost): WorkflowDef<BookAuditParams> {
           const rows = view.value.chapters.filter((c) => ids.has(c.chapter.id)).map((c) => ({ chapterId: c.chapter.id, title: c.chapter.title, pending: c.pendingIssues }));
           const fs = ForeshadowReport.safeParse(output('foreshadow'));
           const loc = LocateReport.safeParse(output('locate'));
-          const report: AuditReport = { chapters: rows, foreshadows: fs.success ? fs.data.findings.length : 0, continuity: loc.success ? loc.data.issues : 0 };
+          // 文风统计（B87）：对话占比、句长、章尾分布与用得太多的说法，不调用模型。
+          const style = await host.styleReport(chapters.value.map((c) => c.id));
+          if (!style.ok) return style;
+          const s = style.value;
+          const report: AuditReport = {
+            chapters: rows,
+            foreshadows: fs.success ? fs.data.findings.length : 0,
+            continuity: loc.success ? loc.data.issues : 0,
+            style: { words: s.words, dialogueRatio: s.dialogueRatio, sentenceCv: s.sentenceCv, endings: { ...s.endings }, overused: s.overused.map((t) => ({ ...t })) },
+          };
           const total = rows.reduce((n, r) => n + r.pending, 0);
           const worst = rows.filter((r) => r.pending > 0).length;
-          return ok({ output: report, note: `范围内 ${rows.length} 章，${worst} 章有待处理的问题，共 ${total} 条（跨章连贯 ${report.continuity} 条）；伏笔要留意的 ${report.foreshadows} 条` });
+          const tone = `；对话占比 ${Math.round(style.value.dialogueRatio * 100)}%，用得太多的说法 ${style.value.overused.length} 个`;
+          return ok({ output: report, note: `范围内 ${rows.length} 章，${worst} 章有待处理的问题，共 ${total} 条（跨章连贯 ${report.continuity} 条）；伏笔要留意的 ${report.foreshadows} 条${tone}` });
         },
       }),
     ],
@@ -2636,15 +2679,21 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
      * assumed 是假定的作品规模：试用脚本（tools/workflow-eval）在章节写出来之前估算后面的工作流时用；不给时按作品现状。
      * relationChanges：写完一章后找人物关系的变化（桌面端的写手队列按偏好做，默认开），每写一章另计一次调用。
      */
-    async quoteWorkflow(workflow: WorkflowKey, params: unknown, assumed?: BookSize, options: { readonly relationChanges?: boolean } = {}): Promise<Result<WorkflowQuote, AppError>> {
+    async quoteWorkflow(workflow: WorkflowKey, params: unknown, assumed?: BookSize, options: { readonly relationChanges?: boolean; readonly polish?: boolean } = {}): Promise<Result<WorkflowQuote, AppError>> {
       const def = ERASED[workflow];
       const p = def.parseParams(params);
       if (!p.ok) return err(invalid(p.error));
       const book = assumed ?? (await currentSize());
       const { written = 0, ...base } = await def.estimate(p.value, book);
       const extra = options.relationChanges === true ? written : 0;
-      const calls = base.calls + extra;
-      const estimate = { calls, inputTokens: base.inputTokens + extra * RELATION_CHANGE_INPUT, outputTokens: base.outputTokens + extra * RELATION_CHANGE_OUTPUT + calls * THINKING_TOKENS_PER_CALL };
+      // 第二遍去 AI 味的修订（B87，偏好开着时）：每写一章另计几次调用。
+      const polished = options.polish === true ? written : 0;
+      const calls = base.calls + extra + polished * POLISH_CALLS_PER_CHAPTER;
+      const estimate = {
+        calls,
+        inputTokens: base.inputTokens + extra * RELATION_CHANGE_INPUT + polished * POLISH_INPUT_PER_CHAPTER,
+        outputTokens: base.outputTokens + extra * RELATION_CHANGE_OUTPUT + polished * POLISH_OUTPUT_PER_CHAPTER + calls * THINKING_TOKENS_PER_CALL,
+      };
       const price = await pricing();
       const cost = costOf({ inputTokens: estimate.inputTokens, outputTokens: estimate.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 }, price?.prices);
       return ok({ ...estimate, written, costUsd: cost, model: price?.model ?? null });

@@ -74,7 +74,7 @@ export type EditorSelectionInfo = { readonly key: string; readonly chapterId: st
 /** 成书流程正在处理的章节：写作（已写 done / total 段）、整理长篇记忆、找人物关系的变化或审核；queued 是排在后面的章节。 */
 export type WriterJob = {
   readonly chapterId: string;
-  readonly stage: 'writing' | 'memory' | 'relations' | 'review';
+  readonly stage: 'writing' | 'polish' | 'memory' | 'relations' | 'review';
   readonly done: number;
   readonly total: number;
   readonly queued: readonly string[];
@@ -534,6 +534,8 @@ export type AppState = {
   readonly stopRelationScan: () => void;
   /** 写完一章后自动找出关系变化（对所有作品生效的偏好，默认开）。 */
   readonly setAutoRelationChanges: (on: boolean) => Promise<void>;
+  /** 写完一章后再做一遍去 AI 味的修订（B87，对所有作品生效的偏好，默认关）。 */
+  readonly setPolishAfterWriting: (on: boolean) => Promise<void>;
   /** 记下（id 为 null）或修改人物的出场、退场与回归；删除一条。返回是否成功。 */
   readonly saveCastPresence: (id: string | null, fields: CastPresenceFields) => Promise<boolean>;
   readonly deleteCastPresence: (id: string) => Promise<boolean>;
@@ -877,6 +879,7 @@ export function createAppStore(service: AppService): AppStore {
     }
     /** 写完一章后自动找出关系变化（偏好，默认开）。 */
     const autoRelations = () => get().library?.preferences.autoRelationChanges ?? true;
+    const polishOn = () => get().library?.preferences.polishAfterWriting ?? false;
     /** 正在从已写的章节找出关系变化（同一时间只有一次）；关闭作品时停下。 */
     let relationScanAbort: AbortController | null = null;
 
@@ -921,6 +924,8 @@ export function createAppStore(service: AppService): AppStore {
       const unreviewed: string[] = [];
       /** 写完了、但人物关系的变化没有找成的章节（带原因），同样不挡住后面的写作，在结束的那句话里列出。 */
       const unrelated: string[] = [];
+      /** 写完了、但第二遍修订没做成或有没写回的组的章节（带原因，B87），同样不挡住后面的写作。 */
+      const unpolished: string[] = [];
       /** 这一批找到的待确认的关系与人物变化。 */
       let relationsFound = 0;
       /** 停在哪里、为什么（显示给作者的话）。 */
@@ -998,6 +1003,17 @@ export function createAppStore(service: AppService): AppStore {
             return false;
           }
           t.finish('done');
+          // 第二遍去 AI 味的修订（B87，偏好开着时）：按程序统计的反馈只改表达；没做成不挡住后面的章。
+          if (polishOn()) {
+            put({ chapterId, stage: 'polish', done: segmentsTotal, total: segmentsTotal });
+            const polished = await polishTask(chapterId, abort, tee);
+            await refresh(chapterId);
+            if (abort.signal.aborted) {
+              halt(`“${title}”已写完，第二遍修订时停下了${rest()}`);
+              return false;
+            }
+            if (polished !== null) unpolished.push(`《${title}》（${polished}）`);
+          }
           // 写完一章就整理它的长篇记忆，后面的章节靠它接上前文；没整理成时不接着写。
           put({ chapterId, stage: 'memory', done: segmentsTotal, total: segmentsTotal });
           written.add(chapterId);
@@ -1046,7 +1062,7 @@ export function createAppStore(service: AppService): AppStore {
       publish();
       const titles = ordered.filter((id) => written.has(id)).map((id) => `《${chapter(id)?.title ?? ''}》`);
       const done = titles.length === 0 ? '一章也没有写完' : `写完了${titles.join('')}`;
-      const missed = `${unreviewedNote(unreviewed)}${unrelatedNote(unrelated)}`;
+      const missed = `${unreviewedNote(unreviewed)}${unrelatedNote(unrelated)}${unpolishedNote(unpolished)}`;
       if (stops.length === 0 && missed !== '') set({ message: missed.slice(1) });
       const found = relationsFound === 0 ? '' : `；找到 ${relationsFound} 条人物关系与人物进出的变化，等作者在人物关系页确认`;
       return { summary: `写手依次写 ${chapterIds.length} 章：${done}${found}${missed}${stops.length === 0 ? '' : `；停在这里：${stops.join('；')}`}`, complete: stops.length === 0, cancelled: abort.signal.aborted };
@@ -1207,6 +1223,30 @@ export function createAppStore(service: AppService): AppStore {
     const unreviewedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：${titles.join('、')}`);
     /** 人物关系的变化没有找成的章节，同上。 */
     const unrelatedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的人物关系变化没有找出，可以在人物关系页“从已写的章节找出变化”补上：${titles.join('、')}`);
+    /** 第二遍修订没做成的章节（B87），同上。 */
+    const unpolishedNote = (titles: readonly string[]) => (titles.length === 0 ? '' : `；这些章的第二遍修订没有全部写回：${titles.join('、')}`);
+
+    /** 第二遍去 AI 味的修订（B87），登记为任务。返回要列在结束那句话里的原因；全部写回时为 null。 */
+    async function polishTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o): Promise<string | null> {
+      const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+      const t = startTask('writer', `去 AI 味修订 · ${title}`, chapterId, abort);
+      const result = await service.polishChapter(chapterId, tee(t.options()));
+      if (!result.ok) {
+        t.fail(describeError(result.error));
+        return describeError(result.error);
+      }
+      const o = result.value;
+      if (o.status === 'cancelled') {
+        t.finish('cancelled');
+        return '已停下';
+      }
+      if (o.status === 'stopped') {
+        t.fail(o.reason ?? '修订停下');
+        return o.reason ?? '修订停下';
+      }
+      t.finish('done');
+      return o.skipped.length === 0 ? null : o.skipped.join('；');
+    }
 
     async function reviewTask(chapterId: string, abort: AbortController, tee: (o: CallOptions) => CallOptions = (o) => o) {
       const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
@@ -2243,7 +2283,7 @@ export function createAppStore(service: AppService): AppStore {
 
       selectWorkflow: (runId) => set({ workflowId: runId }),
       async quoteWorkflow(workflow, params) {
-        const quote = await service.quoteWorkflow(workflow, params, undefined, { relationChanges: autoRelations() });
+        const quote = await service.quoteWorkflow(workflow, params, undefined, { relationChanges: autoRelations(), polish: polishOn() });
         if (quote.ok) return quote.value;
         set({ message: describeError(quote.error) });
         return null;
@@ -2958,6 +2998,7 @@ export function createAppStore(service: AppService): AppStore {
         relationScanAbort?.abort();
       },
       setAutoRelationChanges: (on) => savePreferences({ autoRelationChanges: on }),
+      setPolishAfterWriting: (on) => savePreferences({ polishAfterWriting: on }),
       async saveCastPresence(id, fields) {
         const records = get().castPresence?.records ?? get().relations?.presence.records ?? [];
         const current = id === null ? null : (records.find((r) => r.id === id) ?? null);

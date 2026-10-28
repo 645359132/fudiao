@@ -1,4 +1,5 @@
 import { ActionKind, InjuryLevel, Volume } from '@fudiao/domain';
+import { CHAPTER_TYPES, DIALOGUE_LEVELS, ENDING_STYLES } from '@fudiao/shared';
 import { z } from 'zod';
 
 // 模型输出的 schema。字段全部必填，可缺省的用 nullable 表示：
@@ -208,6 +209,8 @@ export const PlanDraftOutput = z.object({
       payoff: z.array(z.string()),
       treatment: z.string(),
       targetWords: z.number().int().positive().nullable(),
+      /** 节奏目标（B87）：章节类型、对话多少与章尾收法。较早的输出没有这一项。 */
+      rhythm: z.object({ type: z.enum(CHAPTER_TYPES), dialogue: z.enum(DIALOGUE_LEVELS), ending: z.enum(ENDING_STYLES) }).nullable().default(null),
     }),
   ),
   foreshadows: z.array(z.object({ title: z.string(), content: z.string(), reveal: z.string() })),

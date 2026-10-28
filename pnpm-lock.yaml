@@ -175,6 +175,9 @@ importers:
       '@fudiao/store':
         specifier: workspace:*
         version: link:packages/store
+      '@fudiao/writing':
+        specifier: workspace:*
+        version: link:packages/writing
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5

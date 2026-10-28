@@ -985,32 +985,32 @@ describe('写作技能界面（B61、B37）', () => {
       await user.click(within(row(name)).getByRole('button', { name }));
       await waitFor(() => expect(within(detail()).getByRole('heading', { name })).toBeTruthy());
     };
-    await screen.findByRole('listitem', { name: '章末钩子' });
+    await screen.findByRole('listitem', { name: '章尾收束' });
 
     // 列表一行一项：开关、名称、一行适用说明（内置技能取模板，去掉开头重复的名称）、用在哪个阶段。
-    await user.click(within(row('章末钩子')).getByRole('switch', { name: '启用章末钩子' }));
-    await waitFor(() => expect(within(row('章末钩子')).getByRole('switch')).toHaveProperty('checked', false));
-    expect(within(row('章末钩子')).getByText(/写每一章的结尾时使用/)).toBeTruthy();
+    await user.click(within(row('章尾收束')).getByRole('switch', { name: '启用章尾收束' }));
+    await waitFor(() => expect(within(row('章尾收束')).getByRole('switch')).toHaveProperty('checked', false));
+    expect(within(row('章尾收束')).getByText(/写每一章的结尾时使用/)).toBeTruthy();
     expect(within(row('雪花写作法')).getByText('规划')).toBeTruthy();
-    expect(within(row('章末钩子')).getByText('写章节')).toBeTruthy();
+    expect(within(row('章尾收束')).getByText('写章节')).toBeTruthy();
     // 按阶段筛选。
     await user.click(within(screen.getByRole('group', { name: '按阶段筛选' })).getByRole('button', { name: /^规划/ }));
     expect(within(screen.getByRole('list', { name: '技能列表' })).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['雪花写作法']);
     await user.click(within(screen.getByRole('group', { name: '按阶段筛选' })).getByRole('button', { name: /^全部/ }));
 
     // 点一行在右边查看与编辑；改了没保存时切到别的技能，回来还在，列表里标着“未保存”。
-    await open('章末钩子');
-    const box = within(detail()).getByRole('textbox', { name: '章末钩子的指令' });
+    await open('章尾收束');
+    const box = within(detail()).getByRole('textbox', { name: '章尾收束的指令' });
     await user.clear(box);
     await user.type(box, '停在悬念上，不要总结。');
     await open('雪花写作法');
-    expect(within(row('章末钩子')).getByText('未保存')).toBeTruthy();
-    await open('章末钩子');
-    expect(within(detail()).getByRole('textbox', { name: '章末钩子的指令' })).toHaveProperty('value', '停在悬念上，不要总结。');
+    expect(within(row('章尾收束')).getByText('未保存')).toBeTruthy();
+    await open('章尾收束');
+    expect(within(detail()).getByRole('textbox', { name: '章尾收束的指令' })).toHaveProperty('value', '停在悬念上，不要总结。');
     await user.click(within(detail()).getByRole('button', { name: '保存' }));
     expect(await within(detail()).findByText('内置（已修改）')).toBeTruthy();
-    expect(within(row('章末钩子')).getByText('已修改')).toBeTruthy();
-    expect(within(row('章末钩子')).queryByText('未保存')).toBeNull();
+    expect(within(row('章尾收束')).getByText('已修改')).toBeTruthy();
+    expect(within(row('章尾收束')).queryByText('未保存')).toBeNull();
     await user.click(within(detail()).getByRole('button', { name: '恢复内置指令' }));
     expect(await within(detail()).findByText('内置')).toBeTruthy();
 

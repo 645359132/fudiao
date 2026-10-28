@@ -54,6 +54,7 @@ import {
   renderStalemateJudgement,
   renderStructuredRepair,
   renderWriterChapter,
+  renderWriterPolish,
   renderWriterRevise,
   type RenderedPrompt,
 } from './render';
@@ -480,7 +481,8 @@ describe('章节计划草稿（B65）', () => {
       ),
     );
     expect(text).toContain('拆成 5 章');
-    expect(text).toContain('约 3000 字');
+    expect(text).toContain('3000 字上下三成之间浮动');
+    expect(text).toContain('rhythm 是对象 { type, dialogue, ending }');
     expect(text).toContain('作品：当铺夜谈（古代市井）');
     expect(text).not.toContain('简介：');
     expect(text).toContain('人物：\n- 林舟：落魄书生，急需用钱\n- 钱四\n');
@@ -627,7 +629,7 @@ describe('写手成章（B59）', () => {
       '- （已写）雨中奔走\n- （这次写）再访当铺\n- （这次写）对峙\n- （以后写）离开',
       '上一章的结尾：\n门在他身后合上了。',
       '本章已经写到这里：\n雨下了一夜。',
-      '请接着写标为“这次写”的情节点，约 1500 字。这不是本章的结尾',
+      '请接着写标为“这次写”的情节点，约 1500 字（上下三成以内按情节定）。这不是本章的结尾',
     ]) {
       expect(text).toContain(part);
     }
@@ -642,7 +644,7 @@ describe('写手成章（B59）', () => {
     for (const absent of ['写作技能：', '不要使用这些说法', '出场人物：', '已确认的事实：', '前文梗概：', '要埋的伏笔', '要回收的伏笔', '不得说破', '本章的情节点：', '上一章的结尾', '本章已经写到这里', '本卷']) {
       expect(text).not.toContain(absent);
     }
-    expect(text).toContain('请接着写本章的正文，达成本章目标，约 1500 字。这是本章的最后一段，写到本章结束。');
+    expect(text).toContain('请接着写本章的正文，达成本章目标，约 1500 字（上下三成以内按情节定）。这是本章的最后一段，写到本章结束。');
   });
 
   it('本章在某一卷里时写出卷名与本卷梗概（B68）；卷没有梗概时只写卷名', () => {
@@ -1006,5 +1008,74 @@ describe('推演整书的模板（B86）', () => {
     const text = fullText(prompt);
     for (const part of ['本章的目标：林舟当玉，钱四认出来历', '1. 叩门', '4. 离开', '推演写出的正文：\n雨下得更紧了。他没有回头。', 'covered 为已写出的情节点序号数组']) expect(text).toContain(part);
     expect(fullText(unwrap(renderSceneCoverage({ goal: '  ', beats: ['a'], text: 't' })))).toContain('本章的目标：（没有写）');
+  });
+});
+
+describe('写手的节奏目标、风格账本与第二遍修订（B87）', () => {
+  const base = {
+    title: '当铺夜谈',
+    genre: '',
+    chapterTitle: '第二章 夜雨',
+    goal: '林舟再访当铺',
+    treatment: '',
+    skills: [],
+    avoidPhrases: [],
+    cast: [{ name: '胡掌柜', description: '当铺掌柜', state: '', attributes: [{ label: '外貌', value: '矮胖' }, { label: ' ', value: '空的不带' }] }],
+    facts: [],
+    memories: [],
+    toPlant: [],
+    toPayoff: [],
+    mustNotReveal: [],
+    beatsBefore: [],
+    beatsNow: ['叩门'],
+    beatsAfter: [],
+    previousEnding: '',
+    written: '',
+    words: 1500,
+    isLast: true,
+  };
+
+  it('出场人物带外貌与特征；节奏写明类型、对话占比与章尾收法，最后一段按收法收尾', () => {
+    const text = fullText(unwrap(renderWriterChapter({ ...base, rhythm: { type: '对峙或谈判', dialogueTarget: '40%', endingStyle: '一句对白', endingHint: '以人物的一句话收尾' } })));
+    expect(text).toContain('- 胡掌柜：当铺掌柜\n  外貌与特征：外貌：矮胖');
+    expect(text).toContain('出场人物的外貌与特征按设定写，前后一致，不要改');
+    expect(text).toContain('本章的节奏：对峙或谈判；对话约占 40%（人物说出来的话，按引号里的字算）；章尾收法：一句对白（以人物的一句话收尾）');
+    expect(text).toContain('写到本章结束，章尾用“一句对白”的收法。');
+    const plain = fullText(unwrap(renderWriterChapter({ ...base, cast: [{ name: '胡掌柜', description: '当铺掌柜', state: '' }] })));
+    expect(plain).not.toContain('外貌与特征');
+    expect(plain).not.toContain('本章的节奏');
+    expect(plain).toContain('写到本章结束。');
+  });
+
+  it('风格账本：每章一行、最近的章尾与不要再用的说法；没有账本时整段省略', () => {
+    const text = fullText(
+      unwrap(renderWriterChapter({ ...base, style: { lines: ['《第一章》：4,000 字，对话 9%，句长变异 0.40，收尾：一句短的定格'], overused: ['“生铁”（8 章 37 次）', '句子以“沈孤舟没有……”开头（16 次）'], endings: ['一句短的定格', '一段叙述的画面'] } })),
+    );
+    expect(text).toContain('最近几章的文风账本（每章一行：字数、对话占比、句长变异、收尾方式、多用的词），本章的对话、句子长短与收尾要与它们拉开：\n- 《第一章》：4,000 字');
+    expect(text).toContain('最近几章的章尾依次是：一句短的定格、一段叙述的画面。这一章不要再用同一种收法。');
+    expect(text).toContain('这些说法最近几章用得太多，本章不要再用（必须提到的东西换一个说法指代；句首的模板换主语或从动作、环境写起）：\n- “生铁”（8 章 37 次）\n- 句子以“沈孤舟没有……”开头（16 次）');
+    expect(fullText(unwrap(renderWriterChapter({ ...base, style: { lines: [], overused: [], endings: [] } })))).not.toContain('文风账本');
+  });
+
+  it('第二遍修订：统计反馈、带标签的段落、只用润色技能与规避词', () => {
+    const prompt = unwrap(
+      renderWriterPolish({
+        title: '当铺夜谈',
+        chapterTitle: '第二章 夜雨',
+        skills: [{ name: '润色与去 AI 味', description: '润色与去 AI 味：只改表达', text: '不拿同义词替换规避的说法。' }],
+        avoidPhrases: ['不禁'],
+        feedback: ['“生铁”在本章出现 9 次', '本章对话只占 8%，低于本章的目标（约 25%）'],
+        paragraphs: [{ label: 'P1', text: '生铁冷得刺骨。' }, { label: 'P2', text: '他没有说话。' }],
+      }),
+    );
+    expect(prompt.template).toEqual({ id: 'writer_polish', version: '1' });
+    expect(prompt.task).toBe('writer');
+    expect(prompt.output).toBeUndefined();
+    const text = fullText(prompt);
+    expect(text).toContain('段落一段对一段');
+    expect(text).toContain('【润色与去 AI 味】适用：只改表达\n不拿同义词替换规避的说法。');
+    expect(text).toContain('不要使用这些说法：“不禁”');
+    expect(text).toContain('这一章的统计：\n- “生铁”在本章出现 9 次\n- 本章对话只占 8%，低于本章的目标（约 25%）');
+    expect(text).toContain('要修订的段落：\n[P1] 生铁冷得刺骨。\n[P2] 他没有说话。');
   });
 });

@@ -52,8 +52,8 @@
     "sha256": "1f35fe9d7ee5ce1e28a9a16cce7aa0fa080ad58dcac826c765dcd8b413d99655"
   },
   "chapter_review": {
-    "version": "4",
-    "sha256": "1b915ac3a2801ea74c726048a3072255650dc3a27c1bd46b36ea3b207903c3f0"
+    "version": "5",
+    "sha256": "470ca27e09e0b708fa976283095e1e850300f12afb6a7cd6ac7c4f597c3bf1e4"
   },
   "character_action": {
     "version": "10",
@@ -80,8 +80,8 @@
     "sha256": "663fa5774bc0d54b2da1cb0622b60e36a109bde690702dc7d6948d6911e29086"
   },
   "plan_draft": {
-    "version": "6",
-    "sha256": "6ebb23cfb8b0a5e01f120f03923e537d51a32288de9b60a8983c9794653a25ff"
+    "version": "7",
+    "sha256": "7501441a609b0253d773b9d481439d2640a87ec628fa359340f727af5e8ab58d"
   },
   "relation_changes": {
     "version": "1",
@@ -128,20 +128,24 @@
     "sha256": "b22681f9529d04b5a95e68878351114114d15ce7ed4f382e9244a021400eaf5e"
   },
   "writer_chapter": {
-    "version": "8",
-    "sha256": "2aa4a7887bbed9febe07b9aedba2c5b01f56db89a8868e09f070d5d930a68b28"
+    "version": "9",
+    "sha256": "b30dd5a9bb5c0c1ee4a92d81e801cf68243049e394d5c4b8e9321d88a61c7198"
+  },
+  "writer_polish": {
+    "version": "1",
+    "sha256": "4ff7fbb2fa4e3ba8f862fbbf6a7d25ea92dabc55fc71b30c1781aa6d211e48fe"
   },
   "writer_revise": {
     "version": "1",
     "sha256": "91c3472389769a4fd222680c8b48f70331896f9a041e37e6128b492a26c71d80"
   },
   "skill:cliffhanger": {
-    "version": "2",
-    "sha256": "495368a6a66af261eac520f67b300ed0732e774c00838904331a2dd5903941a4"
+    "version": "3",
+    "sha256": "b1cd6dfc17a5a1126425ffe1ed16c183a6044c2ce767dc84db843c4a6167974c"
   },
   "skill:dialogue": {
-    "version": "2",
-    "sha256": "9fbab63b0572f434350ee23cd6b602b109403e2d0a9f158ac0a0271a2f5bec01"
+    "version": "3",
+    "sha256": "77bf4506e21c0c903a25fe46f47d11c56fb15e44d5e597a7e5780462e4e68903"
   },
   "skill:foreshadow": {
     "version": "2",
@@ -156,8 +160,8 @@
     "sha256": "3b8dd7b3fe4c7e9ec19a7536ceba827aeccd9e4565bb37e6a2857f11535533be"
   },
   "skill:polish": {
-    "version": "3",
-    "sha256": "7e619396cc4232b4a7b53277718201426c69a662ad8872d7502f134aab2f0e17"
+    "version": "4",
+    "sha256": "e457c94c1c81049c2d938616c76c98313151ed78271ee7085097a370d2ef53e8"
   },
   "skill:pov": {
     "version": "2",
@@ -172,8 +176,8 @@
     "sha256": "f333c4c8f14963154bc8f72b434d5700b799f2f4a202a70eaf57585d0d1739e9"
   },
   "skill:tension": {
-    "version": "2",
-    "sha256": "1a5dab433af51d6b81efcdf432af1dad395e24931fa2520aefdd0843c73ec1d6"
+    "version": "3",
+    "sha256": "26f9d491a2645637aef4122c029b2204edd4e12a3b17ea242adc0e8be5b3af59"
   },
   "skill:writing-basics": {
     "version": "1",

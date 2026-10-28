@@ -37,7 +37,7 @@ describe('内置写作技能', () => {
 
   it('润色与去 AI 味：对照壳子、一句话收尾、伪深度、重复开头、破折号与限定词、中文的冗余、口癖，以及修订只改表达的边界', () => {
     const skill = BUILTIN_SKILLS.find((s) => s.key === 'polish');
-    expect(skill).toMatchObject({ name: '润色与去 AI 味', version: '3', stages: ['writing'] });
+    expect(skill).toMatchObject({ name: '润色与去 AI 味', version: '4', stages: ['writing'] });
     for (const part of ['不是……而是', '不仅是', '收尾', '格言', '重复开头', '破折号', '限定', '进行', '被字句', '四字词', '口癖', '修订', '不添', '伏笔']) expect(skill?.text).toContain(part);
   });
 

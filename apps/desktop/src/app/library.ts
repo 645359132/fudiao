@@ -31,12 +31,14 @@ export const Preferences = z.object({
   assistant: z.object({ effort: z.enum(['low', 'medium', 'high']).default('medium') }).default({ effort: 'medium' }),
   /** 写手写完一章、整理完长篇记忆后，自动找出这一章带来的人物关系与人物进出的变化（B73 补充），存为待确认的建议。 */
   autoRelationChanges: z.boolean().default(true),
+  /** 写手写完一章后再做一遍去 AI 味的修订（B87）：按程序统计的反馈只改表达，每章约多三四次调用，默认关。 */
+  polishAfterWriting: z.boolean().default(false),
 });
 export type Preferences = z.infer<typeof Preferences>;
 export type Theme = Preferences['theme'];
 export type Layout = Preferences['layout'];
 export type AssistantEffort = Preferences['assistant']['effort'];
-export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' }, autoRelationChanges: true };
+export const DEFAULT_PREFERENCES: Preferences = { showParagraphSource: true, theme: 'system', layout: DEFAULT_LAYOUT, assistant: { effort: 'medium' }, autoRelationChanges: true, polishAfterWriting: false };
 
 /** 应用数据目录下的 library.json。 */
 export const LibraryFile = z.object({

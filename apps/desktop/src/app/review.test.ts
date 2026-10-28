@@ -444,3 +444,27 @@ describe('一键交给写手修订（B64 补充）', () => {
     expect(value(await app.reviseIssues({ chapterIds: [], severities: null })).summary).toBe('范围里没有待处理的审核问题');
   });
 });
+
+describe('文风的程序检查（B87）', () => {
+  it('对话低于本章的目标、本章的高频词都成为程序问题；模型审核照常', async () => {
+    const { deps, app, c2 } = await setup();
+    const contexts = ['撞在石上', '贴着皮肉', '发出闷响', '冷得刺骨', '压在胸口', '横在面前', '落在泥里', '磕在门上', '沉在水底'];
+    const content = value(await app.openChapter(c2));
+    value(
+      await app.saveChapter(
+        c2,
+        content.saved,
+        contexts.map((x, i) => ({ id: `q${i}`, text: `第${i + 1}下，生铁${x}。林舟把那截铁收回袖中，看了第${i + 1}眼柜台后面那盏快要熄灭的油灯，雨还在下，巷子里积了水，挑担子的人把裤脚卷到膝盖，一步一步踩过去，谁也没有说话，远处的更鼓敲了${i + 1}下，风从巷口灌进来，吹得他脖子后面发凉，他把衣领拢了拢。`, source: 'handwritten' as const })),
+        { splits: [], merges: [] },
+      ),
+    );
+    const lin = value(await app.planningView()).characters.find((c) => c.name === '林舟')!;
+    value(await app.savePlan(c2, { goal: '林舟再访', castIds: [lin.id], beats: ['再访'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1000, rhythm: { type: 'confrontation', dialogue: 'high', ending: 'dialogue' } }));
+    deps.llmResponses.push(review([]));
+    const outcome = value(await app.reviewChapter(c2));
+    const descriptions = outcome.issues.filter((i) => i.source === 'program').map((i) => i.description);
+    expect(descriptions).toContain('“生铁”在本章出现 9 次');
+    expect(descriptions).toContain('本章对话只占 0%，低于本章的目标（约 40%）');
+    expect(outcome.issues.find((i) => i.description.startsWith('本章对话'))).toMatchObject({ kind: 'pacing', severity: 'medium' });
+  });
+});

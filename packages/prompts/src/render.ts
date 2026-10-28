@@ -642,7 +642,15 @@ export type WriterChapterInput = {
    * state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。
    * knows、absent（认知层，B59 补充）：这个人物知道或相信的事，与最近几章里他不在场、前文没写他得知的章（章名加梗概）。
    */
-  readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string; readonly knows?: readonly CastKnowledgeFact[]; readonly absent?: readonly string[] }[];
+  readonly cast: readonly {
+    readonly name: string;
+    readonly description: string;
+    readonly state: string;
+    readonly knows?: readonly CastKnowledgeFact[];
+    readonly absent?: readonly string[];
+    /** 设定的属性（外貌、年龄、身形等，B87）：写手照着写、不改。 */
+    readonly attributes?: readonly { readonly label: string; readonly value: string }[];
+  }[];
   /**
    * 人物关系网（B73）中适用于本章、至少一端出场的关系。读作“from 是 to 的 label”，mutual 时为“from 与 to：label”；
    * secret 为读者还不知道的关系（可以暗示，不要点明）。
@@ -666,6 +674,12 @@ export type WriterChapterInput = {
   readonly written: string;
   readonly words: number;
   readonly isLast: boolean;
+  /**
+   * 本章的节奏目标（B87）：类型、对话占比（已写成“约 25%”）、章尾收法与它的写法说明；都已是给模型看的中文，没有的为空。
+   */
+  readonly rhythm?: { readonly type: string; readonly dialogueTarget: string; readonly endingStyle: string; readonly endingHint: string };
+  /** 最近几章的风格账本（B87）：每章一行、用得太多的说法、最近几章的章尾（从远到近）。 */
+  readonly style?: { readonly lines: readonly string[]; readonly overused: readonly string[]; readonly endings: readonly string[] };
 };
 
 export type WriterRelation = { readonly from: string; readonly to: string; readonly label: string; readonly mutual: boolean; readonly description: string; readonly secret: boolean };
@@ -688,8 +702,12 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasSkills: input.skills.length > 0,
     avoidPhrases: [...input.avoidPhrases],
     hasAvoid: input.avoidPhrases.length > 0,
-    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim(), ...castKnowledge(c) })),
+    cast: input.cast.map((c) => {
+      const attributes = (c.attributes ?? []).filter((a) => a.label.trim() !== '' && a.value.trim() !== '').map((a) => `${a.label.trim()}：${a.value.trim()}`).join('；');
+      return { name: c.name, description: c.description.trim(), state: c.state.trim(), attributes, hasAttributes: attributes !== '', ...castKnowledge(c) };
+    }),
     hasCast: input.cast.length > 0,
+    hasAttributes: input.cast.some((c) => (c.attributes ?? []).some((a) => a.label.trim() !== '' && a.value.trim() !== '')),
     // 有谁知道什么、谁不在场时，要求人物只依据自己知道的说话与行动。
     hasKnowledge: input.cast.some((c) => (c.knows ?? []).length > 0 || (c.absent ?? []).length > 0),
     relations: (input.relations ?? []).map((r) => ({ ...r, description: r.description.trim() })),
@@ -699,6 +717,18 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasFacts: input.facts.length > 0,
     memories: input.memories.map((m) => ({ title: m.title, summary: m.summary })),
     hasMemories: input.memories.length > 0,
+    // 节奏目标与风格账本（B87）。
+    hasRhythm: input.rhythm !== undefined,
+    rhythmType: input.rhythm?.type ?? '',
+    dialogueTarget: input.rhythm?.dialogueTarget ?? '',
+    endingStyle: input.rhythm?.endingStyle ?? '',
+    endingHint: input.rhythm?.endingHint ?? '',
+    hasStyle: (input.style?.lines.length ?? 0) > 0,
+    styleLines: [...(input.style?.lines ?? [])],
+    overused: [...(input.style?.overused ?? [])],
+    hasOverused: (input.style?.overused.length ?? 0) > 0,
+    recentEndings: (input.style?.endings ?? []).join('、'),
+    hasRecentEndings: (input.style?.endings.length ?? 0) > 0,
     toPlant: input.toPlant.map((f) => ({ title: f.title, content: f.content })),
     hasToPlant: input.toPlant.length > 0,
     toPayoff: input.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal, progress: [...f.progress], hasProgress: f.progress.length > 0 })),
@@ -716,6 +746,31 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     written: input.written,
     words: input.words,
     isLast: input.isLast,
+  });
+}
+
+export type WriterPolishInput = {
+  readonly title: string;
+  readonly chapterTitle: string;
+  readonly skills: readonly { readonly name: string; readonly description: string; readonly text: string }[];
+  readonly avoidPhrases: readonly string[];
+  /** 程序统计出的这一章的毛病，一条一句（用得太多的词、句首模板、对话占比、句长）。 */
+  readonly feedback: readonly string[];
+  /** 要修订的一组段落，带标签（P1、P2……）；输出按同样的标签对回。 */
+  readonly paragraphs: readonly { readonly label: string; readonly text: string }[];
+};
+
+/** 第二遍去 AI 味的修订（B87）：按程序统计的反馈只改表达，一段对一段。 */
+export function renderWriterPolish(input: WriterPolishInput): Result<RenderedPrompt, string> {
+  return renderTemplate('writer_polish', {
+    title: input.title,
+    chapterTitle: input.chapterTitle,
+    skills: input.skills.map((s) => ({ name: s.name, description: withoutName(s.name, s.description.trim()), text: s.text })),
+    hasSkills: input.skills.length > 0,
+    avoidPhrases: [...input.avoidPhrases],
+    hasAvoid: input.avoidPhrases.length > 0,
+    feedback: [...input.feedback],
+    paragraphs: input.paragraphs.map((p) => ({ label: p.label, text: p.text })),
   });
 }
 

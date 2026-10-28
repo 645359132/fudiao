@@ -59,6 +59,7 @@ import {
 } from '@fudiao/writing';
 import { describeError, type AppError } from './errors';
 import { THINKING_ALLOWANCE, type modelRunner } from './model-runner';
+import { dialogueTargetOf, recentStyle } from './style-ledger';
 import { THINKING_TOKENS_PER_CALL, TOKENS_PER_CHAR } from './thinking';
 import type { AppDeps } from './ports';
 
@@ -233,6 +234,8 @@ type Materials = {
   readonly entities: readonly Entity[];
   readonly facts: readonly Fact[];
   readonly foreshadows: readonly Foreshadow[];
+  /** 设定的名字与别名：文风检查不把它们算作词（B87）。 */
+  readonly names: readonly string[];
 };
 
 export function reviewUseCases(
@@ -281,6 +284,7 @@ export function reviewUseCases(
       entities: entities.value,
       facts: facts.value,
       foreshadows: foreshadows.value,
+      names: entities.value.flatMap((e) => [e.name, ...e.aliases]),
     });
   }
 
@@ -346,6 +350,9 @@ export function reviewUseCases(
     const chapterId = m.chapter.id;
     const handled = await listIssues(port, chapterId, HANDLED);
     if (!handled.ok) return err(repo(handled.error));
+    // 文风检查（B87）按最近几章的风格账本量：用得太多的说法、最近几章的章尾、本章的对话目标。
+    const style = await recentStyle(port, m.chapters, m.order.get(chapterId) ?? 0, { names: m.names });
+    if (!style.ok) return err(repo(style.error));
     const program = dropHandled(
       runProgramChecks({
         chapterId,
@@ -355,6 +362,13 @@ export function reviewUseCases(
         foreshadows: m.foreshadows,
         order: m.order,
         cast: m.entities.filter((e) => m.planItem.castIds.includes(e.id)),
+        style: {
+          names: m.names,
+          overused: style.value.ledger.overused.map((t) => t.term),
+          overusedOpenings: style.value.ledger.overusedOpenings.map((t) => t.term),
+          previousEndings: style.value.ledger.endings,
+          dialogueTarget: dialogueTargetOf(m.plan?.rhythm ?? null),
+        },
       }),
       handled.value,
     );

@@ -1,6 +1,6 @@
 ---
 id: plan_draft
-version: 6
+version: 7
 task: plan_draft
 output: PlanDraftOutput
 ---
@@ -20,7 +20,11 @@ output: PlanDraftOutput
 - 卷纲定下本卷要回收的伏笔，每一条都要在本卷的某一章回收：写进那一章的 payoff，beats 里写出揭晓的方式；一条也不要留到下一卷。
 {{/hasPayoffs}}
 {{/appendVolume}}
-- 每章写：章名（title）；本章目标（goal，一句话，这一章要让故事走到哪里）；出场人物（cast，用下面人物表中的名字，表中没有的新人物也可以写名字）；要写的情节点（beats，3 到 6 条，按发生顺序，每条一句话）；详略说明（treatment，哪里展开、哪里略写）；字数（targetWords，约 {{wordsPerChapter}} 字）。
+- 每章写：章名（title）；本章目标（goal，一句话，这一章要让故事走到哪里）；出场人物（cast，用下面人物表中的名字，表中没有的新人物也可以写名字）；要写的情节点（beats，3 到 6 条，按发生顺序，每条一句话）；详略说明（treatment，哪里展开、哪里略写）；字数（targetWords）；节奏（rhythm，见下）。
+- 章名长短不一：两到七字混用，可以是一句口语（“他没有回头”）、一样东西（“半块铜牌”）、一个地名、一个人名，不要每章都是整齐的四字短语。读者一眼看出目录是机器排的，就不会往下读。
+- 字数按情节轻重定：重场戏多写、过渡少写，在 {{wordsPerChapter}} 字上下三成之间浮动，不要每章一样。
+- 每五到八章安排一章过渡或日常（rhythm.type 为 transition 或 daily）：缓一口气，写支线人物、生活细节或两场大事之间的日常，为下一波冲突蓄力；大纲里没写的日常由你补，不改大纲的走向。
+- 节奏（rhythm）：每章写 type（章节类型：battle 战斗、confrontation 对峙或谈判、dialogue 对话为主、transition 过渡、daily 日常、travel 赶路或探查、reveal 揭晓、climax 高潮、other 其他）、dialogue（对话多少：low 少、mid 中、high 多；多数章是 mid 或 high，只有纯打斗、独行与环境章用 low）、ending（章尾收法：cliffhanger 悬念、dialogue 一句对白、quiet 安静的画面或日常动作、decision 人物做出决定、emotion 情绪落点、humor 小幽默）。先想好这些章要用哪几种收法、各占几章，再分到各章：连续两章不用同一种收法，悬念不超过三分之一的章。
 - 伏笔：大纲中需要提前铺垫、后面才揭晓的内容，写进 foreshadows：title 是简短的名字，content 是埋设时写出来的现象或细节，reveal 是揭晓的内容。在埋设的那一章的 plant 中写它的 title，在回收的那一章的 payoff 中写它的 title。揭晓之前的章节，beats 里不要说破 reveal。
 - 已有的伏笔用相同的 title 沿用，不要重复新建；foreshadows 只列新的伏笔。
 {{#appendVolume}}
@@ -34,7 +38,7 @@ output: PlanDraftOutput
 - 分卷：按顺序把 {{chapterCount}} 章分成 {{volumeCount}} 卷（前面各卷 {{volumeChapters}} 章，最后一卷放余下的章节；每卷是故事的一个大段落），卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。
 {{/volumesFixed}}
 {{#volumesAuto}}
-- 分卷：{{chapterCount}} 章在 10 章及以上时，按故事的大段落（一个大事件或一个阶段）把章节分成若干卷，每卷约 8 到 20 章；卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。不到 10 章时不分卷：每章的 volume 为空字符串，volumes 为空数组。{{#hasVolumes}}作品已有卷时沿用已有的卷名，接着往后分。{{/hasVolumes}}
+- 分卷：{{chapterCount}} 章在 10 章及以上时，按故事的大段落（一个大事件或一个阶段）把章节分成若干卷，每卷约 8 到 20 章、各卷章数不必相等；卷名写成“第一卷 卷题”的样子。每章的 volume 写它所在的卷名，volumes 按顺序列出每卷的 title（卷名，与各章的 volume 一致）与 summary（这一卷讲什么，一两句）。不到 10 章时不分卷：每章的 volume 为空字符串，volumes 为空数组。{{#hasVolumes}}作品已有卷时沿用已有的卷名，接着往后分。{{/hasVolumes}}
 {{/volumesAuto}}
 {{/appendVolume}}
 - 只依据大纲与设定，不添加与大纲矛盾的情节。
@@ -47,7 +51,7 @@ output: PlanDraftOutput
 {{/skills}}
 技能要求写明的视角人物，写在详略说明（treatment）的开头，例如“视角：林舟。”
 {{/hasSkills}}
-输出一个 JSON 对象：volumes 为卷的数组，chapters 为章节计划的数组，foreshadows 为新伏笔的数组。
+输出一个 JSON 对象：volumes 为卷的数组，chapters 为章节计划的数组（每章的 rhythm 是对象 { type, dialogue, ending }），foreshadows 为新伏笔的数组。
 @@user
 作品：{{title}}{{#genre}}（{{genre}}）{{/genre}}
 {{#synopsis}}

@@ -27,6 +27,7 @@ import { gatherChapterMaterials } from './chapter-materials';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, unusableCall, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
+import { rhythmText } from './style-ledger';
 import { skillsForStage } from './writing-skills';
 
 /** 带给写手的上文长度（字）：上一章的结尾与本章已写的结尾。 */
@@ -107,8 +108,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       treatment: m.treatment,
       skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
       avoidPhrases: m.avoidPhrases,
-      // 各人物知道的事与不在场的章（认知层）：人物只依据自己知道的说话与行动。
-      cast: m.cast.map((c) => ({ name: c.name, description: c.description, state: c.state, knows: c.knows, absent: c.absent.map((a) => `${a.title}（${a.summary}）`) })),
+      // 各人物知道的事与不在场的章（认知层）：人物只依据自己知道的说话与行动；外貌等属性照着写（B87）。
+      cast: m.cast.map((c) => ({ name: c.name, description: c.description, attributes: c.attributes, state: c.state, knows: c.knows, absent: c.absent.map((a) => `${a.title}（${a.summary}）`) })),
       relations: m.relations,
       facts: m.worldFacts,
       memories: m.memories,
@@ -117,6 +118,9 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       mustNotReveal: m.mustNotReveal,
       openThreads: m.openThreads,
       previousEnding,
+      // 节奏目标与最近几章的风格账本（B87）。
+      ...(rhythmText(m.rhythm) !== undefined && { rhythm: rhythmText(m.rhythm) }),
+      style: { lines: m.style.lines, overused: m.style.overused, endings: m.style.endings },
     });
   }
 

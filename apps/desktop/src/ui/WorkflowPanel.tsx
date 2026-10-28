@@ -1,3 +1,4 @@
+import { ENDING_KIND_LABEL, type EndingKind } from '@fudiao/writing';
 import { useEffect, useState, type ReactNode } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
@@ -985,20 +986,38 @@ function AuditReportView({ step }: { readonly step: WorkflowStepView }) {
   const openReview = useApp((s) => s.openChapterReview);
   if (report === null) return null;
   const rows = report.chapters.filter((c) => c.pending > 0);
-  if (rows.length === 0) return <p>范围内的章节没有待处理的审核问题。</p>;
+  const style = report.style ?? null;
   return (
-    <ul className="workflow-report" aria-label="体检报告">
-      {rows.map((r) => (
-        <li key={r.chapterId}>
-          <span>
-            《{r.title}》：{r.pending} 条待处理
-          </span>
-          <button type="button" className="link" onClick={() => void openReview(r.chapterId)}>
-            看审核
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      {rows.length === 0 ? (
+        <p>范围内的章节没有待处理的审核问题。</p>
+      ) : (
+        <ul className="workflow-report" aria-label="体检报告">
+          {rows.map((r) => (
+            <li key={r.chapterId}>
+              <span>
+                《{r.title}》：{r.pending} 条待处理
+              </span>
+              <button type="button" className="link" onClick={() => void openReview(r.chapterId)}>
+                看审核
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {style === null ? null : (
+        <div aria-label="文风统计">
+          <p>
+            文风统计（程序量出，不调用模型）：{style.words.toLocaleString('en-US')} 字，对话占比 {Math.round(style.dialogueRatio * 100)}%，叙述句长的变异系数 {style.sentenceCv.toFixed(2)}；章尾：
+            {Object.entries(style.endings)
+              .map(([kind, n]) => `${ENDING_KIND_LABEL[kind as EndingKind] ?? kind} ${n} 章`)
+              .join('、')}
+            。
+          </p>
+          {style.overused.length > 0 ? <p className="muted">用得太多的说法：{style.overused.map((t) => `${t.term}（${t.chapters} 章 ${t.count} 次）`).join('、')}</p> : null}
+        </div>
+      )}
+    </>
   );
 }
 

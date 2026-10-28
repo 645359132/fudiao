@@ -71,7 +71,7 @@ describe('写手成章', () => {
     deps.llmResponses.push(reply('林舟又叩响了门。'), reply('他没回头。'));
     value(await app.writeChapter(c2));
     const body = bodyText(deps, 0);
-    expect(body).toContain('【章末钩子】');
+    expect(body).toContain('【章尾收束】');
     expect(body).toContain('【不用副词】');
     expect(body).toContain('【作者偏好】');
     expect(body).not.toContain('雪花写作法');
@@ -428,5 +428,26 @@ describe('接着已有正文写其余的情节点（B85）', () => {
     expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c2)?.plan).toMatchObject({ status: 'written', progress: null });
     expect(value(await app.listSnapshots(c2))).toEqual([]);
     expect(await app.startWriterAfter(c2, [])).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已经写过') } });
+  });
+});
+
+describe('节奏目标与风格账本（B87）', () => {
+  it('写手的请求带最近几章的账本；计划定了节奏时写明类型、对话占比与章尾收法，最后一段按收法收尾', async () => {
+    const { deps, app, c2 } = await setup();
+    const plan = value(await app.planningView()).chapters[1]!.plan!;
+    value(await app.savePlan(c2, { goal: plan.goal, castIds: plan.castIds, beats: plan.beats, foreshadowPlant: plan.foreshadowPlant, foreshadowPayoff: plan.foreshadowPayoff, treatment: plan.treatment, targetWords: plan.targetWords, rhythm: { type: 'confrontation', dialogue: 'high', ending: 'dialogue' } }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('林舟又叩响了门。'), reply('“走吧。”'));
+    value(await app.writeChapter(c2));
+    const first = bodyText(deps, 0);
+    expect(first).toContain('最近几章的文风账本');
+    expect(first).toContain('《第一章 夜叩》：8 字，对话 0%');
+    expect(first).toContain('本章的节奏：对峙或谈判；对话约占 40%');
+    expect(first).toContain('章尾收法：一句对白');
+    expect(first).not.toContain('章尾用“一句对白”的收法');
+    expect(bodyText(deps, 1)).toContain('写到本章结束，章尾用“一句对白”的收法。');
+    // 计划里没定节奏时没有这一段；账本照带。
+    const again = value(await app.planningView()).chapters[1]!.plan!;
+    expect(again.rhythm).toEqual({ type: 'confrontation', dialogue: 'high', ending: 'dialogue' });
   });
 });

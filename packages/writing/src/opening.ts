@@ -1,5 +1,6 @@
 // 开篇打磨（需求 B81）的客观数字：纯函数。只作参考，交给模型诊断时一并给出，复诊后用来对比前后。
-import { maskDialogue, visibleLength } from './prose';
+import { visibleLength } from './prose';
+import { dialogueRatio } from './style';
 import type { CastMember } from './types';
 
 /** 一章开篇的数字。protagonistAt 是主角的名字（或别名）第一次出现之前有多少字，没出现时为 null。 */
@@ -36,8 +37,6 @@ export function openingMetrics(paragraphs: readonly { readonly text: string }[],
   const text = paragraphs.map((p) => p.text).join('\n');
   const words = visibleLength(text);
   if (words === 0) return { words: 0, protagonistAt: null, dialogueRatio: 0, namesInOpening: 0, longestParagraph: 0 };
-  const masked = maskDialogue(text);
-  const dialogue = words - visibleLength(masked);
   let protagonistAt: number | null = null;
   if (protagonist !== null) {
     const own = [protagonist.name, ...protagonist.aliases].map((n) => n.trim()).filter((n) => n !== '');
@@ -54,7 +53,7 @@ export function openingMetrics(paragraphs: readonly { readonly text: string }[],
   return {
     words,
     protagonistAt,
-    dialogueRatio: dialogue / words,
+    dialogueRatio: dialogueRatio(paragraphs.map((p) => p.text)),
     namesInOpening,
     longestParagraph: Math.max(...paragraphs.map((p) => visibleLength(p.text))),
   };
