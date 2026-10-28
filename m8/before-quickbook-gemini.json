@@ -1,0 +1,610 @@
+{
+  "chapters": 3,
+  "words": 5566,
+  "chapterWords": {
+    "count": 3,
+    "mean": 1855.3333333333333,
+    "sd": 57.27904406402824,
+    "cv": 0.030872643225311667
+  },
+  "titleLengths": {
+    "3": 3
+  },
+  "dialogue": {
+    "overall": 0.212899748472871,
+    "byVolume": [
+      {
+        "volume": "（未分卷）",
+        "chapters": 3,
+        "ratio": 0.212899748472871
+      }
+    ],
+    "lowest": [
+      {
+        "index": 2,
+        "title": "第二章",
+        "volume": null,
+        "words": 1788,
+        "dialogueRatio": 0.1465324384787472,
+        "sentenceCv": 0.4213686458701512,
+        "mtld": 216.74928686666692,
+        "ending": "narration"
+      },
+      {
+        "index": 1,
+        "title": "第一章",
+        "volume": null,
+        "words": 1928,
+        "dialogueRatio": 0.14782157676348548,
+        "sentenceCv": 0.40301709133389296,
+        "mtld": 155.13432522115664,
+        "ending": "narration"
+      },
+      {
+        "index": 3,
+        "title": "第三章",
+        "volume": null,
+        "words": 1850,
+        "dialogueRatio": 0.34486486486486484,
+        "sentenceCv": 0.5302078036032639,
+        "mtld": 161.51851149861005,
+        "ending": "narration"
+      }
+    ]
+  },
+  "sentences": {
+    "count": 172,
+    "mean": 25.47093023255814,
+    "sd": 11.434051208633102,
+    "cv": 0.4489059136920551
+  },
+  "paragraphs": {
+    "count": 112,
+    "mean": 49.69642857142857,
+    "sd": 31.45087986667074,
+    "cv": 0.6328599613846789
+  },
+  "mtldMedian": 161.51851149861005,
+  "endings": {
+    "dialogue": 0,
+    "question": 0,
+    "ellipsis": 0,
+    "freeze": 0,
+    "narration": 3,
+    "summary": 0
+  },
+  "terms": [
+    {
+      "term": "右手",
+      "count": 20,
+      "chapters": 3,
+      "left": "^起",
+      "right": "紧$",
+      "perTenThousand": 35.932446999640675
+    },
+    {
+      "term": "柜台",
+      "count": 11,
+      "chapters": 2,
+      "left": "^到",
+      "right": "筑后",
+      "perTenThousand": 19.76284584980237
+    },
+    {
+      "term": "左手",
+      "count": 7,
+      "chapters": 3,
+      "left": "^把",
+      "right": "则小",
+      "perTenThousand": 12.576356449874236
+    },
+    {
+      "term": "的铁核桃",
+      "count": 6,
+      "chapters": 2,
+      "left": "亮里",
+      "right": "$停",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "二十年前",
+      "count": 6,
+      "chapters": 2,
+      "left": "^查",
+      "right": "的与",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "父亲",
+      "count": 6,
+      "chapters": 3,
+      "left": "是^",
+      "right": "死临",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "猛地",
+      "count": 6,
+      "chapters": 3,
+      "left": "指他",
+      "right": "停抬",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "年前",
+      "count": 6,
+      "chapters": 3,
+      "left": "三十",
+      "right": "在他",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "声音",
+      "count": 6,
+      "chapters": 2,
+      "left": "了的",
+      "right": "$在",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "抬起",
+      "count": 6,
+      "chapters": 2,
+      "left": "^于",
+      "right": "右眼",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "读书",
+      "count": 5,
+      "chapters": 3,
+      "left": "^的",
+      "right": "人二",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "二十",
+      "count": 5,
+      "chapters": 2,
+      "left": "书^",
+      "right": "年两",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "顾文彬",
+      "count": 5,
+      "chapters": 1,
+      "left": "^",
+      "right": "的才",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "青石",
+      "count": 5,
+      "chapters": 3,
+      "left": "的上",
+      "right": "拱台",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "手指",
+      "count": 5,
+      "chapters": 2,
+      "left": "的后",
+      "right": "就熟",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "胸口",
+      "count": 5,
+      "chapters": 2,
+      "left": "到在",
+      "right": "$横",
+      "perTenThousand": 8.983111749910169
+    },
+    {
+      "term": "城南",
+      "count": 4,
+      "chapters": 3,
+      "left": "^朝",
+      "right": "那走",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "读书人",
+      "count": 4,
+      "chapters": 3,
+      "left": "^的",
+      "right": "的腔",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "赌坊",
+      "count": 4,
+      "chapters": 2,
+      "left": "在^",
+      "right": "后的",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "发出",
+      "count": 4,
+      "chapters": 3,
+      "left": "^都",
+      "right": "一黏",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "后头",
+      "count": 4,
+      "chapters": 3,
+      "left": "台在",
+      "right": "没$",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "脚步",
+      "count": 4,
+      "chapters": 2,
+      "left": "^快",
+      "right": "声猛",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "门房",
+      "count": 4,
+      "chapters": 1,
+      "left": "^是",
+      "right": "上识",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "三十两",
+      "count": 4,
+      "chapters": 2,
+      "left": "^出",
+      "right": "$现",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "甚至",
+      "count": 4,
+      "chapters": 3,
+      "left": "^吸",
+      "right": "连都",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "停住",
+      "count": 4,
+      "chapters": 3,
+      "left": "地前",
+      "right": "了$",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "眼皮",
+      "count": 4,
+      "chapters": 2,
+      "left": "起的",
+      "right": "$垂",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "油灯",
+      "count": 4,
+      "chapters": 1,
+      "left": "点的",
+      "right": "$底",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "掌柜",
+      "count": 4,
+      "chapters": 3,
+      "left": "^着",
+      "right": "$打",
+      "perTenThousand": 7.186489399928135
+    },
+    {
+      "term": "背面",
+      "count": 3,
+      "chapters": 2,
+      "left": "的^",
+      "right": "$左",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "打量",
+      "count": 3,
+      "chapters": 2,
+      "left": "下柜",
+      "right": "了他",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "打手",
+      "count": 3,
+      "chapters": 1,
+      "left": "个唤",
+      "right": "垂近",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "得发",
+      "count": 3,
+      "chapters": 2,
+      "left": "涨洗",
+      "right": "紫白",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "灯笼",
+      "count": 3,
+      "chapters": 2,
+      "left": "风的",
+      "right": "$在",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "读书人的",
+      "count": 3,
+      "chapters": 3,
+      "left": "^出",
+      "right": "面脸",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "断指",
+      "count": 3,
+      "chapters": 2,
+      "left": "根的",
+      "right": "便在",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "父亲临",
+      "count": 3,
+      "chapters": 2,
+      "left": "^起",
+      "right": "终死",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "柜台后",
+      "count": 3,
+      "chapters": 2,
+      "left": "^",
+      "right": "头坐",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "厚重的门",
+      "count": 3,
+      "chapters": 3,
+      "left": "在^",
+      "right": "板扇",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "呼吸",
+      "count": 3,
+      "chapters": 2,
+      "left": "^连",
+      "right": "甚都",
+      "perTenThousand": 5.389867049946101
+    }
+  ],
+  "openings": [
+    {
+      "term": "父亲",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "顾文",
+      "count": 3,
+      "chapters": 1,
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "柜台",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "那是",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "屋里",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "赌坊",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "厚重",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "脚步",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "就在",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "林舟走上",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "哪怕",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "三十",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "三天",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "少年",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "他不",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "他猛",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "他在",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5932446999640675
+    },
+    {
+      "term": "阿青辨出",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7966223499820337
+    },
+    {
+      "term": "阿青从木",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7966223499820337
+    },
+    {
+      "term": "阿青见林",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7966223499820337
+    }
+  ],
+  "crossChapter": [
+    {
+      "term": "读书人的",
+      "count": 3,
+      "chapters": 3,
+      "left": "^出",
+      "right": "面脸",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "厚重的门",
+      "count": 3,
+      "chapters": 3,
+      "left": "在^",
+      "right": "板扇",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "的铁核桃",
+      "count": 6,
+      "chapters": 2,
+      "left": "亮里",
+      "right": "$停",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "二十年前",
+      "count": 6,
+      "chapters": 2,
+      "left": "^查",
+      "right": "的与",
+      "perTenThousand": 10.779734099892202
+    },
+    {
+      "term": "六文铜钱",
+      "count": 3,
+      "chapters": 2,
+      "left": "出与",
+      "right": "塞$",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "抬起右手",
+      "count": 3,
+      "chapters": 2,
+      "left": "^于",
+      "right": "$",
+      "perTenThousand": 5.389867049946101
+    },
+    {
+      "term": "角残存的",
+      "count": 2,
+      "chapters": 2,
+      "left": "街檐",
+      "right": "一雨",
+      "perTenThousand": 3.5932446999640675
+    }
+  ],
+  "rows": [
+    {
+      "index": 1,
+      "title": "第一章",
+      "volume": null,
+      "words": 1928,
+      "dialogueRatio": 0.14782157676348548,
+      "sentenceCv": 0.40301709133389296,
+      "mtld": 155.13432522115664,
+      "ending": "narration"
+    },
+    {
+      "index": 2,
+      "title": "第二章",
+      "volume": null,
+      "words": 1788,
+      "dialogueRatio": 0.1465324384787472,
+      "sentenceCv": 0.4213686458701512,
+      "mtld": 216.74928686666692,
+      "ending": "narration"
+    },
+    {
+      "index": 3,
+      "title": "第三章",
+      "volume": null,
+      "words": 1850,
+      "dialogueRatio": 0.34486486486486484,
+      "sentenceCv": 0.5302078036032639,
+      "mtld": 161.51851149861005,
+      "ending": "narration"
+    }
+  ]
+}
