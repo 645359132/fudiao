@@ -58,14 +58,15 @@ export { createEntity, deleteEntity, ENTITY_KINDS, getEntity, listEntities, setE
 export type { Fact, FactBasis, FactInput, FactKind, FactModality, FactStatus } from './fact';
 export { createFact, deleteFact, factInsertStatement, getFact, listFacts, reviewStaleFacts, setFactStatus, updateFact } from './fact';
 export type { LlmCallRow, LlmCallStatus, LlmCallUsage, RunCall, UsageSummary, UsageTotals } from './llm-call';
-export { appendLlmCall, findCallByRequestHash, findCompletedCall, latestCallWithUsage, listLlmCalls, listRunCalls, mayBeBilled, usageSummary } from './llm-call';
+export { appendLlmCall, findCallByRequestHash, findCompletedCall, latestCallWithUsage, listLlmCalls, listRunCalls, mayBeBilled, runUsage, usageSummary } from './llm-call';
 export type { RangeInsert, RangePlan, TextPosition, TextRange } from './paragraph-range';
 export { applyRangeReplace, planRangeReplace, rangeReplaceStatements, textInRange } from './paragraph-range';
 export type { AdoptedEvent, AdoptedFact, AdoptionInput } from './adoption';
 export { adoptionStatements } from './adoption';
 export type { EventLink, StoryEvent } from './story-event';
 export { listChapterEventLinks, listStoryEvents } from './story-event';
-export type { Beat, BeatSheet, BeatSheetInput, BeatTreatment } from './beat-sheet';
+export type { BeatSheet, BeatSheetInput, BeatTreatment } from './beat-sheet';
+export { Beat } from './beat-sheet';
 export type { Evaluation, EvaluationAnswers, EvaluationMeasured, EvaluationScores, EvaluationTarget } from './evaluation';
 export { getEvaluation, saveEvaluation } from './evaluation';
 export { BEAT_TREATMENTS, createBeatSheet, getBeatSheet, listBeatSheets, updateBeatSheet } from './beat-sheet';

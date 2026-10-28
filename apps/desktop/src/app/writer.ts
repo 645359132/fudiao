@@ -14,6 +14,7 @@ import {
   listChapters,
   listParagraphs,
   rollbackWriterRun,
+  setPlanStatus,
   startWriterRun,
   type Chapter,
   type ChapterPlan,
@@ -21,7 +22,7 @@ import {
   type SavedParagraph,
   type SqlPort,
 } from '@fudiao/store';
-import { normalizePunctuation, planSegments, splitParagraphs } from '@fudiao/writing';
+import { normalizePunctuation, planSegments, planSegmentsAfter, splitParagraphs } from '@fudiao/writing';
 import { gatherChapterMaterials } from './chapter-materials';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, unusableCall, type modelRunner } from './model-runner';
@@ -211,6 +212,42 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       return outcome('written', null);
     },
 
+    /**
+     * 本章已有正文写到了这些情节点（推演成章采纳的正文，B85）：写手从其余的情节点接着写。先存“写手写入”快照
+     * （一键回退回到采纳后的样子），进度的第一段是已写出的情节点、记为已写，之后 writeChapter 从第二段接着写；
+     * 情节点都已写出时不开写作，计划直接标为已写。已有进度（中断后继续）时不重建，只返回剩余的段数。
+     */
+    async startWriterAfter(chapterId: string, writtenBeats: readonly string[]): Promise<Result<{ readonly remaining: number }, AppError>> {
+      const s = session();
+      if (s === null) return err({ code: 'no_work' });
+      const { port } = s;
+      const loaded = await getChapterPlan(port, chapterId);
+      if (!loaded.ok) return err(repo(loaded.error));
+      const plan = loaded.value;
+      if (plan === null) return err(settings('这一章还没有章节计划：先在“计划”中写好本章的目标与情节点'));
+      if (plan.status === 'written' || plan.status === 'reviewed') return err(settings('这一章已经写过；要重写请先回退到写手写入前'));
+      const progress = plan.progress;
+      if (progress !== null) return ok({ remaining: progress.segments.length - progress.done });
+      const draft = await deps.drafts.read(s.path, chapterId);
+      if (draft.ok && draft.value !== null) return err(settings('这一章有未保存的修改：请先打开这一章保存或丢弃'));
+      const segments = planSegmentsAfter(plan.beats, writtenBeats, plan.targetWords);
+      const remaining = segments.segments.length - segments.done;
+      if (remaining === 0) {
+        const written = await setPlanStatus(port, plan, 'written', ctx());
+        return written.ok ? ok({ remaining: 0 }) : err(repo(written.error));
+      }
+      const snapshot = await createSnapshot(port, { id: deps.ids.next(), chapterId, reason: 'writer' }, ctx());
+      if (!snapshot.ok) return err(repo(snapshot.error));
+      const started = await startWriterRun(
+        port,
+        plan,
+        { runId: deps.ids.next(), segments: segments.segments.map((b) => [...b]), words: [...segments.words], done: segments.done, snapshotId: snapshot.value.id },
+        ctx(),
+      );
+      if (!started.ok) return err(repo(started.error));
+      return ok({ remaining });
+    },
+
     /** 回退到写手写入前：恢复“写手写入”快照（现稿先存为恢复前快照），清除进度，计划回到待写。 */
     async rollbackWriter(chapterId: string): Promise<Result<ChapterPlan, AppError>> {
       const s = session();
@@ -242,6 +279,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
   return {
     ...cases,
     writeChapter: (chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> => locked(chapterId, () => cases.writeChapter(chapterId, events)),
+    startWriterAfter: (chapterId: string, writtenBeats: readonly string[]) => locked(chapterId, () => cases.startWriterAfter(chapterId, writtenBeats)),
     withWriterLock: locked,
     /** 写手此刻是不是正在写这一章（按章节建推演场景时，前文梗概据此标“还没写完”）。 */
     isWriting: (chapterId: string) => writing.has(chapterId),

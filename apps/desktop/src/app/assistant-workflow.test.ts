@@ -75,7 +75,7 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
 
     step(deps, {
       message: '',
-      actions: [{ tool: 'start_workflow', workflow: 'quick_book', mode: 'step', budgetUsd: null, idea: '落魄书生当铺夜遇旧主', genre: null, chapters: 6, wordsPerChapter: 3000, volumes: null, from: null, to: null, rereview: null, instruction: null }],
+      actions: [{ tool: 'start_workflow', workflow: 'quick_book', mode: 'step', budgetUsd: null, idea: '落魄书生当铺夜遇旧主', genre: null, chapters: 6, wordsPerChapter: 3000, volumes: null, from: null, to: null, rereview: null, instruction: null, chapter: null }],
       done: false,
     });
     step(deps, { message: '已经排上。', actions: [], done: true });
@@ -151,6 +151,7 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
       to: null,
       rereview: null,
       instruction: null,
+      chapter: null,
     });
     step(deps, { message: '', actions: [start(null, 3000, null)], done: false });
     step(deps, { message: '你想写多少章、每章多少字？', actions: [], done: true });
@@ -171,7 +172,7 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
     step(deps, {
       message: '',
       actions: [
-        { tool: 'start_workflow', workflow: 'quick_book', mode: 'auto', budgetUsd: null, idea: '一句话', genre: null, chapters: null, wordsPerChapter: null, volumes: null, from: null, to: null, rereview: null, instruction: null },
+        { tool: 'start_workflow', workflow: 'quick_book', mode: 'auto', budgetUsd: null, idea: '一句话', genre: null, chapters: null, wordsPerChapter: null, volumes: null, from: null, to: null, rereview: null, instruction: null, chapter: null },
         { tool: 'get_workflow', run: null },
       ],
       done: false,
@@ -182,5 +183,28 @@ describe('AI 助手发起与继续写作工作流（B78）', () => {
     expect(start).toMatchObject({ ok: false, detail: '这里不能在后台推进写作工作流' });
     expect(get).toMatchObject({ ok: false, detail: expect.stringContaining('还没有运行过写作工作流') });
     expect(value(await app.listWorkflows())).toEqual([]);
+  });
+});
+
+describe('AI 助手发起推演成章（B85）', () => {
+  it('说了哪一章就发起：参数带这一章的标识与章名、默认回合上限；没说是哪一章时不发起、先问', async () => {
+    const { deps, app } = await setup();
+    const { background, advanced } = backgroundJobs();
+    const chapter = value(await app.createChapter('第三章 当铺')).chapters[0]!;
+    const action = { tool: 'start_workflow' as const, workflow: 'scene_chapter' as const, mode: 'step' as const, budgetUsd: null, idea: null, genre: null, chapters: null, wordsPerChapter: null, volumes: null, from: null, to: null, rereview: null, instruction: null };
+    step(deps, { message: '', actions: [{ ...action, chapter: null }], done: false });
+    step(deps, { message: '想推演哪一章？', actions: [], done: true });
+    const asked = value(await app.sendToAssistant('把那场对峙推演出来再写', { background }));
+    expect(lastResults(asked.items)?.results[0]).toMatchObject({ tool: 'start_workflow', ok: false, detail: expect.stringContaining('先问清楚') });
+    expect(advanced).toEqual([]);
+
+    step(deps, { message: '', actions: [{ ...action, chapter: '第三章 当铺' }], done: false });
+    step(deps, { message: '已经排上。', actions: [], done: true });
+    const started = value(await app.sendToAssistant('第三章', { background }));
+    expect(lastResults(started.items)?.results[0]).toMatchObject({ tool: 'start_workflow', ok: true, detail: expect.stringMatching(/^已排上：“推演成章：第三章 当铺” \[/) });
+    const [run] = value(await app.listWorkflows());
+    expect(run?.run).toMatchObject({ workflow: 'scene_chapter', params: { chapterId: chapter.id, chapterTitle: '第三章 当铺', sceneId: null, maxRounds: 8 } });
+    expect(run?.steps.map((s) => s.key)).toEqual(['scene', 'simulate', 'beats', 'narrate', 'write']);
+    expect(advanced).toEqual([run!.run.id]);
   });
 });

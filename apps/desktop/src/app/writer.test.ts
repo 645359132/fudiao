@@ -399,3 +399,34 @@ describe('写手成章', () => {
     expect(await texts(app, c2)).toEqual(['作者写的开头。', '重写一。', '重写二。']);
   });
 });
+
+describe('接着已有正文写其余的情节点（B85）', () => {
+  it('第一段是已写出的情节点、记为已写；写入前存快照；接着写时带上已写的结尾与“已写”的情节点，只写其余的段；回退回到接着写之前', async () => {
+    const { deps, app, c2 } = await setup();
+    // 本章已有一段正文（例如采纳的推演正文）。
+    const opened = value(await app.openChapter(c2));
+    value(await app.saveChapter(c2, opened.saved, [{ id: 'p-sim', text: '林舟叩门，钱四验了玉，认出了来历。', source: 'handwritten' }], { splits: [], merges: [] }));
+    expect(value(await app.startWriterAfter(c2, ['叩门', '压价', '起疑']))).toEqual({ remaining: 1 });
+    const plan = value(await app.planningView()).chapters.find((c) => c.chapter.id === c2)?.plan;
+    expect(plan).toMatchObject({ status: 'writing', progress: { done: 1, segments: [['叩门', '压价', '起疑'], ['离开']] } });
+    expect(value(await app.listSnapshots(c2)).map((s) => s.reason)).toEqual(['writer']);
+    // 再调一次（中断后继续）：不重建，只报剩余的段数。
+    expect(value(await app.startWriterAfter(c2, ['叩门']))).toEqual({ remaining: 1 });
+    deps.llmResponses.push(reply('林舟转身走进雨里。'));
+    expect(value(await app.writeChapter(c2))).toMatchObject({ status: 'written', segmentsDone: 2, segmentsTotal: 2 });
+    const body = bodyText(deps, 0);
+    expect(body).toContain('（已写）叩门');
+    expect(body).toContain('认出了来历');
+    expect(await texts(app, c2)).toEqual(['林舟叩门，钱四验了玉，认出了来历。', '林舟转身走进雨里。']);
+    value(await app.rollbackWriter(c2));
+    expect(await texts(app, c2)).toEqual(['林舟叩门，钱四验了玉，认出了来历。']);
+  });
+
+  it('情节点都已写出时不开写作、不存快照，计划直接标为已写；已经写过的章不能再接着写', async () => {
+    const { app, c2 } = await setup();
+    expect(value(await app.startWriterAfter(c2, beats))).toEqual({ remaining: 0 });
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c2)?.plan).toMatchObject({ status: 'written', progress: null });
+    expect(value(await app.listSnapshots(c2))).toEqual([]);
+    expect(await app.startWriterAfter(c2, [])).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已经写过') } });
+  });
+});

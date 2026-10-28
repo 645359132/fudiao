@@ -1,13 +1,16 @@
 import { rmSync } from 'node:fs';
-import type { PlanDraftData } from '@fudiao/prompts';
+import { fakeModel, waitProposal, type Policy } from '@fudiao/engine/testing';
+import type { LlmPort } from '@fudiao/llm';
+import { sceneDraftToSpec, type PlanDraftData } from '@fudiao/prompts';
 import { getWorkflowRun, updateWorkflowSteps } from '@fudiao/store';
 import { loadMigrations, openProjectDb } from '@fudiao/store/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
 import { addTestedModel, reply } from '../testing/models';
+import { sceneDraftFixture } from '../testing/scenes';
 import type { BookSeed } from './quick-book';
 import { createAppService } from './service';
-import { bookVolumesOf, distributeChapters, openingIssueChanges, quickBookPlanning, type WorkflowHooks } from './workflows';
+import { beatsStepOf, bookVolumesOf, distributeChapters, narrateStepOf, openingIssueChanges, quickBookPlanning, SCENE_ESTIMATE_ACTORS, sceneStepOf, simStepOf, type WorkflowHooks } from './workflows';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -64,6 +67,7 @@ function fakeWriter(result: { readonly ok: boolean; readonly summary: string; re
       return Promise.resolve(result);
     },
     reviewChapters: () => Promise.resolve({ ok: true, summary: '' }),
+    simulate: () => Promise.resolve({ ok: false, summary: '测试里不推演' }),
   };
   return { calls, hooks };
 }
@@ -963,5 +967,164 @@ describe('扫榜拆书（B79）', () => {
     value(await app.abandonWorkflow(run.run.id));
     expect(value(await app.benchmarkBooks(run.run.id))).toEqual([]);
     expect(value(await app.workflowRun(run.run.id)).state).toBe('abandoned');
+  });
+});
+
+/** 推演与写正文类任务由测试模型应答，其余（能力自检、场景配置草稿、写手、记忆、审核）按排好的回复。 */
+const SIMULATED: ReadonlySet<string> = new Set(['character_action', 'semantic_ruling', 'belief_update', 'judgement', 'beat_sheet', 'candidate_text', 'director']);
+
+/** 当铺场景（sceneDraftFixture）里的测试模型：钱四每次轮到都开口问玉的来历（林舟听得见，节拍表有材料），林舟观望。 */
+function shopPolicy(hooks: { onAction: (() => void) | null }): Policy {
+  return {
+    character_action: (ctx) => {
+      hooks.onAction?.();
+      return ctx.subject === 'qian_si' ? waitProposal({ kind: 'speak', utterance: { sentences: ['这玉从哪儿来的？'], volume: 'normal' } }) : waitProposal();
+    },
+  };
+}
+
+/** 一部作品：人物林舟、钱四，一章有四个情节点的章节计划（出场人物就是这两人）。 */
+async function simSetup() {
+  const base = fsDeps();
+  const hooks: { onAction: (() => void) | null } = { onAction: null };
+  const fake = fakeModel(shopPolicy(hooks));
+  const routed = (provider: Parameters<TestDeps['llm']['forProvider']>[0]): LlmPort => ({
+    complete: (request, options) => (SIMULATED.has(request.task) ? fake.port.complete(request, options) : base.llm.forProvider(provider).complete(request, options)),
+  });
+  const deps: TestDeps = { ...base, llm: { forProvider: routed } };
+  all.push(deps);
+  const app = createAppService(deps);
+  value(await app.loadLibrary());
+  value(await app.createWork('当铺夜谈'));
+  await addTestedModel(app, deps);
+  const lin = value(await app.createEntity('character', '林舟')).created;
+  const qian = value(await app.createEntity('character', '钱四')).created;
+  const chapter = value(await app.createChapter('第三章 当铺')).chapters[0]!;
+  value(await app.savePlan(chapter.id, { goal: '林舟当玉，钱四认出来历', castIds: [lin.id, qian.id], beats: ['叩门', '验玉', '认出来历', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+  deps.llmRequests.length = 0;
+  return { deps, app, fake, hooks, chapter, lin, qian };
+}
+
+describe('推演成章（B85）', () => {
+  it('五步走通：按章节计划建场景并采用、推演到结束、节拍表默认用计划里第一个出场人物的视角、写成候选稿、勾选后采纳进章末并可撤回、写手接着补其余情节点', async () => {
+    const { deps, app, chapter } = await simSetup();
+    // 预计费用随回合数变化（推演按 3 个角色估）。
+    const fewer = value(await app.quoteWorkflow('scene_chapter', { chapterId: chapter.id, maxRounds: 2 }));
+    const more = value(await app.quoteWorkflow('scene_chapter', { chapterId: chapter.id, maxRounds: 4 }));
+    expect(more.calls - fewer.calls).toBe(2 * (3 * SCENE_ESTIMATE_ACTORS + 1));
+    const run = value(await app.startWorkflow({ workflow: 'scene_chapter', params: { chapterId: chapter.id, chapterTitle: chapter.title, sceneId: null, maxRounds: 2 }, mode: 'step', budgetUsd: null }));
+    expect(run.run.title).toBe('推演成章：第三章 当铺');
+    expect(run.steps.map((s) => [s.key, s.kind])).toEqual([
+      ['scene', 'draft'],
+      ['simulate', 'act'],
+      ['beats', 'draft'],
+      ['narrate', 'draft'],
+      ['write', 'act'],
+    ]);
+
+    // 第 1 步：按章节计划生成场景草稿（出场人物就是角色、场景名是章名），等作者核对；采用即保存为这一章的推演场景。
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    const drafted = value(await app.advanceWorkflow(run.run.id));
+    expect(drafted.view.steps.map((s) => s.status)).toEqual(['awaiting_author', 'pending', 'pending', 'pending', 'pending']);
+    expect(sceneStepOf(drafted.view.steps[0]!)).toMatchObject({ title: '第三章 当铺', chapterId: chapter.id, protocol: 'turn_based', maxRounds: 2, sceneId: null, problems: [] });
+    expect(drafted.view.steps[0]?.note).toBe('2 个角色：林舟、钱四；核对后采用，即保存为推演场景');
+    expect(JSON.stringify(deps.llmRequests.at(-1)?.body ?? {})).toContain('认出来历');
+    const adoptedScene = value(await app.adoptWorkflowStep(run.run.id, 0));
+    const sceneId = sceneStepOf(adoptedScene.steps[0]!)?.sceneId ?? null;
+    expect(value(await app.listSimScenes()).map((s) => [s.id, s.chapterId, s.title, s.maxRounds])).toEqual([[sceneId, chapter.id, '第三章 当铺', 2]]);
+
+    // 第 2 步：推演到回合上限（没有状态层的钩子时就地推进），调用汇总记为这一步的用量；第 3 步默认视角是计划里第一个出场人物林舟。
+    const simulated = value(await app.advanceWorkflow(run.run.id));
+    expect(simulated.view.steps[1]).toMatchObject({ status: 'done', output: { endReason: 'max_rounds', round: 2 }, note: expect.stringContaining('推演 2 个回合后结束（到达回合上限）') });
+    const runs = value(await app.listSimRuns(sceneId!));
+    expect(runs.map((r) => r.status)).toEqual(['ended']);
+    expect(simulated.view.steps[1]?.usage?.input).toBeGreaterThan(0);
+    expect(simulated.view.steps[2]).toMatchObject({ status: 'awaiting_author', output: { request: { pov: 'lin_zhou', fromRound: 1, toRound: 2, notes: '' }, povName: '林舟' } });
+    const beats = beatsStepOf(simulated.view.steps[2]!)!;
+    expect(beats.beats.length).toBeGreaterThan(0);
+    // 改处理方式与文风再采用：节拍表随之更新。
+    value(await app.editWorkflowStep(run.run.id, 2, { ...beats, beats: beats.beats.map((b, i) => (i === 0 ? { ...b, treatment: 'expand' } : b)), style: '冷峻' }));
+    value(await app.adoptWorkflowStep(run.run.id, 2));
+    const sheets = value(await app.listBeatSheets(runs[0]!.id));
+    expect(sheets.map((s) => [s.sheet.style, s.sheet.beats[0]?.treatment])).toEqual([['冷峻', 'expand']]);
+
+    // 第 4 步：写成候选稿（放在本章末尾，不直接写入），等作者勾选；采用前的确认说明让“一路做完”也停在这里。
+    const narrated = value(await app.advanceWorkflow(run.run.id));
+    expect(narrated.view.steps[3]).toMatchObject({ status: 'awaiting_author', note: expect.stringContaining('采纳会把推演写成的正文写进《第三章 当铺》末尾') });
+    const draft = narrateStepOf(narrated.view.steps[3]!)!;
+    expect(draft).toMatchObject({ text: '雨下得更紧了。他没有回头。', beats: ['叩门', '验玉', '认出来历', '离开'], coveredBeats: ['叩门', '验玉', '认出来历', '离开'] });
+    expect(draft.draft.povName).toBe('林舟');
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['']);
+    // 勾选后采纳：正文写进章末、关联故事事件；留下一个情节点给写手。撤回时正文由采纳前的快照恢复。
+    value(await app.editWorkflowStep(run.run.id, 3, { ...draft, selection: { ...draft.selection, reviewed: draft.draft.reviews.map((r) => r.requestId) }, coveredBeats: ['叩门', '验玉', '认出来历'] }));
+    const adopted = value(await app.adoptWorkflowStep(run.run.id, 3));
+    expect(adopted.steps[3]).toMatchObject({ status: 'done', note: expect.stringContaining('推演写出了 3 / 4 个情节点，其余交给写手接着写') });
+    // 改动里有记下的认知（事实）与正文的撤回记录（采纳前的快照与正文摘要）。
+    expect(adopted.steps[3]?.changes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'fact' }), expect.objectContaining({ kind: 'text', id: chapter.id, title: '第三章 当铺', digest: expect.any(String), snapshotId: expect.any(String) })]));
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
+    expect(value(await app.chapterEventLinks(chapter.id)).length).toBeGreaterThan(0);
+    const withdrawn = value(await app.withdrawWorkflowStep(run.run.id, 3));
+    expect(withdrawn.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'awaiting_author', 'pending']);
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['']);
+    // 撤回后的候选稿已经处理过：重做这一步重新写成候选稿，再采纳。
+    value(await app.redoWorkflowStep(run.run.id, 3));
+    const again = value(await app.advanceWorkflow(run.run.id));
+    const second = narrateStepOf(again.view.steps[3]!)!;
+    expect(second.candidateId).not.toBe(draft.candidateId);
+    value(await app.editWorkflowStep(run.run.id, 3, { ...second, selection: { ...second.selection, reviewed: second.draft.reviews.map((r) => r.requestId) }, coveredBeats: ['叩门', '验玉', '认出来历'] }));
+    value(await app.adoptWorkflowStep(run.run.id, 3));
+
+    // 第 5 步：写手接着采纳的正文写其余的情节点——进度的第一段是推演写出的三个情节点、记为已写，写入前存了快照；写章节交给钩子。
+    const writer = fakeWriter({ ok: true, summary: '写完了 1 章并审核' });
+    const finished = value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks }));
+    expect(writer.calls).toEqual([{ ids: [chapter.id], review: true }]);
+    expect(finished.view.state).toBe('done');
+    expect(finished.view.steps[4]?.note).toBe('写完了 1 章并审核');
+    const plan = value(await app.planningView()).chapters.find((c) => c.chapter.id === chapter.id)?.plan;
+    expect(plan).toMatchObject({ status: 'writing', progress: { done: 1, segments: [['叩门', '验玉', '认出来历'], ['离开']] } });
+    // 两次采纳各一份快照，撤回时恢复前的一份，写手接着写之前的一份。
+    expect(value(await app.listSnapshots(chapter.id)).map((s) => s.reason).sort()).toEqual(['accept_candidate', 'accept_candidate', 'before_restore', 'writer']);
+  });
+
+  it('沿用已有的场景时跳过建场景；推演中途停下：这一步中断并记下运行，继续时接着推同一次到结束（一路做完时节拍表直接采用、停在采纳），重做时另起一次', async () => {
+    const { app, hooks, chapter } = await simSetup();
+    const scene = value(await app.saveSimScene(null, { chapterId: chapter.id, title: '当铺', config: sceneDraftToSpec(sceneDraftFixture()), protocol: 'turn_based', maxRounds: 3, firstSpeaker: null }));
+    const run = value(await app.startWorkflow({ workflow: 'scene_chapter', params: { chapterId: chapter.id, chapterTitle: chapter.title, sceneId: scene.id, maxRounds: 3 }, mode: 'auto', budgetUsd: null }));
+    // 第 2 回合的第一次角色行动时作者停下。
+    const abort = new AbortController();
+    let actions = 0;
+    hooks.onAction = () => {
+      if (++actions === 3) abort.abort();
+    };
+    const first = value(await app.advanceWorkflow(run.run.id, { signal: abort.signal }));
+    expect(first.view.steps[0]).toMatchObject({ status: 'skipped', note: '沿用已有的场景“当铺”' });
+    expect(first.view.steps[1]).toMatchObject({ status: 'interrupted', note: '已停下，继续时接着做这一步' });
+    const sim = simStepOf(first.view.steps[1]!)!;
+    expect(value(await app.listSimRuns(scene.id)).map((r) => r.id)).toEqual([sim.runId]);
+    expect(first.summary).toContain('停在第 2 步“推演”中途');
+
+    // 继续：接着推同一次运行到结束，没有另起；一路做完时节拍表直接采用，停在采纳正文（须作者勾选）。
+    hooks.onAction = null;
+    const second = value(await app.advanceWorkflow(run.run.id));
+    expect(second.view.steps[1]).toMatchObject({ status: 'done', output: { runId: sim.runId, stepKey: sim.stepKey, endReason: 'max_rounds', round: 3 } });
+    expect(value(await app.listSimRuns(scene.id))).toHaveLength(1);
+    expect(second.view.steps.map((s) => s.status)).toEqual(['skipped', 'done', 'done', 'awaiting_author', 'pending']);
+    expect(second.view.steps[2]?.changes).toEqual([]);
+
+    // 重做推演：步骤键不同，另起一次运行；后面的节拍表可能过时、采纳回到待做。
+    value(await app.redoWorkflowStep(run.run.id, 1));
+    const third = value(await app.advanceWorkflow(run.run.id));
+    expect(simStepOf(third.view.steps[1]!)?.runId).not.toBe(sim.runId);
+    expect(value(await app.listSimRuns(scene.id))).toHaveLength(2);
+    expect(third.view.steps.map((s) => s.status)).toEqual(['skipped', 'done', 'stale', 'pending', 'pending']);
+  });
+
+  it('没有章节计划的章：建场景一步说明原因，不保存场景', async () => {
+    const { app } = await simSetup();
+    const bare = value(await app.createChapter('第四章 空')).chapters.find((c) => c.title === '第四章 空')!;
+    const run = value(await app.startWorkflow({ workflow: 'scene_chapter', params: { chapterId: bare.id, chapterTitle: bare.title, sceneId: null, maxRounds: 2 }, mode: 'step', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('还没有章节计划') });
+    expect(value(await app.listSimScenes())).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { warehouseSpec } from '@fudiao/domain/testing';
-import { fakeModel } from '@fudiao/engine/testing';
+import { fakeModel, waitProposal } from '@fudiao/engine/testing';
 import type { LlmPort } from '@fudiao/llm';
 import { anthropicChunks, openaiChunks } from '@fudiao/llm/testing';
 import { renderConnectionTest, SELF_TEST_EXPECTED } from '@fudiao/prompts';
@@ -3509,5 +3509,70 @@ describe('AI 助手的界面（B69）', () => {
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('dark'));
     await user.click(screen.getByRole('button', { name: '外观：深色' }));
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBeUndefined());
+  });
+});
+
+describe('推演成章的界面（B85）', () => {
+  it('卡片与开始表单只让选有计划与出场人物的章；第 1 步在场景编辑器里采用即保存场景；继续后推演在后台推到结束，节拍表步骤默认是出场人物的视角并带时间线', async () => {
+    const base = fsDeps();
+    let model: LlmPort | null = null;
+    const deps: TestDeps = {
+      ...base,
+      llm: {
+        forProvider: (provider) => ({
+          complete: (request, options) => (model !== null && SIMULATED.has(request.task) ? model : base.llm.forProvider(provider)).complete(request, options),
+        }),
+      },
+    };
+    all.push(deps);
+    mkdirSync(dirname(deps.libraryFile), { recursive: true });
+    writeFileSync(deps.libraryFile, JSON.stringify({ version: 1, libraryDir: null, works: [], preferences: { autoRelationChanges: false } }));
+    const service = createAppService(deps);
+    const store = createAppStore(service);
+    render(<App store={store} />);
+    const user = userEvent.setup();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    // 钱四每次轮到都开口（林舟听得见，节拍表有材料），林舟观望。
+    model = fakeModel({ character_action: (ctx) => (ctx.subject === 'qian_si' ? waitProposal({ kind: 'speak', utterance: { sentences: ['这玉从哪儿来的？'], volume: 'normal' } }) : waitProposal()) }).port;
+    const lin = await service.createEntity('character', '林舟');
+    const qian = await service.createEntity('character', '钱四');
+    if (!lin.ok || !qian.ok) throw new Error('人物');
+    await addChapter(user, '第一章 叩门');
+    await addChapter(user, '第二章 当铺');
+    const c2 = store.getState().work?.chapters.find((c) => c.title === '第二章 当铺');
+    if (c2 === undefined) throw new Error('章节');
+    expect((await service.savePlan(c2.id, { goal: '林舟当玉，钱四认出来历', castIds: [lin.value.created.id, qian.value.created.id], beats: ['叩门', '验玉', '认出来历', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 })).ok).toBe(true);
+
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的推演成章' }));
+    const form = await within(page).findByRole('form', { name: '开始推演成章' });
+    const pick = within(form).getByRole('combobox', { name: '推演哪一章' });
+    // 没有计划的章灰显；默认选中有计划与出场人物的那一章；步骤预览列出五步。
+    expect(within(pick).getByRole('option', { name: '第一章 叩门（没有章节计划）' }).matches(':disabled')).toBe(true);
+    expect(pick).toHaveProperty('value', c2.id);
+    expect(within(form).getByRole('list', { name: '推演成章的步骤' }).textContent).toContain('写手补全并审核');
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    await user.click(within(form).getByRole('button', { name: '开始' }));
+    const sceneStep = await within(page).findByRole('region', { name: '第 1 步：建推演场景' });
+    const editor = await within(sceneStep).findByRole('form', { name: '新场景' });
+    expect(within(editor).getByRole('textbox', { name: '场景名' })).toHaveProperty('value', '第二章 当铺');
+    await user.click(within(editor).getByRole('button', { name: '采用：保存为推演场景' }));
+    await waitFor(async () => {
+      const scenes = await service.listSimScenes();
+      expect(scenes.ok ? scenes.value.map((s) => [s.title, s.chapterId]) : null).toEqual([['第二章 当铺', c2.id]]);
+    });
+    expect(store.getState().workflows?.[0]?.steps[0]?.status).toBe('done');
+
+    // 继续：推演经推演页同一条推进在后台推到结束；节拍表步骤等作者，视角默认是林舟，表单下面有推演的时间线。
+    await user.click(within(page).getByRole('button', { name: '继续' }));
+    const beatsStep = await within(page).findByRole('region', { name: '第 3 步：节拍表' }, { timeout: 15_000 });
+    const sheet = await within(beatsStep).findByRole('form', { name: '林舟视角的节拍表' });
+    expect(within(sheet).getByRole('combobox', { name: '视角' })).toHaveProperty('value', 'lin_zhou');
+    await waitFor(() => expect(sheet.textContent).toContain('推演的时间线'));
+    expect(store.getState().workflows?.[0]?.steps.map((s) => s.status)).toEqual(['done', 'done', 'awaiting_author', 'pending', 'pending']);
+    expect(store.getState().simAdvancing).toBe(false);
   });
 });

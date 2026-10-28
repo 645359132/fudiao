@@ -7,7 +7,7 @@ import type { PlanDraft, PlanningView } from '../app/planning';
 import { reviewWithRetry, type BatchRevisionOutcome, type ReviewIssueView, type RevisionProgress, type RevisionQuote, type RevisionScope } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { CastPresenceFields, ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
-import type { SceneDraftRequest, SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
+import type { SceneDraftRequest, SimIntervention, SimRunDetail, SimRunOptions, SimRunView, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantConversationView, AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
@@ -172,6 +172,8 @@ export type AppState = {
   readonly workflowId: string | null;
   readonly workflowAdvancing: string | null;
   readonly workflowProgress: string | null;
+  /** 推演成章（B85）：成书页里正在看的那次推演的时间线（推演步骤与节拍表步骤用，推进时随之刷新）。 */
+  readonly workflowSim: { readonly runId: string; readonly detail: SimRunDetail } | null;
   /** AI 助手（B69）：右侧对话框是否打开、当前作品（或作品列表页）的对话、是否正在处理。 */
   readonly assistantOpen: boolean;
   readonly assistantItems: readonly AssistantItem[];
@@ -342,6 +344,12 @@ export type AppState = {
   /** 作者对一步的操作：采用、跳过、重做、保留（可能过时时）、撤回这次采用。 */
   readonly workflowStepAction: (runId: string, idx: number, action: 'adopt' | 'skip' | 'redo' | 'keep' | 'withdraw') => Promise<boolean>;
   readonly abandonWorkflow: (runId: string) => Promise<boolean>;
+  /** 读出推演成章里一次推演的时间线（null 为不看了）。 */
+  readonly loadWorkflowSim: (runId: string | null) => Promise<void>;
+  /** 读出推演场景的列表（成书页的开始表单列本章已有的场景）。 */
+  readonly loadSimScenes: () => Promise<void>;
+  /** 到推演页打开某个场景的某次运行。 */
+  readonly openSimRun: (sceneId: string, runId: string) => Promise<void>;
   readonly toggleAssistant: () => void;
   /** 读取当前作品（或作品列表页）的对话。 */
   readonly loadAssistant: () => Promise<void>;
@@ -677,41 +685,52 @@ export function createAppStore(service: AppService): AppStore {
     let simLoopRun: string | null = null;
 
     /**
-     * 连续推进一次运行，每一步之后刷新时间线（是选中的运行时）；停在等待作者、暂停、结束，或作者叫停。
-     * 推演页的“继续”与 AI 助手的后台推演都经这里，同一时间只推进一次（simAdvancing 同步占位）。
+     * 连续推进一次运行，每一步之后刷新时间线（是选中的运行、或成书页正在看的运行时）；停在等待作者、暂停、结束，或作者叫停。
+     * 推演页的“继续”、AI 助手的后台推演与写作工作流的推演步骤都经这里，同一时间只推进一次（simAdvancing 同步占位）。
+     * external：工作流交来的取消信号（它停下时这次推演也停在当前这一步之后）与进展回调。返回最后的状态与是否被叫停。
      */
-    async function advanceSim(runId: string): Promise<void> {
+    async function advanceSim(runId: string, external?: { readonly signal?: AbortSignal; readonly onProgress?: (note: string) => void }): Promise<{ readonly view: Result<SimRunView, AppError>; readonly aborted: boolean }> {
       const abort = new AbortController();
+      if (external?.signal?.aborted === true) abort.abort();
+      external?.signal?.addEventListener('abort', () => abort.abort(), { once: true });
       simAbort = abort;
       simLoopRun = runId;
       set({ simAdvancing: true, message: null });
+      let last: Result<SimRunView, AppError> = { ok: false, error: { code: 'not_found' } };
       simLoop = (async () => {
         let view = await service.simRunStatus(runId);
         if (view.ok && view.value.phase === 'Paused') view = await service.resumeSimRun(runId);
         while (view.ok && !SIM_STOPPED.has(view.value.phase) && !abort.signal.aborted) {
           view = await service.stepSimRun(runId, { signal: abort.signal });
+          if (view.ok) external?.onProgress?.(`推演进行中：第 ${view.value.round} 回合，已用 $${view.value.spentUsd.toFixed(3)}`);
           await refreshRun(runId);
         }
         if (!view.ok) set({ message: describeError(view.error) });
         await refreshRun(runId);
+        last = view;
       })();
       await simLoop;
       simLoop = null;
       simLoopRun = null;
       if (simAbort === abort) simAbort = null;
       set({ simAdvancing: false });
+      return { view: last, aborted: abort.signal.aborted };
     }
 
-    /** 读出一次运行的状态与时间线；选中的运行已经换了时不覆盖。 */
+    /** 读出一次运行的状态与时间线；选中的运行（或成书页正在看的运行）已经换了时不覆盖。 */
     async function refreshRun(runId: string): Promise<void> {
-      if (get().simRunId !== runId) return;
+      const watched = () => get().simRunId === runId || get().workflowSim?.runId === runId;
+      if (!watched()) return;
       const detail = await service.simRunDetail(runId);
-      if (get().simRunId !== runId) return;
+      if (!watched()) return;
       if (!detail.ok) {
         set({ message: describeError(detail.error) });
         return;
       }
-      set({ simRun: detail.value, simRuns: get().simRuns.map((r) => (r.id === runId ? detail.value.view.run : r)) });
+      set({
+        ...(get().simRunId === runId && { simRun: detail.value, simRuns: get().simRuns.map((r) => (r.id === runId ? detail.value.view.run : r)) }),
+        ...(get().workflowSim?.runId === runId && { workflowSim: { runId, detail: detail.value } }),
+      });
     }
 
     /** 作者对选中的运行做一次操作（确认裁决、决定导演提议、介入）：正在推进时不做；之后刷新时间线。 */
@@ -1612,6 +1631,7 @@ export function createAppStore(service: AppService): AppStore {
       workflowId: null,
       workflowAdvancing: null,
       workflowProgress: null,
+      workflowSim: null,
       assistantOpen: true,
       assistantItems: [],
       assistantRunning: false,
@@ -1725,7 +1745,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, workflowSim: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -2251,6 +2271,15 @@ export function createAppStore(service: AppService): AppStore {
                   const done = await reviewQueueRun(chapterIds, listen);
                   return done === null ? { ok: false, summary: '已经有一批在依次审核（成书进度或 AI 助手排的）：等它审完，再继续这个工作流' } : { ok: done.complete, summary: done.summary, cancelled: done.cancelled };
                 },
+                // 推演成章的推演步骤：经推演页同一条推进做，推演页正看着这次运行时时间线跟着刷新；“停下”推演也让这一步停下。
+                async simulate(runId, { signal, onProgress }) {
+                  if (get().simAdvancing) return { ok: false, summary: '已经有一次推演在推进（推演页或 AI 助手发起的）：等它推完或停下，再继续这个工作流' };
+                  const done = await advanceSim(runId, { ...(signal !== undefined && { signal }), onProgress });
+                  if (!done.view.ok) return { ok: false, summary: describeError(done.view.error), cancelled: done.aborted };
+                  const v = done.view.value;
+                  if (done.aborted) return { ok: false, summary: `推演停在第 ${v.round} 回合`, cancelled: true };
+                  return { ok: v.phase === 'Ended', summary: v.phase === 'Ended' ? `推演 ${v.round} 个回合后结束` : `推演停在第 ${v.round} 回合` };
+                },
               },
               onStep: (view) => {
                 putWorkflow(view);
@@ -2338,8 +2367,41 @@ export function createAppStore(service: AppService): AppStore {
         const view = 'view' in result.value ? result.value.view : result.value;
         putWorkflow(view);
         set({ message: 'note' in result.value ? result.value.note : null });
-        if (action === 'adopt' || action === 'withdraw') await refreshWork();
+        if (action === 'adopt' || action === 'withdraw') {
+          await refreshWork();
+          // 推演成章把正文写进章末（撤回时恢复）：这一章正开着时重新读取正文。
+          const target = view.run.params.chapterId;
+          const chapterId = view.run.workflow === 'scene_chapter' && typeof target === 'string' ? target : '';
+          if (chapterId !== '' && get().selectedChapterId === chapterId && get().chapterContent !== null) await get().loadChapter(chapterId);
+        }
         return true;
+      },
+      async loadWorkflowSim(runId) {
+        if (runId === null) {
+          set({ workflowSim: null });
+          return;
+        }
+        const detail = await service.simRunDetail(runId);
+        if (!detail.ok) {
+          set({ message: describeError(detail.error) });
+          return;
+        }
+        set({ workflowSim: { runId, detail: detail.value } });
+      },
+      async loadSimScenes() {
+        const scenes = await service.listSimScenes();
+        if (scenes.ok) set({ simScenes: scenes.value });
+        else set({ message: describeError(scenes.error) });
+      },
+      async openSimRun(sceneId, runId) {
+        if (get().simAdvancing) {
+          set({ message: '推演正在推进：等它停下再到推演页看' });
+          return;
+        }
+        await get().openSimulation();
+        if (get().panel !== 'simulation') return;
+        set({ simSceneId: sceneId, simTab: 'runs', simRuns: [], simRunId: null, simRun: null });
+        await loadRuns(sceneId, runId);
       },
       async abandonWorkflow(runId) {
         if (get().workflowAdvancing === runId) {

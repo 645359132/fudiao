@@ -8,6 +8,8 @@ import {
   purgeBenchmarkSamples,
   latestCallWithUsage,
   listAssistantMessages,
+  getChapterPlan,
+  runUsage,
   getCover,
   getCoverThumbnail,
   removeCover,
@@ -95,7 +97,7 @@ import { bookAuditUseCases } from './book-audit';
 import { openingUseCases } from './opening';
 import { castCompletionUseCases } from './cast-completion';
 import { benchmarkUseCases } from './benchmark';
-import { asChangeEntries, captureWork, diffWork, undoChanges } from './assistant-undo';
+import { asChangeEntries, captureWork, chapterDigest, diffWork, undoChanges } from './assistant-undo';
 import { reviewUseCases, reviewWithRetry } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
@@ -903,6 +905,9 @@ export function createAppService(deps: AppDeps) {
   };
   const incompleteNote = (incomplete: readonly string[]) => (incomplete.length === 0 ? '' : `；这些章的审核没有完成（重试过一次），可以在成书进度里单独审核：${incomplete.join('、')}`);
 
+  /** 推演停在这些阶段：等待作者、暂停或结束（推演成章的推演步骤据此停下）。 */
+  const SIM_STOPPED: ReadonlySet<string> = new Set(['AwaitingAuthor', 'Paused', 'Ended']);
+
   // 写作工作流（B78）：步骤调用上面的用例；写章节默认就地依次写，桌面端由状态层经写手队列做。
   const workflows = workflowUseCases({
     deps,
@@ -910,6 +915,22 @@ export function createAppService(deps: AppDeps) {
     host: { ...app, ...quickBook, ...bookAuditUseCases(deps, () => session?.port ?? null, runner), ...openingUseCases(deps, () => session?.port ?? null, runner),
       ...castCompletionUseCases(deps, () => session?.port ?? null, runner),
       ...benchmark,
+      // 推演成章（B85）：推演的调用汇总、章节计划的出场人物与情节点、正文摘要。
+      async simRunUsage(runId) {
+        if (session === null) return err({ code: 'no_work' });
+        const usage = await runUsage(session.port, runId);
+        return usage.ok ? usage : err(repo(usage.error));
+      },
+      async chapterPlanBrief(chapterId) {
+        if (session === null) return err({ code: 'no_work' });
+        const [plan, entities] = await Promise.all([getChapterPlan(session.port, chapterId), listEntities(session.port)]);
+        if (!plan.ok) return err(repo(plan.error));
+        if (!entities.ok) return err(repo(entities.error));
+        const p = plan.value;
+        if (p === null) return ok({ cast: [], beats: [] });
+        return ok({ cast: p.castIds.flatMap((id) => entities.value.find((e) => e.id === id)?.name ?? []), beats: p.beats });
+      },
+      chapterDigest: (chapterId) => chapterDigest(hostBase, chapterId),
     },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {
@@ -948,6 +969,18 @@ export function createAppService(deps: AppDeps) {
           done.push(id);
         }
         return { ok: true, summary: `写完了 ${done.length} 章${review ? '并审核' : ''}${incompleteNote(incomplete)}` };
+      },
+      // 就地连续推进一次推演（桌面端由状态层经推演页同一条推进做）：暂停的先恢复，一步一步推到停下。
+      async simulate(runId, { signal, onProgress }) {
+        let view = await app.simRunStatus(runId);
+        if (view.ok && view.value.phase === 'Paused') view = await app.resumeSimRun(runId);
+        while (view.ok && !SIM_STOPPED.has(view.value.phase) && signal?.aborted !== true) {
+          view = await app.stepSimRun(runId, { ...(signal !== undefined && { signal }) });
+          if (view.ok) onProgress(`推演进行中：第 ${view.value.round} 回合，已用 $${view.value.spentUsd.toFixed(3)}`);
+        }
+        if (!view.ok) return { ok: false, summary: describeError(view.error) };
+        if (signal?.aborted === true) return { ok: false, summary: `推演停在第 ${view.value.round} 回合`, cancelled: true };
+        return { ok: view.value.phase === 'Ended', summary: view.value.phase === 'Ended' ? `推演 ${view.value.round} 个回合后结束` : `推演停在第 ${view.value.round} 回合` };
       },
     },
   });

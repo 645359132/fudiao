@@ -57,8 +57,9 @@ export function adoptionStatements(input: AdoptionInput, ctx: WriteContext, newI
   }
   for (const eventId of input.linkedEventIds) {
     for (const paragraphId of input.paragraphIds) {
+      // 撤回采纳（正文由快照恢复）后再采纳到同一段时，这件事与这一段的关联还在：同一对只记一次。
       statements.push({
-        sql: "INSERT INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES (?, ?, 'direct', ?)",
+        sql: "INSERT OR IGNORE INTO event_paragraph_link (event_id, paragraph_id, mode, created_at) VALUES (?, ?, 'direct', ?)",
         params: [eventId, paragraphId, ctx.now],
       });
     }

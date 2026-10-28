@@ -9,8 +9,12 @@ import { restoreSnapshot } from './snapshot';
 import { listParagraphs } from './paragraph';
 import type { SavedParagraph } from './paragraph-plan';
 
-/** 开始一次写作：记下分段与写入前的快照，状态改为写作中。 */
+/**
+ * 开始一次写作：记下分段与写入前的快照，状态改为写作中。done 通常为 0；本章已有正文写到了前面几段的情节点
+ * （推演成章采纳的正文，B85）时从那一段之后接着写，done 不能超过段数。
+ */
 export function startWriterRun(port: SqlPort, plan: ChapterPlan, progress: WriterProgress, ctx: WriteContext): Promise<Result<ChapterPlan, RepoError>> {
+  if (progress.done > progress.segments.length) return Promise.resolve(err({ code: 'invalid', detail: '已写的段数不能多于分段数' }));
   return guardedUpdate(
     port,
     PlanRow,
@@ -18,7 +22,7 @@ export function startWriterRun(port: SqlPort, plan: ChapterPlan, progress: Write
     plan.chapterId,
     {
       sql: `UPDATE chapter_plan SET status = 'writing', progress = ?, version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${PLAN_COLUMNS}`,
-      params: [JSON.stringify({ ...progress, done: 0 }), ctx.now, plan.chapterId, plan.version],
+      params: [JSON.stringify(progress), ctx.now, plan.chapterId, plan.version],
     },
     'chapter_id',
   );

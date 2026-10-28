@@ -145,6 +145,18 @@ export async function runWorkflowEval(app: AppService, book: EvalBook, selected:
 
   // 写章节的钩子：与服务层默认的就地实现相同（依次写、整理长篇记忆、审核；模型审核没有完成时这一步出错），另外记下每章的数字。
   const writing: WorkflowHooks = {
+    // 推演成章的推演步骤：就地一步一步推到停下（与服务层默认的钩子相同）；试用脚本目前不跑这个工作流。
+    async simulate(runId, { signal, onProgress }) {
+      let view = await app.simRunStatus(runId);
+      if (view.ok && view.value.phase === 'Paused') view = await app.resumeSimRun(runId);
+      while (view.ok && view.value.phase !== 'Ended' && view.value.phase !== 'Paused' && view.value.phase !== 'AwaitingAuthor' && signal?.aborted !== true) {
+        view = await app.stepSimRun(runId, { ...(signal !== undefined && { signal }) });
+        if (view.ok) onProgress(`第 ${view.value.round} 回合`);
+      }
+      if (!view.ok) return { ok: false, summary: describe(view.error) };
+      if (signal?.aborted === true) return { ok: false, summary: '已停下', cancelled: true };
+      return { ok: view.value.phase === 'Ended', summary: `推演停在第 ${view.value.round} 回合` };
+    },
     async writeChapters(ids, review, options) {
       const done: string[] = [];
       const incomplete: string[] = [];

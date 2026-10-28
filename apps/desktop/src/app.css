@@ -4592,6 +4592,21 @@ body.resizing .assistant {
   background: var(--accent-soft);
 }
 
+/* 推演成章：推演写成的候选稿正文。 */
+.wf-candidate {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.wf-candidate p {
+  margin: 0 0 0.6em;
+  text-indent: 2em;
+  white-space: pre-wrap;
+}
+
 .wf-usage {
   display: flex;
   gap: 6px;

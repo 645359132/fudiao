@@ -1860,6 +1860,12 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         params = { chapters: action.chapters ?? 3 };
       } else if (action.workflow === 'next_volume') {
         params = { chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000, instruction: action.instruction ?? '' };
+      } else if (action.workflow === 'scene_chapter') {
+        // 推演成章要选一章：没说是哪一章就先问，不替作者选。
+        if (action.chapter === null || action.chapter.trim() === '') return failed('作者还没说推演哪一章（要有章节计划与出场人物）：先问清楚再开始，不要替作者选');
+        const c = await env.findChapter(action.chapter);
+        if (!c.ok) return failed(c.error);
+        params = { chapterId: c.value.id, chapterTitle: c.value.title, sceneId: null, maxRounds: DEFAULT_SIM_ROUNDS };
       } else {
         // 一键成书的章数与每章字数由作者定：没说清就先问，不替作者定。
         if (action.chapters === null || action.wordsPerChapter === null) return failed('作者还没说要写多少章、每章多少字（可以顺带问分几卷）：先问清楚再开始，不要替作者定');

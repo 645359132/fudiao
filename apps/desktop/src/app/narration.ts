@@ -133,7 +133,8 @@ export type AdoptionRequest = {
   readonly confirmLocked: boolean;
 };
 
-export type AdoptionResult = { readonly paragraphs: readonly SavedParagraph[]; readonly events: number; readonly facts: number };
+/** snapshotId：写入前存的章节快照（推演成章撤回采用时恢复它，B85）。 */
+export type AdoptionResult = { readonly paragraphs: readonly SavedParagraph[]; readonly events: number; readonly facts: number; readonly snapshotId: string };
 
 const factInput = (
   kind: 'world' | 'belief',
@@ -576,7 +577,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       if (!done.ok) return done.error.code === 'guard_failed' ? stale() : err(repo({ code: 'sql', error: done.error }));
       const after = await listParagraphs(port, candidate.chapterId);
       if (!after.ok) return err(repo(after.error));
-      return ok({ paragraphs: after.value, events: chosen.length, facts: facts.length });
+      return ok({ paragraphs: after.value, events: chosen.length, facts: facts.length, snapshotId: snapshot.value.id });
     },
 
     /**

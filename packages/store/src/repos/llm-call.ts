@@ -244,6 +244,17 @@ export async function usageSummary(port: SqlPort): Promise<Result<UsageSummary, 
   });
 }
 
+/**
+ * 一次推演的调用汇总（写作工作流的推演步骤把它记为这一步的用量，B85）：输入含缓存读写，费用含按估计计入的；
+ * unknown 是连估计也没有的可能已计费的调用数。
+ */
+export async function runUsage(port: SqlPort, runId: string): Promise<Result<{ readonly input: number; readonly output: number; readonly cost: number; readonly unknown: number }, RepoError>> {
+  const row = await queryOne(port, TotalsRow, `SELECT ${AGGREGATE} FROM llm_call WHERE step_key >= ? AND step_key < ?`, [`${runId}:`, `${runId};`]);
+  if (!row.ok) return row;
+  const t = totals(row.value ?? { calls: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost: 0, unknown_cost: 0, estimated_calls: 0, estimated_cost: 0 });
+  return ok({ input: t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens, output: t.outputTokens, cost: t.cost + t.estimatedCost, unknown: t.unknownCost - t.estimatedCalls });
+}
+
 const RunCallRow = z
   .object({
     step_key: z.string(),

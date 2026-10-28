@@ -205,7 +205,8 @@ function ActorView({ round, actorId, data }: { readonly round: ViewerRound; read
   );
 }
 
-function Timeline({ data }: { readonly data: ViewerData }) {
+/** 时间线（B28）：按回合看全局局面与各角色所见；成书页的推演成章也用它。 */
+export function Timeline({ data }: { readonly data: ViewerData }) {
   const [picked, setPicked] = useState<number | null>(null);
   const [tab, setTab] = useState('global');
   if (data.rounds.length === 0) return <p className="muted">还没有完成的回合。</p>;

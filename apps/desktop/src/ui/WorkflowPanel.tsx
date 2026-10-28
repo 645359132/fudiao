@@ -1,19 +1,22 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { randomIdea } from '../app/idea-seeds';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL } from '../app/labels';
 import type { BookSeed } from '../app/quick-book';
 import { VOLUME_MODES, type VolumeMode, type VolumeOutline } from '../app/planning';
-import { benchmarkAnalysesOf, benchmarkResultOf, bookVolumesOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, MAX_BOOK_CHAPTERS, PLAN_CHAPTERS_PER_CALL, quickBookVolumeIssue, type BookVolumesStep, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
+import { benchmarkAnalysesOf, benchmarkResultOf, bookVolumesOf, castDraftOf, diagnosisOf, FORESHADOW_FINDING_LABEL, findingsOf, openingCompareOf, planDraftOf, reportOf, seedDraftOf, suspectsOf, volumeOutlineOf, DEFAULT_SIM_ROUNDS, MAX_BOOK_CHAPTERS, PLAN_CHAPTERS_PER_CALL, quickBookVolumeIssue, type BookVolumesStep, type WorkflowInfo, type WorkflowKey, type WorkflowQuote, type WorkflowStepView, type WorkflowView } from '../app/workflows';
 import { BookSeedFields } from './BookSeedFields';
 import { Icon, type IconName } from './Icon';
 import { IconButton } from './IconButton';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
+import { BeatsStepView, NarrateStepView, SceneStepView, SimStepView, WriteAfterView } from './SceneChapterSteps';
 import { useApp } from './store-context';
+import { useDraftSaver } from './useDraftSaver';
 
 /** “一路做完”时哪些地方仍会停下、哪些直接采用。 */
 const AUTO_NOTE: Readonly<Record<WorkflowKey, string>> = {
   quick_book: '会替换大纲或覆盖计划时仍停下',
+  scene_chapter: '场景与节拍表直接采用，采纳正文时仍停下',
   book_audit: '找到的疑点直接核对',
   next_volume: '卷纲与计划直接采用',
   opening_polish: '处理问题这一步仍等你',
@@ -60,6 +63,22 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
   // 连按两次“开始”（双击、连按回车）不建两次运行。
   const [submitting, setSubmitting] = useState(false);
   const bookChapters = useApp((s) => s.work?.chapters ?? []);
+  // 推演成章（B85）：选一章（要有章节计划与出场人物）、沿用本章已有的场景或按计划新建、回合上限。
+  const planning = useApp((s) => s.planning);
+  const scenes = useApp((s) => s.simScenes);
+  const loadScenes = useApp((s) => s.loadSimScenes);
+  const simReady = (id: string) => {
+    const plan = planning?.chapters.find((c) => c.chapter.id === id)?.plan ?? null;
+    return plan === null ? '没有章节计划' : plan.castIds.length === 0 ? '计划里没有出场人物' : plan.status === 'written' || plan.status === 'reviewed' ? '已经写过' : null;
+  };
+  const [chapterId, setChapterId] = useState(() => (info.key === 'scene_chapter' ? (bookChapters.find((c) => simReady(c.id) === null)?.id ?? '') : ''));
+  const [sceneId, setSceneId] = useState('');
+  const [maxRounds, setMaxRounds] = useState(DEFAULT_SIM_ROUNDS);
+  useEffect(() => {
+    if (info.key === 'scene_chapter' && scenes === null) void loadScenes();
+  }, [info.key, scenes, loadScenes]);
+  const chapterScenes = (scenes ?? []).filter((s) => s.chapterId === chapterId);
+  const chapterIssue = info.key !== 'scene_chapter' ? null : chapterId === '' ? '先选一章' : simReady(chapterId);
   const key: WorkflowKey = info.key;
   const params =
     key === 'book_audit'
@@ -72,13 +91,15 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
             ? {}
             : key === 'benchmark'
               ? { idea, entries: Math.max(1, samples.filter((x) => x.text.trim() !== '').length) }
-              : { idea, genre, chapters, wordsPerChapter: words, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null };
+              : key === 'scene_chapter'
+                ? { chapterId, chapterTitle: bookChapters.find((c) => c.id === chapterId)?.title ?? '', sceneId: sceneId === '' ? null : sceneId, maxRounds }
+                : { idea, genre, chapters, wordsPerChapter: words, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   // 分卷方式与章数搭不搭：不搭时不能开始，提示怎样改。
   // 这次会走的几步：一键成书按章数在“章节计划”与“全书卷纲、逐卷拆章”之间换。
   const flow = info.stepsFor(params);
-  const volumeIssue = key === 'quick_book' ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null }) : null;
+  const volumeIssue = key === 'quick_book' ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null }) : chapterIssue;
   const totalWords = chapters * words;
   return (
     <form
@@ -156,6 +177,68 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
         </>
       ) : key === 'cast_completion' ? (
         <p className="muted">从各章的长篇记忆里找：说明为空的人物、出场却没有关系的人物，以及正文里有、还没建卡的人物；写成小传与关系的草稿，你勾选后再加进设定与人物关系网。只增不改：锁定的人物不动，已有的说明只在后面补充。</p>
+      ) : key === 'scene_chapter' ? (
+        <>
+          <div className="form-row">
+            <label>
+              推演哪一章
+              <select
+                aria-label="推演哪一章"
+                value={chapterId}
+                onChange={(e) => {
+                  setChapterId(e.currentTarget.value);
+                  setSceneId('');
+                  touched();
+                }}
+              >
+                <option value="">选一章</option>
+                {bookChapters.map((c) => {
+                  const why = simReady(c.id);
+                  return (
+                    <option key={c.id} value={c.id} disabled={why !== null}>
+                      {c.title}
+                      {why === null ? '' : `（${why}）`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label>
+              场景
+              <select
+                aria-label="场景"
+                value={sceneId}
+                onChange={(e) => {
+                  setSceneId(e.currentTarget.value);
+                  touched();
+                }}
+              >
+                <option value="">按章节计划新建</option>
+                {chapterScenes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    沿用“{s.title}”
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              回合上限
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={maxRounds}
+                onChange={(e) => {
+                  setMaxRounds(Number(e.currentTarget.value));
+                  touched();
+                }}
+              />
+            </label>
+          </div>
+          <p className="muted">
+            适合对峙、谈判、揭底这样的关键场：出场人物成为角色，各按自己知道的事行动，程序裁决；推完由你选视角写成正文采纳进这一章，写手再接着补其余的情节点。写手只接着已有正文写：推演之前的引入请在采纳时留作“已写出”，或自己补写。
+          </p>
+        </>
       ) : key === 'opening_polish' ? (
         <>
           <label>
@@ -371,36 +454,6 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
       </div>
     </form>
   );
-}
-
-/**
- * 草稿表单的保存：改过没保存就切到别的步骤（表单卸载）时自动保存，回来时修改还在。
- * 返回保存函数（成功与否）；保存前先记下要保存的内容，卸载时与它比较，刚保存过的不再存一次。
- */
-function useDraftSaver<T>(runId: string, idx: number, output: unknown, draft: T | null, payload: (draft: T) => unknown): (draft: T) => Promise<boolean> {
-  const edit = useApp((s) => s.editWorkflowStep);
-  const latest = useRef<T | null>(draft);
-  const saved = useRef(JSON.stringify(output));
-  useEffect(() => {
-    latest.current = draft;
-  }, [draft]);
-  useEffect(
-    () => () => {
-      const d = latest.current;
-      if (d === null) return;
-      const value = payload(d);
-      if (JSON.stringify(value) !== saved.current) void edit(runId, idx, value);
-    },
-    [edit, runId, idx, payload],
-  );
-  return async (d: T) => {
-    const value = payload(d);
-    const before = saved.current;
-    saved.current = JSON.stringify(value);
-    const ok = await edit(runId, idx, value);
-    if (!ok) saved.current = before;
-    return ok;
-  };
 }
 
 const seedPayload = (draft: BookSeed): BookSeed => draft;
@@ -865,6 +918,7 @@ function Badge({ tone, children }: { readonly tone: Tone; readonly children: Rea
 /** 工作流卡片的图标与一句话的用途（只用于显示；步骤以工作流的定义为准）。 */
 const WORKFLOW_LOOK: Readonly<Record<WorkflowKey, { readonly icon: IconName; readonly tagline: string }>> = {
   quick_book: { icon: 'wand', tagline: '从一句想法写成一整本书' },
+  scene_chapter: { icon: 'stage', tagline: '选一章关键场，让角色推演出走向，再写成正文' },
   book_audit: { icon: 'review', tagline: '查跨章矛盾、伏笔遗漏与各章的问题' },
   next_volume: { icon: 'layers', tagline: '接着已写的章节规划并写下一卷' },
   opening_polish: { icon: 'pen', tagline: '按开篇的要求诊断前几章，改完对比' },
@@ -888,8 +942,9 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {label}
     </button>
   );
+  const scene = view.run.workflow === 'scene_chapter';
   const buttons = [
-    waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') ? button('采用', 'adopt', true) : null,
+    waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') && !scene ? button('采用', 'adopt', true) : null,
     waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null,
     step.status === 'stale' ? button('保留结果', 'keep', true) : null,
     step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null,
@@ -940,7 +995,12 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {view.run.workflow === 'cast_completion' && step.key === 'draft' ? <CastStep view={view} step={step} /> : null}
       {step.key === 'analyze' ? <AnalysesView step={step} /> : null}
       {view.run.workflow === 'benchmark' && step.key === 'compare' ? <CompareView view={view} step={step} /> : null}
-      {step.key === 'write' ? (
+      {scene && step.key === 'scene' ? <SceneStepView key={`${step.version}`} view={view} step={step} /> : null}
+      {scene && step.key === 'simulate' ? <SimStepView view={view} step={step} /> : null}
+      {scene && step.key === 'beats' ? <BeatsStepView key={`${step.version}`} view={view} step={step} /> : null}
+      {scene && step.key === 'narrate' ? <NarrateStepView key={`${step.version}`} view={view} step={step} /> : null}
+      {scene && step.key === 'write' ? <WriteAfterView view={view} /> : null}
+      {step.key === 'write' && !scene ? (
         <>
           {/* 写章节一步下面是整本书的成书进度（长篇有几百行）：这一步的操作放在看板上面，不用翻到底。 */}
           {actions}

@@ -46,14 +46,18 @@ import type { BenchmarkSampleInput } from '@fudiao/store';
 import type { SkillStage } from '@fudiao/shared';
 import type { CastGap } from '@fudiao/writing';
 import { foreshadowAudit, type ForeshadowFinding } from '@fudiao/writing';
-import { chapterLengths, type Chapter } from '@fudiao/store';
+import { Beat, chapterLengths, SIM_PROTOCOLS, type Candidate, type Chapter, type SimScene, type SimSceneFields, type StoredEvent } from '@fudiao/store';
+import type { RunEvent } from '@fudiao/engine';
 import type { AppDeps } from './ports';
 import { seedContentTokens, type BookSeed, type BookSeedRequest, type QuickBookStatus } from './quick-book';
 import { segmentContentTokens } from './writer';
 import { THINKING_ALLOWANCE, THINKING_TOKENS_PER_CALL, TOKENS_PER_CHAR } from './thinking';
+import { SIM_END_LABEL, SIM_PAUSE_LABEL } from './labels';
+import type { SceneDraft, SceneDraftRequest, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
+import type { AdoptionDraft, AdoptionRequest, AdoptionResult, BeatSheetRequest, BeatSheetView } from './narration';
 
 /** 工作流的键。新增工作流时在这里加一项，命令表的类型要求它有定义。 */
-export const WORKFLOW_KEYS = ['quick_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion', 'benchmark'] as const;
+export const WORKFLOW_KEYS = ['quick_book', 'scene_chapter', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion', 'benchmark'] as const;
 /** 要作者先导入材料、AI 助手不能直接发起的工作流（扫榜拆书要粘贴或导入榜单与样章）。 */
 export const AUTHOR_STARTED_WORKFLOWS = ['benchmark'] as const;
 export type WorkflowKey = (typeof WORKFLOW_KEYS)[number];
@@ -73,6 +77,11 @@ export type WorkflowHooks = {
   writeChapters(chapterIds: readonly string[], review: boolean, options: CallOptions): Promise<HookOutcome>;
   /** 依次审核这些章（状态层经依次审核做，与成书进度、助手的后台审核同一时间只有一批）。ok 为是否全部审完。 */
   reviewChapters(chapterIds: readonly string[], options: CallOptions): Promise<HookOutcome>;
+  /**
+   * 连续推进一次推演到结束、等待作者、暂停或被停下（推演成章，B85）。状态层经推演页同一条推进做（同一时间只推进一次，
+   * 时间线随之刷新）；ok 为推演已结束，cancelled 为被停下。调用由引擎记进调用记录，不经这一步的调用选项。
+   */
+  simulate(runId: string, options: { readonly signal?: AbortSignal; readonly onProgress: (note: string) => void }): Promise<HookOutcome>;
 };
 
 export type HookOutcome = { readonly ok: boolean; readonly summary: string; readonly cancelled?: boolean };
@@ -106,8 +115,17 @@ type StepContext<P> = {
   readonly options: CallOptions;
   readonly hooks: WorkflowHooks;
   readonly onProgress: (note: string) => void;
-  /** 前面某一步的结果（按它的结构校验过）；没有时为 null。 */
+  /** 前面某一步的结果（按它的结构校验过）；没有时为 null。自己的键给出上一次执行留下的结果（中断后继续、重做时）。 */
   readonly output: (key: string) => unknown;
+  /**
+   * 一步中途把结果先存进这一步（例如已经开始的推演的标识）：中断、停下时结果保留，继续时从 output(自己的键) 接着做。
+   * 结果须符合这一步的结构。
+   */
+  readonly checkpoint: (output: unknown) => Promise<Result<void, AppError>>;
+  /** 这一步的用量以汇报的为准（调用不经这一步的调用选项时，例如推演由引擎记进调用记录），写回作品库并做预算判断。 */
+  readonly report: (usage: StepUsage) => Promise<void>;
+  /** 预算上限减去已用（含本步此刻的用量）；没有上限时为 null。 */
+  readonly budgetLeft: () => number | null;
 };
 
 /** 一步的结果。settled：草稿没有要作者看的东西（例如一处疑点也没找到），直接完成、不停下。 */
@@ -142,8 +160,11 @@ type Step<P> = {
   readonly skipIf?: (ctx: StepContext<P>) => Promise<string | null>;
 };
 
-/** 采用的结果：一句话，或一句话加存回这一步的结果。 */
-type Adopted<O> = string | { readonly note: string; readonly output: O };
+/**
+ * 采用的结果：一句话，或一句话加存回这一步的结果（output）与撤回时另外要改回的项（changes，与 AI 助手的撤销记录同一格式，
+ * 追加在现状差别之后；例如采纳进章末的正文由采纳前的快照恢复）。
+ */
+type Adopted<O> = string | { readonly note: string; readonly output?: O; readonly changes?: readonly unknown[] };
 
 const invalid = (detail: string): AppError => ({ code: 'settings', detail });
 
@@ -342,8 +363,20 @@ export type BenchmarkParams = z.infer<typeof BenchmarkParams>;
 export const CastParams = z.object({});
 export type CastParams = z.infer<typeof CastParams>;
 
+/** 推演的回合上限（没有指定时）。 */
+export const DEFAULT_SIM_ROUNDS = 8;
+/** 推演成章（B85）的参数：哪一章（章名只用于运行的标题）、沿用的场景（null 为按章节计划新建）与回合上限。 */
+export const SceneChapterParams = z.object({
+  chapterId: z.string().min(1),
+  chapterTitle: z.string().default(''),
+  sceneId: z.string().nullable().default(null),
+  maxRounds: z.number().int().min(1).max(30).default(DEFAULT_SIM_ROUNDS),
+});
+export type SceneChapterParams = z.infer<typeof SceneChapterParams>;
+
 type ParamsOf = {
   readonly quick_book: QuickBookParams;
+  readonly scene_chapter: SceneChapterParams;
   readonly book_audit: BookAuditParams;
   readonly next_volume: NextVolumeParams;
   readonly opening_polish: OpeningParams;
@@ -353,7 +386,9 @@ type ParamsOf = {
 
 /** 工作流用到的现有用例（由应用服务提供）。 */
 export type WorkflowHost = {
-  reloadWork(): Promise<Result<{ readonly project: { readonly outline: string }; readonly volumes: readonly { readonly id: string; readonly title: string }[] }, AppError>>;
+  reloadWork(): Promise<
+    Result<{ readonly project: { readonly outline: string }; readonly volumes: readonly { readonly id: string; readonly title: string }[]; readonly chapters: readonly { readonly id: string; readonly title: string }[] }, AppError>
+  >;
   exportText(kind: 'txt' | 'md', chapterId?: string): Promise<Result<boolean, AppError>>;
   quickBookStatus(): Promise<Result<QuickBookStatus, AppError>>;
   draftBookSeed(request: BookSeedRequest, options?: CallOptions): Promise<Result<BookSeed, AppError>>;
@@ -398,6 +433,26 @@ export type WorkflowHost = {
   ): Promise<Result<{ readonly compare: BenchmarkCompare; readonly trimmed: number }, AppError>>;
   clearBenchmark(runId: string): Promise<Result<number, AppError>>;
   addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<unknown, AppError>>;
+  // 推演成章（B85）：角色推演、写成正文与采纳、写手接着写的用例。
+  draftSimScene(request: SceneDraftRequest, options?: CallOptions): Promise<Result<SceneDraft, AppError>>;
+  saveSimScene(id: string | null, fields: SimSceneFields): Promise<Result<SimScene, AppError>>;
+  listSimScenes(): Promise<Result<SimScene[], AppError>>;
+  startSimRun(sceneId: string, options: SimRunOptions): Promise<Result<SimRunView, AppError>>;
+  simRunStatus(runId: string): Promise<Result<SimRunView, AppError>>;
+  simRunDetail(runId: string): Promise<Result<SimRunDetail, AppError>>;
+  simRunEvents(runId: string): Promise<Result<readonly StoredEvent[], AppError>>;
+  /** 一次推演的调用汇总，记为推演步骤的用量。 */
+  simRunUsage(runId: string): Promise<Result<StepUsage, AppError>>;
+  draftBeatSheet(runId: string, request: BeatSheetRequest, options?: CallOptions): Promise<Result<BeatSheetView, AppError>>;
+  saveBeatSheet(id: string, fields: { readonly beats: readonly Beat[]; readonly style: string }): Promise<Result<BeatSheetView, AppError>>;
+  narrateBeatSheet(id: string, chapterId: string, options?: CallOptions): Promise<Result<Candidate, AppError>>;
+  adoptionDraft(candidateId: string): Promise<Result<AdoptionDraft, AppError>>;
+  adoptCandidate(request: AdoptionRequest): Promise<Result<AdoptionResult, AppError>>;
+  startWriterAfter(chapterId: string, writtenBeats: readonly string[]): Promise<Result<{ readonly remaining: number }, AppError>>;
+  /** 一章的章节计划里的出场人物名与情节点（没有计划时都为空）。 */
+  chapterPlanBrief(chapterId: string): Promise<Result<{ readonly cast: readonly string[]; readonly beats: readonly string[] }, AppError>>;
+  /** 一章正文此刻的摘要（撤回采用时据此判断之后有没有改过）。 */
+  chapterDigest(chapterId: string): Promise<Result<{ readonly digest: string; readonly draft: boolean }, AppError>>;
 };
 
 
@@ -1357,6 +1412,326 @@ export const reportOf = (step: Pick<WorkflowStepView, 'output'>) => {
 };
 export const FORESHADOW_FINDING_LABEL = FINDING_LABEL;
 
+/** 推演成章（B85）各步的结果。场景一步存的是场景的各项（作者在步骤里改好再采用保存），采用后记下场景的标识。 */
+export const SceneStep = z.object({
+  title: z.string(),
+  chapterId: z.string(),
+  config: z.record(z.string(), z.unknown()),
+  protocol: z.enum(SIM_PROTOCOLS),
+  maxRounds: z.number().int().min(1),
+  firstSpeaker: z.string().nullable(),
+  problems: z.array(z.string()),
+  notes: z.array(z.string()),
+  sceneId: z.string().nullable(),
+});
+export type SceneStep = z.infer<typeof SceneStep>;
+/** 推演一步：开始后先记下运行的标识与这次执行的步骤键（中断后接着推同一次；重做时步骤键不同，另起一次）。 */
+export const SimStep = z.object({ runId: z.string(), stepKey: z.string(), round: z.number().int(), endReason: z.string().nullable(), spentUsd: z.number() });
+export type SimStep = z.infer<typeof SimStep>;
+const BeatRequest = z.object({ pov: z.string(), fromRound: z.number().int().min(1), toRound: z.number().int().min(1), notes: z.string() });
+export const BeatsStep = z.object({
+  /** 生成这份节拍表的请求；作者换视角或回合范围后重做这一步时按改过的请求重新生成。 */
+  request: BeatRequest,
+  sheetId: z.string(),
+  povName: z.string(),
+  beats: z.array(Beat.extend({ round: z.number().int(), text: z.string() })),
+  style: z.string(),
+});
+export type BeatsStep = z.infer<typeof BeatsStep>;
+const AdoptionDraftStep = z.object({
+  candidateId: z.string(),
+  chapterId: z.string(),
+  povKey: z.string(),
+  povName: z.string(),
+  events: z.array(z.object({ key: z.string(), round: z.number().int(), summary: z.string(), participants: z.array(z.object({ key: z.string(), name: z.string() })), seenByPov: z.boolean(), adoptedEventId: z.string().nullable() })),
+  beliefs: z.array(z.object({ ref: z.string(), round: z.number().int(), text: z.string(), modality: z.enum(['observed', 'heard', 'inferred']), confidence: z.number().nullable(), about: z.array(z.string()) })),
+  reviews: z.array(z.object({ requestId: z.string(), kind: z.enum(['ruling', 'director']), round: z.number().int(), rationale: z.string(), detail: z.string() })),
+  entities: z.array(z.object({ key: z.string(), name: z.string(), kind: z.enum(['character', 'location', 'item']), entityId: z.string().nullable(), entityName: z.string().nullable(), locked: z.boolean() })),
+});
+export const AdoptionSelection = z.object({ events: z.array(z.string()), worldFacts: z.array(z.string()), beliefs: z.array(z.string()), reviewed: z.array(z.string()), confirmLocked: z.boolean() });
+export type AdoptionSelection = z.infer<typeof AdoptionSelection>;
+export const NarrateStep = z.object({
+  candidateId: z.string(),
+  text: z.string(),
+  /** 采纳的准备（生成时的样子，给作者勾选用；采纳时按作品现状重算）。 */
+  draft: AdoptionDraftStep,
+  selection: AdoptionSelection,
+  /** 本章计划的情节点，与其中推演已写出的（写手从其余的接着写）。 */
+  beats: z.array(z.string()),
+  coveredBeats: z.array(z.string()),
+});
+export type NarrateStep = z.infer<typeof NarrateStep>;
+const WriteAfterReport = z.object({ chapterId: z.string(), remaining: z.number().int(), summary: z.string() });
+
+export const sceneStepOf = (step: Pick<WorkflowStepView, 'output'>): SceneStep | null => {
+  const parsed = SceneStep.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const simStepOf = (step: Pick<WorkflowStepView, 'output'>): SimStep | null => {
+  const parsed = SimStep.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const beatsStepOf = (step: Pick<WorkflowStepView, 'output'>): BeatsStep | null => {
+  const parsed = BeatsStep.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+export const narrateStepOf = (step: Pick<WorkflowStepView, 'output'>): NarrateStep | null => {
+  const parsed = NarrateStep.safeParse(step.output);
+  return parsed.success ? parsed.data : null;
+};
+
+/** 预计推演的费用时按几个角色算（场景还没建，角色数未知）。 */
+export const SCENE_ESTIMATE_ACTORS = 3;
+/** 每回合每个角色的调用：角色行动、认知更新、证据链判断；另有裁决。 */
+const SIM_CALLS_PER_ACTOR_ROUND = 3;
+
+/** 节拍表默认的视角：章节计划出场人物里第一个与场景角色同名的；没有则场景的第一个角色。 */
+export function defaultPov(actors: readonly { readonly id: string; readonly name: string }[], castNames: readonly string[]): string | null {
+  for (const name of castNames) {
+    const actor = actors.find((a) => a.name.trim() === name.trim());
+    if (actor !== undefined) return actor.id;
+  }
+  return actors[0]?.id ?? null;
+}
+
+/** 最后一个已经结束的回合（节拍表只能写已结束的回合）；一个也没有时为 0。 */
+export const lastEndedRound = (events: readonly StoredEvent[]): number =>
+  events.reduce((n, e) => {
+    const p = e.payload as RunEvent;
+    return p.type === 'RoundEnded' ? Math.max(n, p.round) : n;
+  }, 0);
+
+function sceneChapter(host: WorkflowHost): WorkflowDef<SceneChapterParams> {
+  const chapterTitle = async (chapterId: string) => {
+    const work = await host.reloadWork();
+    return work.ok ? (work.value.chapters.find((c) => c.id === chapterId)?.title ?? '') : '';
+  };
+  const sceneTitle = async (sceneId: string) => {
+    const scenes = await host.listSimScenes();
+    return scenes.ok ? (scenes.value.find((s) => s.id === sceneId)?.title ?? null) : null;
+  };
+  /** 这次运行用的场景：参数里沿用的，或第 1 步采用后记下的。 */
+  const sceneIdOf = (params: SceneChapterParams, output: (key: string) => unknown): Result<string, AppError> => {
+    if (params.sceneId !== null) return ok(params.sceneId);
+    const scene = SceneStep.safeParse(output('scene'));
+    return scene.success && scene.data.sceneId !== null ? ok(scene.data.sceneId) : err(invalid('先采用推演场景：场景还没有保存'));
+  };
+  return {
+    title: '推演成章',
+    description: '按这一章的计划建推演场景 → 角色推演 → 选视角写节拍表 → 写成候选稿并采纳进本章 → 写手补全其余情节点并审核',
+    params: SceneChapterParams,
+    runTitle: (p) => `推演成章：${p.chapterTitle.trim() === '' ? '一章' : p.chapterTitle.trim()}`,
+    estimate(p, book) {
+      const scene = p.sceneId === null ? 1 : 0;
+      const sim = p.maxRounds * (SIM_CALLS_PER_ACTOR_ROUND * SCENE_ESTIMATE_ACTORS + 1);
+      const words = book.words > 0 ? book.words / Math.max(book.written, 1) : AUDIT_WORDS_PER_CHAPTER;
+      // 写手只补半章；写完整理记忆与审核各一次。
+      const segments = Math.max(1, Math.ceil(words / 1_500 / 2));
+      return {
+        written: 1,
+        calls: scene + sim + 2 + segments + 2,
+        inputTokens: Math.round(scene * 8_000 + sim * 6_000 + 5_000 + 5_000 + segments * 9_000 + 2 * 6_000),
+        outputTokens: Math.round(scene * 5_000 + sim * 1_200 + 2_000 + 6_000 + (words / 2) * TOKENS_PER_CHAR + 1_500 + 3_000),
+      };
+    },
+    steps: [
+      step<SceneChapterParams, SceneStep>({
+        key: 'scene',
+        label: '建推演场景',
+        kind: 'draft',
+        output: SceneStep,
+        async run({ params, options, onProgress }) {
+          const title = await chapterTitle(params.chapterId);
+          onProgress(`正在按《${title}》的章节计划生成推演场景：出场人物就是角色，各带自己知道的事`);
+          const draft = await host.draftSimScene({ description: '', chapterId: params.chapterId }, options);
+          if (!draft.ok) return draft;
+          const config = draft.value.config;
+          const actors = config.actors.map((a) => a.name);
+          const output: SceneStep = {
+            title: config.meta?.title?.trim() === '' || config.meta?.title === undefined ? title : config.meta.title,
+            chapterId: params.chapterId,
+            config,
+            protocol: actors.length === 2 ? 'turn_based' : 'simultaneous',
+            maxRounds: params.maxRounds,
+            firstSpeaker: null,
+            problems: [...draft.value.problems],
+            notes: [...draft.value.notes],
+            sceneId: null,
+          };
+          const problems = draft.value.problems.length;
+          return ok({
+            output,
+            note: `${actors.length} 个角色：${actors.join('、')}；${problems > 0 ? `${problems} 处要改好才能采用` : '核对后采用，即保存为推演场景'}${draft.value.notes.length > 0 ? `；备注 ${draft.value.notes.length} 条` : ''}`,
+          });
+        },
+        async skipIf({ params }) {
+          if (params.sceneId === null) return null;
+          return `沿用已有的场景“${(await sceneTitle(params.sceneId)) ?? params.sceneId}”`;
+        },
+        async adopt(_c, scene) {
+          const saved = await host.saveSimScene(null, {
+            chapterId: scene.chapterId,
+            title: scene.title,
+            config: scene.config,
+            protocol: scene.protocol,
+            maxRounds: scene.maxRounds,
+            firstSpeaker: scene.protocol === 'turn_based' ? scene.firstSpeaker : null,
+          });
+          if (!saved.ok) return saved;
+          const actors = (scene.config as { actors?: readonly unknown[] }).actors?.length ?? 0;
+          return ok({ note: `已保存推演场景“${saved.value.title}”（${actors} 个角色，回合上限 ${scene.maxRounds}）`, output: { ...scene, problems: [], sceneId: saved.value.id } });
+        },
+      }),
+      step<SceneChapterParams, SimStep>({
+        key: 'simulate',
+        label: '推演',
+        kind: 'act',
+        output: SimStep,
+        async run({ params, stepKey, options, hooks, onProgress, output, checkpoint, report, budgetLeft }) {
+          const sceneId = sceneIdOf(params, output);
+          if (!sceneId.ok) return sceneId;
+          const prior = SimStep.safeParse(output('simulate'));
+          let runId: string;
+          if (prior.success && prior.data.stepKey === stepKey) {
+            // 中断后接着推同一次（重做时步骤键不同，另起一次）。
+            runId = prior.data.runId;
+          } else {
+            const left = budgetLeft();
+            const started = await host.startSimRun(sceneId.value, { mode: 'auto', ...(left !== null && { budgetUsd: left }) });
+            if (!started.ok) return started;
+            runId = started.value.run.id;
+            const noted = await checkpoint({ runId, stepKey, round: 0, endReason: null, spentUsd: 0 });
+            if (!noted.ok) return noted;
+          }
+          onProgress('推演进行中：角色各按自己知道的事行动，程序裁决');
+          const done = await hooks.simulate(runId, { ...(options.signal !== undefined && { signal: options.signal }), onProgress });
+          const status = await host.simRunStatus(runId);
+          if (!status.ok) return status;
+          const usage = await host.simRunUsage(runId);
+          if (usage.ok) await report(usage.value);
+          const v = status.value;
+          const result: SimStep = { runId, stepKey, round: v.round, endReason: v.endReason, spentUsd: v.spentUsd };
+          if (v.phase === 'Ended') {
+            return ok({ output: result, note: `推演 ${v.round} 个回合后结束（${SIM_END_LABEL[v.endReason ?? ''] ?? v.endReason ?? ''}），费用 $${v.spentUsd.toFixed(3)}；看时间线后到下一步选视角` });
+          }
+          const noted = await checkpoint(result);
+          if (!noted.ok) return noted;
+          if (done.cancelled === true || options.signal?.aborted === true) return err(interrupted(`推演停在第 ${v.round} 回合，继续时接着推`));
+          if (v.phase === 'AwaitingAuthor') return err(interrupted(`推演在第 ${v.round} 回合等你处理（待核实的裁决或导演提议）：到推演页处理后再继续`));
+          const why = v.pause !== null ? `${SIM_PAUSE_LABEL[v.pause.reason] ?? v.pause.reason}${v.pause.detail === undefined ? '' : `（${v.pause.detail}）`}` : done.summary;
+          return err(interrupted(`推演停在第 ${v.round} 回合：${why}；继续时接着推`));
+        },
+      }),
+      step<SceneChapterParams, BeatsStep>({
+        key: 'beats',
+        label: '节拍表',
+        kind: 'draft',
+        output: BeatsStep,
+        async run({ params, options, onProgress, output }) {
+          const sim = SimStep.safeParse(output('simulate'));
+          if (!sim.success) return err(invalid('先推演：还没有推演的运行'));
+          const prior = BeatsStep.safeParse(output('beats'));
+          let request: BeatSheetRequest;
+          if (prior.success) {
+            request = prior.data.request;
+          } else {
+            const [detail, events, brief] = await Promise.all([host.simRunDetail(sim.data.runId), host.simRunEvents(sim.data.runId), host.chapterPlanBrief(params.chapterId)]);
+            if (!detail.ok) return detail;
+            if (!events.ok) return events;
+            const pov = defaultPov(detail.value.cast.actors, brief.ok ? brief.value.cast : []);
+            if (pov === null) return err(invalid('这次推演的场景里没有角色'));
+            request = { pov, fromRound: 1, toRound: Math.max(1, lastEndedRound(events.value)), notes: '' };
+          }
+          onProgress(`正在按视角写第 ${request.fromRound}–${request.toRound} 回合的节拍表`);
+          const sheet = await host.draftBeatSheet(sim.data.runId, request, options);
+          if (!sheet.ok) return sheet;
+          const out: BeatsStep = { request, sheetId: sheet.value.sheet.id, povName: sheet.value.povName, beats: sheet.value.beats.map((b) => ({ ...b })), style: sheet.value.sheet.style };
+          return ok({ output: out, note: `${sheet.value.povName}的视角，第 ${request.fromRound}–${request.toRound} 回合，${out.beats.length} 个节拍；改处理方式与文风后采用，或换视角、改回合范围后重新生成` });
+        },
+        async adopt(_c, sheet) {
+          const saved = await host.saveBeatSheet(sheet.sheetId, { beats: sheet.beats.map(({ round: _round, text: _text, ...b }) => b), style: sheet.style });
+          if (!saved.ok) return saved;
+          const omitted = sheet.beats.filter((b) => b.treatment === 'omit').length;
+          return ok(`按${sheet.povName}的视角写 ${sheet.beats.length - omitted} 个节拍${omitted > 0 ? `（省略 ${omitted} 个）` : ''}`);
+        },
+      }),
+      step<SceneChapterParams, NarrateStep>({
+        key: 'narrate',
+        label: '写成正文并采纳',
+        kind: 'draft',
+        output: NarrateStep,
+        async run({ params, options, onProgress, output }) {
+          const beats = BeatsStep.safeParse(output('beats'));
+          if (!beats.success) return err(invalid('先生成并采用节拍表'));
+          const title = await chapterTitle(params.chapterId);
+          onProgress(`正在按${beats.data.povName}的视角把推演写成《${title}》的正文`);
+          const candidate = await host.narrateBeatSheet(beats.data.sheetId, params.chapterId, options);
+          if (!candidate.ok) return candidate;
+          const [draft, brief] = await Promise.all([host.adoptionDraft(candidate.value.id), host.chapterPlanBrief(params.chapterId)]);
+          if (!draft.ok) return draft;
+          const d = draft.value;
+          const povEntity = d.entities.find((e) => e.key === d.povKey)?.entityId ?? null;
+          const planBeats = brief.ok ? [...brief.value.beats] : [];
+          const out: NarrateStep = {
+            candidateId: candidate.value.id,
+            text: candidate.value.generated,
+            draft: { ...d, events: d.events.map((e) => ({ ...e, participants: [...e.participants] })), beliefs: d.beliefs.map((b) => ({ ...b, about: [...b.about] })), reviews: [...d.reviews], entities: [...d.entities] },
+            selection: { events: d.events.filter((e) => e.seenByPov).map((e) => e.key), worldFacts: [], beliefs: povEntity === null ? [] : d.beliefs.map((b) => b.ref), reviewed: [], confirmLocked: false },
+            beats: planBeats,
+            coveredBeats: planBeats,
+          };
+          return ok({
+            output: out,
+            note: `候选稿 ${out.text.length} 字；勾选要记下的事件与认知${d.reviews.length > 0 ? `、复核 ${d.reviews.length} 条自动接受的裁决` : ''}，标出推演已写出的情节点，再采纳进《${title}》末尾`,
+          });
+        },
+        async confirm({ params }) {
+          const title = await chapterTitle(params.chapterId);
+          return `采纳会把推演写成的正文写进《${title}》末尾，并记下你勾选的事件、事实与认知；自动接受的裁决须逐条复核后才能采纳`;
+        },
+        async adopt({ params }, narrated) {
+          const adopted = await host.adoptCandidate({ candidateId: narrated.candidateId, ...narrated.selection });
+          if (!adopted.ok) return adopted;
+          const [title, digest] = await Promise.all([chapterTitle(params.chapterId), host.chapterDigest(params.chapterId)]);
+          // 撤回时由采纳前的快照恢复正文（之后改过的不动）；记下的事实按现状差别删掉，故事事件保留。
+          const change = { kind: 'text', id: params.chapterId, title, snapshotId: adopted.value.snapshotId, ...(digest.ok && { digest: digest.value.digest }) };
+          const covered = narrated.beats.filter((b) => narrated.coveredBeats.includes(b)).length;
+          return ok({
+            note: `已写进《${title}》末尾，记下 ${adopted.value.events} 件事、${adopted.value.facts} 条事实；推演写出了 ${covered} / ${narrated.beats.length} 个情节点${covered < narrated.beats.length ? '，其余交给写手接着写' : ''}（撤回时正文恢复到采纳前，故事事件保留）`,
+            changes: [change],
+          });
+        },
+      }),
+      step<SceneChapterParams, z.infer<typeof WriteAfterReport>>({
+        key: 'write',
+        label: '写手补全并审核',
+        kind: 'act',
+        output: WriteAfterReport,
+        async run({ params, hooks, options, onProgress, output }) {
+          const narrated = NarrateStep.safeParse(output('narrate'));
+          const covered = narrated.success ? narrated.data.beats.filter((b) => narrated.data.coveredBeats.includes(b)) : [];
+          const title = await chapterTitle(params.chapterId);
+          const prepared = await host.startWriterAfter(params.chapterId, covered);
+          if (!prepared.ok) return prepared;
+          const { remaining } = prepared.value;
+          if (remaining === 0) {
+            onProgress(`《${title}》的情节点都已由推演写出：整理长篇记忆并审核`);
+            const memory = await host.buildMemory(params.chapterId, options);
+            if (!memory.ok) return options.signal?.aborted === true ? memory : err(interrupted(`《${title}》的长篇记忆没有整理成：${describeError(memory.error)}`));
+            const reviewed = await hooks.reviewChapters([params.chapterId], options);
+            if (!reviewed.ok) return err(hookFailure(reviewed));
+            return ok({ output: { chapterId: params.chapterId, remaining: 0, summary: reviewed.summary }, note: `情节点都已由推演写出，没有要写手补的；${reviewed.summary}` });
+          }
+          onProgress(`写手接着推演写成的正文补全《${title}》的其余情节点（${remaining} 段），写完整理长篇记忆并审核`);
+          const written = await hooks.writeChapters([params.chapterId], true, options);
+          if (!written.ok) return err(hookFailure(written));
+          return ok({ output: { chapterId: params.chapterId, remaining, summary: written.summary }, note: written.summary });
+        },
+      }),
+    ],
+  };
+}
+
 /** 卡片与助手用的工作流说明。 */
 export type WorkflowInfo = {
   readonly key: WorkflowKey;
@@ -1424,13 +1799,19 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
   const ctx = () => ({ now: deps.clock.now() });
   const WORKFLOWS: { readonly [K in WorkflowKey]: WorkflowDef<ParamsOf[K]> } = {
     quick_book: quickBook(host, project),
+    scene_chapter: sceneChapter(host),
     book_audit: bookAudit(host),
     next_volume: nextVolume(host),
     opening_polish: openingPolish(host),
     cast_completion: castCompletion(host),
     benchmark: benchmark(host),
   };
-  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = { quick_book: erase(WORKFLOWS.quick_book), book_audit: erase(WORKFLOWS.book_audit), next_volume: erase(WORKFLOWS.next_volume), opening_polish: erase(WORKFLOWS.opening_polish),
+  const ERASED: { readonly [K in WorkflowKey]: AnyWorkflow } = {
+    quick_book: erase(WORKFLOWS.quick_book),
+    scene_chapter: erase(WORKFLOWS.scene_chapter),
+    book_audit: erase(WORKFLOWS.book_audit),
+    next_volume: erase(WORKFLOWS.next_volume),
+    opening_polish: erase(WORKFLOWS.opening_polish),
     cast_completion: erase(WORKFLOWS.cast_completion),
     benchmark: erase(WORKFLOWS.benchmark),
   };
@@ -1508,6 +1889,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         if (control.budget !== null && control.spentBefore + usage.value.cost >= control.budget) control.onBudget();
       },
     };
+    const spec = def.steps.find((x) => x.key === s.key);
     return {
       runId: data.run.id,
       params: data.run.params,
@@ -1522,6 +1904,28 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         const parsed = spec.parse(other.output);
         return parsed.ok ? parsed.value : null;
       },
+      // 中途存结果：重新读取这一行（用量的写回不改版本，但前面的检查点改过）再按版本守卫写；只在执行时有效。
+      async checkpoint(output) {
+        if (control === undefined || spec === undefined) return ok(undefined);
+        const parsed = spec.parse(output);
+        if (!parsed.ok) return err(invalid(`这一步中途的结果不完整：${parsed.error}`));
+        const current = await load(control.port, data.run.id);
+        if (!current.ok) return current;
+        const row = current.value.steps[idx];
+        if (row === undefined) return err({ code: 'not_found' });
+        const saved = await updateWorkflowSteps(control.port, data.run.id, [{ step: row, patch: { output: parsed.value } }], ctx());
+        if (!saved.ok) return err(repo(saved.error));
+        // 界面据此知道这一步中途的结果（例如已经开始的推演，成书页要显示它的时间线）。
+        env.onStep?.(viewOf(saved.value));
+        return ok(undefined);
+      },
+      async report(u) {
+        usage.value = u;
+        if (control === undefined) return;
+        await setWorkflowStepUsage(control.port, data.run.id, idx, u, ctx());
+        if (control.budget !== null && control.spentBefore + u.cost >= control.budget) control.onBudget();
+      },
+      budgetLeft: () => (control === undefined || control.budget === null ? null : Math.max(0, control.budget - control.spentBefore - usage.value.cost)),
     };
   }
 
@@ -1551,9 +1955,12 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     const after = before === null ? null : await tracker.capture();
     const changes = before === null || after === null ? null : tracker.diff(before, after);
     if (typeof adopted.value === 'string') return ok({ note: adopted.value, changes });
+    const extra = adopted.value.changes ?? [];
+    const merged = changes === null && extra.length === 0 ? null : [...(changes ?? []), ...extra];
+    if (adopted.value.output === undefined) return ok({ note: adopted.value.note, changes: merged });
     const output = spec.parse(adopted.value.output);
     if (!output.ok) return err(invalid(`采用后的结果不完整：${output.error}`));
-    return ok({ note: adopted.value.note, changes, output: output.value });
+    return ok({ note: adopted.value.note, changes: merged, output: output.value });
   }
 
   /** 采用后写回这一步：状态、说明、改动，以及采用时改过的结果。 */

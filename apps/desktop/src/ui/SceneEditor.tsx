@@ -239,10 +239,26 @@ const freshKey = (prefix: string, taken: readonly string[]) => {
  * 区域图在“区域”一节（ZoneGraphEditor）；机关、消耗规则等其余配置在“高级”里直接编辑。
  * 校验由领域内核完成，表单下方随时列出还不对的地方，全部改好才能保存。
  */
-export function SceneEditor({ id, initial, notes, hints }: { readonly id: string | null; readonly initial: SimSceneFields; readonly notes?: readonly string[]; readonly hints?: readonly string[] }) {
+export function SceneEditor({
+  id,
+  initial,
+  notes,
+  hints,
+  onSave,
+  submitLabel = '保存场景',
+}: {
+  readonly id: string | null;
+  readonly initial: SimSceneFields;
+  readonly notes?: readonly string[];
+  readonly hints?: readonly string[];
+  /** 给了时保存交给它（写作工作流的步骤里：存进步骤并采用），否则保存为推演场景。 */
+  readonly onSave?: (fields: SimSceneFields) => Promise<boolean>;
+  readonly submitLabel?: string;
+}) {
   const chapters = useApp((s) => s.work?.chapters ?? []);
-  const save = useApp((s) => s.saveSimScene);
+  const saveScene = useApp((s) => s.saveSimScene);
   const busy = useApp((s) => s.busy);
+  const save = (fields: SimSceneFields) => (onSave === undefined ? saveScene(id, fields) : onSave(fields));
   const [title, setTitle] = useState(initial.title);
   const [chapterId, setChapterId] = useState(initial.chapterId);
   const [protocol, setProtocol] = useState(initial.protocol);
@@ -282,7 +298,7 @@ export function SceneEditor({ id, initial, notes, hints }: { readonly id: string
       aria-label={id === null ? '新场景' : `场景 ${initial.title}`}
       onSubmit={(e) => {
         e.preventDefault();
-        void save(id, { title, chapterId, protocol, maxRounds: rounds, firstSpeaker: protocol === 'turn_based' ? firstSpeaker : null, config: config }).then((saved) => {
+        void save({ title, chapterId, protocol, maxRounds: rounds, firstSpeaker: protocol === 'turn_based' ? firstSpeaker : null, config: config }).then((saved) => {
           if (saved) setDirty(false);
         });
       }}
@@ -450,8 +466,8 @@ export function SceneEditor({ id, initial, notes, hints }: { readonly id: string
           ))}
         </ul>
       ) : null}
-      <button type="submit" disabled={busy || !dirty || problems.length > 0}>
-        保存场景
+      <button type="submit" className={onSave === undefined ? undefined : 'primary'} disabled={busy || !dirty || problems.length > 0}>
+        {submitLabel}
       </button>
     </form>
   );
