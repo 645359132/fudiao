@@ -6,7 +6,7 @@ import type { AssistantEffort } from '../app/library';
 import { Icon } from './Icon';
 import { useApp } from './store-context';
 
-const SUGGESTIONS_NO_WORK = ['帮我开一本古风悬疑小说，主角是被革职的捕快', '打开我最近写的那部作品'];
+// 没有打开作品时不给示例说法（作者要求 2026-10-28），输入框也不写“例如”。
 const SUGGESTIONS = ['给主角建一张人物卡片', '完善这部作品的世界观：地点、组织与规则', '按大纲生成 20 章的章节计划', '续写正在看的这一章', '审核正在看的这一章'];
 /** 选中文字后对话框上方的快捷说法。 */
 const SELECTION_ASKS: readonly (readonly [string, string])[] = [
@@ -401,13 +401,15 @@ export function AssistantPanel() {
               </button>
               里设置的默认模型。
             </p>
-            <div className="assistant-suggestions">
-              {(hasWork ? SUGGESTIONS : SUGGESTIONS_NO_WORK).map((s) => (
-                <button key={s} type="button" className="chip" disabled={running} onClick={() => submit(s)}>
-                  {s}
-                </button>
-              ))}
-            </div>
+            {hasWork ? (
+              <div className="assistant-suggestions">
+                {SUGGESTIONS.map((s) => (
+                  <button key={s} type="button" className="chip" disabled={running} onClick={() => submit(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : (
           items.map((item) => {
@@ -468,7 +470,7 @@ export function AssistantPanel() {
         <textarea
           aria-label="给助手的话"
           rows={3}
-          placeholder={hasWork ? '例如：给第三章加一个反派出场的情节点' : '例如：帮我开一本武侠小说'}
+          placeholder={hasWork ? '例如：给第三章加一个反派出场的情节点' : undefined}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
