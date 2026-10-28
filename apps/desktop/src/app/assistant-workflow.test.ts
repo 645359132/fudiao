@@ -207,4 +207,28 @@ describe('AI 助手发起推演成章（B85）', () => {
     expect(run?.steps.map((s) => s.key)).toEqual(['scene', 'simulate', 'beats', 'narrate', 'write']);
     expect(advanced).toEqual([run!.run.id]);
   });
+
+  it('推演整书：助手先把范围里的章数与预计费用交给作者确认，确认后才排上；范围用 from、to', async () => {
+    const { deps, app } = await setup();
+    const { background, advanced } = backgroundJobs();
+    const lin = value(await app.createEntity('character', '林舟')).created;
+    const chapters = [];
+    for (const title of ['第一章 叩门', '第二章 当铺']) {
+      const chapter = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!;
+      value(await app.savePlan(chapter.id, { goal: '目标', castIds: [lin.id], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 }));
+      chapters.push(chapter);
+    }
+    const action = { tool: 'start_workflow' as const, workflow: 'scene_book' as const, mode: 'step' as const, budgetUsd: 5, idea: null, genre: null, chapters: null, wordsPerChapter: null, volumes: null, from: '第二章 当铺', to: null, rereview: null, instruction: null, chapter: null };
+    step(deps, { message: '', actions: [action], done: false });
+    const paused = value(await app.sendToAssistant('从第二章起整本书都用推演写', { background }));
+    expect(paused.items.at(-1)).toMatchObject({ role: 'pending', summary: expect.stringMatching(/^推演整书：范围里 1 章.*预计调用模型 \d+ 次.*上限 \$5$/) });
+    expect(advanced).toEqual([]);
+    step(deps, { message: '已经排上。', actions: [], done: true });
+    const approved = value(await app.resolveAssistantPending(true, { background }));
+    expect(lastResults(approved.items)?.results[0]).toMatchObject({ tool: 'start_workflow', ok: true, detail: expect.stringContaining('已排上：“推演整书：所选范围” [') });
+    const [run] = value(await app.listWorkflows());
+    expect(run?.run).toMatchObject({ workflow: 'scene_book', params: { from: chapters[1]!.id, to: null, maxRounds: 8, pov: null, review: true }, budgetUsd: 5 });
+    expect(run?.steps.map((s) => s.key)).toEqual(['check', 'chapters', 'adopt']);
+    expect(advanced).toEqual([run!.run.id]);
+  });
 });

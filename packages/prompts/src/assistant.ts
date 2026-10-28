@@ -16,7 +16,7 @@ export const SELECTION_EDITS = ['rewrite', 'expand', 'shorten', 'polish'] as con
 export const ASSISTANT_PAGES = ['book', 'planning', 'settings', 'relations', 'facts', 'simulation', 'search', 'skills', 'usage', 'tasks'] as const;
 
 /** 助手可以发起的写作工作流（与应用层工作流命令表的键相同，由类型检查核对）。 */
-export const ASSISTANT_WORKFLOWS = ['quick_book', 'scene_chapter', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion'] as const;
+export const ASSISTANT_WORKFLOWS = ['quick_book', 'scene_chapter', 'scene_book', 'book_audit', 'next_volume', 'opening_polish', 'cast_completion'] as const;
 
 /** 人物关系的类别（与存储层的取值相同）。 */
 export const RELATION_KINDS_FOR_ASSISTANT = ['family', 'romance', 'mentor', 'ally', 'rival', 'enemy', 'affiliation', 'other'] as const;

@@ -3576,3 +3576,41 @@ describe('推演成章的界面（B85）', () => {
     expect(store.getState().simAdvancing).toBe(false);
   });
 });
+
+describe('推演整书的界面（B86）', () => {
+  it('卡片与开始表单：范围、回合上限、视角、写完后审核；步骤列出三步；估算费用写明合格的章数与费用', async () => {
+    const { service, store, user, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addTestedModel(service, deps);
+    // 人物经状态层建（视角下拉用状态层的人物列表）。
+    await store.getState().createEntity('character', '林舟');
+    await store.getState().createEntity('character', '钱四');
+    const castIds = store.getState().entities.map((e) => e.id);
+    expect(castIds).toHaveLength(2);
+    await addChapter(user, '第一章 叩门');
+    await addChapter(user, '第二章 当铺');
+    const c2 = store.getState().work?.chapters.find((c) => c.title === '第二章 当铺');
+    if (c2 === undefined) throw new Error('章节');
+    expect((await service.savePlan(c2.id, { goal: '林舟当玉，钱四认出来历', castIds, beats: ['叩门', '验玉'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 })).ok).toBe(true);
+
+    await user.click(within(screen.getByRole('navigation', { name: '作品导航' })).getByRole('button', { name: '成书' }));
+    const page = await screen.findByRole('region', { name: '成书' });
+    await waitFor(() => expect(page.textContent).toContain('已连接'));
+    await user.click(within(page).getByRole('button', { name: '新的推演整书' }));
+    const form = await within(page).findByRole('form', { name: '开始推演整书' });
+    expect(within(form).getByRole('list', { name: '推演整书的步骤' }).textContent).toBe('1核对范围2逐章推演成章3采纳推演草案');
+    expect(within(form).getByRole('combobox', { name: '从' })).toHaveProperty('value', '');
+    expect(within(form).getByRole('combobox', { name: '到' })).toHaveProperty('value', '');
+    const pov = within(form).getByRole('combobox', { name: '视角' });
+    expect(within(pov).getAllByRole('option').map((o) => o.textContent)).toEqual(['本章计划的第一个出场人物', '林舟（在本章出场时）', '钱四（在本章出场时）']);
+    expect(within(form).getByRole('checkbox', { name: '写完后审核' })).toHaveProperty('checked', true);
+    // 只有第二章有计划与出场人物：范围里 1 章可以推演；估算写明章数与调用次数。
+    expect(form.textContent).toContain('范围里 1 章可以推演');
+    await user.click(within(form).getByRole('button', { name: '估算费用' }));
+    await waitFor(() => expect(form.textContent).toMatch(/1 章，预计约 \d+ 次调用/));
+    // 范围只到第一章时没有可以推演的章，不能开始。
+    await user.selectOptions(within(form).getByRole('combobox', { name: '到' }), store.getState().work!.chapters[0]!.id);
+    expect(form.textContent).toContain('范围里没有可以推演的章');
+    expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(true);
+  });
+});

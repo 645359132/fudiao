@@ -10,7 +10,7 @@ import { addTestedModel, reply } from '../testing/models';
 import { sceneDraftFixture } from '../testing/scenes';
 import type { BookSeed } from './quick-book';
 import { createAppService } from './service';
-import { beatsStepOf, bookVolumesOf, distributeChapters, narrateStepOf, openingIssueChanges, quickBookPlanning, SCENE_ESTIMATE_ACTORS, sceneStepOf, simStepOf, type WorkflowHooks } from './workflows';
+import { beatsStepOf, bookVolumesOf, distributeChapters, narrateStepOf, openingIssueChanges, quickBookPlanning, SCENE_ESTIMATE_ACTORS, sceneBookAdoptionOf, sceneBookChaptersOf, sceneStepOf, simStepOf, type WorkflowHooks } from './workflows';
 
 const all: TestDeps[] = [];
 afterEach(async () => {
@@ -1126,5 +1126,234 @@ describe('推演成章（B85）', () => {
     const out = value(await app.advanceWorkflow(run.run.id));
     expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('还没有章节计划') });
     expect(value(await app.listSimScenes())).toEqual([]);
+  });
+});
+
+/** 一部作品：人物林舟、钱四，三章都有四个情节点的章节计划（出场人物就是这两人）。 */
+async function bookSetup() {
+  const base = fsDeps();
+  const hooks: { onAction: (() => void) | null } = { onAction: null };
+  const fake = fakeModel(shopPolicy(hooks));
+  const routed = (provider: Parameters<TestDeps['llm']['forProvider']>[0]): LlmPort => ({
+    complete: (request, options) => (SIMULATED.has(request.task) ? fake.port.complete(request, options) : base.llm.forProvider(provider).complete(request, options)),
+  });
+  const deps: TestDeps = { ...base, llm: { forProvider: routed } };
+  all.push(deps);
+  const app = createAppService(deps);
+  value(await app.loadLibrary());
+  value(await app.createWork('当铺夜谈'));
+  await addTestedModel(app, deps);
+  const lin = value(await app.createEntity('character', '林舟')).created;
+  const qian = value(await app.createEntity('character', '钱四')).created;
+  const chapters = [];
+  for (const title of ['第一章 叩门', '第二章 验玉', '第三章 当铺']) {
+    const chapter = value(await app.createChapter(title)).chapters.find((c) => c.title === title)!;
+    value(await app.savePlan(chapter.id, { goal: `${title}的目标`, castIds: [lin.id, qian.id], beats: ['叩门', '验玉', '认出来历', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 }));
+    chapters.push(chapter);
+  }
+  deps.llmRequests.length = 0;
+  return { deps, app, fake, hooks, chapters, lin, qian };
+}
+
+/** 就地一步一步推演到停下（与服务层默认的钩子相同），写章节交给假写手。 */
+function bookHooks(app: ReturnType<typeof createAppService>, writer: WorkflowHooks): WorkflowHooks {
+  return {
+    ...writer,
+    async simulate(runId, { signal, onProgress }) {
+      let view = await app.simRunStatus(runId);
+      if (view.ok && view.value.phase === 'Paused') view = await app.resumeSimRun(runId);
+      while (view.ok && view.value.phase !== 'Ended' && view.value.phase !== 'Paused' && view.value.phase !== 'AwaitingAuthor' && signal?.aborted !== true) {
+        view = await app.stepSimRun(runId, { ...(signal !== undefined && { signal }) });
+        if (view.ok) onProgress(`第 ${view.value.round} 回合`);
+      }
+      if (!view.ok) return { ok: false, summary: '推演出错' };
+      if (signal?.aborted === true) return { ok: false, summary: '已停下', cancelled: true };
+      return { ok: view.value.phase === 'Ended', summary: `推演停在第 ${view.value.round} 回合` };
+    },
+  };
+}
+
+const bookParams = { from: null, to: null, maxRounds: 2, pov: null, review: true };
+const scene = () => reply(JSON.stringify(sceneDraftFixture()));
+/** 角色放在不存在的区域：草稿校验不过，不能保存。 */
+const badScene = () => reply(JSON.stringify({ ...sceneDraftFixture(), actors: sceneDraftFixture().actors.map((a) => ({ ...a, zone: 'nowhere' })) }));
+const coverage = (covered: readonly number[]) => reply(JSON.stringify({ covered }));
+/** 情节点都由推演写出时不开写手，只整理长篇记忆（这一次调用由排好的回复回答）。 */
+const memory = () => reply(JSON.stringify({ summary: '林舟当玉，钱四认出来历。', cast: [], foreshadows: [] }));
+
+describe('推演整书（B86）', () => {
+  it('三章走通：核对范围；逐章建场景、推演、节拍表、正文直接写入（一章的场景草稿不合格，重试一次仍不合格就记下、接着做下一章）、写手补其余情节点；草案逐章复核采纳或全部采纳，撤回与回退', async () => {
+    const { deps, app, chapters } = await bookSetup();
+    const [c1, c2, c3] = chapters as [typeof chapters[number], typeof chapters[number], typeof chapters[number]];
+    // 预计随范围里合格的章数、回合上限与审核变化。
+    const full = value(await app.quoteWorkflow('scene_book', bookParams));
+    expect(full.written).toBe(3);
+    expect(full.calls - value(await app.quoteWorkflow('scene_book', { ...bookParams, review: false })).calls).toBe(3);
+    expect(value(await app.quoteWorkflow('scene_book', { ...bookParams, from: c2.id })).written).toBe(2);
+    expect(value(await app.quoteWorkflow('scene_book', { ...bookParams, maxRounds: 4 })).calls - full.calls).toBe(3 * 2 * (3 * SCENE_ESTIMATE_ACTORS + 1));
+
+    const run = value(await app.startWorkflow({ workflow: 'scene_book', params: bookParams, mode: 'step', budgetUsd: null }));
+    expect(run.run.title).toBe('推演整书：整本书');
+    expect(run.steps.map((s) => [s.key, s.kind])).toEqual([
+      ['check', 'check'],
+      ['chapters', 'act'],
+      ['adopt', 'draft'],
+    ]);
+    // 排好的回复（推演、节拍表与正文由测试模型回答）：第一章的场景与情节点判断；第二章的场景两次都不合格；第三章的场景与情节点判断。
+    deps.llmResponses.push(scene(), coverage([1, 2, 3]), badScene(), badScene(), scene(), coverage([1, 2, 3, 4]), memory());
+    const writer = fakeWriter({ ok: true, summary: '写完了 1 章并审核' });
+    const out = value(await app.advanceWorkflow(run.run.id, { hooks: bookHooks(app, writer.hooks) }));
+    expect(deps.llmResponses).toHaveLength(0);
+    expect(out.view.steps[0]).toMatchObject({ status: 'done', note: expect.stringContaining('3 章可以推演') });
+    expect(out.view.steps[1]?.status).toBe('done');
+    const result = sceneBookChaptersOf(out.view.steps[1]!)!;
+    expect(result.chapters.map((c) => [c.chapterId, c.status, c.stage])).toEqual([
+      [c1.id, 'done', 'write'],
+      [c2.id, 'failed', 'scene'],
+      [c3.id, 'done', 'write'],
+    ]);
+    expect(result.chapters[1]?.note).toMatch(/^建场景没做成：场景草稿有 .* 处不对.*（重试过一次）$/);
+    expect(result.chapters[1]?.retries).toBe(1);
+    expect(result.summary).toContain('写完了《第一章 叩门》《第三章 当铺》（2 章）');
+    expect(result.summary).toContain('没做成：《第二章 验玉》');
+    expect(out.view.steps[1]?.usage?.input).toBeGreaterThan(0);
+    // 正文直接写进各章（AI 来源），候选稿已接受、不在待处理里；写入前存了“写手写入”快照，写手运行沿用它。
+    expect(value(await app.openChapter(c1.id)).saved.map((p) => [p.text, p.source])).toEqual([['雨下得更紧了。他没有回头。', 'ai_generated']]);
+    expect(value(await app.openChapter(c3.id)).saved.map((p) => p.text)).toEqual(['雨下得更紧了。他没有回头。']);
+    expect(value(await app.openChapter(c2.id)).saved).toEqual([]);
+    expect(value(await app.listCandidates(c1.id))).toEqual([]);
+    expect(value(await app.listSnapshots(c1.id)).map((s) => s.reason)).toEqual(['writer']);
+    // 第一章推演写出三个情节点，写手接着写第四个（交给钩子）；第三章都写出了，只整理记忆并审核。
+    const plans = value(await app.planningView()).chapters;
+    expect(plans.find((c) => c.chapter.id === c1.id)?.plan).toMatchObject({ status: 'writing', progress: { done: 1, segments: [['叩门', '验玉', '认出来历'], ['离开']] } });
+    expect(plans.find((c) => c.chapter.id === c3.id)?.plan?.status).toBe('written');
+    expect(plans.find((c) => c.chapter.id === c2.id)?.plan?.status).toBe('todo');
+    expect(writer.calls).toEqual([{ ids: [c1.id], review: true }]);
+    expect(result.chapters[0]?.note).toContain('推演写出了 3 / 4 个情节点，写手补了 1 段');
+    expect(result.chapters[2]?.note).toContain('推演写出了 4 / 4 个情节点，没有要写手补的');
+    // 事件与认知没有自动采纳：故事事件与事实都还没有。
+    expect(value(await app.storyEvents())).toEqual([]);
+    expect(value(await app.listFacts())).toEqual([]);
+    expect(value(await app.chapterEventLinks(c1.id))).toEqual([]);
+
+    // 第 3 步：两章的草案待采纳（第二章没写成，不在里面）。
+    // 采纳前的确认说明让“一路做完”也停在这里；它就是这一步给作者看的话。
+    expect(out.view.steps[2]).toMatchObject({ status: 'awaiting_author', note: expect.stringContaining('一键采纳会把其余 2 章的草案按默认勾选记为故事事件与视角人物的认知') });
+    const adoption = sceneBookAdoptionOf(out.view.steps[2]!)!;
+    expect(adoption.chapters.map((c) => [c.chapterId, c.status, c.povName])).toEqual([
+      [c1.id, 'pending', '林舟'],
+      [c3.id, 'pending', '林舟'],
+    ]);
+    const first = adoption.chapters[0]!;
+    expect(first.paragraphIds.length).toBeGreaterThan(0);
+    // 单独复核第一章：读出草案（正文已写入的候选稿），勾选后采纳；事件关联到写入的段落，认知记在林舟名下。
+    const draft = value(await app.adoptionDraft(first.candidateId, { written: true }));
+    expect(draft.povName).toBe('林舟');
+    expect(draft.events.filter((e) => e.seenByPov).length).toBeGreaterThan(0);
+    expect((await app.adoptionDraft(first.candidateId)).ok).toBe(false);
+    const adoptedOne = value(
+      await app.adoptSceneBookChapter(run.run.id, c1.id, {
+        events: draft.events.filter((e) => e.seenByPov).map((e) => e.key),
+        worldFacts: [],
+        beliefs: draft.beliefs.map((b) => b.ref),
+        reviewed: draft.reviews.map((r) => r.requestId),
+        confirmLocked: false,
+      }),
+    );
+    expect(sceneBookAdoptionOf(adoptedOne.steps[2]!)?.chapters[0]).toMatchObject({ status: 'adopted', events: draft.events.filter((e) => e.seenByPov).length, facts: draft.beliefs.length });
+    expect(adoptedOne.steps[2]?.status).toBe('awaiting_author');
+    expect(value(await app.chapterEventLinks(c1.id)).length).toBeGreaterThan(0);
+    expect(value(await app.listFacts()).map((f) => f.kind)).toEqual(draft.beliefs.map(() => 'belief'));
+    expect((await app.adoptSceneBookChapter(run.run.id, c1.id, { events: [], worldFacts: [], beliefs: [], reviewed: [], confirmLocked: false })).ok).toBe(false);
+    // 一键采纳其余的：第三章按默认勾选采纳（自动接受的裁决一并视为已复核）；这一步完成。
+    const note = value(await app.stepConfirmNote(run.run.id, 2));
+    expect(note).toContain('一键采纳会把其余 1 章的草案按默认勾选记为故事事件与视角人物的认知');
+    const adoptedAll = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(adoptedAll.steps[2]).toMatchObject({ status: 'done', note: expect.stringMatching(/^采纳了 1 章的草案：记下 \d+ 件事、\d+ 条事实/) });
+    expect(sceneBookAdoptionOf(adoptedAll.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'adopted']);
+    expect(adoptedAll.state).toBe('done');
+    const events = value(await app.storyEvents());
+    expect(events.length).toBeGreaterThan(0);
+    expect(value(await app.chapterEventLinks(c3.id)).length).toBeGreaterThan(0);
+    // 撤回这次采用：两章记下的事实都删除（单独采纳的也记在这一步里），故事事件保留；再回退第一章的写手写入，正文回到推演写入之前。
+    const withdrawn = value(await app.withdrawWorkflowStep(run.run.id, 2));
+    expect(withdrawn.view.steps[2]?.status).toBe('awaiting_author');
+    expect(value(await app.listFacts())).toEqual([]);
+    expect(value(await app.storyEvents())).toHaveLength(events.length);
+    value(await app.rollbackWriter(c1.id));
+    expect(value(await app.openChapter(c1.id)).saved.map((p) => p.text)).toEqual(['']);
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c1.id)?.plan?.status).toBe('todo');
+  });
+
+  it('中断后继续：推演中途停下时这一步中断、记下运行；继续时前面写完的章不再调用、这一章接着推同一次到结束', async () => {
+    const { deps, app, hooks, chapters } = await bookSetup();
+    const [, c2] = chapters;
+    const run = value(await app.startWorkflow({ workflow: 'scene_book', params: { ...bookParams, review: false }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(scene(), coverage([1, 2, 3, 4]), memory(), scene(), coverage([1, 2, 3, 4]), memory(), scene(), coverage([1, 2, 3, 4]), memory());
+    // 第二章推演的第二次角色行动时作者停下。
+    const abort = new AbortController();
+    let inSecond = false;
+    let actions = 0;
+    hooks.onAction = () => {
+      if (inSecond && ++actions === 2) abort.abort();
+    };
+    const writer = fakeWriter({ ok: true, summary: '写完了 1 章' });
+    const first = value(
+      await app.advanceWorkflow(run.run.id, {
+        hooks: bookHooks(app, writer.hooks),
+        signal: abort.signal,
+        onChapterStage: (stage) => {
+          inSecond = stage?.chapterId === c2!.id && stage.stage === 'simulate';
+        },
+      }),
+    );
+    expect(first.view.steps[1]).toMatchObject({ status: 'interrupted', note: '已停下，继续时接着做这一步' });
+    const halted = sceneBookChaptersOf(first.view.steps[1]!)!;
+    expect(halted.chapters.map((c) => [c.status, c.stage])).toEqual([
+      ['done', 'write'],
+      ['running', 'simulate'],
+      ['pending', 'scene'],
+    ]);
+    const runId = halted.chapters[1]?.runId ?? null;
+    expect(runId).not.toBeNull();
+    const scenes = value(await app.listSimScenes());
+    expect(scenes.map((s) => s.chapterId).sort()).toEqual([chapters[0]!.id, c2!.id].sort());
+    const secondScene = scenes.find((s) => s.chapterId === c2!.id)!;
+    expect(value(await app.listSimRuns(secondScene.id)).map((r) => r.id)).toEqual([runId]);
+
+    // 继续：第一章不再做（场景只有三个、排好的回复一个不多用），第二章接着同一次运行推到结束，第三章照常；一路做完时停在采纳。
+    hooks.onAction = null;
+    const second = value(await app.advanceWorkflow(run.run.id, { hooks: bookHooks(app, writer.hooks) }));
+    expect(deps.llmResponses).toHaveLength(0);
+    const finished = sceneBookChaptersOf(second.view.steps[1]!)!;
+    expect(finished.chapters.map((c) => c.status)).toEqual(['done', 'done', 'done']);
+    expect(finished.chapters[1]?.runId).toBe(runId);
+    expect(value(await app.listSimRuns(secondScene.id))).toHaveLength(1);
+    expect(value(await app.listSimScenes())).toHaveLength(3);
+    expect(second.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'awaiting_author']);
+    expect(second.summary).toContain('等你处理');
+    expect(sceneBookAdoptionOf(second.view.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['pending', 'pending', 'pending']);
+
+    // 不采纳第一章后还可以再复核采纳；“全部采纳其余的”只采纳待采纳的两章。
+    const c1 = chapters[0]!;
+    const declined = value(await app.declineSceneBookChapter(run.run.id, c1.id));
+    expect(sceneBookAdoptionOf(declined.steps[2]!)?.chapters[0]).toMatchObject({ status: 'declined', note: '没有采纳' });
+    expect((await app.declineSceneBookChapter(run.run.id, c1.id)).ok).toBe(false);
+    const firstDraft = value(await app.adoptionDraft(sceneBookAdoptionOf(declined.steps[2]!)!.chapters[0]!.candidateId, { written: true }));
+    const reconsidered = value(await app.adoptSceneBookChapter(run.run.id, c1.id, { events: firstDraft.events.filter((e) => e.seenByPov).map((e) => e.key), worldFacts: [], beliefs: [], reviewed: firstDraft.reviews.map((r) => r.requestId), confirmLocked: false }));
+    expect(sceneBookAdoptionOf(reconsidered.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'pending', 'pending']);
+    const all = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(all.steps[2]).toMatchObject({ status: 'done', note: expect.stringMatching(/^采纳了 2 章的草案/) });
+    expect(sceneBookAdoptionOf(all.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'adopted', 'adopted']);
+    expect(all.state).toBe('done');
+  });
+
+  it('范围里没有可以推演的章时核对范围出错并说明原因；重做逐章推演成章时已写过的章跳过', async () => {
+    const { app } = await bookSetup();
+    const bare = value(await app.createChapter('第四章 空')).chapters.find((c) => c.title === '第四章 空')!;
+    const run = value(await app.startWorkflow({ workflow: 'scene_book', params: { ...bookParams, from: bare.id, to: bare.id }, mode: 'step', budgetUsd: null }));
+    const out = value(await app.advanceWorkflow(run.run.id));
+    expect(out.view.steps[0]).toMatchObject({ status: 'failed', note: expect.stringContaining('范围里没有可以推演的章') });
+    expect(out.view.steps[0]?.note).toContain('《第四章 空》没有章节计划');
   });
 });

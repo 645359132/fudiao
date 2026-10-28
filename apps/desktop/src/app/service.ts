@@ -931,6 +931,22 @@ export function createAppService(deps: AppDeps) {
         return ok({ cast: p.castIds.flatMap((id) => entities.value.find((e) => e.id === id)?.name ?? []), beats: p.beats });
       },
       chapterDigest: (chapterId) => chapterDigest(hostBase, chapterId),
+      // 推演整书（B86）：已写入正文的草案、中断前写成的候选稿、写入的段落与作者指定的视角人物。
+      writtenAdoptionDraft: (candidateId) => narration.adoptionDraft(candidateId, { written: true }),
+      async pendingNarration(chapterId, sheetId) {
+        const list = await candidates.listCandidates(chapterId);
+        if (!list.ok) return list;
+        return ok(list.value.find((c) => c.operation === 'narrate' && c.beatSheetId === sheetId && c.status === 'pending')?.id ?? null);
+      },
+      async chapterParagraphs(chapterId) {
+        if (session === null) return err({ code: 'no_work' });
+        const paragraphs = await listParagraphs(session.port, chapterId);
+        return paragraphs.ok ? ok(paragraphs.value.map((p) => ({ id: p.id, text: p.text }))) : err(repo(paragraphs.error));
+      },
+      async entityName(entityId) {
+        const list = await entities();
+        return list.ok ? ok(list.value.find((e) => e.id === entityId)?.name ?? null) : list;
+      },
     },
     // 采用的撤回沿用 AI 助手的撤销：同一套现状、差别与改回的规则。
     changes: {

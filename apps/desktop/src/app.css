@@ -4607,6 +4607,31 @@ body.resizing .assistant {
   white-space: pre-wrap;
 }
 
+/* 推演整书：待采纳的推演草案，一章一项，展开后是采纳的勾选。 */
+.wf-adoption-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.wf-adoption-entry {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.wf-adoption-entry > .form-row {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wf-adoption-entry .panel-form {
+  margin-top: 10px;
+}
+
 .wf-usage {
   display: flex;
   gap: 6px;

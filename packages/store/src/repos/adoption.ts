@@ -26,7 +26,8 @@ export type AdoptedFact = {
 };
 
 export type AdoptionInput = {
-  readonly candidate: { readonly id: string; readonly version: number };
+  /** 这次一并标为已接受的候选稿；正文早已写入、候选稿早已接受时（推演整书的草案，B86）为 null。 */
+  readonly candidate: { readonly id: string; readonly version: number } | null;
   /** 新建的故事事件。 */
   readonly events: readonly AdoptedEvent[];
   /** 这段正文讲述的全部事件：新建的，加上以前采纳过、这次再次讲述的（同一件事只有一个故事事件，B55）。 */
@@ -74,10 +75,12 @@ export function adoptionStatements(input: AdoptionInput, ctx: WriteContext, newI
       });
     }
   }
-  statements.push({
-    sql: "UPDATE candidate SET status = 'accepted', status_reason = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'pending'",
-    params: [ctx.now, input.candidate.id, input.candidate.version],
-    expectChanges: 1,
-  });
+  if (input.candidate !== null) {
+    statements.push({
+      sql: "UPDATE candidate SET status = 'accepted', status_reason = NULL, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'pending'",
+      params: [ctx.now, input.candidate.id, input.candidate.version],
+      expectChanges: 1,
+    });
+  }
   return statements;
 }

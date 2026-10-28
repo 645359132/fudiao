@@ -42,6 +42,7 @@ import {
   renderBenchmarkCompare,
   renderCastCompletion,
   renderRelationChanges,
+  renderSceneCoverage,
   renderContinuityCheck,
   renderOpeningReview,
   renderBookVolumes,
@@ -994,5 +995,16 @@ describe('全书卷纲（一键成书的长篇规划）', () => {
     expect(text).toContain('- 玉佩：多看一眼（揭晓：遗物）');
     expect(text).toContain('请规划全书的 3 卷');
     expect(text).not.toContain('规划技能');
+  });
+});
+
+describe('推演整书的模板（B86）', () => {
+  it('scene_coverage：列出本章目标与编号的情节点，带上推演写成的正文，要求只输出已写出的序号', () => {
+    const prompt = unwrap(renderSceneCoverage({ goal: '林舟当玉，钱四认出来历', beats: ['叩门', '验玉', '认出来历', '离开'], text: '雨下得更紧了。他没有回头。' }));
+    expect(prompt.output?.name).toBe('SceneCoverageOutput');
+    expect(prompt.task).toBe('plan_draft');
+    const text = fullText(prompt);
+    for (const part of ['本章的目标：林舟当玉，钱四认出来历', '1. 叩门', '4. 离开', '推演写出的正文：\n雨下得更紧了。他没有回头。', 'covered 为已写出的情节点序号数组']) expect(text).toContain(part);
+    expect(fullText(unwrap(renderSceneCoverage({ goal: '  ', beats: ['a'], text: 't' })))).toContain('本章的目标：（没有写）');
   });
 });

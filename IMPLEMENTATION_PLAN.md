@@ -899,6 +899,7 @@ M5-03 的设计：
 | M6-07 | 扫榜拆书：导入榜单与样章（迁移 0022 `benchmark_sample`，不导出、用完即删）、逐本拆解（`benchmark_book`）、复述检查（纯函数 `trimOverlap`）、对标分析（`benchmark_compare`）、存为规划技能或带进一键成书；样章的金丝雀测试 | B79，验收“扫榜拆书” |
 | M6-08 | 写作工作流的真实模型试用：试用脚本 `tools/workflow-eval`（`pnpm workflow:eval`，在 `m3/eval/book.json` 上依次跑六个工作流，运行前按 `quoteWorkflow` 汇总预计并等确认）、结果与待修清单 `m6/RESULTS.md`、试用后的修正（审核没完成先重试一次再记下继续、模型照抄的标签换成章节名与段落开头、一章之内的疑点、开篇对比写明解决与新提） | B78 至 B83 |
 | M6-09 | 推演成章：第七个工作流 `scene_chapter`（建推演场景 → 推演 → 节拍表 → 写成正文并采纳 → 写手补全并审核），执行器补上步骤中途的检查点、步骤自己汇报用量与剩余预算，写手接着已有正文写其余情节点（`startWriterAfter`、`planSegmentsAfter`），成书页的卡片、开始表单与四个步骤视图，AI 助手 `start_workflow` 的 `chapter`（`assistant_turn` 版本 26） | B85，验收“推演成章” |
+| M6-10 | 推演整书：第八个工作流 `scene_book`（核对范围 → 逐章推演成章 → 采纳推演草案），逐章的子阶段与检查点、失败重试与跳过、推演正文直接写入（`writeNarration`）与待采纳的草案（`adoptWrittenNarration`、`adoptSceneBookChapter`）、情节点判断模板 `scene_coverage`、成书页的表单与步骤视图、看板上的阶段、AI 助手的发起与费用确认（`assistant_turn` 版本 27） | B86，验收“推演整书” |
 
 M6-01 的设计（写作工作流框架）：
 
@@ -961,6 +962,19 @@ M6-09 的设计（推演成章，B85，作者确认方案 2026-10-28）：
 - 界面：成书页的“推演成章”卡片；开始表单选章（只能选有章节计划与出场人物、还没写过的章）、沿用本章已有的场景或新建、回合上限；步骤视图 `ui/SceneChapterSteps.tsx`（场景编辑器、推演的状态与 `Timeline`、节拍表编辑与重新生成、候选稿与采纳的勾选、写手补全的说明），采纳表的勾选抽成受控的 `AdoptionFields` 与“AI 写作”共用。
 - AI 助手：`start_workflow` 的 `workflow` 增加 `scene_chapter`、参数 `chapter`（没说是哪一章不发起、先问），`assistant_turn` 版本 26。
 - 限制与后续：写手只接着已有正文写，推演之前的引入情节点不能插到正文前面（作者在采纳时留作“已写出”或自己补写）；首版只推一次，“跑 N 次挑一次”与写作工作流试用脚本里的推演成章列为后续。
+
+M6-10 的设计（推演整书，B86，作者确认方案 2026-10-28）：
+
+- 参数 `SceneBookParams`：`from`、`to`（章节标识，null 为从头、到尾，按书中顺序）、`maxRounds`（1 至 30，默认 8）、`pov`（null 为本章计划的第一个出场人物；人物设定标识时，这个人物在本章出场且场景里有同名角色就用他，否则退回第一个出场人物）、`review`（默认开）；费用上限是运行的 `budgetUsd`。合格的章（`qualify`）：有章节计划、有出场人物、没有正文、计划待写；其余列出原因。
+- 三步：核对范围（check：默认模型可用、合格的章与跳过的章，一章也没有时出错）→ 逐章推演成章（act）→ 采纳推演草案（draft）。
+- 逐章推演成章：各章的状态（阶段、这一阶段重试了几次、场景、运行、节拍表、候选稿、写入的段落、快照、情节点、剩余段数、备注）记在这一步的结果里，每个子阶段做完就 `checkpoint`；结果里记下这次执行的步骤键，中断后继续时各章的状态照旧、从停下的那一章那一阶段接着做，重做时另起（已有正文或计划不是待写的章跳过）。子阶段：scene（`draftSimScene({ chapterId, stepKey })`，草稿有校验问题即失败，否则 `saveSimScene`，两角色轮流对话）→ simulate（`startSimRun(sceneId, { mode: 'auto', budgetUsd: budgetLeft() })` 后先记下运行标识；`hooks.simulate` 推进；`simRunUsage` 累进这一步的用量（`report(u, true)`），接着推同一次时只报差额；结束进下一阶段，被停下即中断，暂停或等作者即这一阶段失败）→ beats（视角按 `pov` 规则，回合 1 到最后一个结束的回合，`draftBeatSheet(…, { stepKey })`）→ narrate（先找这一章里由这份节拍表写成、还待处理的候选稿，没有才 `narrateBeatSheet(…, { stepKey })`；`writeNarration` 把它写进章末：写入前存“写手写入”快照、段落带 AI 来源，候选稿标为已接受、`status_reason` 记 `WRITTEN_REASON`，返回写入的段落标识与快照标识）→ coverage（`beatsCovered`：模板 `scene_coverage` 版本 1，task `plan_draft`，输入本章目标、编号的情节点与写入的正文，输出已写出的序号；失败重试一次仍不成就按全部写出处理并写进备注，这一章不算失败）→ write（`startWriterAfter(chapterId, coveredBeats, { snapshotId })` 沿用写入前的快照，“回退写手写入”回到推演正文写入之前；剩余段数记在状态里，重试不再开写手运行；剩余为 0 时只整理记忆并审核，否则 `hooks.writeChapters([chapterId], review)` 经写手队列写、整理记忆、找关系变化、审核）。
+- 失败与中断：子阶段失败（不是停下、不是预算）就同一阶段重试一次（模型调用的步骤键加 `:r1`，推演是恢复同一次），仍失败记下原因、这一章标为没做成、接着做下一章；停下、预算用完（`budgetLeft()` 为 0 时不开始新的阶段）、写手或审核的钩子没做完（与其他工作流一致）时整步中断，继续时接着做这一章。结束的一句话列出写完的章、没做成的章与原因、跳过的章、审核没完成的章；一章也没写成时这一步出错。
+- 采纳推演草案：从第 2 步的结果列出已写入正文的章（上一次自己的结果里已采纳的沿用），没有待采纳的直接完成；`confirm` 总是返回说明（“一路做完”也停）。逐章复核：`adoptSceneBookChapter(runId, chapterId, selection)` 先以版本守卫在这一步上记一笔，经 `adoptWrittenNarration`（候选稿须是已接受且记着 `WRITTEN_REASON` 的，只写故事事件、事实及来源、关联到仍在章节里的写入段落，不动正文）写入，现状差别追加到这一步的 `changes`；`declineSceneBookChapter` 标为不采纳。采用（“全部采纳其余的”）：每章按默认勾选（视角人物察觉的事件、他的全部见闻、不记世界事实、裁决一并视为已复核、不勾锁定设定的核对），涉及锁定设定的章失败并写明须单独复核。撤回：这一步记下的改动（逐章与一键的都在）经撤销改回——撤销删除新记的事实改为按记下的状态与内容判断没改过才删（以前只删候选状态的，采纳写入的是已确认的），故事事件保留。
+- 执行器：`StepContext.report(u, add)` 可累加；`AdvanceEnv.onChapterStage` 经 `StepContext.chapterStage` 汇报正在做哪一章的哪个阶段，状态层记在 `sceneBookStage`：成书进度看板的写作一列显示“推演成章：建场景 / 推演中 / …”，`chapterLock` 让这一章只读；`WorkflowDef.estimate` 可以异步（按范围里合格的章数估：每章场景 1 次、推演 `maxRounds × (3×3 + 1)` 次、节拍表与正文各 1 次、情节点判断 1 次、写手补半章、记忆 1 次、审核 1 次），`quoteWorkflow` 的结果带 `written`（章数）。`adoptStep` 采用时保留这一步等作者期间已记的改动。
+- 存储：不加迁移。`adoptionStatements` 的 `candidate` 可为 null（候选稿早已接受）；`AdoptionInput`、`startWriterAfter` 的签名随之。
+- 界面：成书页的“推演整书”卡片；开始表单（从、到、每章回合上限、视角、写完后审核；说明写明范围里合格的章数；估算结果写明章数）；第 2 步的操作放在看板上面、下面是各章状态表（可在推演页打开、打开这一章）；第 3 步 `ui/SceneBookSteps.tsx` 的待采纳列表（逐章“复核”展开 `AdoptionFields`，“采纳这一章”“不采纳”），步骤按钮改名“全部采纳其余的”。
+- AI 助手：`start_workflow` 的 `workflow` 增加 `scene_book`，范围用 `from`、`to`，其余按默认；`confirm` 先 `quoteWorkflow` 把章数、调用次数与费用交给作者确认（`assistant_turn` 版本 27）。
+- 限制与后续：写手只接着推演写出的正文写，推演之前的引入不补；剩余情节点为 0 的章不找人物关系的变化（与推演成章相同）；一章只推一次；写作工作流试用脚本不跑这个工作流。
 
 ### M7 联网
 

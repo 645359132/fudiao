@@ -37,6 +37,7 @@ import {
   type Candidate,
   type EventLink,
   type FactInput,
+  type RangePlan,
   type RepoError,
   type SavedParagraph,
   type SimRun,
@@ -54,6 +55,9 @@ import { describeObservation, describeStoryOccurrence } from './sim-describe';
 /** 节拍表与正文的输出上限：正文所需之外另留出思考的余量。 */
 export const BEAT_SHEET_OUTPUT_TOKENS = 4_000 + THINKING_ALLOWANCE;
 export const NARRATION_OUTPUT_TOKENS = 8_000 + THINKING_ALLOWANCE;
+
+/** 推演整书（B86）写入正文后候选稿的状态原因：正文已在章节里，事件与认知还等作者采纳（采纳草案据此认出它）。 */
+export const WRITTEN_REASON = '推演整书：正文已写入，事件与认知待采纳';
 
 /** 节拍：作者看得懂的内容（视角角色那一条认知写成的文字）与它所在的回合。 */
 export type BeatView = Beat & { readonly round: number; readonly text: string };
@@ -162,6 +166,9 @@ const factInput = (
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
 const settings = (detail: string): AppError => ({ code: 'settings', detail });
 
+/** 范围内发生的事（按“事件序号:位置”的键）：提交时的序号、出处的运行、事件本身与谁察觉到了。 */
+type OccurrenceMap = Map<string, { readonly seq: number; readonly originRunId: string; readonly occurrence: Occurrence; readonly perceivedBy: readonly { readonly actor: string; readonly channel: string }[] }>;
+
 /** 视角角色在某一刻的认知：角色视图、这几个回合里的见闻与他自己的内心片段。 */
 type Moment = {
   readonly scene: Scene;
@@ -254,12 +261,17 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
     };
   }
 
-  /** 采纳要用到的一切：候选稿、节拍表那一刻的视角、范围内发生的事、设定的对应与需要复核的裁决。 */
-  async function adoptionContext(port: SqlPort, candidateId: string) {
+  /**
+   * 采纳要用到的一切：候选稿、节拍表那一刻的视角、范围内发生的事、设定的对应与需要复核的裁决。
+   * written：推演整书（B86）已把正文写进章节、候选稿已标为已接受，这时采纳的只是事件与认知。
+   */
+  async function adoptionContext(port: SqlPort, candidateId: string, written = false) {
     const candidate = await getCandidate(port, candidateId);
     if (!candidate.ok) return err(repo(candidate.error));
     const c = candidate.value;
-    if (c.status !== 'pending') return err(settings('这份候选稿已经处理过了'));
+    if (written ? c.status !== 'accepted' || c.statusReason !== WRITTEN_REASON : c.status !== 'pending') {
+      return err(settings(written ? '这份推演草案不是推演整书写入的，或已经处理过了' : '这份候选稿已经处理过了'));
+    }
     if (c.operation !== 'narrate' || c.beatSheetId === null) return err(settings('只有推演写成的正文需要采纳'));
     const sheet = await getBeatSheet(port, c.beatSheetId);
     if (!sheet.ok) return err(repo(sheet.error));
@@ -362,6 +374,89 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
     return ok({ draft, candidate: c, occurrences, entityOf, lockedNames });
   }
 
+  /**
+   * 采纳前算出要写的东西：作者选定的事件（以前采纳过的只关联，不另建）、同时记为世界事实的、视角角色的认知；
+   * 自动接受的裁决要复核完，至少选一件事，涉及锁定设定的要作者核对过。adoptCandidate 与推演整书的采纳共用。
+   */
+  async function prepareAdoption(
+    port: SqlPort,
+    loaded: { readonly draft: AdoptionDraft; readonly candidate: Candidate; readonly occurrences: OccurrenceMap; readonly entityOf: (key: string) => string | null; readonly lockedNames: Map<string, string> },
+    request: AdoptionRequest,
+  ): Promise<Result<{ readonly chosen: readonly AdoptionEvent[]; readonly eventIds: Map<string, string>; readonly events: readonly AdoptedEvent[]; readonly facts: readonly AdoptedFact[] }, AppError>> {
+    const { draft, candidate, occurrences, entityOf, lockedNames } = loaded;
+    const unreviewed = draft.reviews.filter((r) => !request.reviewed.includes(r.requestId));
+    if (unreviewed.length > 0) return err(settings(`还有 ${unreviewed.length} 条自动接受的裁决或导演事件没有复核：自动模式的结果须逐条复核后才能采纳`));
+    const chosen = draft.events.filter((e) => request.events.includes(e.key));
+    if (chosen.length === 0) return err(settings('请至少选一件事：推演写成的正文要关联它讲述的事件'));
+
+    // 事件与事实（人物与地点换成设定的标识；对不上设定的略去）。以前采纳过的事只关联，不另建。
+    const eventIds = new Map(chosen.map((e) => [e.key, e.adoptedEventId ?? deps.ids.next()]));
+    const events: AdoptedEvent[] = chosen.filter((e) => e.adoptedEventId === null).map((e) => {
+      const o = occurrences.get(e.key)!;
+      const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
+      return {
+        id: eventIds.get(e.key)!,
+        summary: e.summary,
+        participants: people.flatMap((k) => entityOf(k) ?? []),
+        locationId: o.occurrence.zones.length === 0 ? null : entityOf(o.occurrence.zones[o.occurrence.zones.length - 1]!),
+        perceptions: o.perceivedBy.flatMap((p) => {
+          const id = entityOf(p.actor);
+          return id === null ? [] : [{ entityId: id, channel: p.channel }];
+        }),
+        originRunId: o.originRunId,
+        originSeq: o.seq,
+      };
+    });
+    const existing = await listFacts(port);
+    if (!existing.ok) return err(repo(existing.error));
+    const facts: AdoptedFact[] = [];
+    for (const e of chosen.filter((x) => request.worldFacts.includes(x.key))) {
+      const eventId = eventIds.get(e.key)!;
+      // 同一件事以前已记为世界事实的，不重复记。
+      if (existing.value.some((f) => f.kind === 'world' && f.content === e.summary && f.eventIds.includes(eventId))) continue;
+      const o = occurrences.get(e.key)!;
+      const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
+      facts.push({ id: deps.ids.next(), eventIds: [eventId], input: factInput('world', null, e.summary, people.flatMap((k) => entityOf(k) ?? []), null, null, candidate.chapterId) });
+    }
+    const povEntity = entityOf(draft.povKey);
+    const beliefs = draft.beliefs.filter((b) => request.beliefs.includes(b.ref));
+    if (beliefs.length > 0 && povEntity === null) return err(settings(`视角角色“${draft.povName}”没有对应的人物设定，不能把他的见闻记为认知：先在“设定”里建这个人物`));
+    for (const b of beliefs) {
+      facts.push({
+        id: deps.ids.next(),
+        // 见闻的来源：同一回合里视角角色察觉到、这次采纳的事。
+        eventIds: chosen.filter((e) => e.round === b.round && e.seenByPov).map((e) => eventIds.get(e.key)!),
+        input: factInput('belief', povEntity, b.text, b.about.flatMap((k) => entityOf(k) ?? []), b.modality, b.confidence, candidate.chapterId),
+      });
+    }
+    const touched = new Set(facts.flatMap((f) => [...f.input.subjectIds, ...(f.input.holderId === null ? [] : [f.input.holderId])]));
+    const locked = [...touched].flatMap((id) => lockedNames.get(id) ?? []);
+    if (locked.length > 0 && !request.confirmLocked) {
+      return err(settings(`要写入的事实涉及锁定设定：${[...new Set(locked)].join('、')}。请核对它们没有改变这些设定后，勾选“我已核对涉及锁定设定的内容”再采纳`));
+    }
+    return ok({ chosen, eventIds, events, facts });
+  }
+
+  /**
+   * 候选稿写进章末的计划：原文在生成之后改过时为 null（候选稿过期）。written 是写入的段落：新插入的各段，
+   * 以及文字有变化的那一段（空章节时候选稿写进原有的空段落）。
+   */
+  function narrationPlan(paragraphs: readonly SavedParagraph[], candidate: Candidate): { readonly plan: RangePlan; readonly written: readonly string[] } | null {
+    const i = paragraphs.findIndex((p) => p.id === candidate.target.from.paragraphId);
+    const versions = candidateVersions(paragraphs, candidate);
+    const same =
+      i >= 0 &&
+      Object.keys(versions).length === Object.keys(candidate.baseVersions).length &&
+      Object.entries(candidate.baseVersions).every(([id, v]) => versions[id] === v) &&
+      textInRange(paragraphs, candidate.target) === candidate.baseText;
+    if (!same) return null;
+    const plan = planRangeReplace(paragraphs, candidate.target, insertFor(candidate, paragraphs), () => deps.ids.next());
+    if (!plan.ok) return null;
+    const before = paragraphs.find((p) => p.id === plan.value.update.id);
+    const written = [...(before !== undefined && before.text !== plan.value.update.text ? [plan.value.update.id] : []), ...plan.value.inserts.map((p) => p.id)];
+    return { plan: plan.value, written };
+  }
+
   async function sheetView(port: SqlPort, sheet: BeatSheet): Promise<Result<BeatSheetView, AppError>> {
     const loaded = await runOf(port, sheet.runId);
     if (!loaded.ok) return loaded;
@@ -374,7 +469,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
      * 由一次推演生成节拍表（B45）：视角角色、回合范围，以及作者的说明。认知取到 toRound 这一回合结束时为止，
      * 之后才发生的事他还不知道，不会进入材料。节拍只能指向这些见闻，模型给出的其他引用丢弃。
      */
-    async draftBeatSheet(runId: string, request: BeatSheetRequest, options: CallOptions = {}): Promise<Result<BeatSheetView, AppError>> {
+    async draftBeatSheet(runId: string, request: BeatSheetRequest, options: CallOptions = {}, keyed: { readonly stepKey?: string } = {}): Promise<Result<BeatSheetView, AppError>> {
       const s = session();
       if (s === null) return err({ code: 'no_work' });
       const loaded = await runOf(s.port, runId);
@@ -398,7 +493,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
         ...(request.notes.trim() !== '' && { authorNotes: request.notes.trim() }),
       });
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: BEAT_SHEET_OUTPUT_TOKENS, effort: 'medium' }, BeatSheetOutput, options);
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: BEAT_SHEET_OUTPUT_TOKENS, effort: 'medium', ...(keyed.stepKey !== undefined && { stepKey: keyed.stepKey }) }, BeatSheetOutput, options);
       if (!result.ok) return result;
       const known = new Set<string>(moment.value.materials);
       const seen = new Set<string>();
@@ -474,10 +569,10 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
      * 也可同时记为世界事实）、视角角色的这些见闻（可记为他的认知）——以及采纳前必须做的事：
      * 自动接受、尚待复核的裁决要逐条复核；场景里的角色、地点与物品按名字对应到设定，涉及锁定设定的要作者核对。
      */
-    async adoptionDraft(candidateId: string): Promise<Result<AdoptionDraft, AppError>> {
+    async adoptionDraft(candidateId: string, options: { readonly written?: boolean } = {}): Promise<Result<AdoptionDraft, AppError>> {
       const s = session();
       if (s === null) return err({ code: 'no_work' });
-      const loaded = await adoptionContext(s.port, candidateId);
+      const loaded = await adoptionContext(s.port, candidateId, options.written === true);
       return loaded.ok ? ok(loaded.value.draft) : loaded;
     },
 
@@ -492,60 +587,12 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
       const { port } = s;
       const loaded = await adoptionContext(port, request.candidateId);
       if (!loaded.ok) return loaded;
-      const { draft, candidate, occurrences, entityOf, lockedNames } = loaded.value;
-
-      const unreviewed = draft.reviews.filter((r) => !request.reviewed.includes(r.requestId));
-      if (unreviewed.length > 0) return err(settings(`还有 ${unreviewed.length} 条自动接受的裁决或导演事件没有复核：自动模式的结果须逐条复核后才能采纳`));
-      const chosen = draft.events.filter((e) => request.events.includes(e.key));
-      if (chosen.length === 0) return err(settings('请至少选一件事：推演写成的正文要关联它讲述的事件'));
+      const { candidate } = loaded.value;
+      const prepared = await prepareAdoption(port, loaded.value, request);
+      if (!prepared.ok) return prepared;
+      const { chosen, eventIds, events, facts } = prepared.value;
       const draftFile = await deps.drafts.read(s.path, candidate.chapterId);
       if (draftFile.ok && draftFile.value !== null) return err(settings('这一章有未保存的修改：请先打开这一章保存或丢弃'));
-
-      // 事件与事实（人物与地点换成设定的标识；对不上设定的略去）。以前采纳过的事只关联，不另建。
-      const eventIds = new Map(chosen.map((e) => [e.key, e.adoptedEventId ?? deps.ids.next()]));
-      const events: AdoptedEvent[] = chosen.filter((e) => e.adoptedEventId === null).map((e) => {
-        const o = occurrences.get(e.key)!;
-        const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
-        return {
-          id: eventIds.get(e.key)!,
-          summary: e.summary,
-          participants: people.flatMap((k) => entityOf(k) ?? []),
-          locationId: o.occurrence.zones.length === 0 ? null : entityOf(o.occurrence.zones[o.occurrence.zones.length - 1]!),
-          perceptions: o.perceivedBy.flatMap((p) => {
-            const id = entityOf(p.actor);
-            return id === null ? [] : [{ entityId: id, channel: p.channel }];
-          }),
-          originRunId: o.originRunId,
-          originSeq: o.seq,
-        };
-      });
-      const existing = await listFacts(port);
-      if (!existing.ok) return err(repo(existing.error));
-      const facts: AdoptedFact[] = [];
-      for (const e of chosen.filter((x) => request.worldFacts.includes(x.key))) {
-        const eventId = eventIds.get(e.key)!;
-        // 同一件事以前已记为世界事实的，不重复记。
-        if (existing.value.some((f) => f.kind === 'world' && f.content === e.summary && f.eventIds.includes(eventId))) continue;
-        const o = occurrences.get(e.key)!;
-        const people = [...new Set([...(o.occurrence.actor === undefined ? [] : [o.occurrence.actor]), ...o.occurrence.participants])];
-        facts.push({ id: deps.ids.next(), eventIds: [eventId], input: factInput('world', null, e.summary, people.flatMap((k) => entityOf(k) ?? []), null, null, candidate.chapterId) });
-      }
-      const povEntity = entityOf(draft.povKey);
-      const beliefs = draft.beliefs.filter((b) => request.beliefs.includes(b.ref));
-      if (beliefs.length > 0 && povEntity === null) return err(settings(`视角角色“${draft.povName}”没有对应的人物设定，不能把他的见闻记为认知：先在“设定”里建这个人物`));
-      for (const b of beliefs) {
-        facts.push({
-          id: deps.ids.next(),
-          // 见闻的来源：同一回合里视角角色察觉到、这次采纳的事。
-          eventIds: chosen.filter((e) => e.round === b.round && e.seenByPov).map((e) => eventIds.get(e.key)!),
-          input: factInput('belief', povEntity, b.text, b.about.flatMap((k) => entityOf(k) ?? []), b.modality, b.confidence, candidate.chapterId),
-        });
-      }
-      const touched = new Set(facts.flatMap((f) => [...f.input.subjectIds, ...(f.input.holderId === null ? [] : [f.input.holderId])]));
-      const locked = [...touched].flatMap((id) => lockedNames.get(id) ?? []);
-      if (locked.length > 0 && !request.confirmLocked) {
-        return err(settings(`要写入的事实涉及锁定设定：${[...new Set(locked)].join('、')}。请核对它们没有改变这些设定后，勾选“我已核对涉及锁定设定的内容”再采纳`));
-      }
 
       // 正文：与接受候选稿相同的过期检查与写法（段落来源、生成原文）。
       const paragraphs = await listParagraphs(port, candidate.chapterId);
@@ -554,25 +601,13 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
         await setCandidateStatus(port, candidate, 'stale', STALE_REASON, ctx());
         return err(settings(`候选稿已过期：${STALE_REASON}，请重新写成正文`));
       };
-      const i = paragraphs.value.findIndex((p) => p.id === candidate.target.from.paragraphId);
-      const versions = candidateVersions(paragraphs.value, candidate);
-      const same =
-        i >= 0 &&
-        Object.keys(versions).length === Object.keys(candidate.baseVersions).length &&
-        Object.entries(candidate.baseVersions).every(([id, v]) => versions[id] === v) &&
-        textInRange(paragraphs.value, candidate.target) === candidate.baseText;
-      if (!same) return stale();
-      const plan = planRangeReplace(paragraphs.value, candidate.target, insertFor(candidate, paragraphs.value), () => deps.ids.next());
-      if (!plan.ok) return stale();
-      // 写入的段落：新插入的各段，以及文字有变化的那一段（空章节时候选稿写进原有的空段落）。
-      const before = paragraphs.value.find((p) => p.id === plan.value.update.id);
-      const written = [...(before !== undefined && before.text !== plan.value.update.text ? [plan.value.update.id] : []), ...plan.value.inserts.map((p) => p.id)];
-
+      const plan = narrationPlan(paragraphs.value, candidate);
+      if (plan === null) return stale();
       const snapshot = await createSnapshot(port, { id: deps.ids.next(), chapterId: candidate.chapterId, reason: 'accept_candidate' }, ctx());
       if (!snapshot.ok) return err(repo(snapshot.error));
       const done = await port.transaction([
-        ...rangeReplaceStatements(candidate.chapterId, plan.value, ctx()),
-        ...adoptionStatements({ candidate, events, linkedEventIds: [...eventIds.values()], facts, paragraphIds: written }, ctx(), () => deps.ids.next()),
+        ...rangeReplaceStatements(candidate.chapterId, plan.plan, ctx()),
+        ...adoptionStatements({ candidate, events, linkedEventIds: [...eventIds.values()], facts, paragraphIds: plan.written }, ctx(), () => deps.ids.next()),
       ]);
       if (!done.ok) return done.error.code === 'guard_failed' ? stale() : err(repo({ code: 'sql', error: done.error }));
       const after = await listParagraphs(port, candidate.chapterId);
@@ -581,10 +616,71 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
     },
 
     /**
+     * 推演整书（B86）：把推演写成的候选稿直接写进这一章末尾（像写手一样：写入前存“写手写入”快照、段落记为 AI 生成），
+     * 候选稿标为已接受并记下“事件与认知待采纳”；故事事件、事实与认知不写，留给作者在成书页采纳（硬性规则 21）。
+     * 返回写入的段落标识（采纳草案时关联事件用）与快照标识（写手运行沿用它，回退写手写入即回到写入之前）。
+     */
+    async writeNarration(candidateId: string): Promise<Result<{ readonly paragraphIds: readonly string[]; readonly snapshotId: string }, AppError>> {
+      const s = session();
+      if (s === null) return err({ code: 'no_work' });
+      const { port } = s;
+      const got = await getCandidate(port, candidateId);
+      if (!got.ok) return err(repo(got.error));
+      const candidate = got.value;
+      if (candidate.status !== 'pending') return err(settings('这份候选稿已经处理过了'));
+      if (candidate.operation !== 'narrate' || candidate.beatSheetId === null) return err(settings('只有推演写成的正文能这样写入'));
+      const draftFile = await deps.drafts.read(s.path, candidate.chapterId);
+      if (draftFile.ok && draftFile.value !== null) return err(settings('这一章有未保存的修改：请先打开这一章保存或丢弃'));
+      const paragraphs = await listParagraphs(port, candidate.chapterId);
+      if (!paragraphs.ok) return err(repo(paragraphs.error));
+      const stale = async () => {
+        await setCandidateStatus(port, candidate, 'stale', STALE_REASON, ctx());
+        return err(settings(`候选稿已过期：${STALE_REASON}，请重新写成正文`));
+      };
+      const plan = narrationPlan(paragraphs.value, candidate);
+      if (plan === null) return stale();
+      const snapshot = await createSnapshot(port, { id: deps.ids.next(), chapterId: candidate.chapterId, reason: 'writer' }, ctx());
+      if (!snapshot.ok) return err(repo(snapshot.error));
+      const now = ctx();
+      const done = await port.transaction([
+        ...rangeReplaceStatements(candidate.chapterId, plan.plan, now),
+        {
+          sql: "UPDATE candidate SET status = 'accepted', status_reason = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'pending'",
+          params: [WRITTEN_REASON, now.now, candidate.id, candidate.version],
+          expectChanges: 1,
+        },
+      ]);
+      if (!done.ok) return done.error.code === 'guard_failed' ? stale() : err(repo({ code: 'sql', error: done.error }));
+      return ok({ paragraphIds: plan.written, snapshotId: snapshot.value.id });
+    },
+
+    /**
+     * 采纳推演整书写入的草案（B86）：正文早已在章节里，这里只写故事事件、事实及其来源，并关联到当初写入的、仍在章节里的段落。
+     * 勾选、复核与锁定设定的规则与 adoptCandidate 相同。
+     */
+    async adoptWrittenNarration(request: AdoptionRequest & { readonly paragraphIds: readonly string[] }): Promise<Result<{ readonly events: number; readonly facts: number }, AppError>> {
+      const s = session();
+      if (s === null) return err({ code: 'no_work' });
+      const { port } = s;
+      const loaded = await adoptionContext(port, request.candidateId, true);
+      if (!loaded.ok) return loaded;
+      const prepared = await prepareAdoption(port, loaded.value, request);
+      if (!prepared.ok) return prepared;
+      const { chosen, eventIds, events, facts } = prepared.value;
+      const paragraphs = await listParagraphs(port, loaded.value.candidate.chapterId);
+      if (!paragraphs.ok) return err(repo(paragraphs.error));
+      const still = new Set(paragraphs.value.map((p) => p.id));
+      const linked = request.paragraphIds.filter((id) => still.has(id));
+      const done = await port.transaction(adoptionStatements({ candidate: null, events, linkedEventIds: [...eventIds.values()], facts, paragraphIds: linked }, ctx(), () => deps.ids.next()));
+      if (!done.ok) return err(repo({ code: 'sql', error: done.error }));
+      return ok({ events: chosen.length, facts: facts.length });
+    },
+
+    /**
      * 按节拍表把视角角色的经历写成正文（B29、B62），存为这一章末尾的候选稿：标为省略的节拍不进入请求。
      * 这一章有未保存的修改时不写；这一章还没有段落时先建一个空段落，候选稿接在它后面。
      */
-    async narrateBeatSheet(id: string, chapterId: string, options: CallOptions = {}): Promise<Result<Candidate, AppError>> {
+    async narrateBeatSheet(id: string, chapterId: string, options: CallOptions = {}, keyed: { readonly stepKey?: string } = {}): Promise<Result<Candidate, AppError>> {
       const s = session();
       if (s === null) return err({ code: 'no_work' });
       const { port } = s;
@@ -609,7 +705,7 @@ export function narrationUseCases(deps: AppDeps, session: () => { readonly port:
         ...(sheet.value.style.trim() !== '' && { style: sheet.value.style.trim() }),
       });
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.text({ prompt: prompt.value, maxOutputTokens: NARRATION_OUTPUT_TOKENS, effort: 'high' }, options);
+      const result = await runner.text({ prompt: prompt.value, maxOutputTokens: NARRATION_OUTPUT_TOKENS, effort: 'high', ...(keyed.stepKey !== undefined && { stepKey: keyed.stepKey }) }, options);
       if (!result.ok) return result;
       if (result.value.outcome === 'cancelled') return err(settings('已取消'));
       if (result.value.outcome === 'refused') return err(settings(`模型拒绝了这次写作${result.value.refusal?.explanation ? `：${result.value.refusal.explanation}` : ''}`));

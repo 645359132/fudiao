@@ -450,8 +450,10 @@ async function undoOne(host: UndoHost, entry: ChangeEntry, now: WorkImage, remap
       if (!facts.ok) return describeError(facts.error);
       const f = facts.value.find((x) => x.id === key);
       if (f === undefined) return gone;
-      if (entry.before !== null) return '只撤销助手新记的候选事实';
-      if (f.status !== 'candidate') return '作者已经处理过这条事实，没有动它';
+      if (entry.before !== null) return '只撤销新记的事实';
+      // 新记的事实只在没动过时删：助手记的候选事实被作者确认过、或改过内容，就不动它；采纳推演草案时记的是已确认的事实，照样按记下的样子比较。
+      const after = entry.after as { readonly status?: unknown; readonly content?: unknown } | null;
+      if (after === null || f.status !== after.status || f.content !== after.content) return '作者已经处理过这条事实，没有动它';
       return failed(await host.deleteFact(f));
     }
   }

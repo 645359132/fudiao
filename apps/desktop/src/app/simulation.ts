@@ -193,7 +193,12 @@ export type SimRunOptions = {
  */
 export type SceneDraft = { readonly config: SceneSpecInput; readonly problems: readonly string[]; readonly notes: readonly string[] };
 /** 生成草稿的请求：作者的描述，或按某一章的章节计划建（二者至少一个；都有时描述是补充说明）。 */
-export type SceneDraftRequest = { readonly description: string; readonly chapterId: string | null };
+export type SceneDraftRequest = {
+  readonly description: string;
+  readonly chapterId: string | null;
+  /** 调用的步骤键（推演整书逐章建场景时，中断后继续不重复调用）；不给时按请求内容查重。 */
+  readonly stepKey?: string;
+};
 
 const mentionText = (m: ChapterMention) => `${m.title}（${m.summary}）`;
 
@@ -424,7 +429,7 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       }
       const prompt = renderSceneDraft(input);
       if (!prompt.ok) return err(settings(prompt.error));
-      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: SCENE_DRAFT_OUTPUT_TOKENS, effort: 'medium' }, SceneDraftOutput, options);
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: SCENE_DRAFT_OUTPUT_TOKENS, effort: 'medium', ...(request.stepKey !== undefined && { stepKey: request.stepKey }) }, SceneDraftOutput, options);
       if (!result.ok) return result;
       let config = sceneDraftToSpec(result.value.value);
       if (chapter !== null) {

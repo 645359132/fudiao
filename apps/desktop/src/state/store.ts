@@ -12,7 +12,7 @@ import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } 
 import type { AssistantConversationView, AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
 import type { SearchHit as WebSearchHit, SearchServiceForm, SearchServicesView, SearchServiceView } from '../app/web-search';
-import type { HookOutcome, StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
+import type { AdoptionSelection, HookOutcome, SceneBookStageNote, StartWorkflowRequest, WorkflowInfo, WorkflowKey, WorkflowQuote, WorkflowView } from '../app/workflows';
 import type { SimEvaluationInput, SimEvaluationView } from '../app/sim-evaluation';
 import type { Beat, Cover } from '@fudiao/store';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -174,6 +174,8 @@ export type AppState = {
   readonly workflowProgress: string | null;
   /** 推演成章（B85）：成书页里正在看的那次推演的时间线（推演步骤与节拍表步骤用，推进时随之刷新）。 */
   readonly workflowSim: { readonly runId: string; readonly detail: SimRunDetail } | null;
+  /** 推演整书（B86）正在做哪一章的哪个阶段（成书进度看板显示；这一章只读）；没有时为 null。 */
+  readonly sceneBookStage: SceneBookStageNote | null;
   /** AI 助手（B69）：右侧对话框是否打开、当前作品（或作品列表页）的对话、是否正在处理。 */
   readonly assistantOpen: boolean;
   readonly assistantItems: readonly AssistantItem[];
@@ -343,6 +345,10 @@ export type AppState = {
   readonly editWorkflowStep: (runId: string, idx: number, output: unknown) => Promise<boolean>;
   /** 作者对一步的操作：采用、跳过、重做、保留（可能过时时）、撤回这次采用。 */
   readonly workflowStepAction: (runId: string, idx: number, action: 'adopt' | 'skip' | 'redo' | 'keep' | 'withdraw') => Promise<boolean>;
+  /** 推演整书（B86）：读一章已写入正文的推演草案（勾选用）；单独采纳一章；一章不采纳。 */
+  readonly writtenAdoptionDraft: (candidateId: string) => Promise<AdoptionDraft | null>;
+  readonly adoptSceneBookChapter: (runId: string, chapterId: string, selection: AdoptionSelection) => Promise<boolean>;
+  readonly declineSceneBookChapter: (runId: string, chapterId: string) => Promise<boolean>;
   readonly abandonWorkflow: (runId: string) => Promise<boolean>;
   /** 读出推演成章里一次推演的时间线（null 为不看了）。 */
   readonly loadWorkflowSim: (runId: string | null) => Promise<void>;
@@ -613,6 +619,7 @@ export type ChapterLock = 'writer' | 'revise' | 'assistant';
 export function chapterLock(state: AppState, chapterId: string | null): ChapterLock | null {
   if (chapterId === null) return null;
   if (state.writerJobs.some((j) => j.chapterId === chapterId)) return 'writer';
+  if (state.sceneBookStage?.chapterId === chapterId) return 'writer';
   if (state.reviseQueue !== null && state.reviseQueue.chapterId === chapterId) return 'revise';
   const job = state.assistantJobs.find((j) => j.chapterId === chapterId && j.kind !== 'review');
   if (job !== undefined) return job.kind === 'writing' ? 'writer' : 'revise';
@@ -1632,6 +1639,7 @@ export function createAppStore(service: AppService): AppStore {
       workflowAdvancing: null,
       workflowProgress: null,
       workflowSim: null,
+      sceneBookStage: null,
       assistantOpen: true,
       assistantItems: [],
       assistantRunning: false,
@@ -1745,7 +1753,7 @@ export function createAppStore(service: AppService): AppStore {
         simAbort?.abort();
         await simLoop;
         await service.closeWork();
-        set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, workflowSim: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
+        set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, workflowSim: null, sceneBookStage: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
       },
       async setArchived(id, archived) {
@@ -2287,6 +2295,7 @@ export function createAppStore(service: AppService): AppStore {
                 void refreshWork();
               },
               onProgress: (note) => set({ workflowProgress: note }),
+              onChapterStage: (stage) => set({ sceneBookStage: stage }),
             });
             if (result.ok) {
               summary = result.value.summary;
@@ -2304,7 +2313,7 @@ export function createAppStore(service: AppService): AppStore {
             t.fail(summary);
           } finally {
             if (workflowAbort === abort) workflowAbort = null;
-            set({ workflowAdvancing: null, workflowProgress: null });
+            set({ workflowAdvancing: null, workflowProgress: null, sceneBookStage: null });
             await refreshWork();
             onEnd?.(summary);
           }
@@ -2374,6 +2383,40 @@ export function createAppStore(service: AppService): AppStore {
           const chapterId = view.run.workflow === 'scene_chapter' && typeof target === 'string' ? target : '';
           if (chapterId !== '' && get().selectedChapterId === chapterId && get().chapterContent !== null) await get().loadChapter(chapterId);
         }
+        return true;
+      },
+      async writtenAdoptionDraft(candidateId) {
+        const draft = await service.adoptionDraft(candidateId, { written: true });
+        if (!draft.ok) {
+          set({ message: describeError(draft.error) });
+          return null;
+        }
+        return draft.value;
+      },
+      async adoptSceneBookChapter(runId, chapterId, selection) {
+        if (get().workflowAdvancing === runId) {
+          set({ message: '这个工作流正在推进：先停下再处理' });
+          return false;
+        }
+        set({ busy: true });
+        const result = await service.adoptSceneBookChapter(runId, chapterId, selection);
+        set({ busy: false });
+        if (!result.ok) {
+          set({ message: describeError(result.error) });
+          return false;
+        }
+        putWorkflow(result.value);
+        set({ message: null });
+        await refreshWork();
+        return true;
+      },
+      async declineSceneBookChapter(runId, chapterId) {
+        const result = await service.declineSceneBookChapter(runId, chapterId);
+        if (!result.ok) {
+          set({ message: describeError(result.error) });
+          return false;
+        }
+        putWorkflow(result.value);
         return true;
       },
       async loadWorkflowSim(runId) {

@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "26",
-    "sha256": "57c0053c83fdf3bf8de1af987829e0a6ce0cf445336e2931f57b946899848b60"
+    "version": "27",
+    "sha256": "4252faddf48ecf64926594197bed97e9980307f7a8f3162353110e93a7330773"
   },
   "baseline_scene": {
     "version": "2",
@@ -90,6 +90,10 @@
   "run_synopsis": {
     "version": "3",
     "sha256": "f3217db2960d38e02534528fda0a92d8474fed7d420449ddd2abd4bac6aa8e51"
+  },
+  "scene_coverage": {
+    "version": "1",
+    "sha256": "8573f444bde455d21f044addc0366c5afb07c360aec3552c7f0a4386a6373258"
   },
   "scene_draft": {
     "version": "2",

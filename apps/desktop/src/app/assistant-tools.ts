@@ -1838,6 +1838,26 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
   start_workflow: {
     label: '开始写作工作流',
     undo: 'kept',
+    // 推演整书比写手贵几倍：先把范围里的章数、预计调用次数与费用交给作者确认，确认后才开始。
+    confirm: async (action, env) => {
+      if (action.workflow !== 'scene_book') return null;
+      const flows = env.host.workflows;
+      if (flows === undefined) return null;
+      const ref = async (r: string | null) => {
+        if (r === null || r.trim() === '') return null;
+        const c = await env.findChapter(r);
+        return c.ok ? c.value.id : null;
+      };
+      const params = { from: await ref(action.from), to: await ref(action.to), maxRounds: DEFAULT_SIM_ROUNDS, pov: null, review: true };
+      const quote = await flows.quoteWorkflow('scene_book', params);
+      if (!quote.ok) return null;
+      const q = quote.value;
+      const cost = q.costUsd === null ? '费用未知（默认模型没有登记价格）' : `约 $${q.costUsd.toFixed(2)}（按 ${q.model ?? '默认模型'} 的价格估计）`;
+      return {
+        summary: `推演整书：范围里 ${q.written ?? 0} 章（有章节计划与出场人物、还没写的）逐章推演成章，正文直接写进各章，事件与认知跑完后由你复核采纳；预计调用模型 ${q.calls} 次，${cost}${action.budgetUsd === null ? '' : `，上限 $${action.budgetUsd}`}`,
+        action,
+      };
+    },
     async run(action, env) {
       const flows = env.host.workflows;
       const jobs = env.events.background;
@@ -1860,6 +1880,18 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         params = { chapters: action.chapters ?? 3 };
       } else if (action.workflow === 'next_volume') {
         params = { chapters: action.chapters ?? 20, wordsPerChapter: action.wordsPerChapter ?? 3000, instruction: action.instruction ?? '' };
+      } else if (action.workflow === 'scene_book') {
+        // 推演整书的范围：from、to 为章名或标识，都不给是整本书；回合上限、视角与审核按默认。
+        const ref = async (r: string | null): Promise<Result<string | null, string>> => {
+          if (r === null || r.trim() === '') return ok(null);
+          const c = await env.findChapter(r);
+          return c.ok ? ok(c.value.id) : c;
+        };
+        const from = await ref(action.from);
+        if (!from.ok) return failed(from.error);
+        const to = await ref(action.to);
+        if (!to.ok) return failed(to.error);
+        params = { from: from.value, to: to.value, maxRounds: DEFAULT_SIM_ROUNDS, pov: null, review: true };
       } else if (action.workflow === 'scene_chapter') {
         // 推演成章要选一章：没说是哪一章就先问，不替作者选。
         if (action.chapter === null || action.chapter.trim() === '') return failed('作者还没说推演哪一章（要有章节计划与出场人物）：先问清楚再开始，不要替作者选');

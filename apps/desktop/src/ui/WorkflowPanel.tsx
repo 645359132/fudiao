@@ -10,6 +10,7 @@ import { IconButton } from './IconButton';
 import { PipelineBoard } from './PipelineBoard';
 import { PlanDraftChapters } from './PlanDraftChapters';
 import { BeatsStepView, NarrateStepView, SceneStepView, SimStepView, WriteAfterView } from './SceneChapterSteps';
+import { SceneBookAdoptView, SceneBookChaptersView, SceneBookCheckView } from './SceneBookSteps';
 import { useApp } from './store-context';
 import { useDraftSaver } from './useDraftSaver';
 
@@ -17,6 +18,7 @@ import { useDraftSaver } from './useDraftSaver';
 const AUTO_NOTE: Readonly<Record<WorkflowKey, string>> = {
   quick_book: '会替换大纲或覆盖计划时仍停下',
   scene_chapter: '场景与节拍表直接采用，采纳正文时仍停下',
+  scene_book: '正文逐章写入，跑完停在采纳推演草案',
   book_audit: '找到的疑点直接核对',
   next_volume: '卷纲与计划直接采用',
   opening_polish: '处理问题这一步仍等你',
@@ -74,6 +76,18 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
   const [chapterId, setChapterId] = useState(() => (info.key === 'scene_chapter' ? (bookChapters.find((c) => simReady(c.id) === null)?.id ?? '') : ''));
   const [sceneId, setSceneId] = useState('');
   const [maxRounds, setMaxRounds] = useState(DEFAULT_SIM_ROUNDS);
+  // 推演整书（B86）：范围（从/到）、视角规则（第一个出场人物或指定的人物）、写完后是否审核。
+  const [pov, setPov] = useState('');
+  const [review, setReview] = useState(true);
+  const characters = useApp((s) => s.entities).filter((e) => e.kind === 'character');
+  const bookReady = (id: string) => {
+    const item = planning?.chapters.find((c) => c.chapter.id === id);
+    const plan = item?.plan ?? null;
+    return plan === null ? '没有章节计划' : plan.castIds.length === 0 ? '计划里没有出场人物' : item?.hasText === true ? '已有正文' : plan.status !== 'todo' ? '不是待写' : null;
+  };
+  const fromIndex = from === '' ? 0 : bookChapters.findIndex((x) => x.id === from);
+  const toIndex = to === '' ? bookChapters.length - 1 : bookChapters.findIndex((x) => x.id === to);
+  const bookCount = info.key !== 'scene_book' ? 0 : bookChapters.filter((c, i) => i >= Math.min(fromIndex, toIndex) && i <= Math.max(fromIndex, toIndex) && bookReady(c.id) === null).length;
   useEffect(() => {
     if (info.key === 'scene_chapter' && scenes === null) void loadScenes();
   }, [info.key, scenes, loadScenes]);
@@ -93,13 +107,22 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
               ? { idea, entries: Math.max(1, samples.filter((x) => x.text.trim() !== '').length) }
               : key === 'scene_chapter'
                 ? { chapterId, chapterTitle: bookChapters.find((c) => c.id === chapterId)?.title ?? '', sceneId: sceneId === '' ? null : sceneId, maxRounds }
-                : { idea, genre, chapters, wordsPerChapter: words, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null };
+                : key === 'scene_book'
+                  ? { from: from === '' ? null : from, to: to === '' ? null : to, maxRounds, pov: pov === '' ? null : pov, review }
+                  : { idea, genre, chapters, wordsPerChapter: words, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null };
   const budgetUsd = budget.trim() === '' ? null : Number(budget);
   const touched = () => setQuote(null);
   // 分卷方式与章数搭不搭：不搭时不能开始，提示怎样改。
   // 这次会走的几步：一键成书按章数在“章节计划”与“全书卷纲、逐卷拆章”之间换。
   const flow = info.stepsFor(params);
-  const volumeIssue = key === 'quick_book' ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null }) : chapterIssue;
+  const volumeIssue =
+    key === 'quick_book'
+      ? quickBookVolumeIssue({ chapters, volumeMode, volumeCount: volumeMode === 'fixed' ? volumeCount : null })
+      : key === 'scene_book'
+        ? bookCount === 0
+          ? '范围里没有可以推演的章（要有章节计划与出场人物、还没有正文）'
+          : null
+        : chapterIssue;
   const totalWords = chapters * words;
   return (
     <form
@@ -237,6 +260,88 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
           </div>
           <p className="muted">
             适合对峙、谈判、揭底这样的关键场：出场人物成为角色，各按自己知道的事行动，程序裁决；推完由你选视角写成正文采纳进这一章，写手再接着补其余的情节点。写手只接着已有正文写：推演之前的引入请在采纳时留作“已写出”，或自己补写。
+          </p>
+        </>
+      ) : key === 'scene_book' ? (
+        <>
+          <div className="form-row">
+            <label>
+              从
+              <select
+                aria-label="从"
+                value={from}
+                onChange={(e) => {
+                  setFrom(e.currentTarget.value);
+                  touched();
+                }}
+              >
+                <option value="">第一章</option>
+                {bookChapters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              到
+              <select
+                aria-label="到"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.currentTarget.value);
+                  touched();
+                }}
+              >
+                <option value="">最后一章</option>
+                {bookChapters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              每章回合上限
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={maxRounds}
+                onChange={(e) => {
+                  setMaxRounds(Number(e.currentTarget.value));
+                  touched();
+                }}
+              />
+            </label>
+          </div>
+          <div className="form-row">
+            <label>
+              视角
+              <select aria-label="视角" value={pov} onChange={(e) => setPov(e.currentTarget.value)}>
+                <option value="">本章计划的第一个出场人物</option>
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}（在本章出场时）
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={review}
+                onChange={(e) => {
+                  setReview(e.currentTarget.checked);
+                  touched();
+                }}
+              />
+              写完后审核
+            </label>
+          </div>
+          <p className="muted">
+            {volumeIssue ?? `范围里 ${bookCount} 章可以推演（有章节计划与出场人物、还没有正文的章）。`}
+            每章依次建场景、推演、写节拍表、把推演写成的正文直接写进这一章（写入前存快照，可以回退），写手再补全其余情节点。推演里的事件与人物认知不自动写进作品：跑完后在“采纳推演草案”里逐章复核。推演比写手贵几倍，先估算费用再开始。
           </p>
         </>
       ) : key === 'opening_polish' ? (
@@ -439,7 +544,7 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
         <p className="wf-quote muted" aria-live="polite">
           {quote === null
             ? '开始前可以先估算用量与费用。'
-            : `预计约 ${quote.calls} 次调用、${Math.round((quote.inputTokens + quote.outputTokens) / 1000)} 千 Token，${quote.costUsd === null ? `${quote.model ?? '默认模型'}没有配置价格，费用未知（预算上限因此不起作用）` : `约 $${quote.costUsd.toFixed(2)}（${quote.model ?? ''}）`}。思考的多少因模型而异，只作参考。`}
+            : `${key === 'scene_book' ? `${quote.written ?? 0} 章，` : ''}预计约 ${quote.calls} 次调用、${Math.round((quote.inputTokens + quote.outputTokens) / 1000)} 千 Token，${quote.costUsd === null ? `${quote.model ?? '默认模型'}没有配置价格，费用未知（预算上限因此不起作用）` : `约 $${quote.costUsd.toFixed(2)}（${quote.model ?? ''}）`}。思考的多少因模型而异，只作参考。`}
         </p>
         <div className="form-actions">
           <button type="button" onClick={() => void quoteWorkflow(key, params).then(setQuote)}>
@@ -919,6 +1024,7 @@ function Badge({ tone, children }: { readonly tone: Tone; readonly children: Rea
 const WORKFLOW_LOOK: Readonly<Record<WorkflowKey, { readonly icon: IconName; readonly tagline: string }>> = {
   quick_book: { icon: 'wand', tagline: '从一句想法写成一整本书' },
   scene_chapter: { icon: 'stage', tagline: '选一章关键场，让角色推演出走向，再写成正文' },
+  scene_book: { icon: 'stage', tagline: '按章依次推演整本书，正文自动写入，事件与认知跑完后复核采纳' },
   book_audit: { icon: 'review', tagline: '查跨章矛盾、伏笔遗漏与各章的问题' },
   next_volume: { icon: 'layers', tagline: '接着已写的章节规划并写下一卷' },
   opening_polish: { icon: 'pen', tagline: '按开篇的要求诊断前几章，改完对比' },
@@ -943,8 +1049,9 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
     </button>
   );
   const scene = view.run.workflow === 'scene_chapter';
+  const book = view.run.workflow === 'scene_book';
   const buttons = [
-    waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') && !scene ? button('采用', 'adopt', true) : null,
+    waiting && step.kind === 'draft' && step.key !== 'seed' && step.key !== 'suspects' && step.key !== 'outline' && step.key !== 'volumes' && !(view.run.workflow === 'cast_completion' && step.key === 'draft') && !(view.run.workflow === 'benchmark' && step.key === 'compare') && !scene ? button(book ? '全部采纳其余的' : '采用', 'adopt', true) : null,
     waiting && step.kind === 'manual' ? button(step.key === 'export' ? '导出' : step.key === 'handle' ? '处理完了，复诊' : '做这一步', 'adopt', true) : null,
     step.status === 'stale' ? button('保留结果', 'keep', true) : null,
     step.status !== 'pending' && step.status !== 'running' && !(step.status === 'done' && step.kind === 'draft' && step.changes !== null) ? button('重做这一步', 'redo') : null,
@@ -1000,7 +1107,15 @@ function StepDetail({ view, step }: { readonly view: WorkflowView; readonly step
       {scene && step.key === 'beats' ? <BeatsStepView key={`${step.version}`} view={view} step={step} /> : null}
       {scene && step.key === 'narrate' ? <NarrateStepView key={`${step.version}`} view={view} step={step} /> : null}
       {scene && step.key === 'write' ? <WriteAfterView view={view} /> : null}
-      {step.key === 'write' && !scene ? (
+      {book && step.key === 'check' ? <SceneBookCheckView step={step} /> : null}
+      {book && step.key === 'adopt' ? <SceneBookAdoptView view={view} step={step} /> : null}
+      {book && step.key === 'chapters' ? (
+        <>
+          {/* 与一键成书的写章节相同：操作放在看板上面。 */}
+          {actions}
+          <SceneBookChaptersView view={view} step={step} />
+        </>
+      ) : step.key === 'write' && !scene ? (
         <>
           {/* 写章节一步下面是整本书的成书进度（长篇有几百行）：这一步的操作放在看板上面，不用翻到底。 */}
           {actions}

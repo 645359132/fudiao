@@ -3,13 +3,16 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { PlanChapterView } from '../app/planning';
 import type { WriterJob } from '../state/store';
 import { PLAN_STATUS_LABEL } from '../app/labels';
+import { SCENE_BOOK_STAGE_LABEL, type SceneBookStageNote } from '../app/workflows';
 import { BookRevision } from './BookRevision';
 import { useApp } from './store-context';
 
 
-function writingCell(item: PlanChapterView, job: WriterJob | undefined, queued: boolean): string {
+function writingCell(item: PlanChapterView, job: WriterJob | undefined, queued: boolean, sceneBook: SceneBookStageNote | null): string {
   const { plan } = item;
   if (job !== undefined && job.stage === 'writing') return `正在写${job.total > 0 ? `（${job.done} / ${job.total} 段）` : ''}`;
+  // 推演整书（B86）正在做这一章：写手还没接手的阶段也在这里显示。
+  if (sceneBook !== null && sceneBook.chapterId === item.chapter.id) return `推演成章：${SCENE_BOOK_STAGE_LABEL[sceneBook.stage]}`;
   if (queued) return '排队中';
   if (plan === null) return item.hasText ? '有正文' : '—';
   if (plan.status === 'writing' && plan.progress !== null) return `写作中（${plan.progress.done} / ${plan.progress.segments.length} 段）`;
@@ -39,6 +42,7 @@ export const PLAN_VIRTUAL_FROM = 60;
 
 type RowState = {
   readonly jobs: readonly WriterJob[];
+  readonly sceneBook: SceneBookStageNote | null;
   readonly queued: ReadonlySet<string>;
   readonly building: string | null;
   readonly reviewing: string | null;
@@ -67,7 +71,7 @@ function ProgressTable({ chapters, state }: { readonly chapters: readonly PlanCh
   const top = items === null ? 0 : (items[0]?.start ?? 0);
   const bottom = items === null ? 0 : Math.max(0, virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0));
   const measure = virtual ? virtualizer.measureElement : undefined;
-  const { jobs, queued, building, reviewing, idle, reviewOne, openIssues } = state;
+  const { jobs, sceneBook, queued, building, reviewing, idle, reviewOne, openIssues } = state;
   return (
     <div className={virtual ? 'board-scroll' : undefined} ref={scrollRef}>
       <table className="source-table" aria-label="各章进度">
@@ -94,7 +98,7 @@ function ProgressTable({ chapters, state }: { readonly chapters: readonly PlanCh
               <tr key={id} ref={measure} data-index={index} aria-label={item.chapter.title}>
                 <th scope="row">{item.chapter.title}</th>
                 <td>{item.plan === null ? '没有' : item.problems.length > 0 ? `有（${item.problems.length} 处要核对）` : '有'}</td>
-                <td>{writingCell(item, mine, queued.has(id))}</td>
+                <td>{writingCell(item, mine, queued.has(id), sceneBook)}</td>
                 <td>{memoryCell(item, mine?.stage === 'memory' || building === id)}</td>
                 <td>{reviewCell(item, mine?.stage === 'review' || reviewing === id)}</td>
                 <td>
@@ -132,6 +136,7 @@ export function PipelineBoard() {
   const planning = useApp((s) => s.planning);
   const job = useApp((s) => s.writerJob);
   const jobs = useApp((s) => s.writerJobs);
+  const sceneBook = useApp((s) => s.sceneBookStage);
   const reviewing = useApp((s) => s.reviewingChapterId);
   const building = useApp((s) => s.memoryBuilding);
   // AI 助手在后台写某一章时，这本书的写手已经在用（一本书一次只由一个写手写）。
@@ -183,7 +188,7 @@ export function PipelineBoard() {
       ) : null}
       <ProgressTable
         chapters={planning.chapters}
-        state={{ jobs, queued, building, reviewing, idle, reviewOne: (id) => void reviewOne(id), openIssues: (id) => void openIssues(id) }}
+        state={{ jobs, sceneBook, queued, building, reviewing, idle, reviewOne: (id) => void reviewOne(id), openIssues: (id) => void openIssues(id) }}
       />
       <div className="skill-actions">
         <button type="button" disabled={!idle || ids.length === 0} onClick={() => void write(ids.slice(0, 1), { review })}>

@@ -33,6 +33,7 @@ import {
   BookSeedOutput,
   CastCompletionOutput,
   RelationChangesOutput,
+  SceneCoverageOutput,
   DirectorProposalOutput,
   VolumeOutlineOutput,
   BookVolumesOutput,
@@ -78,6 +79,7 @@ const OUTPUTS: Readonly<Record<string, z.ZodType>> = {
   BookVolumesOutput,
   CastCompletionOutput,
   RelationChangesOutput,
+  SceneCoverageOutput,
   BenchmarkBookOutput,
   BenchmarkCompareOutput,
   AssistantTurnOutput,
@@ -946,6 +948,23 @@ export function renderRelationChanges(input: RelationChangesInput): Result<Rende
     relations: input.relations.map((r) => ({ label: r.label, text: r.text, description: r.description.trim() })),
     hasRelations: input.relations.length > 0,
     chapters: input.chapters.map((c) => ({ label: c.label, title: c.title, summary: c.summary.trim() === '' ? '（没有梗概）' : c.summary.trim(), cast: [...c.cast] })),
+  });
+}
+
+export type SceneCoverageInput = {
+  readonly goal: string;
+  /** 本章计划的情节点，按顺序。 */
+  readonly beats: readonly string[];
+  /** 推演写成、已写进这一章的正文。 */
+  readonly text: string;
+};
+
+/** 推演整书（B86）：推演写成的正文已经写出了本章计划里的哪些情节点。不含角色视图，不涉及信息隔离。 */
+export function renderSceneCoverage(input: SceneCoverageInput): Result<RenderedPrompt, string> {
+  return renderTemplate('scene_coverage', {
+    goal: input.goal.trim() === '' ? '（没有写）' : input.goal.trim(),
+    beats: input.beats.map((text, i) => ({ n: i + 1, text })),
+    text: input.text,
   });
 }
 

@@ -7,6 +7,7 @@ export type {
   CandidateTextInput,
   RenderedPrompt,
   RulingInput,
+  SceneCoverageInput,
   TemplateId,
 } from './render';
 export {
@@ -33,6 +34,7 @@ export {
   renderCastCompletion,
   renderRelationChanges,
   RELATION_CHANGES_LIMIT,
+  renderSceneCoverage,
   renderOpeningReview,
   renderVolumeOutline,
   renderBookVolumes,
@@ -67,6 +69,7 @@ export {
   BookVolumesOutput,
   CastCompletionOutput,
   RelationChangesOutput,
+  SceneCoverageOutput,
   PlanDraftOutput,
   BookSeedOutput,
   type BookSeedData,

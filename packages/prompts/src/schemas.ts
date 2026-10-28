@@ -361,6 +361,10 @@ export const RelationChangesOutput = z.object({
 });
 export type RelationChangesOutput = z.infer<typeof RelationChangesOutput>;
 
+/** 推演整书（B86）：推演写成的正文已经写出了本章计划里的哪些情节点（序号从 1 起），写手从其余的接着写。 */
+export const SceneCoverageOutput = z.object({ covered: z.array(z.number().int().min(1)) });
+export type SceneCoverageOutput = z.infer<typeof SceneCoverageOutput>;
+
 /** 扫榜拆书（B79）：一本对标作品的拆解，只有结构与技法；引文由应用层做复述检查。 */
 export const BenchmarkBookOutput = z.object({
   genre: z.string(),

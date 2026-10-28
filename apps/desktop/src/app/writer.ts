@@ -4,7 +4,7 @@
 // 每段的步骤键是“章节 + 这次写作的标识 + 段号”：中断后续写时，已写入的段跳过，已完成但没写入的调用复用记录，不重复计费。
 // 输出被截断的段不写入：停下说明，续写时这一段换一个步骤键（加“重写次数”），不复用截断的结果。
 import type { CallOptions } from '@fudiao/llm';
-import { renderWriterChapter } from '@fudiao/prompts';
+import { renderSceneCoverage, renderWriterChapter, SceneCoverageOutput } from '@fudiao/prompts';
 import { err, ok, type Result } from '@fudiao/shared';
 import {
   appendWrittenSegment,
@@ -36,6 +36,8 @@ export const TAIL_CHARS = 1500;
 export const segmentContentTokens = (words: number) => words * 2;
 /** 每段的输出上限：内容之外另留出思考的余量。 */
 const segmentOutputTokens = (words: number) => segmentContentTokens(words) + THINKING_ALLOWANCE;
+/** 判断推演正文写出了哪些情节点（B86）的输出上限：几个序号，另留思考的余量。 */
+const COVERAGE_OUTPUT_TOKENS = 500 + THINKING_ALLOWANCE;
 
 export type WriterOutcome = {
   /** written：本章写完；cancelled：作者取消；stopped：中途停下（原因见 reason），已写入的段保留，可以续写。 */
@@ -217,7 +219,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
      * （一键回退回到采纳后的样子），进度的第一段是已写出的情节点、记为已写，之后 writeChapter 从第二段接着写；
      * 情节点都已写出时不开写作，计划直接标为已写。已有进度（中断后继续）时不重建，只返回剩余的段数。
      */
-    async startWriterAfter(chapterId: string, writtenBeats: readonly string[]): Promise<Result<{ readonly remaining: number }, AppError>> {
+    async startWriterAfter(chapterId: string, writtenBeats: readonly string[], options: { readonly snapshotId?: string } = {}): Promise<Result<{ readonly remaining: number }, AppError>> {
       const s = session();
       if (s === null) return err({ code: 'no_work' });
       const { port } = s;
@@ -236,16 +238,40 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
         const written = await setPlanStatus(port, plan, 'written', ctx());
         return written.ok ? ok({ remaining: 0 }) : err(repo(written.error));
       }
-      const snapshot = await createSnapshot(port, { id: deps.ids.next(), chapterId, reason: 'writer' }, ctx());
-      if (!snapshot.ok) return err(repo(snapshot.error));
+      // 推演整书（B86）给出写入推演正文之前存的快照：写手运行沿用它，“回退写手写入”回到推演正文写入之前。
+      let snapshotId = options.snapshotId ?? null;
+      if (snapshotId === null) {
+        const snapshot = await createSnapshot(port, { id: deps.ids.next(), chapterId, reason: 'writer' }, ctx());
+        if (!snapshot.ok) return err(repo(snapshot.error));
+        snapshotId = snapshot.value.id;
+      }
       const started = await startWriterRun(
         port,
         plan,
-        { runId: deps.ids.next(), segments: segments.segments.map((b) => [...b]), words: [...segments.words], done: segments.done, snapshotId: snapshot.value.id },
+        { runId: deps.ids.next(), segments: segments.segments.map((b) => [...b]), words: [...segments.words], done: segments.done, snapshotId },
         ctx(),
       );
       if (!started.ok) return err(repo(started.error));
       return ok({ remaining });
+    },
+
+    /**
+     * 推演整书（B86）：推演写成的正文已写进这一章，问模型它写出了本章计划里的哪些情节点，写手从其余的接着写。
+     * 对不上的序号丢弃；没有计划或没有情节点时为空。
+     */
+    async beatsCovered(chapterId: string, text: string, stepKey: string, options: CallOptions = {}): Promise<Result<readonly string[], AppError>> {
+      const s = session();
+      if (s === null) return err({ code: 'no_work' });
+      const plan = await getChapterPlan(s.port, chapterId);
+      if (!plan.ok) return err(repo(plan.error));
+      const beats = plan.value?.beats ?? [];
+      if (plan.value === null || beats.length === 0) return ok([]);
+      const prompt = renderSceneCoverage({ goal: plan.value.goal, beats, text });
+      if (!prompt.ok) return err(settings(prompt.error));
+      const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: COVERAGE_OUTPUT_TOKENS, effort: 'low', stepKey }, SceneCoverageOutput, options);
+      if (!result.ok) return result;
+      const covered = new Set(result.value.value.covered);
+      return ok(beats.filter((_, i) => covered.has(i + 1)));
     },
 
     /** 回退到写手写入前：恢复“写手写入”快照（现稿先存为恢复前快照），清除进度，计划回到待写。 */
@@ -279,7 +305,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
   return {
     ...cases,
     writeChapter: (chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> => locked(chapterId, () => cases.writeChapter(chapterId, events)),
-    startWriterAfter: (chapterId: string, writtenBeats: readonly string[]) => locked(chapterId, () => cases.startWriterAfter(chapterId, writtenBeats)),
+    startWriterAfter: (chapterId: string, writtenBeats: readonly string[], options?: { readonly snapshotId?: string }) => locked(chapterId, () => cases.startWriterAfter(chapterId, writtenBeats, options)),
     withWriterLock: locked,
     /** 写手此刻是不是正在写这一章（按章节建推演场景时，前文梗概据此标“还没写完”）。 */
     isWriting: (chapterId: string) => writing.has(chapterId),
