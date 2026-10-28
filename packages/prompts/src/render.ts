@@ -539,9 +539,90 @@ export function renderDirectorProposal(input: DirectorInput): Result<RenderedPro
   });
 }
 
-/** 场景配置草稿（B39）。 */
-export function renderSceneDraft(description: string): Result<RenderedPrompt, string> {
-  return renderTemplate('scene_draft', { description });
+/** 一个人物知道的一件事（认知层，B59 补充）：认知或说法，带来源方式与相信程度。 */
+export type CastKnowledgeFact = {
+  readonly text: string;
+  readonly kind: 'belief' | 'claim';
+  readonly modality: 'observed' | 'heard' | 'inferred' | 'claimed' | null;
+  readonly confidence: number | null;
+};
+
+const MODALITY_LABEL = { observed: '亲身经历', heard: '听到', inferred: '推测', claimed: '他人说法' } as const;
+
+/** 一条认知写成一句：来源方式、内容与相信程度（1 时不写），与角色视图里的用词一致。 */
+export function knowledgeLine(f: CastKnowledgeFact): string {
+  const how = f.kind === 'claim' ? '说过' : f.modality === null ? '知道' : MODALITY_LABEL[f.modality];
+  const confidence = f.kind === 'belief' && f.confidence !== null && f.confidence < 1 ? `（相信程度 ${f.confidence}）` : '';
+  return `${how}：${f.text.trim()}${confidence}`;
+}
+
+/** 出场人物的认知层：知道的事写成一行一句，不在场的章合成一句。 */
+function castKnowledge(c: { readonly knows?: readonly CastKnowledgeFact[]; readonly absent?: readonly string[] }) {
+  const knows = (c.knows ?? []).map(knowledgeLine);
+  const absent = (c.absent ?? []).join('、');
+  return { knows, hasKnows: knows.length > 0, absent, hasAbsent: absent !== '' };
+}
+
+/** 按章节计划建场景时给模型的作品材料（B39 补充）。 */
+export type SceneChapterMaterials = {
+  readonly title: string;
+  readonly genre: string;
+  readonly chapterTitle: string;
+  readonly goal: string;
+  readonly beats: readonly string[];
+  readonly treatment: string;
+  readonly volumeSummary: string;
+  /** present、absent：最近几章里在场与不在场的章（章名加梗概）。 */
+  readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string; readonly knows: readonly CastKnowledgeFact[]; readonly present: readonly string[]; readonly absent: readonly string[] }[];
+  readonly relations: readonly WriterRelation[];
+  readonly worldFacts: readonly string[];
+  readonly memories: readonly { readonly title: string; readonly summary: string }[];
+  readonly openThreads: readonly string[];
+  readonly locations: readonly { readonly name: string; readonly description: string }[];
+  readonly toPayoff: readonly { readonly title: string; readonly reveal: string }[];
+  readonly mustNotReveal: readonly string[];
+};
+
+/** 场景配置草稿的输入：作者的描述，与（按某一章建时）这一章的材料；二者至少一个。 */
+export type SceneDraftInput = { readonly description: string; readonly chapter?: SceneChapterMaterials };
+
+/** 场景配置草稿（B39）：由一段描述，或由一章的计划、人物与各自知道的事整理成场景。 */
+export function renderSceneDraft(input: SceneDraftInput): Result<RenderedPrompt, string> {
+  const chapter = input.chapter;
+  return renderTemplate('scene_draft', {
+    description: input.description.trim(),
+    hasDescription: input.description.trim() !== '',
+    chapter:
+      chapter === undefined
+        ? false
+        : {
+            title: chapter.title,
+            genre: chapter.genre,
+            chapterTitle: chapter.chapterTitle,
+            goal: chapter.goal,
+            treatment: chapter.treatment.trim(),
+            volumeSummary: chapter.volumeSummary.trim(),
+            beats: [...chapter.beats],
+            hasBeats: chapter.beats.length > 0,
+            cast: chapter.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim(), ...castKnowledge(c), present: c.present.join('、'), hasPresent: c.present.length > 0 })),
+            hasCast: chapter.cast.length > 0,
+            relations: chapter.relations.map((r) => ({ ...r, description: r.description.trim() })),
+            hasRelations: chapter.relations.length > 0,
+            hasSecretRelations: chapter.relations.some((r) => r.secret),
+            facts: [...chapter.worldFacts],
+            hasFacts: chapter.worldFacts.length > 0,
+            memories: chapter.memories.map((m) => ({ title: m.title, summary: m.summary })),
+            hasMemories: chapter.memories.length > 0,
+            openThreads: [...chapter.openThreads],
+            hasOpenThreads: chapter.openThreads.length > 0,
+            locations: chapter.locations.map((l) => ({ name: l.name, description: l.description.trim() })),
+            hasLocations: chapter.locations.length > 0,
+            toPayoff: chapter.toPayoff.map((f) => ({ title: f.title, reveal: f.reveal })),
+            hasToPayoff: chapter.toPayoff.length > 0,
+            mustNotReveal: [...chapter.mustNotReveal],
+            hasMustNotReveal: chapter.mustNotReveal.length > 0,
+          },
+  });
 }
 
 export type WriterChapterInput = {
@@ -555,8 +636,11 @@ export type WriterChapterInput = {
   /** 启用的写作技能：名称、适用说明（SKILL.md 的 description）与指令。 */
   readonly skills: readonly { readonly name: string; readonly description: string; readonly text: string }[];
   readonly avoidPhrases: readonly string[];
-  /** state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。 */
-  readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string }[];
+  /**
+   * state：长篇记忆中这个人物最近一次出场后的状态，没有时为空。
+   * knows、absent（认知层，B59 补充）：这个人物知道或相信的事，与最近几章里他不在场、前文没写他得知的章（章名加梗概）。
+   */
+  readonly cast: readonly { readonly name: string; readonly description: string; readonly state: string; readonly knows?: readonly CastKnowledgeFact[]; readonly absent?: readonly string[] }[];
   /**
    * 人物关系网（B73）中适用于本章、至少一端出场的关系。读作“from 是 to 的 label”，mutual 时为“from 与 to：label”；
    * secret 为读者还不知道的关系（可以暗示，不要点明）。
@@ -602,8 +686,10 @@ export function renderWriterChapter(input: WriterChapterInput): Result<RenderedP
     hasSkills: input.skills.length > 0,
     avoidPhrases: [...input.avoidPhrases],
     hasAvoid: input.avoidPhrases.length > 0,
-    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim() })),
+    cast: input.cast.map((c) => ({ name: c.name, description: c.description.trim(), state: c.state.trim(), ...castKnowledge(c) })),
     hasCast: input.cast.length > 0,
+    // 有谁知道什么、谁不在场时，要求人物只依据自己知道的说话与行动。
+    hasKnowledge: input.cast.some((c) => (c.knows ?? []).length > 0 || (c.absent ?? []).length > 0),
     relations: (input.relations ?? []).map((r) => ({ ...r, description: r.description.trim() })),
     hasRelations: (input.relations ?? []).length > 0,
     hasSecretRelations: (input.relations ?? []).some((r) => r.secret),

@@ -11,16 +11,8 @@ import {
   createSnapshot,
   findCompletedCall,
   getChapterPlan,
-  getProject,
-  listChapterMemories,
   listChapters,
-  listChaptersWithText,
-  listVolumes,
-  listEntities,
-  listFacts,
-  listForeshadows,
   listParagraphs,
-  listRelationships,
   rollbackWriterRun,
   startWriterRun,
   type Chapter,
@@ -28,9 +20,9 @@ import {
   type RepoError,
   type SavedParagraph,
   type SqlPort,
-  listChapterPlans,
 } from '@fudiao/store';
-import { effectiveAvoidPhrases, foreshadowsForChapter, normalizePunctuation, planSegments, relationsForCast, splitParagraphs } from '@fudiao/writing';
+import { normalizePunctuation, planSegments, splitParagraphs } from '@fudiao/writing';
+import { gatherChapterMaterials } from './chapter-materials';
 import type { AppError } from './errors';
 import { THINKING_ALLOWANCE, unusableCall, type modelRunner } from './model-runner';
 import type { AppDeps } from './ports';
@@ -38,12 +30,6 @@ import { skillsForStage } from './writing-skills';
 
 /** 带给写手的上文长度（字）：上一章的结尾与本章已写的结尾。 */
 export const TAIL_CHARS = 1500;
-/** 前文梗概最多带多少字，超出时先去掉最远的章节。 */
-export const MEMORY_CHARS = 6000;
-/** 相关事实最多带多少条。 */
-export const MAX_FACTS = 30;
-/** 交给写手的人物关系最多这么多条（两端都出场的在前）。 */
-export const MAX_RELATIONS = 30;
 
 /** 写手一段要写的内容最多约多少 Token：目标字数的两倍。 */
 export const segmentContentTokens = (words: number) => words * 2;
@@ -88,75 +74,19 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
   // 两个写手会互相当成“作者改了本章”而停下。写作期间也不能回退这一章。
   const writing = new Set<string>();
 
-  /** 本章不随分段变化的材料：作品、技能、人物、事实、伏笔、前文梗概与上一章的结尾。 */
+  /** 本章不随分段变化的材料：作品、技能、人物（各自知道的事与在不在场）、事实、伏笔、前文梗概与上一章的结尾。 */
   async function materials(port: SqlPort, chapter: Chapter, chapters: readonly Chapter[], plan: ChapterPlan) {
-    const [work, skills, entities, facts, foreshadows, memories, withText, volumes, relations, plans] = await Promise.all([
-      getProject(port),
-      skillsForStage(port, 'writing', deps),
-      listEntities(port),
-      listFacts(port),
-      listForeshadows(port),
-      listChapterMemories(port),
-      listChaptersWithText(port),
-      listVolumes(port),
-      listRelationships(port),
-      listChapterPlans(port),
-    ]);
-    if (!work.ok) return err(repo(work.error));
-    if (!skills.ok) return err(repo(skills.error));
-    if (!entities.ok) return err(repo(entities.error));
-    if (!facts.ok) return err(repo(facts.error));
-    if (!foreshadows.ok) return err(repo(foreshadows.error));
-    if (!memories.ok) return err(repo(memories.error));
-    if (!withText.ok) return err(repo(withText.error));
-    if (!volumes.ok) return err(repo(volumes.error));
-    if (!relations.ok) return err(repo(relations.error));
-    if (!plans.ok) return err(repo(plans.error));
-    const volume = volumes.value.find((v) => v.id === chapter.volumeId);
-
-    const order = new Map(chapters.map((c, i) => [c.id, i]));
-    const index = order.get(chapter.id) ?? 0;
-    const cast = entities.value.filter((e) => plan.castIds.includes(e.id));
-    const castIds = new Set(cast.map((c) => c.id));
-    const nameOf = new Map(entities.value.map((e) => [e.id, e.name]));
-    const fs = foreshadowsForChapter(plan, foreshadows.value, order);
-
-    // 前文梗概：优先用长篇记忆（待复核的也用，它仍是最接近正文的梗概），没有时用作者写的章节梗概；从近到远选入，超出预算时去掉最远的。
-    // 正文已经清空（例如回退之后）的章节，留下的记忆不再对应任何正文，不用。
-    const hasText = new Set(withText.value);
-    const memoryOf = new Map(memories.value.filter((m) => hasText.has(m.chapterId)).map((m) => [m.chapterId, m]));
-    const earlier: { title: string; summary: string }[] = [];
-    let used = 0;
-    // 前面还没写、正在写或还没整理记忆的章节（例如作者跳着写）：用它的章节计划顶上，至少知道那里要发生什么。
-    const planOf = new Map(plans.value.map((p) => [p.chapterId, p]));
     /**
      * 写手此刻正在写的章节（例如 AI 助手在后台修订它）：它的正文还不是完整的一章，不当作上一章的结尾。
      * 写手停下后作者自己写完的章节计划仍停在“写作中”，所以看的是此刻在不在写，不看计划的状态。
      */
     const unfinished = (id: string) => writing.has(id);
-    const planned = (c: Chapter) => {
-      const goal = planOf.get(c.id)?.goal.trim() ?? '';
-      if (goal === '') return '';
-      return `（${!hasText.has(c.id) ? '还没写，' : unfinished(c.id) ? '还没写完，' : ''}按计划）${goal}`;
-    };
-    for (const c of chapters.slice(0, index).reverse()) {
-      const summary = (memoryOf.get(c.id)?.summary ?? c.summary).trim() || planned(c);
-      if (summary === '') continue;
-      if (used + summary.length > MEMORY_CHARS) break;
-      used += summary.length;
-      earlier.unshift({ title: c.title, summary });
-    }
+    const [skills, gathered] = await Promise.all([skillsForStage(port, 'writing', deps), gatherChapterMaterials(port, { chapter, chapters, plan, unfinished })]);
+    if (!skills.ok) return err(repo(skills.error));
+    if (!gathered.ok) return gathered;
+    const m = gathered.value;
 
-    // 人物最近的状态与伏笔在前文中的进展，取自前面各章的长篇记忆（从远到近，后面的覆盖前面的）。
-    const stateOf = new Map<string, string>();
-    const progressOf = new Map<string, string[]>();
-    for (const c of chapters.slice(0, index)) {
-      const memory = memoryOf.get(c.id);
-      if (memory === undefined) continue;
-      for (const [id, state] of Object.entries(memory.castState)) stateOf.set(id, state);
-      for (const [id, progress] of Object.entries(memory.foreshadowProgress)) progressOf.set(id, [...(progressOf.get(id) ?? []), `${c.title}：${progress}`]);
-    }
-
+    const index = chapters.findIndex((c) => c.id === chapter.id);
     const previous = chapters[index - 1];
     let previousEnding = '';
     if (previous !== undefined && !unfinished(previous.id)) {
@@ -166,41 +96,23 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     }
 
     return ok({
-      title: work.value?.title ?? '',
-      genre: work.value?.genre ?? '',
-      chapterTitle: chapter.title,
-      ...(volume !== undefined && { volume: { title: volume.title, summary: volume.summary } }),
-      goal: plan.goal,
-      treatment: plan.treatment,
+      title: m.title,
+      genre: m.genre,
+      chapterTitle: m.chapterTitle,
+      ...(m.volume !== null && { volume: m.volume }),
+      goal: m.goal,
+      treatment: m.treatment,
       skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
-      avoidPhrases: effectiveAvoidPhrases(work.value?.avoidPhrases ?? null),
-      cast: cast.map((c) => ({ name: c.name, description: c.description, state: stateOf.get(c.id) ?? '' })),
-      // 人物关系网（B73）：本章成立、至少一端出场的关系。
-      relations: relationsForCast(relations.value, castIds, index, order, MAX_RELATIONS).map((r) => ({
-        from: nameOf.get(r.fromId) ?? '',
-        to: nameOf.get(r.toId) ?? '',
-        label: r.label,
-        mutual: r.mutual,
-        description: r.description,
-        secret: r.secret,
-      })),
-      facts: facts.value
-        .filter((f) => {
-          if (f.status !== 'confirmed') return false;
-          // 只用适用于本章的事实（与上下文、审核相同）：后面章节才成立的事、已经不再成立的事都不给写手。
-          const from = f.validFromChapterId === null ? undefined : order.get(f.validFromChapterId);
-          const to = f.validToChapterId === null ? undefined : order.get(f.validToChapterId);
-          if ((from !== undefined && from > index) || (to !== undefined && to < index)) return false;
-          return f.subjectIds.some((id) => castIds.has(id)) || (f.holderId !== null && castIds.has(f.holderId));
-        })
-        .slice(0, MAX_FACTS)
-        .map((f) => f.content),
-      memories: earlier,
-      toPlant: fs.toPlant.map((f) => ({ title: f.title, content: f.content })),
-      toPayoff: fs.toPayoff.map((f) => ({ title: f.title, content: f.content, reveal: f.reveal, progress: progressOf.get(f.id) ?? [] })),
-      mustNotReveal: fs.mustNotReveal.map((f) => f.reveal.trim()),
-      // 上一章结尾留下的事（B74）：上一章的长篇记忆里有就带上。
-      openThreads: previous === undefined ? [] : (memoryOf.get(previous.id)?.openThreads ?? []),
+      avoidPhrases: m.avoidPhrases,
+      // 各人物知道的事与不在场的章（认知层）：人物只依据自己知道的说话与行动。
+      cast: m.cast.map((c) => ({ name: c.name, description: c.description, state: c.state, knows: c.knows, absent: c.absent.map((a) => `${a.title}（${a.summary}）`) })),
+      relations: m.relations,
+      facts: m.worldFacts,
+      memories: m.memories,
+      toPlant: m.toPlant,
+      toPayoff: m.toPayoff,
+      mustNotReveal: m.mustNotReveal,
+      openThreads: m.openThreads,
       previousEnding,
     });
   }
@@ -331,6 +243,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     ...cases,
     writeChapter: (chapterId: string, events: WriterEvents = {}): Promise<Result<WriterOutcome, AppError>> => locked(chapterId, () => cases.writeChapter(chapterId, events)),
     withWriterLock: locked,
+    /** 写手此刻是不是正在写这一章（按章节建推演场景时，前文梗概据此标“还没写完”）。 */
+    isWriting: (chapterId: string) => writing.has(chapterId),
     async rollbackWriter(chapterId: string): Promise<Result<ChapterPlan, AppError>> {
       return busy(chapterId) ?? cases.rollbackWriter(chapterId);
     },

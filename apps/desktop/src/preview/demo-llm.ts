@@ -55,6 +55,29 @@ const DEMO_RELATION_CHANGES = {
   ],
 };
 
+/** 按章节计划建场景（scene_draft）的演示草稿：两个区域、演示作品里的两个人物。 */
+const DEMO_SCENE = {
+  zones: [
+    { id: 'teahouse', name: '茶棚' },
+    { id: 'path', name: '山路' },
+  ],
+  edges: [{ a: 'teahouse', b: 'path', adjacent: true, visible: true, sound: 1, requiresFlag: null }],
+  flags: [],
+  actors: [
+    { id: 'shen_yan', name: '沈砚', zone: 'path', injury: 'none', goal: '不被人认出，赶到渡口', bottomLine: '不说出师父的遗言', traits: ['寡言'], riskPreference: '能躲就躲', emotionThreshold: '被提起师父', lossOfControl: '有人翻他的竹篓', speechStyle: '短句', knowledge: [{ text: '师父临终让他去渡口找姓卫的人', modality: 'observed', confidence: 1, about: [], concerning: null }] },
+    { id: 'su_wan', name: '苏晚', zone: 'teahouse', injury: 'none', goal: '替他引开眼线，又不暴露自己', bottomLine: '不说出账册的下落', traits: ['慢'], riskPreference: '谨慎', emotionThreshold: '被人当面质疑', lossOfControl: '', speechStyle: '从不正面回答', knowledge: [{ text: '茶棚里的挑夫认出了沈砚', modality: 'observed', confidence: 1, about: ['shen_yan'], concerning: null }] },
+  ],
+  items: [{ id: 'basket', name: '竹篓', holder: 'shen_yan', zone: null, counters: [], reach: null, noise: null, concealed: false }],
+  mechanisms: [],
+  secrets: [{ id: 'ledger', text: '苏晚替旧主保管着账册', subjects: ['su_wan'], knownBy: ['su_wan'] }],
+  exits: ['path'],
+  consumption: [],
+  injuryLimits: [],
+  requirements: [],
+  contest: 'ruling',
+  narrativeRules: ['茶棚里有外人，说话要压低声音'],
+};
+
 export function demoLlm(): LlmPort {
   return {
     async complete(r: LlmRequest, options: CallOptions = {}): Promise<Result<LlmResult, LlmError>> {
@@ -69,6 +92,8 @@ export function demoLlm(): LlmPort {
                 ? JSON.stringify(DEMO_MEMORY)
                 : r.template.id === 'relation_changes'
                   ? JSON.stringify(DEMO_RELATION_CHANGES)
+                  : r.template.id === 'scene_draft'
+                    ? JSON.stringify(DEMO_SCENE)
               : r.template.id === 'selection_edit'
                 ? '石阶上的冰还没有化尽，他一步一步踩稳了才往下走。竹篓很轻，里面只有两件换洗的衣裳，和师父留下的那封信。'
                 : '演示';

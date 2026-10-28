@@ -6,15 +6,20 @@ import { useApp } from './store-context';
 
 const PROTOCOL = { simultaneous: '同时行动', turn_based: '轮流对话' } as const;
 
-/** 新建场景（B39）：用一段话描述局面生成场景配置草稿，或从空白开始。草稿不保存，修改确认后才保存。 */
+/**
+ * 新建场景（B39）：用一段话描述局面生成场景配置草稿，或按某一章的章节计划生成（B39 补充：角色就是出场人物，
+ * 带上各自知道的事；描述是补充说明），或从空白开始。草稿不保存，修改确认后才保存。
+ */
 function NewScene() {
   const draft = useApp((s) => s.sceneDraft);
   const drafting = useApp((s) => s.sceneDrafting);
   const generate = useApp((s) => s.draftSimScene);
   const useBlank = useApp((s) => s.blankSimScene);
   const discard = useApp((s) => s.discardSceneDraft);
-  const chapterId = useApp((s) => s.selectedChapterId);
+  const selectedChapterId = useApp((s) => s.selectedChapterId);
+  const chapters = useApp((s) => s.work?.chapters ?? []);
   const [description, setDescription] = useState('');
+  const [chapterId, setChapterId] = useState(selectedChapterId);
 
   if (draft !== null) {
     return (
@@ -29,22 +34,35 @@ function NewScene() {
           key={draft.serial}
           id={null}
           notes={draft.problems}
-          initial={{ chapterId, title: draft.title, config: draft.config, protocol: draft.config.actors.length === 2 ? 'turn_based' : 'simultaneous', maxRounds: 8, firstSpeaker: null }}
+          hints={draft.notes}
+          initial={{ chapterId: draft.chapterId, title: draft.title, config: draft.config, protocol: draft.config.actors.length === 2 ? 'turn_based' : 'simultaneous', maxRounds: 8, firstSpeaker: null }}
         />
       </>
     );
   }
+  const byChapter = chapterId !== null;
   return (
     <div className="panel-form" role="form" aria-label="新建场景">
       <label>
-        用一段话描述局面：在哪里、有谁、各自想要什么、谁知道什么
+        按某一章的章节计划生成（可选）：角色就是这一章的出场人物，带上各自知道的事
+        <select value={chapterId ?? ''} onChange={(e) => setChapterId(e.target.value === '' ? null : e.target.value)}>
+          <option value="">不按章节</option>
+          {chapters.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        {byChapter ? '补充说明（可选）：这一章的计划之外，还想让局面怎样' : '用一段话描述局面：在哪里、有谁、各自想要什么、谁知道什么'}
         <textarea rows={6} value={description} onChange={(e) => setDescription(e.target.value)} />
       </label>
       <div className="skill-actions">
-        <button type="button" disabled={drafting || description.trim() === ''} onClick={() => void generate(description)}>
+        <button type="button" disabled={drafting || (description.trim() === '' && !byChapter)} onClick={() => void generate({ description, chapterId })}>
           {drafting ? '正在生成…' : '生成场景配置草稿'}
         </button>
-        <button type="button" disabled={drafting} onClick={() => useBlank(blankSceneConfig())}>
+        <button type="button" disabled={drafting} onClick={() => useBlank(blankSceneConfig(), chapterId)}>
           从空白开始
         </button>
       </div>

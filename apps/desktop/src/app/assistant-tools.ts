@@ -34,7 +34,7 @@ import type { AppError } from './errors';
 import { WORKFLOW_STATE_LABEL, WORKFLOW_STEP_STATUS_LABEL, ENTITY_KIND_LABEL, FORESHADOW_STATUS_LABEL, PLAN_STATUS_LABEL, RELATION_CATEGORY_LABEL, SIM_END_LABEL, SIM_PAUSE_LABEL, SIM_RUN_STATUS_LABEL, SKILL_STAGE_LABEL } from './labels';
 import type { BeatSheetRequest, BeatSheetView } from './narration';
 import { ACTION_LABELS, INJURY_LABELS } from './sim-describe';
-import type { SceneDraft, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
+import type { SceneDraft, SceneDraftRequest, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
 import type { AppliedDraft, PlanningView } from './planning';
 import type { RelationsView } from './relations';
 import type { SkillsView } from './writing-skills';
@@ -204,7 +204,7 @@ export type AssistantHost = {
   ): Promise<Result<{ readonly candidate: { readonly id: string } | null }, AppError>>;
   listSimScenes(): Promise<Result<SimScene[], AppError>>;
   listSimRuns(sceneId: string): Promise<Result<SimRun[], AppError>>;
-  draftSimScene(description: string, options?: CallOptions): Promise<Result<SceneDraft, AppError>>;
+  draftSimScene(request: SceneDraftRequest, options?: CallOptions): Promise<Result<SceneDraft, AppError>>;
   saveSimScene(id: string | null, fields: SimSceneFields): Promise<Result<SimScene, AppError>>;
   startSimRun(sceneId: string, options: SimRunOptions): Promise<Result<SimRunView, AppError>>;
   simRunStatus(runId: string): Promise<Result<SimRunView, AppError>>;
@@ -1693,15 +1693,19 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
         if (!c.ok) return failed(c.error);
         chapterId = c.value.id;
       }
+      const description = action.description?.trim() ?? '';
+      if (description === '' && chapterId === null) return failed('没有说按哪一章建，也没有描述局面：给 chapter 按那一章的计划与人物建，或用 description 写清在哪里、有谁、各自想要什么、谁知道什么');
       env.events.onProgress?.('正在生成推演场景');
-      const draft = await env.host.draftSimScene(action.description, env.call());
+      // 给了章节时按这一章的计划、出场人物与各自知道的事建（描述是补充说明），场景绑到这一章。
+      const draft = await env.host.draftSimScene({ description, chapterId }, env.call());
       if (!draft.ok) return failWith(draft.error);
-      const { config, problems } = draft.value;
+      const { config, problems, notes } = draft.value;
       if (problems.length > 0) {
         return failed(
           `生成的场景还有 ${problems.length} 处不合规则，没有保存：${problems.slice(0, 6).join('；')}${problems.length > 6 ? '……' : ''}。可以把描述写得更具体再试一次，或请作者在推演页“生成场景配置草稿”后逐项修改`,
         );
       }
+      const remarks = notes.length === 0 ? '' : `生成时的备注（请作者在推演页核对）：${notes.join('；')}。`;
       const title = action.title?.trim() || config.meta?.title?.trim() || '新场景';
       const protocol = config.actors.length === 2 ? 'turn_based' : 'simultaneous';
       const maxRounds = action.maxRounds ?? DEFAULT_SIM_ROUNDS;
@@ -1709,7 +1713,7 @@ const TOOLS: { readonly [K in AssistantTool]: Tool<K> } = {
       if (!saved.ok) return failWith(saved.error);
       env.events.onEffect?.({ kind: 'simulation_changed' });
       return done(
-        `已保存推演场景“${title}”[${saved.value.id}]：${config.zones.length} 个区域，角色 ${actorList(config.actors)}，${PROTOCOL_LABEL[protocol]}，最多 ${maxRounds} 回合。作者可以在推演页修改；要推演时用 start_simulation。`,
+        `已保存推演场景“${title}”[${saved.value.id}]：${config.zones.length} 个区域，角色 ${actorList(config.actors)}，${PROTOCOL_LABEL[protocol]}，最多 ${maxRounds} 回合。${remarks}作者可以在推演页修改；要推演时用 start_simulation。`,
       );
     },
   },

@@ -61,7 +61,7 @@
 - update_foreshadow：修改账本里的一条伏笔，或改它的状态（planned 计划中、planted 已埋下、paid_off 已回收、dropped 放弃）。参数 foreshadow（标识或名字）；title、content、reveal、plant、payoff、status 不改的填 null；plant、payoff 填“无”表示清除章节。
 角色推演（每个角色只按自己知道的信息行动，程序裁决结果；用来试一个局面会怎样发展，再挑一个角色的视角写成正文）：
 - list_simulations：列出推演场景（标识、场景名、角色）与每个场景的推演（标识、状态、回合、费用）。参数 scene：只列这个场景的（标识或场景名），null 为全部。
-- create_sim_scene：由一段局面描述生成推演场景并保存（保存前按规则校验，不合格时不保存、返回问题）。描述写清：在哪里（几个区域、彼此能否看见听见）、有谁、各自想要什么、谁知道什么秘密、有哪些关键物品；可以先看章节计划与人物设定再写。参数 description；title：场景名，可为 null；chapter：关联的章节，可为 null；maxRounds：回合上限，null 为 8。
+- create_sim_scene：生成推演场景并保存（保存前按规则校验，不合格时不保存、返回问题）。给了 chapter 时按这一章的章节计划、出场人物、各人物知道的事与人物关系建场景（场景绑到这一章，角色就是出场人物），description 只是补充说明、可为 null；没有 chapter 时由 description 建：写清在哪里（几个区域、彼此能否看见听见）、有谁、各自想要什么、谁知道什么秘密、有哪些关键物品。参数 description：可为 null（有 chapter 时）；title：场景名，可为 null；chapter：按哪一章建、关联的章节，可为 null；maxRounds：回合上限，null 为 8。
 - start_simulation：用一个场景开始一次推演，在后台连续推进到结束（会按回合调用模型；裁决自动接受，采纳进作品前由作者复核）。动作立即返回，进度出现在“正在进行的任务”里。参数 scene；budgetUsd：费用上限（美元），null 为不设（模型没有配置价格时不能设）。
 - continue_simulation：让暂停或停下的推演在后台接着推进。等待作者确认裁决或决定导演提议时不能继续，请作者到推演页处理。参数 run（推演的标识）。
 - get_simulation：看一次推演的状态与全局概要（每回合谁做了什么、说了什么，结束原因、费用，等作者处理的事）。这是作者视角的全貌，只用来向作者汇报与做计划。参数 run。

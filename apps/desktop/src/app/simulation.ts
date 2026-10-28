@@ -17,13 +17,15 @@ import {
   type ViewerData,
 } from '@fudiao/engine';
 import { BudgetGuard, type CallOptions, type LlmPort, type ModelProfile } from '@fudiao/llm';
-import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput, SemanticRulingOutput } from '@fudiao/prompts';
+import { renderSceneDraft, sceneDraftToSpec, SceneDraftOutput, SemanticRulingOutput, type SceneChapterMaterials, type SceneDraftInput } from '@fudiao/prompts';
 import { err, ok, sha256, type Result } from '@fudiao/shared';
 import {
   createSimRun,
   createSimScene,
+  getChapterPlan,
   getSimRun,
   getSimScene,
+  listChapters,
   listRunCalls,
   listSimRuns,
   listSimScenes,
@@ -40,12 +42,13 @@ import {
   type SqlPort,
   type StoredEvent,
 } from '@fudiao/store';
+import { gatherChapterMaterials, type ChapterMaterials, type ChapterMention } from './chapter-materials';
 import type { AppError } from './errors';
 import type { ProviderView } from './model-services';
 import { projectCallLog, THINKING_ALLOWANCE, type modelRunner, type ModelChoice } from './model-runner';
 import { clipOutput } from './model-limits';
 import type { AppDeps } from './ports';
-import { checkSceneConfig, describeSceneProblems } from './scene-editing';
+import { chapterSceneNotes, checkSceneConfig, describeSceneProblems, limitKnowledge } from './scene-editing';
 import { describeEffect, describeOccurrence, forkLabel, rulingToOutput, type ForkPoint } from './sim-describe';
 
 /** 给作者看的运行状态：运行记录，加上由事件得出的阶段与等待作者处理的事项。 */
@@ -184,7 +187,36 @@ export type SimRunOptions = {
 };
 
 /** 场景配置草稿（B39）：由一段描述生成，不保存；problems 是草稿里还不对的地方，作者修改后才能保存。 */
-export type SceneDraft = { readonly config: SceneSpecInput; readonly problems: readonly string[] };
+/**
+ * 场景配置草稿：problems 是校验不通过的地方（改好才能保存）；notes 是按章节建场景时的备注（截掉的认知、对不上的人物、
+ * 可能串了的认知），只提醒作者核对，不挡保存。
+ */
+export type SceneDraft = { readonly config: SceneSpecInput; readonly problems: readonly string[]; readonly notes: readonly string[] };
+/** 生成草稿的请求：作者的描述，或按某一章的章节计划建（二者至少一个；都有时描述是补充说明）。 */
+export type SceneDraftRequest = { readonly description: string; readonly chapterId: string | null };
+
+const mentionText = (m: ChapterMention) => `${m.title}（${m.summary}）`;
+
+/** 按章节建场景时交给模板的材料：与写手看到的是同一份，只换了形状。 */
+function sceneMaterials(m: ChapterMaterials): SceneChapterMaterials {
+  return {
+    title: m.title,
+    genre: m.genre,
+    chapterTitle: m.chapterTitle,
+    goal: m.goal,
+    beats: m.beats,
+    treatment: m.treatment,
+    volumeSummary: m.volume?.summary ?? '',
+    cast: m.cast.map((c) => ({ name: c.name, description: c.description, state: c.state, knows: c.knows, present: c.present.map(mentionText), absent: c.absent.map(mentionText) })),
+    relations: m.relations,
+    worldFacts: m.worldFacts,
+    memories: m.memories,
+    openThreads: m.openThreads,
+    locations: m.locations,
+    toPayoff: m.toPayoff.map((f) => ({ title: f.title, reveal: f.reveal })),
+    mustNotReveal: m.mustNotReveal,
+  };
+}
 
 /** 场景配置草稿的输出上限：区域、角色、认知与规则合计几千字，另留出思考的余量。 */
 export const SCENE_DRAFT_OUTPUT_TOKENS = 8_000 + THINKING_ALLOWANCE;
@@ -198,6 +230,8 @@ export type SimulationDeps = {
   /** 按标识找模型服务（运行配置里记的是服务标识）。 */
   readonly provider: (id: string) => Promise<ProviderView | null>;
   readonly runner: ReturnType<typeof modelRunner>;
+  /** 写手此刻是不是正在写某一章（按章节建场景时，前文梗概据此标“还没写完”）；省略时当作都没在写。 */
+  readonly unfinished?: (chapterId: string) => boolean;
 };
 
 const repo = (error: RepoError): AppError => ({ code: 'repo', error });
@@ -228,7 +262,7 @@ function progressOf(status: RunStatus): SimRunProgress {
   return { status: phase === 'AwaitingAuthor' ? 'awaiting_author' : 'running', endReason: null, pauseReason: null, round: status.round };
 }
 
-export function simulationUseCases({ deps, project, defaultModel, provider, runner }: SimulationDeps) {
+export function simulationUseCases({ deps, project, defaultModel, provider, runner, unfinished = () => false }: SimulationDeps) {
   const ctx = () => ({ now: deps.clock.now() });
 
   /** 运行配置里的模型来自“模型服务”中的默认模型（硬性规则 13）；推演的各类任务都要结构化输出，须通过能力自检。 */
@@ -356,15 +390,50 @@ export function simulationUseCases({ deps, project, defaultModel, provider, runn
       return scenes.ok ? scenes : err(repo(scenes.error));
     },
 
-    /** 由一段局面描述生成场景配置草稿（B39）。草稿不保存：作者逐项修改、确认后再保存。 */
-    async draftSimScene(description: string, options: CallOptions = {}): Promise<Result<SceneDraft, AppError>> {
-      if (description.trim() === '') return err(settings('请先用一段话描述局面：在哪里、有谁、各自想要什么、谁知道什么'));
-      const prompt = renderSceneDraft(description.trim());
+    /**
+     * 生成场景配置草稿（B39）：由一段局面描述，或按某一章的章节计划（本章的目标与情节点、出场人物与各自知道的事、
+     * 关系、事实、前文与伏笔，B39 补充）。草稿不保存：作者逐项修改、确认后再保存。按章节建的草稿绑到这一章，
+     * 场景名是章名、想弄清的问题是本章目标。
+     */
+    async draftSimScene(request: SceneDraftRequest, options: CallOptions = {}): Promise<Result<SceneDraft, AppError>> {
+      const description = request.description.trim();
+      if (description === '' && request.chapterId === null) return err(settings('请先用一段话描述局面：在哪里、有谁、各自想要什么、谁知道什么；或者选一章，按它的章节计划生成'));
+      let input: SceneDraftInput = { description };
+      let chapter: { readonly title: string; readonly materials: ChapterMaterials } | null = null;
+      const notes: string[] = [];
+      if (request.chapterId !== null) {
+        const port = project();
+        if (port === null) return err({ code: 'no_work' });
+        const chapters = await listChapters(port, 'normal');
+        if (!chapters.ok) return err(repo(chapters.error));
+        const found = chapters.value.find((c) => c.id === request.chapterId);
+        if (found === undefined) return err({ code: 'not_found' });
+        const plan = await getChapterPlan(port, found.id);
+        if (!plan.ok) return err(repo(plan.error));
+        const missing = plan.value === null ? `“${found.title}”还没有章节计划` : plan.value.castIds.length === 0 ? `“${found.title}”的章节计划里没有出场人物` : null;
+        if (missing !== null) {
+          // 计划不够用又没有描述时没法建；有描述时按描述建，场景仍属于这一章，备注里说明。
+          if (description === '') return err(settings(`${missing}：先在“计划”中写好本章的目标、情节点与出场人物（推演的角色就是出场人物），或者用一段话描述局面`));
+          notes.push(`${missing}，这次是按描述建的场景（没有带上本章的计划与人物各自知道的事）；场景仍属于这一章`);
+        } else if (plan.value !== null) {
+          const materials = await gatherChapterMaterials(port, { chapter: found, chapters: chapters.value, plan: plan.value, unfinished });
+          if (!materials.ok) return materials;
+          chapter = { title: found.title, materials: materials.value };
+          input = { description, chapter: sceneMaterials(materials.value) };
+        }
+      }
+      const prompt = renderSceneDraft(input);
       if (!prompt.ok) return err(settings(prompt.error));
       const result = await runner.structured({ prompt: prompt.value, maxOutputTokens: SCENE_DRAFT_OUTPUT_TOKENS, effort: 'medium' }, SceneDraftOutput, options);
       if (!result.ok) return result;
-      const config = sceneDraftToSpec(result.value.value);
-      return ok({ config, problems: checkSceneConfig(config) });
+      let config = sceneDraftToSpec(result.value.value);
+      if (chapter !== null) {
+        const limited = limitKnowledge(config);
+        const goal = chapter.materials.goal.trim();
+        config = { ...limited.config, meta: { ...limited.config.meta, title: chapter.title, questions: goal === '' ? [] : [goal] } };
+        notes.push(...limited.notes, ...chapterSceneNotes(config, chapter.materials.cast.map((c) => ({ name: c.name, aliases: c.aliases, knows: c.knows.map((k) => k.text) }))));
+      }
+      return ok({ config, problems: checkSceneConfig(config), notes });
     },
 
     /** 新建（id 为 null）或修改推演场景。场景配置须通过领域内核的校验；第一个开口的角色须是场景里的角色。 */

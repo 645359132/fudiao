@@ -302,7 +302,7 @@ describe('场景配置草稿（B39）', () => {
     useModel(null);
     deps.llmRequests.length = 0;
     deps.llmResponses.push(reply(JSON.stringify(draft)));
-    const result = value(await app.draftSimScene('雨夜，落魄书生林舟到钱四的当铺当玉。'));
+    const result = value(await app.draftSimScene({ description: '雨夜，落魄书生林舟到钱四的当铺当玉。', chapterId: null }));
     expect(result.problems).toEqual([]);
     expect(result.config.actors.map((a) => a.name)).toEqual(['林舟', '钱四']);
     expect(result.config.actors[1]?.card?.initialKnowledge?.[0]).toMatchObject({ order: 2, concerning: 'lin_zhou' });
@@ -320,15 +320,122 @@ describe('场景配置草稿（B39）', () => {
     useModel(null);
     deps.llmRequests.length = 0;
     deps.llmResponses.push(reply(JSON.stringify({ ...draft, actors: draft.actors.map((a, i) => (i === 1 ? { ...a, zone: 'cellar' } : a)) })));
-    const result = value(await app.draftSimScene('当铺'));
+    const result = value(await app.draftSimScene({ description: '当铺', chapterId: null }));
     expect(result.problems).toEqual(['角色 第 2 项 › 所在区域：引用了场景里没有的“cellar”']);
     // 有问题的草稿不能保存，说明里写的是同样的话。
     expect(await app.saveSimScene(null, { chapterId: null, title: '当铺', config: result.config, protocol: 'turn_based', maxRounds: 4, firstSpeaker: null })).toMatchObject({
       ok: false,
       error: { code: 'settings', detail: expect.stringContaining('角色 第 2 项 › 所在区域：引用了场景里没有的“cellar”') },
     });
-    expect(await app.draftSimScene('  ')).toMatchObject({ ok: false, error: { code: 'settings' } });
+    expect(await app.draftSimScene({ description: '  ', chapterId: null })).toMatchObject({ ok: false, error: { code: 'settings' } });
     expect(deps.llmRequests).toHaveLength(1);
+  });
+});
+
+describe('按章节计划建场景（B39 补充）', () => {
+  const fact = (kind: 'world' | 'belief' | 'claim', holderId: string | null, subjectIds: string[], content: string, modality: 'observed' | 'heard' | 'inferred' | 'claimed' | null, confidence: number | null) => ({
+    kind,
+    holderId,
+    subjectIds,
+    content,
+    modality,
+    confidence,
+    validFromChapterId: null,
+    validToChapterId: null,
+    validFrom: null,
+    validTo: null,
+    basis: [],
+  });
+
+  /** 两章：第一章林舟出场、已写、有长篇记忆；第二章的计划里林舟与钱四出场。林舟、钱四各有认知，有一条世界事实与一条隐秘关系。 */
+  async function book() {
+    const ctx = await ready();
+    const { app, deps } = ctx;
+    ctx.useModel(null);
+    const c1 = value(await app.createChapter('第一章 当铺')).chapters[0]!;
+    const c2 = value(await app.createChapter('第二章 后院', c1.id)).chapters.find((c) => c.title === '第二章 后院')!;
+    const lin = value(await app.createEntity('character', '林舟')).created;
+    value(await app.updateEntity(lin, { description: '落魄书生' }));
+    const qian = value(await app.createEntity('character', '钱四')).created;
+    value(await app.createEntity('location', '当铺'));
+    value(await app.savePlan(c1.id, { goal: '林舟当玉', castIds: [lin.id], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1000 }));
+    const first = value(await app.openChapter(c1.id));
+    value(await app.saveChapter(c1.id, first.saved, [{ id: 'p0', text: '林舟当了玉。', source: 'handwritten' }], { splits: [], merges: [] }));
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟深夜当玉，被压价。', cast: [{ name: '林舟', state: '玉还在手里' }], foreshadows: [], openThreads: ['三日后再来'] })));
+    value(await app.buildMemory(c1.id));
+    value(await app.createFact(fact('belief', lin.id, [qian.id], '钱四认得这块玉', 'inferred', 0.6), 'confirmed'));
+    value(await app.createFact(fact('belief', qian.id, [lin.id], '林舟手里的玉是赃物', 'heard', 0.8), 'confirmed'));
+    value(await app.createFact(fact('world', null, [lin.id], '当铺后院有口井', null, null), 'confirmed'));
+    value(await app.addRelationship({ fromId: qian.id, toId: lin.id, category: 'enemy', label: '债主', mutual: false, description: '', secret: true, validFromChapterId: null, validToChapterId: null }));
+    value(await app.savePlan(c2.id, { goal: '林舟再访当铺', castIds: [lin.id, qian.id], beats: ['叩门', '对峙'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '对峙展开', targetWords: 2000 }));
+    deps.llmRequests.length = 0;
+    return { ...ctx, c1, c2, lin, qian };
+  }
+
+  it('请求里有本章的计划、出场人物与各自知道的事、在场与不在场的章、关系、事实、地点与补充说明；草稿绑到这一章，场景名是章名、问题是本章目标', async () => {
+    const { deps, app, useModel, c2 } = await book();
+    const draft = sceneDraftFixture();
+    // 模型把钱四的认知写进了林舟的认知，给林舟写了七条认知，还多出一个作品里没有的人。
+    const lin = draft.actors[0]!;
+    const extra = Array.from({ length: 6 }, (_, i) => ({ ...lin.knowledge[0]!, text: `第 ${i + 1} 条多余的认知` }));
+    const tampered = {
+      ...draft,
+      actors: [{ ...lin, knowledge: [{ ...lin.knowledge[0]!, text: '听挑夫说林舟手里的玉是赃物' }, ...extra] }, draft.actors[1]!, { ...draft.actors[1]!, id: 'wu_ming', name: '无名' }],
+    };
+    deps.llmResponses.push(reply(JSON.stringify(tampered)));
+    const result = value(await app.draftSimScene({ description: '让钱四先开口。', chapterId: c2.id }));
+    const body = JSON.stringify(deps.llmRequests[0]?.body);
+    for (const part of [
+      '名字一字不差照用',
+      '作者对局面的补充描述：\\n让钱四先开口。',
+      '本章：第二章 后院\\n本章目标：林舟再访当铺\\n详略：对峙展开',
+      '- 叩门\\n- 对峙',
+      '- 林舟：落魄书生（最近的状态：玉还在手里）\\n  知道或相信的：推测：钱四认得这块玉（相信程度 0.6）；\\n  最近出场：第一章 当铺（林舟深夜当玉，被压价。）',
+      '- 钱四\\n  知道或相信的：听到：林舟手里的玉是赃物（相信程度 0.8）；\\n  不在场、前文没写他得知：第一章 当铺（林舟深夜当玉，被压价。）',
+      '- 钱四是林舟的债主〔隐秘〕',
+      '已确认的世界事实：\\n- 当铺后院有口井',
+      '前文梗概：\\n- 第一章 当铺：林舟深夜当玉，被压价。',
+      '上一章结尾留下的事：\\n- 三日后再来',
+      '地点设定：\\n- 当铺',
+    ]) {
+      expect(body).toContain(part);
+    }
+    expect(body).not.toContain('默认两个人物');
+    expect(result.problems).toEqual([]);
+    expect(result.config.meta).toEqual({ title: '第二章 后院', questions: ['林舟再访当铺'] });
+    expect(result.config.actors[0]?.card?.initialKnowledge).toHaveLength(5);
+    expect(result.notes).toEqual([
+      expect.stringContaining('角色“林舟”的初始认知有 7 条，只留了前 5 条；截掉的：“第 5 条多余的认知”'),
+      expect.stringContaining('认知可能串了：“林舟”的初始认知“听挑夫说林舟手里的玉是赃物”里有“钱四”知道的事“林舟手里的玉是赃物”'),
+      '角色“无名”对不上作品里的人物设定：采纳推演草案时记不成这个人物的认知，请改成人物设定里的名字',
+    ]);
+    // 备注不挡保存：绑到这一章，保存后可以开始推演。
+    const saved = value(await app.saveSimScene(null, { chapterId: c2.id, title: '第二章 后院', config: result.config, protocol: 'simultaneous', maxRounds: 3, firstSpeaker: null }));
+    expect(saved.chapterId).toBe(c2.id);
+    useModel(fakeModel().port);
+    expect(value(await app.startSimRun(saved.id, { mode: 'auto', seed: 1 }))).toMatchObject({ run: { status: 'running' } });
+  });
+
+  it('没有章节计划或计划里没有出场人物时：没有描述就不调用模型，有描述就按描述建并在备注里说明；只给章节不给描述照常', async () => {
+    const { deps, app, c1, c2 } = await book();
+    const c3 = value(await app.createChapter('第三章 天明', c2.id)).chapters.find((c) => c.title === '第三章 天明')!;
+    expect(await app.draftSimScene({ description: '', chapterId: c3.id })).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('“第三章 天明”还没有章节计划') } });
+    value(await app.savePlan(c3.id, { goal: '天亮了', castIds: [], beats: [], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: null }));
+    expect(await app.draftSimScene({ description: '', chapterId: c3.id })).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('没有出场人物') } });
+    expect(await app.draftSimScene({ description: '', chapterId: null })).toMatchObject({ ok: false, error: { code: 'settings' } });
+    expect(await app.draftSimScene({ description: '', chapterId: 'missing' })).toMatchObject({ ok: false, error: { code: 'not_found' } });
+    expect(deps.llmRequests).toHaveLength(0);
+
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    const byDescription = value(await app.draftSimScene({ description: '天亮时林舟在当铺门口等钱四。', chapterId: c3.id }));
+    expect(JSON.stringify(deps.llmRequests[0]?.body)).toContain('作者对局面的描述：\\n天亮时林舟在当铺门口等钱四。');
+    expect(byDescription.notes).toEqual(['“第三章 天明”的章节计划里没有出场人物，这次是按描述建的场景（没有带上本章的计划与人物各自知道的事）；场景仍属于这一章']);
+    expect(byDescription.config.meta).toBeUndefined();
+
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    const result = value(await app.draftSimScene({ description: '', chapterId: c1.id }));
+    expect(JSON.stringify(deps.llmRequests[1]?.body)).not.toContain('作者对局面的');
+    expect(result.notes).toEqual(['角色“钱四”对不上作品里的人物设定：采纳推演草案时记不成这个人物的认知，请改成人物设定里的名字']);
   });
 });
 

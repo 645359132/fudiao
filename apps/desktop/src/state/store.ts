@@ -7,7 +7,7 @@ import type { PlanDraft, PlanningView } from '../app/planning';
 import { reviewWithRetry, type BatchRevisionOutcome, type ReviewIssueView, type RevisionProgress, type RevisionQuote, type RevisionScope } from '../app/review';
 import type { SceneSpecInput } from '@fudiao/domain';
 import type { CastPresenceFields, ForeshadowFields, PlanFields, RelationshipFields, SimRun, SimScene, SimSceneFields } from '@fudiao/store';
-import type { SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
+import type { SceneDraftRequest, SimIntervention, SimRunDetail, SimRunOptions, SimVerification } from '../app/simulation';
 import type { AdoptionDraft, AdoptionRequest, BeatSheetRequest, BeatSheetView } from '../app/narration';
 import type { AssistantConversationView, AssistantEffect, AssistantEvents, AssistantItem, AssistantOutcome, AssistantSelection, AssistantUsage } from '../app/assistant';
 import type { QuickBookStatus } from '../app/quick-book';
@@ -80,8 +80,18 @@ export type WriterJob = {
   readonly queued: readonly string[];
 };
 
-/** 还没有保存的场景配置草稿：由描述生成，或从空白开始。serial 每次换草稿加一，编辑表单据此重建。 */
-export type SceneDraftState = { readonly serial: number; readonly title: string; readonly config: SceneSpecInput; readonly problems: readonly string[] };
+/**
+ * 还没有保存的场景配置草稿：由描述生成、按某一章的计划生成（chapterId 为那一章），或从空白开始。serial 每次换草稿加一，编辑表单据此重建。
+ * notes 是生成时的备注（截掉的认知、对不上的人物等），只提醒作者核对。
+ */
+export type SceneDraftState = {
+  readonly serial: number;
+  readonly title: string;
+  readonly chapterId: string | null;
+  readonly config: SceneSpecInput;
+  readonly problems: readonly string[];
+  readonly notes: readonly string[];
+};
 
 /** 推演停下来等人的阶段：等待作者、已暂停、已结束。 */
 const SIM_STOPPED: ReadonlySet<string> = new Set(['AwaitingAuthor', 'Paused', 'Ended']);
@@ -452,8 +462,11 @@ export type AppState = {
   readonly simEvaluation: (SimEvaluationView & { readonly runId: string }) | null;
   readonly loadSimEvaluation: () => Promise<void>;
   readonly saveSimEvaluation: (input: SimEvaluationInput) => Promise<boolean>;
-  readonly draftSimScene: (description: string) => Promise<void>;
-  readonly blankSimScene: (config: SceneSpecInput) => void;
+  /** 生成场景配置草稿：由描述，或按某一章的计划（B39 补充）；做完后草稿在推演页的“新建场景”里等作者核对。 */
+  readonly draftSimScene: (request: SceneDraftRequest) => Promise<void>;
+  /** 推演这一章：切到推演页，按这一章的计划与出场人物各自知道的事生成场景草稿，绑到这一章。 */
+  readonly simulateChapter: (chapterId: string) => Promise<void>;
+  readonly blankSimScene: (config: SceneSpecInput, chapterId: string | null) => void;
   readonly discardSceneDraft: () => void;
   /** 保存场景；成功后选中它。返回是否成功。 */
   readonly saveSimScene: (id: string | null, fields: SimSceneFields) => Promise<boolean>;
@@ -759,6 +772,24 @@ export function createAppStore(service: AppService): AppStore {
         set({ message: describeError(result.error) });
       }
       return result;
+    }
+
+    /** 生成场景配置草稿（登记为任务）：成功后放进推演页的“新建场景”等作者核对；失败时说明原因。 */
+    async function draftScene(request: SceneDraftRequest, taskTitle: string): Promise<void> {
+      const t = startTask('scene_draft', taskTitle, request.chapterId);
+      set({ sceneDrafting: true, message: null });
+      const result = await service.draftSimScene(request, t.options());
+      if (result.ok) {
+        const title = result.value.config.meta?.title?.trim() ?? '';
+        set({
+          sceneDrafting: false,
+          sceneDraft: { serial: ++sceneSerial, title: title === '' ? '新场景' : title, chapterId: request.chapterId, config: result.value.config, problems: result.value.problems, notes: result.value.notes },
+        });
+        t.finish('done');
+      } else {
+        set({ sceneDrafting: false, message: describeError(result.error) });
+        t.fail(describeError(result.error));
+      }
     }
 
     async function loadBeatSheets(runId: string): Promise<void> {
@@ -2492,21 +2523,38 @@ export function createAppStore(service: AppService): AppStore {
         if (!view.ok) set({ message: describeError(view.error) });
         await refreshRun(id);
       },
-      async draftSimScene(description) {
+      async draftSimScene(request) {
         if (get().sceneDrafting) return;
-        const t = startTask('scene_draft', '生成场景配置草稿', null);
-        set({ sceneDrafting: true, message: null });
-        const result = await service.draftSimScene(description, t.options());
-        if (result.ok) {
-          const title = result.value.config.meta?.title?.trim() ?? '';
-          set({ sceneDrafting: false, sceneDraft: { serial: ++sceneSerial, title: title === '' ? '新场景' : title, config: result.value.config, problems: result.value.problems } });
-          t.finish('done');
-        } else {
-          set({ sceneDrafting: false, message: describeError(result.error) });
-          t.fail(describeError(result.error));
-        }
+        await draftScene(request, '生成场景配置草稿');
       },
-      blankSimScene: (config) => set({ sceneDraft: { serial: ++sceneSerial, title: '新场景', config, problems: [] } }),
+      async simulateChapter(chapterId) {
+        if (get().sceneDrafting || get().simAdvancing) return;
+        // 推演页里改到一半的草稿不悄悄丢掉。
+        if (get().sceneDraft !== null) {
+          set({ message: '推演页还有一份没有保存的场景草稿：先保存或放弃它，再推演这一章' });
+          return;
+        }
+        if (!(await get().leaveChapter())) return;
+        const title = get().work?.chapters.find((c) => c.id === chapterId)?.title ?? '';
+        const scenes = get().simScenes === null ? await service.listSimScenes() : null;
+        if (scenes !== null && !scenes.ok) {
+          set({ message: describeError(scenes.error) });
+          return;
+        }
+        set({
+          ...(scenes !== null && scenes.ok && { simScenes: scenes.value }),
+          panel: 'simulation',
+          simSceneId: 'new',
+          simTab: 'config',
+          simRuns: [],
+          simRunId: null,
+          simRun: null,
+          chapterContent: null,
+          drawer: null,
+        });
+        await draftScene({ description: '', chapterId }, `推演这一章：${title}`);
+      },
+      blankSimScene: (config, chapterId) => set({ sceneDraft: { serial: ++sceneSerial, title: '新场景', chapterId, config, problems: [], notes: [] } }),
       discardSceneDraft: () => set({ sceneDraft: null }),
       async saveSimScene(id, fields) {
         const saved = await service.saveSimScene(id, fields);

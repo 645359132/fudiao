@@ -122,7 +122,7 @@ export const AssistantAction = z.discriminatedUnion('tool', [
   }),
   // 角色推演：建场景、在后台推演、看全局概要、按视角写成候选稿；待核实的裁决与采纳由作者在界面上做
   z.object({ tool: z.literal('list_simulations'), scene: opt }),
-  z.object({ tool: z.literal('create_sim_scene'), description: text, title: opt, chapter: opt, maxRounds: z.number().int().positive().nullable() }),
+  z.object({ tool: z.literal('create_sim_scene'), description: opt, title: opt, chapter: opt, maxRounds: z.number().int().positive().nullable() }),
   z.object({ tool: z.literal('start_simulation'), scene: text, budgetUsd: z.number().positive().nullable() }),
   z.object({ tool: z.literal('continue_simulation'), run: text }),
   z.object({ tool: z.literal('get_simulation'), run: text }),

@@ -54,6 +54,7 @@ export function ChapterPanel() {
   const writerJob = useApp((s) => s.writerJob);
   const mine = useApp((s) => s.writerJobs.find((j) => j.chapterId === chapter?.id));
   const writeChapters = useApp((s) => s.writeChapters);
+  const simulateChapter = useApp((s) => s.simulateChapter);
   const cancelWriting = useApp((s) => s.cancelWriting);
   const openReview = useApp((s) => s.openReview);
   const chapterId = chapter?.id ?? null;
@@ -82,6 +83,12 @@ export function ChapterPanel() {
             <button type="button" className="ghost" disabled={busy || writerJob !== null} onClick={() => void writeChapters([chapter.id])}>
               <Icon name="writer" />
               让写手写这一章
+            </button>
+          </Tip>
+          <Tip label="按本章的计划与出场人物各自知道的事建推演场景，让角色自己走一遍，再挑一个视角写成正文">
+            <button type="button" className="ghost" disabled={busy} onClick={() => void simulateChapter(chapter.id)}>
+              <Icon name="stage" />
+              推演这一章
             </button>
           </Tip>
           <Tip label="检查本章与设定、事实、伏笔和章节计划不一致的地方">

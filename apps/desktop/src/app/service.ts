@@ -414,6 +414,7 @@ export function createAppService(deps: AppDeps) {
   const simulation = simulationUseCases({
     deps,
     project: () => session?.port ?? null,
+    unfinished: writer.isWriting,
     defaultModel: () => services.defaultModel(),
     provider: async (id) => {
       const view = await services.loadModelServices();

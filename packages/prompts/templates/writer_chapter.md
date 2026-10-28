@@ -1,6 +1,6 @@
 ---
 id: writer_chapter
-version: 7
+version: 8
 task: writer
 ---
 @@system
@@ -18,6 +18,9 @@ task: writer
 {{#hasSecretRelations}}
 - 标为“隐秘”的人物关系读者还不知道：可以留下暗示，不要在正文里点明，除非本章目标或情节点要揭晓它。
 {{/hasSecretRelations}}
+{{#hasKnowledge}}
+- 人物只依据自己知道的说话与行动：出场人物下面列了各人“知道或相信的”与“不在场”的章；不在场那几章发生的事，除非前文写了他得知，按他不知道处理，不让他提起、不让他对此有反应。人物之间的信息差可以写成误会与张力。
+{{/hasKnowledge}}
 {{#hasSkills}}
 
 写作技能（每项先写明适用的情况；按情况运用，不适用的这次不用）：
@@ -36,6 +39,12 @@ task: writer
 出场人物：
 {{#cast}}
 - {{name}}{{#description}}：{{description}}{{/description}}{{#state}}（最近的状态：{{state}}）{{/state}}
+{{#hasKnows}}
+  知道或相信的：{{#knows}}{{.}}；{{/knows}}
+{{/hasKnows}}
+{{#hasAbsent}}
+  不在场、前文没写他得知：{{absent}}
+{{/hasAbsent}}
 {{/cast}}
 {{/hasCast}}
 {{#hasRelations}}

@@ -1,6 +1,6 @@
 import { warehouseSpec } from '@fudiao/domain/testing';
 import { describe, expect, it } from 'vitest';
-import { blankSceneConfig, checkSceneConfig, parseSceneConfigText, removeZone, renameZone, setZoneEdge, zonePairs } from './scene-editing';
+import { blankSceneConfig, chapterSceneNotes, checkSceneConfig, limitKnowledge, parseSceneConfigText, removeZone, renameZone, setZoneEdge, zonePairs } from './scene-editing';
 
 describe('场景配置的检查', () => {
   it('空白场景与测试场景没有问题', () => {
@@ -91,5 +91,35 @@ describe('区域图的编辑（B41）', () => {
     expect(removed.edges).toEqual([]);
     expect(removed.exits).toEqual(['c']);
     expect(checkSceneConfig(removed)).toEqual(expect.arrayContaining(['角色 第 1 项 › 所在区域：引用了场景里没有的“a”']));
+  });
+});
+
+describe('按章节计划建的场景与出场人物核对（B39 补充）', () => {
+  const knowledge = (...texts: string[]) => texts.map((text) => ({ text }));
+  const actor = (id: string, name: string, ...texts: string[]) => ({ id, name, zone: 'room', card: { initialKnowledge: knowledge(...texts) } });
+
+  it('初始认知超过五条的角色只留前五条，截掉的写进备注；没超过的配置原样返回', () => {
+    const config = { ...blankSceneConfig(), actors: [actor('a', '林舟', '一', '二', '三', '四', '五', '六', '七'), actor('b', '钱四', '一')] };
+    const limited = limitKnowledge(config);
+    expect(limited.config.actors.map((a) => a.card?.initialKnowledge?.length)).toEqual([5, 1]);
+    expect(limited.notes).toEqual(['角色“林舟”的初始认知有 7 条，只留了前 5 条；截掉的：“六”、“七”']);
+    expect(checkSceneConfig(limited.config)).toEqual([]);
+    const fine = blankSceneConfig();
+    expect(limitKnowledge(fine)).toEqual({ config: fine, notes: [] });
+  });
+
+  it('角色按名字或别名对到出场人物；对不上的角色、没进场景的人物、含别人认知原文的认知各记一条备注', () => {
+    const cast = [
+      { name: '林舟', aliases: ['林秀才'], knows: ['钱四认得这块玉'] },
+      { name: '钱四', aliases: [], knows: ['林舟的玉是赃物，挑夫说的', '短'] },
+      { name: '阿青', aliases: [], knows: [] },
+    ];
+    const config = { ...blankSceneConfig(), actors: [actor('a', '林秀才', '听说林舟的玉是赃物，挑夫说的', '钱四认得这块玉', '短'), actor('b', '钱四', '林舟的玉是赃物，挑夫说的'), actor('c', '无名')] };
+    expect(chapterSceneNotes(config, cast)).toEqual([
+      '认知可能串了：“林秀才”的初始认知“听说林舟的玉是赃物，挑夫说的”里有“钱四”知道的事“林舟的玉是赃物，挑夫说的”，请核对',
+      '角色“无名”对不上作品里的人物设定：采纳推演草案时记不成这个人物的认知，请改成人物设定里的名字',
+      '出场人物“阿青”没有进场景',
+    ]);
+    expect(chapterSceneNotes({ ...blankSceneConfig(), actors: [actor('a', '林舟'), actor('b', '钱四')] }, cast.slice(0, 2))).toEqual([]);
   });
 });

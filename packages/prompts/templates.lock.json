@@ -4,8 +4,8 @@
     "sha256": "57e8b23d53f9f18ba60235cfe3249a61ae4f82a7a768628a44d63d09e014790a"
   },
   "assistant_turn": {
-    "version": "24",
-    "sha256": "15b6002d3ae623911ab29179b013d5bf8c86f7af9c73be5b545ebb06cd14d42b"
+    "version": "25",
+    "sha256": "0f898bcfa998a87a1ff16878652aa227bf0268400d5eda9ba0226b190da8c1f1"
   },
   "baseline_scene": {
     "version": "2",
@@ -92,8 +92,8 @@
     "sha256": "f3217db2960d38e02534528fda0a92d8474fed7d420449ddd2abd4bac6aa8e51"
   },
   "scene_draft": {
-    "version": "1",
-    "sha256": "a6b51734e6de4a32e9b3019aa392405bfc0eaeddbfe6874f4937eb80340fe97a"
+    "version": "2",
+    "sha256": "832a5c51d43181a4ea620bf9768a4f2b99936c284ed5e25746df101302eaa53d"
   },
   "selection_edit": {
     "version": "1",
@@ -124,8 +124,8 @@
     "sha256": "b22681f9529d04b5a95e68878351114114d15ce7ed4f382e9244a021400eaf5e"
   },
   "writer_chapter": {
-    "version": "7",
-    "sha256": "6090379f0df8b8dd06850de02df36d089d3560259969210d673d2625cd67eed0"
+    "version": "8",
+    "sha256": "2aa4a7887bbed9febe07b9aedba2c5b01f56db89a8868e09f070d5d930a68b28"
   },
   "writer_revise": {
     "version": "1",

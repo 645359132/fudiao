@@ -241,6 +241,42 @@ describe('写手成章', () => {
     expect(request).not.toContain('林舟还住在破庙');
   });
 
+  it('请求中带上各人物知道的事与不在场的章（认知层）：认知与说法归到各人名下，别人的认知不混进来，世界事实仍在“已确认的事实”', async () => {
+    const { deps, app, c1, c2 } = await setup();
+    const lin = value(await app.listEntities()).find((e) => e.name === '林舟')!;
+    const qian = value(await app.createEntity('character', '钱四')).created;
+    // 第一章只有林舟出场，整理了长篇记忆；钱四不在场。
+    value(await app.savePlan(c1, { goal: '林舟当玉', castIds: [lin.id], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 1000 }));
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟深夜当玉，被压价。', cast: [{ name: '林舟', state: '玉还在手里' }], foreshadows: [], openThreads: [] })));
+    value(await app.buildMemory(c1));
+    const fact = (kind: 'world' | 'belief' | 'claim', holderId: string | null, content: string, modality: 'observed' | 'heard' | 'inferred' | 'claimed' | null, confidence: number | null) => ({
+      kind,
+      holderId,
+      subjectIds: [lin.id],
+      content,
+      modality,
+      confidence,
+      validFromChapterId: null,
+      validToChapterId: null,
+      validFrom: null,
+      validTo: null,
+      basis: [],
+    });
+    value(await app.createFact(fact('belief', lin.id, '钱四认得这块玉', 'inferred', 0.6), 'confirmed'));
+    value(await app.createFact(fact('claim', lin.id, '玉是捡来的', 'claimed', null), 'confirmed'));
+    value(await app.createFact(fact('belief', qian.id, '林舟的玉是赃物', 'heard', 0.8), 'confirmed'));
+    value(await app.createFact(fact('world', null, '当铺后院有口井', null, null), 'confirmed'));
+    value(await app.savePlan(c2, { goal: '林舟再访当铺', castIds: [lin.id, qian.id], beats, foreshadowPlant: [], foreshadowPayoff: [], treatment: '对峙展开', targetWords: 3000 }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply('一。'), reply('二。'));
+    value(await app.writeChapter(c2));
+    const body = bodyText(deps, 0);
+    expect(body).toContain('- 林舟：落魄书生，好面子（最近的状态：玉还在手里）\\n  知道或相信的：推测：钱四认得这块玉（相信程度 0.6）；说过：玉是捡来的；\\n- 钱四\\n  知道或相信的：听到：林舟的玉是赃物（相信程度 0.8）；\\n  不在场、前文没写他得知：第一章 夜叩（林舟深夜当玉，被压价。）');
+    expect(body).toContain('人物只依据自己知道的说话与行动');
+    expect(body).toContain('已确认的事实：\\n- 当铺后院有口井');
+    expect(body).not.toContain('- 林舟的玉是赃物');
+  });
+
   it('本章在某一卷里时，请求带上卷名与本卷梗概（B68）', async () => {
     const { deps, app, c2 } = await setup();
     const created = value(await app.createVolume('第一卷 夜雨'));

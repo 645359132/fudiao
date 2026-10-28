@@ -3,7 +3,7 @@
 import type { WritingContextInput } from '@fudiao/context';
 import { createEntityMatcher } from '@fudiao/editor';
 import type { Chapter, Entity, Fact, Project, Relationship, StoredModel } from '@fudiao/store';
-import { relationApplies } from '@fudiao/writing';
+import { factApplies, relationApplies } from '@fudiao/writing';
 import { effectiveLimits } from './model-limits';
 
 /** 编辑器中的选区（或光标，此时 from 与 to 相同），位置是段落标识加段内下标。 */
@@ -78,19 +78,11 @@ export function gatherWritingInput(src: WritingSources, selection: EditorSelecti
   const present = src.entities.filter((e) => mentions.has(e.id));
   const presentIds = new Set(present.map((e) => e.id));
 
-  // 适用于本章的事实：起始章节不在本章之后，结束章节不在本章之前；与本章出现的设定有关。
-  const at = (id: string | null) => (id === null ? null : src.chapters.findIndex((c) => c.id === id));
-  const facts = src.facts.filter((f) => {
-    if (f.status === 'rejected') return false;
-    const fromIndex = at(f.validFromChapterId);
-    const toIndex = at(f.validToChapterId);
-    if (fromIndex !== null && fromIndex > index) return false;
-    if (toIndex !== null && toIndex >= 0 && toIndex < index) return false;
-    return f.subjectIds.some((s) => presentIds.has(s)) || (f.holderId !== null && presentIds.has(f.holderId));
-  });
+  const order = new Map(src.chapters.map((c, i) => [c.id, i]));
+  // 适用于本章的事实（与写手、审核同一个判断）：起始章节不在本章之后，结束章节不在本章之前；与本章出现的设定有关。
+  const facts = src.facts.filter((f) => f.status !== 'rejected' && factApplies(f, index, order) && (f.subjectIds.some((s) => presentIds.has(s)) || (f.holderId !== null && presentIds.has(f.holderId))));
 
   // 适用于本章、至少一端在本章出现的人物关系。
-  const order = new Map(src.chapters.map((c, i) => [c.id, i]));
   const nameOf = new Map(src.entities.map((e) => [e.id, e.name]));
   const relations = (src.relationships ?? []).filter((r) => relationApplies(r, index, order) && (presentIds.has(r.fromId) || presentIds.has(r.toId)));
 

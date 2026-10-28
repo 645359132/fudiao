@@ -316,6 +316,7 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
   const writerJob = useApp((s) => s.writerJob);
   const mine = useApp((s) => s.writerJobs.find((j) => j.chapterId === item.chapter.id));
   const write = useApp((s) => s.writeChapters);
+  const simulate = useApp((s) => s.simulateChapter);
   const rollback = useApp((s) => s.rollbackWriter);
   const cancel = useApp((s) => s.cancelWriting);
   const busy = useApp((s) => s.busy);
@@ -351,6 +352,9 @@ function WriterActions({ item }: { readonly item: PlanChapterView }) {
           {plan.status === 'writing' ? '接着写' : '写这一章'}
         </button>
       ) : null}
+      <button type="button" disabled={busy} title="按本章的计划与出场人物各自知道的事建推演场景，让角色自己走一遍" onClick={() => void simulate(item.chapter.id)}>
+        推演这一章
+      </button>
       {writerJob === null && progress !== null ? (
         confirming ? (
           <>

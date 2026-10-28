@@ -47,6 +47,7 @@ import {
   dropHandled,
   effectiveAvoidPhrases,
   foreshadowsForChapter,
+  factApplies,
   normalizePunctuation,
   paragraphLabel,
   relocateIssue,
@@ -534,15 +535,8 @@ export function reviewUseCases(
       const entities = [...cast, ...others].slice(0, MAX_REVIEW_ENTITIES);
       const entityIds = new Set(entities.map((e) => e.id));
       const index = m.order.get(chapterId) ?? 0;
-      const at = (id: string | null) => (id === null ? undefined : m.order.get(id));
       const facts = m.facts
-        .filter((f) => {
-          if (f.status !== 'confirmed') return false;
-          const from = at(f.validFromChapterId);
-          const to = at(f.validToChapterId);
-          if ((from !== undefined && from > index) || (to !== undefined && to < index)) return false;
-          return f.subjectIds.some((id) => entityIds.has(id)) || (f.holderId !== null && entityIds.has(f.holderId));
-        })
+        .filter((f) => f.status === 'confirmed' && factApplies(f, index, m.order) && (f.subjectIds.some((id) => entityIds.has(id)) || (f.holderId !== null && entityIds.has(f.holderId))))
         .slice(0, MAX_REVIEW_FACTS);
       const nameOf = new Map(m.entities.map((e) => [e.id, e.name]));
       const factText = (f: Fact) => {

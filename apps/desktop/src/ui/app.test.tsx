@@ -1873,6 +1873,79 @@ async function simReady(maxRounds = 3) {
 }
 const simStatus = () => screen.getByRole('region', { name: '推演工作区' }).querySelector('[role="status"]')?.textContent ?? '';
 
+describe('推演这一章（B39 补充）', () => {
+  /** 一部作品、一章（有计划、出场人物林舟），模型已配好。 */
+  async function ready() {
+    const ctx = start();
+    const { user, service, store, deps } = ctx;
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章 夜叩');
+    const chapterId = store.getState().selectedChapterId ?? '';
+    const lin = await service.createEntity('character', '林舟');
+    const linId = lin.ok ? lin.value.created.id : '';
+    await addTestedModel(service, deps);
+    deps.llmRequests.length = 0;
+    return { ...ctx, chapterId, linId };
+  }
+
+  it('章节页的“推演这一章”：没有计划时到推演页的新建场景表单提示（可以改用描述）；有计划时按计划生成草稿、切到推演页的新场景表单，绑到这一章，备注列出来；推演页还有草稿时先提示', async () => {
+    const { user, service, store, deps, chapterId, linId } = await ready();
+    await user.click(screen.getByRole('button', { name: '推演这一章' }));
+    await waitFor(() => expect(store.getState().message).toContain('“第一章 夜叩”还没有章节计划'));
+    expect(deps.llmRequests).toHaveLength(0);
+    const fresh = screen.getByRole('form', { name: '新建场景' });
+    expect(within(fresh).getByRole('combobox')).toHaveProperty('value', chapterId);
+
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [linId], beats: ['叩门', '压价'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 })).ok).toBe(true);
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    await user.click(screen.getByRole('button', { name: '第一章 夜叩' }));
+    await user.click(await screen.findByRole('button', { name: '推演这一章' }));
+    const form = await screen.findByRole('form', { name: '新场景' });
+    expect(within(form).getByRole('textbox', { name: '场景名' })).toHaveProperty('value', '第一章 夜叩');
+    expect(within(form).getByRole('combobox', { name: '所属章节' })).toHaveProperty('value', chapterId);
+    // 作品里没有钱四这个人物：备注提醒，不挡保存。
+    expect(within(form).getByRole('list', { name: '生成时的备注' }).textContent).toContain('角色“钱四”对不上作品里的人物设定');
+    expect(within(form).queryByRole('list', { name: '还不对的地方' })).toBeNull();
+    expect(JSON.stringify(deps.llmRequests[0]?.body)).toContain('本章目标：林舟当玉');
+    expect(store.getState().tasks.map((t) => [t.kind, t.title, t.status])).toEqual(expect.arrayContaining([['scene_draft', '推演这一章：第一章 夜叩', 'done']]));
+
+    // 草稿还没保存就又点“推演这一章”：提示，不另生成。
+    await store.getState().simulateChapter(chapterId);
+    expect(store.getState().message).toContain('推演页还有一份没有保存的场景草稿');
+    expect(deps.llmRequests).toHaveLength(1);
+
+    await user.click(within(form).getByRole('button', { name: '保存场景' }));
+    await screen.findByRole('form', { name: '场景 第一章 夜叩' });
+    const scenes = await service.listSimScenes();
+    expect(scenes.ok && scenes.value[0]).toMatchObject({ title: '第一章 夜叩', chapterId });
+  });
+
+  it('计划页的“推演这一章”同样生成草稿；新建场景表单可以选一章按它的计划生成，描述可以不填', async () => {
+    const { user, service, store, deps, chapterId, linId } = await ready();
+    expect((await service.savePlan(chapterId, { goal: '林舟当玉', castIds: [linId], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 2000 })).ok).toBe(true);
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    const actions = await screen.findByRole('group', { name: '第一章 夜叩的写作' });
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    await user.click(within(actions).getByRole('button', { name: '推演这一章' }));
+    const form = await screen.findByRole('form', { name: '新场景' });
+    expect(within(form).getByRole('combobox', { name: '所属章节' })).toHaveProperty('value', chapterId);
+    await user.click(screen.getByRole('button', { name: '放弃草稿' }));
+
+    // 新建场景的表单：选了章节就能生成，不必写描述。
+    const fresh = screen.getByRole('form', { name: '新建场景' });
+    await user.selectOptions(within(fresh).getByRole('combobox'), '');
+    expect(within(fresh).getByRole('button', { name: '生成场景配置草稿' }).matches(':disabled')).toBe(true);
+    await user.selectOptions(within(fresh).getByRole('combobox'), chapterId);
+    expect(within(fresh).getByText(/补充说明（可选）/)).toBeTruthy();
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    await user.click(within(fresh).getByRole('button', { name: '生成场景配置草稿' }));
+    await screen.findByRole('form', { name: '新场景' });
+    expect(JSON.stringify(deps.llmRequests[0]?.body)).toContain('本章目标：林舟当玉');
+    expect(store.getState().sceneDraft?.chapterId).toBe(chapterId);
+  });
+});
+
 describe('推演工作区（B28）', () => {
   it('开始推演并继续到结束：时间线按回合显示全局局面与各角色所见；结束后不能再推进；列出等待时间', async () => {
     const { user, runs } = await simReady();

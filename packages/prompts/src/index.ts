@@ -78,7 +78,8 @@ export {
 export type { PlanDraftData, RulingEffect } from './schemas';
 export { checkSelfTest, SELF_TEST_EXPECTED, SelfTestOutput } from './self-test';
 export type { AssistantHistoryItem, AssistantResult, AssistantState, EvidenceSecret } from './render';
-export type { BenchmarkBookInput, BenchmarkCompareInput, BookAuditInput, CastCompletionInput, RelationChangesInput, ContinuityCheckInput, OpeningReviewInput, VolumeOutlineInput, ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput, WriterRelation } from './render';
+export type { BenchmarkBookInput, BenchmarkCompareInput, BookAuditInput, CastCompletionInput, RelationChangesInput, ContinuityCheckInput, OpeningReviewInput, VolumeOutlineInput, ChapterMemoryInput, ChapterReviewInput, WriterReviseInput, PlanDraftInput, BookSeedInput, SelectionEditInput, SelectionOperation, WriterChapterInput, WriterRelation, CastKnowledgeFact, SceneChapterMaterials, SceneDraftInput } from './render';
+export { knowledgeLine } from './render';
 export type { BuiltinSkill } from './skills';
 export { BUILTIN_SKILLS } from './skills';
 export { ASSISTANT_PAGES, ASSISTANT_TOOLS, ASSISTANT_WORKFLOWS, AssistantAction, AssistantTurnOutput, ENTITY_KINDS_FOR_ASSISTANT, RELATION_KINDS_FOR_ASSISTANT } from './assistant';

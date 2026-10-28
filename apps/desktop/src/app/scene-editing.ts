@@ -174,3 +174,56 @@ export function removeZone(config: SceneSpecInput, id: string): SceneSpecInput {
     ...(config.exits !== undefined && { exits: config.exits.filter((x) => x !== id) }),
   };
 }
+
+/** 领域内核允许每个角色最多几条初始认知（需求 I04 首版原型范围）。 */
+export const MAX_INITIAL_KNOWLEDGE = 5;
+
+/** 草稿里初始认知超过上限的角色只留前几条（否则过不了校验、存不了），截掉的写进备注，作者可以自己换。 */
+export function limitKnowledge(config: SceneSpecInput): { readonly config: SceneSpecInput; readonly notes: string[] } {
+  const notes: string[] = [];
+  const actors = config.actors.map((a) => {
+    const knowledge = a.card?.initialKnowledge ?? [];
+    if (knowledge.length <= MAX_INITIAL_KNOWLEDGE) return a;
+    notes.push(
+      `角色“${a.name}”的初始认知有 ${knowledge.length} 条，只留了前 ${MAX_INITIAL_KNOWLEDGE} 条；截掉的：${knowledge
+        .slice(MAX_INITIAL_KNOWLEDGE)
+        .map((k) => `“${k.text}”`)
+        .join('、')}`,
+    );
+    return { ...a, card: { ...a.card, initialKnowledge: knowledge.slice(0, MAX_INITIAL_KNOWLEDGE) } };
+  });
+  return { config: notes.length === 0 ? config : { ...config, actors }, notes };
+}
+
+/** 按章节计划建场景时的一个出场人物：名字与别名（对角色），以及他知道的事的原文（查认知有没有串）。 */
+export type SceneCastMember = { readonly name: string; readonly aliases: readonly string[]; readonly knows: readonly string[] };
+
+/** 认知原文至少这么长才拿来比对，短句容易误报。 */
+const CROSS_MIN_CHARS = 8;
+
+/**
+ * 按章节计划建的场景与出场人物核对（B39 补充）：角色的名字要对得上人物设定（采纳推演草案按名字对应人物），
+ * 出场人物都该进场景，一个角色的初始认知里不该有别人知道的事的原文。都只是备注，不挡保存。
+ */
+export function chapterSceneNotes(config: SceneSpecInput, cast: readonly SceneCastMember[]): string[] {
+  const notes: string[] = [];
+  const memberOf = (name: string) => cast.find((c) => c.name === name.trim() || c.aliases.includes(name.trim()));
+  const matched = new Set<SceneCastMember>();
+  for (const actor of config.actors) {
+    const member = memberOf(actor.name);
+    if (member === undefined) {
+      notes.push(`角色“${actor.name}”对不上作品里的人物设定：采纳推演草案时记不成这个人物的认知，请改成人物设定里的名字`);
+      continue;
+    }
+    matched.add(member);
+    for (const k of actor.card?.initialKnowledge ?? []) {
+      for (const other of cast) {
+        if (other === member) continue;
+        const leaked = other.knows.find((t) => t.trim().length >= CROSS_MIN_CHARS && k.text.includes(t.trim()) && !member.knows.some((mine) => mine.includes(t.trim())));
+        if (leaked !== undefined) notes.push(`认知可能串了：“${actor.name}”的初始认知“${k.text}”里有“${other.name}”知道的事“${leaked}”，请核对`);
+      }
+    }
+  }
+  for (const member of cast) if (!matched.has(member)) notes.push(`出场人物“${member.name}”没有进场景`);
+  return notes;
+}

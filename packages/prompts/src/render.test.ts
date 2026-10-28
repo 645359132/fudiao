@@ -295,8 +295,70 @@ describe('其他模板', () => {
     expect(text).toContain('说话发生在他移动之前所在的地方');
   });
 
-  it('场景配置草稿包含作者的描述', () => {
-    expect(fullText(unwrap(renderSceneDraft('当铺里，掌柜与落魄书生讨价还价。')))).toContain('落魄书生');
+  it('场景配置草稿包含作者的描述；没有章节材料时按描述建，默认两个人物', () => {
+    const text = fullText(unwrap(renderSceneDraft({ description: '当铺里，掌柜与落魄书生讨价还价。' })));
+    expect(text).toContain('作者对局面的描述：\n当铺里，掌柜与落魄书生讨价还价。');
+    expect(text).toContain('默认两个人物');
+    expect(text).not.toContain('出场人物');
+  });
+
+  it('按章节计划建场景（B39 补充）：角色就是出场人物、名字照用，带上各人知道的、在场与不在场的章、关系、事实、地点、要揭晓与不得说破的；描述是补充', () => {
+    const text = fullText(
+      unwrap(
+        renderSceneDraft({
+          description: '让钱四先开口。',
+          chapter: {
+            title: '当铺夜谈',
+            genre: '古代市井',
+            chapterTitle: '第二章 夜雨',
+            goal: '林舟再访当铺',
+            beats: ['叩门', '压价'],
+            treatment: '对峙展开',
+            volumeSummary: '林舟当玉，引出旧主。',
+            cast: [
+              {
+                name: '林舟',
+                description: '落魄书生',
+                state: '玉还在手里',
+                knows: [
+                  { text: '玉是父亲留下的', kind: 'belief', modality: 'observed', confidence: 1 },
+                  { text: '钱四认得这块玉', kind: 'belief', modality: 'inferred', confidence: 0.6 },
+                  { text: '玉是捡来的', kind: 'claim', modality: 'claimed', confidence: null },
+                ],
+                present: ['第一章 夜叩（林舟当玉被压价）'],
+                absent: [],
+              },
+              { name: '钱四', description: '', state: '', knows: [], present: [], absent: ['第一章 夜叩（林舟当玉被压价）'] },
+            ],
+            relations: [{ from: '钱四', to: '林舟', label: '债主', mutual: false, description: '', secret: true }],
+            worldFacts: ['当铺后院有口井'],
+            memories: [{ title: '第一章 夜叩', summary: '林舟当玉被压价' }],
+            openThreads: ['钱四约他三日后再来'],
+            locations: [{ name: '当铺', description: '城南的老铺子' }],
+            toPayoff: [{ title: '玉佩的来历', reveal: '玉佩是父亲的遗物' }],
+            mustNotReveal: ['债主是钱四的表兄'],
+          },
+        }),
+      ),
+    );
+    for (const part of [
+      '名字一字不差照用',
+      '作者对局面的补充描述：\n让钱四先开口。',
+      '本卷梗概：林舟当玉，引出旧主。',
+      '本章：第二章 夜雨\n本章目标：林舟再访当铺\n详略：对峙展开',
+      '- 叩门\n- 压价',
+      '- 林舟：落魄书生（最近的状态：玉还在手里）\n  知道或相信的：亲身经历：玉是父亲留下的；推测：钱四认得这块玉（相信程度 0.6）；说过：玉是捡来的；\n  最近出场：第一章 夜叩（林舟当玉被压价）',
+      '- 钱四\n  不在场、前文没写他得知：第一章 夜叩（林舟当玉被压价）',
+      '- 钱四是林舟的债主〔隐秘〕',
+      '已确认的世界事实：\n- 当铺后院有口井',
+      '上一章结尾留下的事：\n- 钱四约他三日后再来',
+      '地点设定：\n- 当铺：城南的老铺子',
+      '本章要揭晓的：\n- 玉佩的来历：玉佩是父亲的遗物',
+      '不得说破：\n- 债主是钱四的表兄',
+    ]) {
+      expect(text).toContain(part);
+    }
+    expect(text).not.toContain('默认两个人物');
   });
 });
 
@@ -588,6 +650,35 @@ describe('写手成章（B59）', () => {
     const bare = fullText(unwrap(renderWriterChapter({ ...base, volume: { title: '第一卷 雨夜', summary: '' } })));
     expect(bare).toContain('本卷：第一卷 雨夜\n本章：');
     expect(bare).not.toContain('本卷梗概');
+  });
+
+  it('认知层（B59 补充）：各人知道或相信的写在人物下面，不在场的章合成一句；有认知层时要求人物只依据自己知道的说话与行动；都没有时省略', () => {
+    const text = fullText(
+      unwrap(
+        renderWriterChapter({
+          ...base,
+          cast: [
+            {
+              name: '林舟',
+              description: '落魄书生',
+              state: '',
+              knows: [
+                { text: '钱四认得这块玉', kind: 'belief', modality: 'inferred', confidence: 0.6 },
+                { text: '玉是父亲留下的', kind: 'belief', modality: 'observed', confidence: 1 },
+                { text: '玉是捡来的', kind: 'claim', modality: 'claimed', confidence: null },
+              ],
+              absent: [],
+            },
+            { name: '钱四', description: '', state: '', knows: [], absent: ['第一章 夜叩（林舟当玉被压价）', '第三章 天明（林舟中举）'] },
+          ],
+        }),
+      ),
+    );
+    expect(text).toContain('- 林舟：落魄书生\n  知道或相信的：推测：钱四认得这块玉（相信程度 0.6）；亲身经历：玉是父亲留下的；说过：玉是捡来的；\n- 钱四\n  不在场、前文没写他得知：第一章 夜叩（林舟当玉被压价）、第三章 天明（林舟中举）\n');
+    expect(text).toContain('- 人物只依据自己知道的说话与行动');
+    const plain = fullText(unwrap(renderWriterChapter(base)));
+    expect(plain).not.toContain('知道或相信的');
+    expect(plain).not.toContain('人物只依据自己知道的说话与行动');
   });
 
   it('人物关系（B73）写在出场人物之后；单向读作“甲是乙的…”，双向读作“甲与乙：…”；有隐秘关系时要求不要点明；没有关系时省略', () => {

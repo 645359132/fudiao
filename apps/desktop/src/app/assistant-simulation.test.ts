@@ -91,6 +91,28 @@ describe('AI 助手操作角色推演（M5-19）', () => {
     expect(effects).toContainEqual({ kind: 'simulation_changed' });
   });
 
+  it('给了章节时按这一章的计划与出场人物建场景（B39 补充）：描述可以为 null，场景绑到这一章、名字是章名；章节与描述都没有时不建', async () => {
+    const { deps, app } = await setup();
+    const chapter = value(await app.createChapter('第一章 当铺')).chapters[0]!;
+    const lin = value(await app.createEntity('character', '林舟')).created;
+    const qian = value(await app.createEntity('character', '钱四')).created;
+    value(await app.savePlan(chapter.id, { goal: '林舟再访当铺', castIds: [lin.id, qian.id], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: null }));
+    deps.llmRequests.length = 0;
+    step(deps, { message: '', actions: [{ tool: 'create_sim_scene', description: null, title: null, chapter: '第一章 当铺', maxRounds: null }], done: true });
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    const outcome = value(await app.sendToAssistant('把第一章推演一下'));
+    const [scene] = value(await app.listSimScenes());
+    expect(scene).toMatchObject({ title: '第一章 当铺', chapterId: chapter.id, protocol: 'turn_based', config: { meta: { title: '第一章 当铺', questions: ['林舟再访当铺'] } } });
+    expect(JSON.stringify(deps.llmRequests[1]?.body)).toContain('本章目标：林舟再访当铺');
+    expect(lastResults(outcome.items)?.results[0]).toMatchObject({ tool: 'create_sim_scene', ok: true, detail: expect.stringContaining('已保存推演场景“第一章 当铺”') });
+
+    step(deps, { message: '', actions: [{ tool: 'create_sim_scene', description: null, title: null, chapter: null, maxRounds: null }], done: true });
+    step(deps, { message: '要先说按哪一章。', actions: [], done: true });
+    const refused = value(await app.sendToAssistant('建个推演场景'));
+    expect(lastResults(refused.items)?.results[0]).toMatchObject({ tool: 'create_sim_scene', ok: false, detail: expect.stringContaining('没有说按哪一章建，也没有描述局面') });
+    expect(value(await app.listSimScenes())).toHaveLength(1);
+  });
+
   it('生成的场景不合规则时不保存，把问题告诉模型', async () => {
     const { deps, app } = await setup();
     const broken = { ...sceneDraftFixture(), actors: sceneDraftFixture().actors.map((a) => ({ ...a, zone: 'nowhere' })) };

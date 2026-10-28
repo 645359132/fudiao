@@ -239,7 +239,7 @@ const freshKey = (prefix: string, taken: readonly string[]) => {
  * 区域图在“区域”一节（ZoneGraphEditor）；机关、消耗规则等其余配置在“高级”里直接编辑。
  * 校验由领域内核完成，表单下方随时列出还不对的地方，全部改好才能保存。
  */
-export function SceneEditor({ id, initial, notes }: { readonly id: string | null; readonly initial: SimSceneFields; readonly notes?: readonly string[] }) {
+export function SceneEditor({ id, initial, notes, hints }: { readonly id: string | null; readonly initial: SimSceneFields; readonly notes?: readonly string[]; readonly hints?: readonly string[] }) {
   const chapters = useApp((s) => s.work?.chapters ?? []);
   const save = useApp((s) => s.saveSimScene);
   const busy = useApp((s) => s.busy);
@@ -291,6 +291,13 @@ export function SceneEditor({ id, initial, notes }: { readonly id: string | null
         <div role="note" className="muted">
           草稿里有 {notes.length} 处需要你改一下才能保存，见表单下方的列表。
         </div>
+      ) : null}
+      {hints !== undefined && hints.length > 0 ? (
+        <ul className="muted" aria-label="生成时的备注">
+          {hints.map((h) => (
+            <li key={h}>{h}</li>
+          ))}
+        </ul>
       ) : null}
       <Text label="场景名" value={title} onChange={touch(setTitle)} />
       <label>
