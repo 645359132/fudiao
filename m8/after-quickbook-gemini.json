@@ -1,0 +1,644 @@
+{
+  "chapters": 3,
+  "words": 5666,
+  "chapterWords": {
+    "count": 3,
+    "mean": 1888.6666666666667,
+    "sd": 317.457958721396,
+    "cv": 0.16808575294108505
+  },
+  "titleLengths": {
+    "3": 1,
+    "4": 1,
+    "6": 1
+  },
+  "dialogue": {
+    "overall": 0.24973526297211437,
+    "byVolume": [
+      {
+        "volume": "（未分卷）",
+        "chapters": 3,
+        "ratio": 0.24973526297211437
+      }
+    ],
+    "lowest": [
+      {
+        "index": 1,
+        "title": "半夜敲门",
+        "volume": null,
+        "words": 2336,
+        "dialogueRatio": 0.1656678082191781,
+        "sentenceCv": 0.42336737706854427,
+        "mtld": 147.14921072766973,
+        "ending": "freeze"
+      },
+      {
+        "index": 2,
+        "title": "等得起",
+        "volume": null,
+        "words": 1632,
+        "dialogueRatio": 0.2622549019607843,
+        "sentenceCv": 0.49861564849845963,
+        "mtld": 183.11343331206126,
+        "ending": "narration"
+      },
+      {
+        "index": 3,
+        "title": "掌柜坐了一宿",
+        "volume": null,
+        "words": 1698,
+        "dialogueRatio": 0.35335689045936397,
+        "sentenceCv": 0.4375567402550188,
+        "mtld": 192.05784728938096,
+        "ending": "narration"
+      }
+    ]
+  },
+  "sentences": {
+    "count": 174,
+    "mean": 24.43103448275862,
+    "sd": 10.992858814105494,
+    "cv": 0.44995470093021783
+  },
+  "paragraphs": {
+    "count": 132,
+    "mean": 42.92424242424242,
+    "sd": 24.88538003683275,
+    "cv": 0.5797511762904912
+  },
+  "mtldMedian": 183.11343331206126,
+  "endings": {
+    "dialogue": 0,
+    "question": 0,
+    "ellipsis": 0,
+    "freeze": 1,
+    "narration": 2,
+    "summary": 0
+  },
+  "terms": [
+    {
+      "term": "柜台",
+      "count": 14,
+      "chapters": 2,
+      "left": "的进",
+      "right": "比后",
+      "perTenThousand": 24.708789269325802
+    },
+    {
+      "term": "右手",
+      "count": 13,
+      "chapters": 2,
+      "left": "的把",
+      "right": "死从",
+      "perTenThousand": 22.943875750088246
+    },
+    {
+      "term": "疤脸汉子",
+      "count": 8,
+      "chapters": 2,
+      "left": "的^",
+      "right": "咧没",
+      "perTenThousand": 14.119308153900459
+    },
+    {
+      "term": "门板",
+      "count": 8,
+      "chapters": 3,
+      "left": "漆的",
+      "right": "上$",
+      "perTenThousand": 14.119308153900459
+    },
+    {
+      "term": "汉子",
+      "count": 7,
+      "chapters": 1,
+      "left": "名脸",
+      "right": "穿咧",
+      "perTenThousand": 12.354394634662901
+    },
+    {
+      "term": "声音",
+      "count": 7,
+      "chapters": 3,
+      "left": "的^",
+      "right": "像在",
+      "perTenThousand": 12.354394634662901
+    },
+    {
+      "term": "发出",
+      "count": 6,
+      "chapters": 3,
+      "left": "^",
+      "right": "沉刺",
+      "perTenThousand": 10.589481115425345
+    },
+    {
+      "term": "死死",
+      "count": 6,
+      "chapters": 2,
+      "left": "手直",
+      "right": "按盯",
+      "perTenThousand": 10.589481115425345
+    },
+    {
+      "term": "眼皮",
+      "count": 6,
+      "chapters": 2,
+      "left": "^的",
+      "right": "耷微",
+      "perTenThousand": 10.589481115425345
+    },
+    {
+      "term": "边缘",
+      "count": 5,
+      "chapters": 2,
+      "left": "的着",
+      "right": "往转",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "斗笠",
+      "count": 5,
+      "chapters": 1,
+      "left": "破的",
+      "right": "的上",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "赌坊",
+      "count": 5,
+      "chapters": 3,
+      "left": "在^",
+      "right": "后里",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "脸汉子",
+      "count": 5,
+      "chapters": 1,
+      "left": "疤黑",
+      "right": "咧没",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "算盘",
+      "count": 5,
+      "chapters": 2,
+      "left": "在把",
+      "right": "旁往",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "孙文甫",
+      "count": 5,
+      "chapters": 1,
+      "left": "的^",
+      "right": "一叹",
+      "perTenThousand": 8.824567596187787
+    },
+    {
+      "term": "背面",
+      "count": 4,
+      "chapters": 1,
+      "left": "^过",
+      "right": "$右",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "城东",
+      "count": 4,
+      "chapters": 1,
+      "left": "眼去",
+      "right": "的$",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "出两",
+      "count": 4,
+      "chapters": 3,
+      "left": "伸摸",
+      "right": "根钱",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "掸子",
+      "count": 4,
+      "chapters": 1,
+      "left": "毛的",
+      "right": "百停",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "得极",
+      "count": 4,
+      "chapters": 2,
+      "left": "放断",
+      "right": "低快",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "脚步",
+      "count": 4,
+      "chapters": 2,
+      "left": "^快",
+      "right": "猛$",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "石桥",
+      "count": 4,
+      "chapters": 1,
+      "left": "南^",
+      "right": "下北",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "手指",
+      "count": 4,
+      "chapters": 2,
+      "left": "的^",
+      "right": "$在",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "抬手",
+      "count": 4,
+      "chapters": 2,
+      "left": "^他",
+      "right": "抹用",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "胸口",
+      "count": 4,
+      "chapters": 2,
+      "left": "着的",
+      "right": "$剧",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "抓起",
+      "count": 4,
+      "chapters": 2,
+      "left": "手^",
+      "right": "一柜",
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "打手",
+      "count": 3,
+      "chapters": 3,
+      "left": "个的",
+      "right": "就$",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "地看",
+      "count": 3,
+      "chapters": 2,
+      "left": "下楚",
+      "right": "着到",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "垫子",
+      "count": 3,
+      "chapters": 1,
+      "left": "皮到",
+      "right": "铺上",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "东西",
+      "count": 3,
+      "chapters": 2,
+      "left": "老么",
+      "right": "看狠",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "赌债",
+      "count": 3,
+      "chapters": 2,
+      "left": "两^",
+      "right": "$的",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "黑漆",
+      "count": 3,
+      "chapters": 1,
+      "left": "^的",
+      "right": "门木",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "后巷",
+      "count": 3,
+      "chapters": 3,
+      "left": "坊楼",
+      "right": "挨$",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "灰布",
+      "count": 3,
+      "chapters": 2,
+      "left": "的个",
+      "right": "短帕",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "酒楼",
+      "count": 3,
+      "chapters": 1,
+      "left": "^下",
+      "right": "二$",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "开半",
+      "count": 3,
+      "chapters": 3,
+      "left": "拉让",
+      "right": "尺人",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "拉开",
+      "count": 3,
+      "chapters": 1,
+      "left": "内力",
+      "right": "半$",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "两根",
+      "count": 3,
+      "chapters": 3,
+      "left": "出他",
+      "right": "干指",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "两银子",
+      "count": 3,
+      "chapters": 1,
+      "left": "五十",
+      "right": "$扔",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "鹿皮垫",
+      "count": 3,
+      "chapters": 1,
+      "left": "块回",
+      "right": "子上",
+      "perTenThousand": 5.2947405577126725
+    }
+  ],
+  "openings": [
+    {
+      "term": "孙文",
+      "count": 4,
+      "chapters": 1,
+      "perTenThousand": 7.059654076950229
+    },
+    {
+      "term": "疤脸",
+      "count": 3,
+      "chapters": 1,
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "钱四昨夜",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "他在",
+      "count": 3,
+      "chapters": 2,
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "表舅",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "城南",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "林舟没有",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "林舟咬着",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "明天",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "弄堂",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "钱四眼皮",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "三年",
+      "count": 2,
+      "chapters": 2,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "石桥",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "他的",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "他抬",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "他一",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "屋里",
+      "count": 2,
+      "chapters": 1,
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "阿青比画",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7649135192375573
+    },
+    {
+      "term": "阿青盯着",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7649135192375573
+    },
+    {
+      "term": "阿青搁下",
+      "count": 1,
+      "chapters": 1,
+      "perTenThousand": 1.7649135192375573
+    }
+  ],
+  "crossChapter": [
+    {
+      "term": "青石板路",
+      "count": 3,
+      "chapters": 3,
+      "left": "剩^",
+      "right": "反泡",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "疤脸汉子",
+      "count": 8,
+      "chapters": 2,
+      "left": "的^",
+      "right": "咧没",
+      "perTenThousand": 14.119308153900459
+    },
+    {
+      "term": "右手死死",
+      "count": 3,
+      "chapters": 2,
+      "left": "的用",
+      "right": "按捂",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "在柜台边",
+      "count": 3,
+      "chapters": 2,
+      "left": "搁撑",
+      "right": "的缘",
+      "perTenThousand": 5.2947405577126725
+    },
+    {
+      "term": "拱了拱手",
+      "count": 2,
+      "chapters": 2,
+      "left": "至^",
+      "right": "$",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "宽的缝隙",
+      "count": 2,
+      "chapters": 2,
+      "left": "尺人",
+      "right": "$",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "身子往前",
+      "count": 2,
+      "chapters": 2,
+      "left": "^",
+      "right": "探倾",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "手拢在袖",
+      "count": 2,
+      "chapters": 2,
+      "left": "两双",
+      "right": "子里",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "死死盯着",
+      "count": 2,
+      "chapters": 2,
+      "left": "直^",
+      "right": "他对",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "在赌坊后",
+      "count": 2,
+      "chapters": 2,
+      "left": "前人",
+      "right": "巷院",
+      "perTenThousand": 3.5298270384751147
+    },
+    {
+      "term": "走投无路",
+      "count": 2,
+      "chapters": 2,
+      "left": "个他",
+      "right": "来$",
+      "perTenThousand": 3.5298270384751147
+    }
+  ],
+  "rows": [
+    {
+      "index": 1,
+      "title": "半夜敲门",
+      "volume": null,
+      "words": 2336,
+      "dialogueRatio": 0.1656678082191781,
+      "sentenceCv": 0.42336737706854427,
+      "mtld": 147.14921072766973,
+      "ending": "freeze"
+    },
+    {
+      "index": 2,
+      "title": "等得起",
+      "volume": null,
+      "words": 1632,
+      "dialogueRatio": 0.2622549019607843,
+      "sentenceCv": 0.49861564849845963,
+      "mtld": 183.11343331206126,
+      "ending": "narration"
+    },
+    {
+      "index": 3,
+      "title": "掌柜坐了一宿",
+      "volume": null,
+      "words": 1698,
+      "dialogueRatio": 0.35335689045936397,
+      "sentenceCv": 0.4375567402550188,
+      "mtld": 192.05784728938096,
+      "ending": "narration"
+    }
+  ]
+}
