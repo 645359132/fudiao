@@ -2,7 +2,7 @@
 
 use std::{fs, path::PathBuf};
 
-use fudiao_lib::db::{migrate::checksum, Database, Statement};
+use fudiao_lib::db::{migrate::checksum, Database, Query, Statement};
 use serde_json::{json, Value};
 
 fn contract() -> Value {
@@ -52,6 +52,11 @@ fn contract_cases() {
                 .cloned()
                 .unwrap_or_default();
             db.query(q["sql"].as_str().unwrap(), &params)
+                .map(|rows| json!(rows))
+                .map_err(|e| serde_json::to_value(e).unwrap())
+        } else if let Some(r) = case.get("read") {
+            let queries: Vec<Query> = serde_json::from_value(r.clone()).unwrap();
+            db.read(&queries)
                 .map(|rows| json!(rows))
                 .map_err(|e| serde_json::to_value(e).unwrap())
         } else {

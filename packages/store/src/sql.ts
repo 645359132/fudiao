@@ -18,6 +18,9 @@ export type Statement = {
 /** 每条语句的结果：影响行数（只读语句为 0）与返回的行（SELECT 或 RETURNING）。 */
 export type StatementResult = { readonly changes: number; readonly rows: readonly Row[] };
 
+/** 批量读取里的一条只读查询。 */
+export type Query = { readonly sql: string; readonly params?: readonly SqlValue[] };
+
 export type SqlError =
   | { readonly code: 'not_open' }
   | { readonly code: 'readonly'; readonly detail: string }
@@ -35,6 +38,11 @@ export type SqlError =
 export interface SqlPort {
   /** 在只读连接上执行；写语句返回 readonly 错误。 */
   query(sql: string, params?: readonly SqlValue[]): Promise<Result<readonly Row[], SqlError>>;
+  /**
+   * 在只读连接的一个读事务里依次执行一批只读查询，各条读到的是同一个快照（WAL 下不挡写入）：
+   * 导出作品包这类要几张表彼此一致的读取用它，分开 query 会读到后台写入交错后的样子。写语句返回 readonly 错误，一条出错整批失败。
+   */
+  read(queries: readonly Query[]): Promise<Result<readonly (readonly Row[])[], SqlError>>;
   /** 在写连接上以 BEGIN IMMEDIATE 执行一个事务；任一语句出错或守卫不满足即回滚。 */
   transaction(statements: readonly Statement[]): Promise<Result<readonly StatementResult[], SqlError>>;
 }

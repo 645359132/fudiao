@@ -155,6 +155,7 @@ export function fsDeps(root = mkdtempSync(join(tmpdir(), 'fudiao-app-')), option
   const heldElsewhere = new Set<string>();
   const port: SqlPort = {
     query: (sql, params) => (current === null ? Promise.resolve(err({ code: 'not_open' })) : current.query(sql, params)),
+    read: (queries) => (current === null ? Promise.resolve(err({ code: 'not_open' })) : current.read(queries)),
     transaction: (statements: readonly Statement[]) => {
       if (current === null) return Promise.resolve(err({ code: 'not_open' }));
       const fault = sqlFaults[0];

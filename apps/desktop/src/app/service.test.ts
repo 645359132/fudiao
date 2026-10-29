@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
+import { addTestedModel, reply } from '../testing/models';
 import { DEFAULT_PREFERENCES, folderName } from './library';
+import { REVOKED_DETAIL } from './port-guard';
 import { createAppService, type WorkView } from './service';
 
 const roots: TestDeps[] = [];
@@ -381,5 +383,55 @@ describe('导入导出与备份', () => {
     expect(value(await app.restoreBackup(backup.name)).project.title).toBe('雨夜');
     expect(value(await app.loadLibrary()).works[0]).toMatchObject({ title: '雨夜', cover: null });
     expect(value(await app.workCover())).toBeNull();
+  });
+});
+
+describe('从备份恢复与后台写入（审查后的修正，2026-10-29）', () => {
+  /** 一部有一章（有计划）、配好模型、备份过的作品。 */
+  async function writable() {
+    const { deps, app } = setup();
+    await app.loadLibrary();
+    value(await app.createWork('雨夜'));
+    const chapter = value(await app.createChapter('第一章')).chapters[0]!;
+    value(await app.savePlan(chapter.id, { goal: '林舟当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 600 }));
+    await addTestedModel(app, deps);
+    const backup = value(await app.createBackup());
+    return { deps, app, chapter, backup };
+  }
+
+  it('写手正在写时不恢复备份：说明等它写完或先停下；写手照常写完', async () => {
+    const { deps, app, chapter, backup } = await writable();
+    let refused: unknown = null;
+    // 模型生成期间作者点了恢复。
+    deps.beforeLlm.push(async () => {
+      refused = await app.restoreBackup(backup.name);
+    });
+    deps.llmResponses.push(reply('林舟叩门。'));
+    expect(value(await app.writeChapter(chapter.id))).toMatchObject({ status: 'written' });
+    expect(refused).toMatchObject({ ok: false, error: { code: 'settings', detail: expect.stringContaining('写手正在写') } });
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['林舟叩门。']);
+  });
+
+  it('恢复前发起的模型调用返回后不写进恢复后的作品库（作品库代次守卫）：用例停下并说明，恢复后的作品里没有它写的东西', async () => {
+    const { deps, app, chapter, backup } = await writable();
+    // 备份之后写了正文；整理长篇记忆期间从备份恢复（整理记忆不在写手锁里，恢复照常进行）。
+    const opened = value(await app.openChapter(chapter.id));
+    value(await app.saveChapter(chapter.id, opened.saved, [{ id: 'p1', text: '林舟叩门。', source: 'handwritten' }], { splits: [], merges: [] }));
+    let restored: unknown = null;
+    deps.beforeLlm.push(async () => {
+      restored = await app.restoreBackup(backup.name);
+    });
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟叩门。', cast: [], foreshadows: [], openThreads: [] })));
+    const memory = await app.buildMemory(chapter.id);
+    expect(restored).toMatchObject({ ok: true });
+    expect(memory.ok).toBe(false);
+    expect(JSON.stringify(memory)).toContain(REVOKED_DETAIL);
+    // 恢复后的作品库：正文回到备份时，没有那份记忆；之后照常可写。
+    expect(value(await app.openChapter(chapter.id)).saved).toEqual([]);
+    expect(value(await app.planningView()).chapters[0]?.memory).toBeNull();
+    const again = value(await app.openChapter(chapter.id));
+    value(await app.saveChapter(chapter.id, again.saved, [{ id: 'p2', text: '恢复后写的。', source: 'handwritten' }], { splits: [], merges: [] }));
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '恢复后的一章。', cast: [], foreshadows: [], openThreads: [] })));
+    expect((await app.buildMemory(chapter.id)).ok).toBe(true);
   });
 });

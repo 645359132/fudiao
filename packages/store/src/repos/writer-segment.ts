@@ -13,16 +13,21 @@ import type { SavedParagraph } from './paragraph-plan';
  * 开始一次写作：记下分段与写入前的快照，状态改为写作中。done 通常为 0；本章已有正文写到了前面几段的情节点
  * （推演成章采纳的正文，B85）时从那一段之后接着写，done 不能超过段数。
  */
-export function startWriterRun(port: SqlPort, plan: ChapterPlan, progress: WriterProgress, ctx: WriteContext): Promise<Result<ChapterPlan, RepoError>> {
+/**
+ * 开始一次写手运行：记下分段与进度，计划进入写作中。各段都已记为已写时（推演写出了全部情节点，B85）status 给 written：
+ * 进度与快照照样记下，“回退写手写入”才能回到推演正文写入之前。
+ */
+export function startWriterRun(port: SqlPort, plan: ChapterPlan, progress: WriterProgress, ctx: WriteContext, status: 'writing' | 'written' = 'writing'): Promise<Result<ChapterPlan, RepoError>> {
   if (progress.done > progress.segments.length) return Promise.resolve(err({ code: 'invalid', detail: '已写的段数不能多于分段数' }));
+  if (status === 'written' && progress.done < progress.segments.length) return Promise.resolve(err({ code: 'invalid', detail: '各段都写完才能记为已写' }));
   return guardedUpdate(
     port,
     PlanRow,
     'chapter_plan',
     plan.chapterId,
     {
-      sql: `UPDATE chapter_plan SET status = 'writing', progress = ?, version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${PLAN_COLUMNS}`,
-      params: [JSON.stringify(progress), ctx.now, plan.chapterId, plan.version],
+      sql: `UPDATE chapter_plan SET status = ?, progress = ?, version = version + 1, updated_at = ? WHERE chapter_id = ? AND version = ? RETURNING ${PLAN_COLUMNS}`,
+      params: [status, JSON.stringify(progress), ctx.now, plan.chapterId, plan.version],
     },
     'chapter_id',
   );

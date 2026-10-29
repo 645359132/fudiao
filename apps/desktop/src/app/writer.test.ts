@@ -422,12 +422,21 @@ describe('接着已有正文写其余的情节点（B85）', () => {
     expect(await texts(app, c2)).toEqual(['林舟叩门，钱四验了玉，认出了来历。']);
   });
 
-  it('情节点都已写出时不开写作、不存快照，计划直接标为已写；已经写过的章不能再接着写', async () => {
+  it('情节点都已写出时不开写作，计划直接标为已写，但进度与写入前的快照照样记下：回退写手写入回到推演正文写入之前；已经写过的章不能再接着写', async () => {
     const { app, c2 } = await setup();
+    // 本章已有推演写成的正文（审查后的修正 2026-10-29：以前这个分支只标已写、不记进度，回退时报“没有写手写入的记录”）。
+    const opened = value(await app.openChapter(c2));
+    value(await app.saveChapter(c2, opened.saved, [{ id: 'p-sim', text: '林舟叩门、压价、起疑，转身离开。', source: 'handwritten' }], { splits: [], merges: [] }));
     expect(value(await app.startWriterAfter(c2, beats))).toEqual({ remaining: 0 });
-    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c2)?.plan).toMatchObject({ status: 'written', progress: null });
-    expect(value(await app.listSnapshots(c2))).toEqual([]);
+    const plan = value(await app.planningView()).chapters.find((c) => c.chapter.id === c2)?.plan;
+    expect(plan).toMatchObject({ status: 'written', progress: { done: 1, segments: [beats], snapshotId: expect.any(String) } });
+    expect(value(await app.listSnapshots(c2)).map((s) => s.reason)).toEqual(['writer']);
     expect(await app.startWriterAfter(c2, [])).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已经写过') } });
+    expect(await app.writeChapter(c2)).toMatchObject({ ok: false, error: { detail: expect.stringContaining('已经写过') } });
+    // 回退到写手写入前：正文回到写入前的样子（这里就是推演写成的那一段），计划回到待写。
+    expect(value(await app.rollbackWriter(c2))).toMatchObject({ status: 'todo', progress: null });
+    expect(await texts(app, c2)).toEqual(['林舟叩门、压价、起疑，转身离开。']);
+    expect(value(await app.listSnapshots(c2)).map((s) => s.reason).sort()).toEqual(['before_restore', 'writer']);
   });
 });
 

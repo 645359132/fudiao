@@ -14,7 +14,6 @@ import {
   listChapters,
   listParagraphs,
   rollbackWriterRun,
-  setPlanStatus,
   startWriterRun,
   type Chapter,
   type ChapterPlan,
@@ -221,7 +220,8 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
     /**
      * 本章已有正文写到了这些情节点（推演成章采纳的正文，B85）：写手从其余的情节点接着写。先存“写手写入”快照
      * （一键回退回到采纳后的样子），进度的第一段是已写出的情节点、记为已写，之后 writeChapter 从第二段接着写；
-     * 情节点都已写出时不开写作，计划直接标为已写。已有进度（中断后继续）时不重建，只返回剩余的段数。
+     * 情节点都已写出时不开写作，计划直接标为已写——进度与快照照样记下，“回退写手写入”才能回到推演正文写入之前。
+     * 已有进度（中断后继续）时不重建，只返回剩余的段数。
      */
     async startWriterAfter(chapterId: string, writtenBeats: readonly string[], options: { readonly snapshotId?: string } = {}): Promise<Result<{ readonly remaining: number }, AppError>> {
       const s = session();
@@ -238,10 +238,6 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
       if (draft.ok && draft.value !== null) return err(settings('这一章有未保存的修改：请先打开这一章保存或丢弃'));
       const segments = planSegmentsAfter(plan.beats, writtenBeats, plan.targetWords);
       const remaining = segments.segments.length - segments.done;
-      if (remaining === 0) {
-        const written = await setPlanStatus(port, plan, 'written', ctx());
-        return written.ok ? ok({ remaining: 0 }) : err(repo(written.error));
-      }
       // 推演整书（B86）给出写入推演正文之前存的快照：写手运行沿用它，“回退写手写入”回到推演正文写入之前。
       let snapshotId = options.snapshotId ?? null;
       if (snapshotId === null) {
@@ -254,6 +250,7 @@ export function writerUseCases(deps: AppDeps, session: () => { readonly port: Sq
         plan,
         { runId: deps.ids.next(), segments: segments.segments.map((b) => [...b]), words: [...segments.words], done: segments.done, snapshotId },
         ctx(),
+        remaining === 0 ? 'written' : 'writing',
       );
       if (!started.ok) return err(repo(started.error));
       return ok({ remaining });

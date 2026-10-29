@@ -170,9 +170,10 @@ type Step<P> = {
 
 /**
  * 采用的结果：一句话，或一句话加存回这一步的结果（output）与撤回时另外要改回的项（changes，与 AI 助手的撤销记录同一格式，
- * 追加在现状差别之后；例如采纳进章末的正文由采纳前的快照恢复）。
+ * 追加在现状差别之后；例如采纳进章末的正文由采纳前的快照恢复）。incomplete：采用没有做完（例如几章里有没采纳成的），
+ * 结果与改动照样写回这一步，但这一步仍等作者，单项复核与再次采用照常可用。
  */
-type Adopted<O> = string | { readonly note: string; readonly output?: O; readonly changes?: readonly unknown[] };
+type Adopted<O> = string | { readonly note: string; readonly output?: O; readonly changes?: readonly unknown[]; readonly incomplete?: boolean };
 
 const invalid = (detail: string): AppError => ({ code: 'settings', detail });
 
@@ -1531,7 +1532,20 @@ export const NarrateStep = z.object({
   coveredBeats: z.array(z.string()),
 });
 export type NarrateStep = z.infer<typeof NarrateStep>;
-const WriteAfterReport = z.object({ chapterId: z.string(), remaining: z.number().int(), summary: z.string() });
+/** 写手补全一步的结果；stepKey 与 remaining 在开写手运行后就记为检查点，中断后继续时据此不再重开运行。 */
+const WriteAfterReport = z.object({ stepKey: z.string().default(''), chapterId: z.string(), remaining: z.number().int(), summary: z.string() });
+
+/**
+ * 一章的写作状态（推演成章与推演整书的收尾用）：计划是不是已标写完（写手写完了、或情节点都由推演写出），
+ * 长篇记忆是不是现成的（有、且没过期）。写手补全一步停在整理记忆或审核处再继续时，据此不再调写手、不重复整理记忆。
+ */
+async function chapterWritingState(host: WorkflowHost, chapterId: string): Promise<Result<{ readonly written: boolean; readonly memoryFresh: boolean }, AppError>> {
+  const view = await host.planningView();
+  if (!view.ok) return view;
+  const item = view.value.chapters.find((c) => c.chapter.id === chapterId);
+  const status = item?.plan?.status;
+  return ok({ written: status === 'written' || status === 'reviewed', memoryFresh: item?.memory?.status === 'valid' });
+}
 
 export const sceneStepOf = (step: Pick<WorkflowStepView, 'output'>): SceneStep | null => {
   const parsed = SceneStep.safeParse(step.output);
@@ -1777,25 +1791,39 @@ function sceneChapter(host: WorkflowHost): WorkflowDef<SceneChapterParams> {
         label: '写手补全并审核',
         kind: 'act',
         output: WriteAfterReport,
-        async run({ params, hooks, options, onProgress, output }) {
+        async run({ params, stepKey, hooks, options, onProgress, output, checkpoint }) {
           const narrated = NarrateStep.safeParse(output('narrate'));
           const covered = narrated.success ? narrated.data.beats.filter((b) => narrated.data.coveredBeats.includes(b)) : [];
           const title = await chapterTitle(params.chapterId);
-          const prepared = await host.startWriterAfter(params.chapterId, covered);
-          if (!prepared.ok) return prepared;
-          const { remaining } = prepared.value;
-          if (remaining === 0) {
-            onProgress(`《${title}》的情节点都已由推演写出：整理长篇记忆并审核`);
-            const memory = await host.buildMemory(params.chapterId, options);
-            if (!memory.ok) return options.signal?.aborted === true ? memory : err(interrupted(`《${title}》的长篇记忆没有整理成：${describeError(memory.error)}`));
+          // 剩余的段数在开写手运行后就记为检查点：中断（整理记忆或审核没做成）后继续时不再重开运行——情节点都由推演写出时计划已标为已写，再开会被“已经写过”拒绝。
+          const prior = WriteAfterReport.safeParse(output('write'));
+          let remaining: number;
+          if (prior.success && prior.data.stepKey === stepKey) remaining = prior.data.remaining;
+          else {
+            const prepared = await host.startWriterAfter(params.chapterId, covered);
+            if (!prepared.ok) return prepared;
+            remaining = prepared.value.remaining;
+            const noted = await checkpoint({ stepKey, chapterId: params.chapterId, remaining, summary: '' });
+            if (!noted.ok) return noted;
+          }
+          const state = await chapterWritingState(host, params.chapterId);
+          if (!state.ok) return state;
+          // 没有要写手补的，或写手上次已经写完（停在整理记忆或审核处）：直接收尾。
+          if (remaining === 0 || state.value.written) {
+            const how = remaining === 0 ? '情节点都已由推演写出，没有要写手补的' : `写手已补全其余情节点（${remaining} 段）`;
+            onProgress(`《${title}》：${how}；整理长篇记忆并审核`);
+            if (!state.value.memoryFresh) {
+              const memory = await host.buildMemory(params.chapterId, options);
+              if (!memory.ok) return options.signal?.aborted === true ? memory : err(interrupted(`《${title}》的长篇记忆没有整理成：${describeError(memory.error)}`));
+            }
             const reviewed = await hooks.reviewChapters([params.chapterId], options);
             if (!reviewed.ok) return err(hookFailure(reviewed));
-            return ok({ output: { chapterId: params.chapterId, remaining: 0, summary: reviewed.summary }, note: `情节点都已由推演写出，没有要写手补的；${reviewed.summary}` });
+            return ok({ output: { stepKey, chapterId: params.chapterId, remaining, summary: reviewed.summary }, note: `${how}；${reviewed.summary}` });
           }
           onProgress(`写手接着推演写成的正文补全《${title}》的其余情节点（${remaining} 段），写完整理长篇记忆并审核`);
           const written = await hooks.writeChapters([params.chapterId], true, options);
           if (!written.ok) return err(hookFailure(written));
-          return ok({ output: { chapterId: params.chapterId, remaining, summary: written.summary }, note: written.summary });
+          return ok({ output: { stepKey, chapterId: params.chapterId, remaining, summary: written.summary }, note: written.summary });
         },
       }),
     ],
@@ -2206,14 +2234,20 @@ function sceneBook(host: WorkflowHost): WorkflowDef<SceneBookParams> {
                   await save();
                 }
                 const covered = `推演写出了 ${state.coveredBeats.length} / ${state.beats.length} 个情节点`;
-                if (remaining === 0) {
-                  onProgress(`${where}：情节点都已由推演写出，整理长篇记忆${params.review ? '并审核' : ''}`);
-                  const memory = await host.buildMemory(state.chapterId, options);
-                  if (!memory.ok) return options.signal?.aborted === true ? memory : err(invalid(`长篇记忆没有整理成：${describeError(memory.error)}`));
-                  if (!params.review) return ok({ remaining: 0, status: 'done', note: `${covered}，没有要写手补的` });
+                const current = await chapterWritingState(host, state.chapterId);
+                if (!current.ok) return current;
+                // 没有要写手补的，或写手上次已经写完（中断在整理记忆或审核处，继续时接着做）：直接收尾，不再调写手。
+                if (remaining === 0 || current.value.written) {
+                  const how = remaining === 0 ? '没有要写手补的' : `写手补了 ${remaining} 段`;
+                  onProgress(`${where}：${how}，整理长篇记忆${params.review ? '并审核' : ''}`);
+                  if (!current.value.memoryFresh) {
+                    const memory = await host.buildMemory(state.chapterId, options);
+                    if (!memory.ok) return options.signal?.aborted === true ? memory : err(invalid(`长篇记忆没有整理成：${describeError(memory.error)}`));
+                  }
+                  if (!params.review) return ok({ remaining, status: 'done', note: `${covered}，${how}` });
                   const reviewed = await hooks.reviewChapters([state.chapterId], options);
                   if (!reviewed.ok) return err(hookFailure(reviewed));
-                  return ok({ remaining: 0, status: 'done', note: `${covered}，没有要写手补的；${reviewed.summary}` });
+                  return ok({ remaining, status: 'done', note: `${covered}，${how}；${reviewed.summary}` });
                 }
                 onProgress(`${where}：写手接着推演写成的正文补全其余情节点（${remaining} 段）`);
                 // 写手没写完（被停下、调用失败）一律记为中断（与其他工作流一致）：继续时接着写这一章。
@@ -2246,18 +2280,21 @@ function sceneBook(host: WorkflowHost): WorkflowDef<SceneBookParams> {
           return Promise.resolve(ok({ output: { chapters: list }, note: `${pending} 章的推演草案待采纳：逐章复核后采纳，或一键采纳其余的` }));
         },
         confirm(_c, adoption) {
-          const pending = adoption.chapters.filter((x) => x.status === 'pending');
+          const pending = adoption.chapters.filter((x) => x.status === 'pending' || x.status === 'failed');
           if (pending.length === 0) return Promise.resolve(null);
           return Promise.resolve(`一键采纳会把其余 ${pending.length} 章的草案按默认勾选记为故事事件与视角人物的认知（不记世界事实），各章自动接受的裁决一并视为已复核；涉及锁定设定的章不采纳、须单独复核。要逐条看的章请先单独采纳`);
         },
+        // 待采纳与上次没采纳成的章都采纳；有没采纳成的，这一步仍等作者（incomplete），单章复核采纳或再一键采纳。
         async adopt(_c, adoption) {
           const chapters = adoption.chapters.map((x) => ({ ...x }));
           let adopted = 0;
           let events = 0;
           let facts = 0;
           const failed: string[] = [];
+          let tried = 0;
           for (const entry of chapters) {
-            if (entry.status !== 'pending') continue;
+            if (entry.status !== 'pending' && entry.status !== 'failed') continue;
+            tried += 1;
             const draft = await host.writtenAdoptionDraft(entry.candidateId);
             if (!draft.ok) {
               Object.assign(entry, { status: 'failed', note: describeError(draft.error) });
@@ -2285,9 +2322,11 @@ function sceneBook(host: WorkflowHost): WorkflowDef<SceneBookParams> {
             events += done.value.events;
             facts += done.value.facts;
           }
+          if (tried === 0) return ok({ note: '各章的推演草案都已处理，没有待采纳的（撤回时事实删除，故事事件保留）', output: { chapters } });
           return ok({
-            note: `采纳了 ${adopted} 章的草案：记下 ${events} 件事、${facts} 条事实${failed.length > 0 ? `；没有采纳成：${failed.join('、')}（可以单独复核采纳）` : ''}（撤回时事实删除，故事事件保留）`,
+            note: `采纳了 ${adopted} 章的草案：记下 ${events} 件事、${facts} 条事实${failed.length > 0 ? `；没有采纳成：${failed.join('、')}——这一步仍等你处理，可以单独复核采纳，或处理好以后再一键采纳其余的` : ''}（撤回时事实删除，故事事件保留）`,
             output: { chapters },
+            incomplete: failed.length > 0,
           });
         },
       }),
@@ -2500,7 +2539,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
    * 动作品之前先以版本守卫在这一步上记一笔：两处同时采用（成书页与 AI 助手、“一路做完”与作者）时后到的在动作品之前就失败，
    * 草稿不会写进作品两遍。
    */
-  async function adoptStep(port: SqlPort, def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv): Promise<Result<{ readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown }, AppError>> {
+  async function adoptStep(port: SqlPort, def: AnyWorkflow, data: WorkflowRunWithSteps, idx: number, env: AdvanceEnv): Promise<Result<{ readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown; readonly incomplete: boolean }, AppError>> {
     const spec = specAt(def, data, idx);
     const row = data.steps[idx];
     if (spec?.adopt === undefined || row === undefined) return err(invalid('这一步没有要采用的结果'));
@@ -2523,13 +2562,14 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     const earlier = row.changes ?? [];
     const diffed = before === null || after === null ? null : tracker.diff(before, after);
     const changes = diffed === null && earlier.length === 0 ? null : [...earlier, ...(diffed ?? [])];
-    if (typeof adopted.value === 'string') return ok({ note: adopted.value, changes });
+    if (typeof adopted.value === 'string') return ok({ note: adopted.value, changes, incomplete: false });
     const extra = adopted.value.changes ?? [];
     const merged = changes === null && extra.length === 0 ? null : [...(changes ?? []), ...extra];
-    if (adopted.value.output === undefined) return ok({ note: adopted.value.note, changes: merged });
+    const incomplete = adopted.value.incomplete === true;
+    if (adopted.value.output === undefined) return ok({ note: adopted.value.note, changes: merged, incomplete });
     const output = spec.parse(adopted.value.output);
     if (!output.ok) return err(invalid(`采用后的结果不完整：${output.error}`));
-    return ok({ note: adopted.value.note, changes: merged, output: output.value });
+    return ok({ note: adopted.value.note, changes: merged, output: output.value, incomplete });
   }
 
   /** 采用后写回这一步：状态、说明、改动，以及采用时改过的结果。 */
@@ -2538,6 +2578,20 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     changes: adopted.changes,
     ...(adopted.output !== undefined && { output: adopted.output }),
   });
+
+  /**
+   * 采用之后改这一步：做完了按状态机进入已完成；没做完（有没采纳成的章）只写回结果、说明与已记的改动，
+   * 这一步仍等作者——单章复核采纳与再次一键采纳照常可用，不会把作者关在外面。
+   */
+  async function settleAdoption(port: SqlPort, runId: string, idx: number, adopted: { readonly note: string; readonly changes: readonly unknown[] | null; readonly output?: unknown; readonly incomplete: boolean }): Promise<Result<WorkflowRunWithSteps, AppError>> {
+    const again = await load(port, runId);
+    if (!again.ok) return again;
+    if (!adopted.incomplete) return apply(port, again.value, { type: 'adopt', idx }, { [idx]: adoptPatch(adopted) });
+    const row = again.value.steps[idx];
+    if (row === undefined) return err({ code: 'not_found' });
+    const saved = await updateWorkflowSteps(port, runId, [{ step: row, patch: adoptPatch(adopted) }], ctx());
+    return saved.ok ? saved : err(repo(saved.error));
+  }
 
   /**
    * 执行结束后写回这一步：先重新读取（执行期间用量写回不改版本，但作者可能放弃了运行、助手可能动过这一步）；
@@ -2604,14 +2658,14 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
     if (!produced.ok || produced.value.run.mode !== 'auto' || confirmNote !== null) return produced;
     // 一路做完：草稿直接采用；采用不成时停在这一步，草稿还在。
     const adopted = await adoptStep(port, def, produced.value, idx, env);
-    const again = await load(port, data.run.id);
-    if (!again.ok) return again;
     if (!adopted.ok) {
+      const again = await load(port, data.run.id);
+      if (!again.ok) return again;
       const s = again.value.steps[idx]!;
       const noted = await updateWorkflowSteps(port, data.run.id, [{ step: s, patch: { note: `没有采用成：${describeError(adopted.error)}` } }], ctx());
       return noted.ok ? ok(noted.value) : err(repo(noted.error));
     }
-    return apply(port, again.value, { type: 'adopt', idx }, { [idx]: adoptPatch(adopted.value) });
+    return settleAdoption(port, data.run.id, idx, adopted.value);
   }
 
   function withPort<T>(f: (port: SqlPort) => Promise<Result<T, AppError>>): Promise<Result<T, AppError>> {
@@ -2850,9 +2904,7 @@ export function workflowUseCases<I>({ deps, project, host, changes: tracker, pri
         if (!check.ok) return err(invalid(check.error));
         const adopted = await adoptStep(port, def, data.value, idx, env);
         if (!adopted.ok) return adopted;
-        const again = await load(port, runId);
-        if (!again.ok) return again;
-        const saved = await apply(port, again.value, { type: 'adopt', idx }, { [idx]: adoptPatch(adopted.value) });
+        const saved = await settleAdoption(port, runId, idx, adopted.value);
         return saved.ok ? ok(viewOf(saved.value)) : saved;
       });
     },

@@ -58,8 +58,10 @@ export function describeError(error: AppError): string {
           return '这是锁定设定，先解锁才能修改或删除';
         case 'in_use':
           return '还有事实、章节计划或故事事件用到它（持有者、涉及的设定、出场人物、参与者，或计划里要埋、要收的伏笔），不能删除：先在那里去掉它';
-        case 'sql':
-          return `保存失败：${error.error.error.code}`;
+        case 'sql': {
+          const e = error.error.error;
+          return `保存失败：${'detail' in e ? e.detail : e.code}`;
+        }
       }
   }
   return '操作失败';

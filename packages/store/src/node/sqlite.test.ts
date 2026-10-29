@@ -3,12 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { Migration, Row, SqlValue, Statement } from '../sql';
+import type { Migration, Query, Row, SqlValue, Statement } from '../sql';
 import { loadMigrations, migrationChecksum, openProjectDb, type ProjectDb } from './sqlite';
 
 type Case = {
   readonly name: string;
   readonly query?: { readonly sql: string; readonly params?: SqlValue[] };
+  readonly read?: Query[];
   readonly tx?: Statement[];
   readonly expect: { readonly rows?: Row[]; readonly results?: unknown[]; readonly error?: Record<string, unknown> };
   readonly after?: { readonly sql: string; readonly rows: Row[] };
@@ -42,7 +43,7 @@ async function fresh() {
 describe('SqlPort 契约（Node 实现）', () => {
   it.each(contract.cases.map((c) => [c.name, c] as const))('%s', async (_, c) => {
     const db = await fresh();
-    const result = c.query ? await db.query(c.query.sql, c.query.params) : await db.transaction(c.tx ?? []);
+    const result = c.query ? await db.query(c.query.sql, c.query.params) : c.read ? await db.read(c.read) : await db.transaction(c.tx ?? []);
     if (c.expect.error) {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toMatchObject(c.expect.error);

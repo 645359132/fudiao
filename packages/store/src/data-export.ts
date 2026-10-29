@@ -3,7 +3,7 @@
 import { err, ok, type Result } from '@fudiao/shared';
 import { LEGACY_CONVERSATION_ID } from './repos/assistant';
 import { TABLES, type TableSpec } from './schema';
-import type { SqlError, SqlPort, SqlValue, Statement } from './sql';
+import type { Query, Row, SqlError, SqlPort, SqlValue, Statement } from './sql';
 
 export type ExportedRow = Readonly<Record<string, unknown>>;
 
@@ -100,25 +100,42 @@ export const UPGRADES: Readonly<Record<number, (tables: Tables) => Tables>> = {
 /** 导出时去掉模型输出原文的模板（扫榜拆书的逐本拆解，B79）。 */
 export const BENCHMARK_BOOK_TEMPLATE = 'benchmark_book';
 
-export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {
-  const version = await schemaVersion(port);
-  if (!version.ok) return version;
-  const tables: Record<string, ExportedRow[]> = {};
-  for (const t of TABLES) {
-    const rows = await port.query(`SELECT ${t.columns.join(', ')} FROM ${t.name} ORDER BY ${t.primaryKey.join(', ')}`);
-    if (!rows.ok) return err({ code: 'sql', error: rows.error });
-    tables[t.name] = rows.value.map((row) => {
-      const out: Record<string, unknown> = { ...row };
-      for (const column of t.json) {
-        const value = row[column];
-        if (typeof value === 'string') out[column] = parseJson(value);
-      }
-      // 扫榜拆书逐本拆解的模型输出可能抄了样章（别人的作品）：原文只留在本机，导出时去掉，用量与费用照旧。
-      if (t.name === 'llm_call' && out['template_id'] === BENCHMARK_BOOK_TEMPLATE) out['response'] = null;
-      return out;
-    });
+/** 导出要读的查询：结构版本与每张表（按主键排序）。 */
+const exportQueries = (): Query[] => [
+  { sql: 'SELECT coalesce(max(version), 0) AS v FROM schema_migrations' },
+  ...TABLES.map((t) => ({ sql: `SELECT ${t.columns.join(', ')} FROM ${t.name} ORDER BY ${t.primaryKey.join(', ')}` })),
+];
+
+function exportedRow(t: TableSpec, row: Row): ExportedRow {
+  const out: Record<string, unknown> = { ...row };
+  for (const column of t.json) {
+    const value = row[column];
+    if (typeof value === 'string') out[column] = parseJson(value);
   }
-  return ok({ schemaVersion: version.value, tables });
+  // 扫榜拆书逐本拆解的模型输出可能抄了样章（别人的作品）：原文只留在本机，导出时去掉，用量与费用照旧。
+  if (t.name === 'llm_call' && out['template_id'] === BENCHMARK_BOOK_TEMPLATE) out['response'] = null;
+  return out;
+}
+
+export async function exportData(port: SqlPort): Promise<Result<ExportedData, DataError>> {
+  const snapshot = await exportSnapshot(port, []);
+  return snapshot.ok ? ok(snapshot.value.data) : snapshot;
+}
+
+/**
+ * 导出的数据连同调用方另要的几条只读查询（例如作品包里供人阅读的章节正文），在同一个读事务里一次读完：
+ * 后台写作期间导出，各张表与各部分也彼此一致（分开读时，先读的章节表与后读的段落表之间可能已经写入了新的一章，
+ * 导出的包里就有没有章的段落，导回时报外键错）。
+ */
+export async function exportSnapshot(port: SqlPort, extra: readonly Query[]): Promise<Result<{ readonly data: ExportedData; readonly extra: readonly (readonly Row[])[] }, DataError>> {
+  const read = await port.read([...exportQueries(), ...extra]);
+  if (!read.ok) return err({ code: 'sql', error: read.error });
+  const [versionRows, ...rest] = read.value;
+  const tables: Record<string, ExportedRow[]> = {};
+  TABLES.forEach((t, i) => {
+    tables[t.name] = (rest[i] ?? []).map((row) => exportedRow(t, row));
+  });
+  return ok({ data: { schemaVersion: Number(versionRows?.[0]?.['v'] ?? 0), tables }, extra: rest.slice(TABLES.length) });
 }
 
 export const toJsonl = (rows: readonly ExportedRow[]): string => rows.map((r) => `${JSON.stringify(r)}\n`).join('');

@@ -1147,6 +1147,35 @@ describe('推演成章（B85）', () => {
     expect(third.view.steps.map((s) => s.status)).toEqual(['skipped', 'done', 'stale', 'pending', 'pending']);
   });
 
+  it('写手补全一步停在整理记忆处再继续：不再重开写手运行（情节点都由推演写出时计划已标写完），接着整理记忆并审核；回退写手写入回到接着写之前', async () => {
+    const { deps, app, chapter } = await simSetup();
+    const run = value(await app.startWorkflow({ workflow: 'scene_chapter', params: { chapterId: chapter.id, chapterTitle: chapter.title, sceneId: null, maxRounds: 2 }, mode: 'auto', budgetUsd: null }));
+    deps.llmResponses.push(reply(JSON.stringify(sceneDraftFixture())));
+    // 一路做完：场景与节拍表直接采用，停在采纳正文。推演写出了全部情节点，采纳。
+    const narrated = value(await app.advanceWorkflow(run.run.id));
+    expect(narrated.view.steps.map((s) => s.status)).toEqual(['done', 'done', 'done', 'awaiting_author', 'pending']);
+    const draft = narrateStepOf(narrated.view.steps[3]!)!;
+    value(await app.editWorkflowStep(run.run.id, 3, { ...draft, selection: { ...draft.selection, reviewed: draft.draft.reviews.map((r) => r.requestId) } }));
+    value(await app.adoptWorkflowStep(run.run.id, 3));
+    // 第 5 步：没有要写手补的；整理长篇记忆时调用失败（没有排回复）→ 这一步中断。计划已标写完，进度与快照都记下了。
+    const writer = fakeWriter({ ok: true, summary: '审完了 1 章' });
+    const halted = value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks }));
+    expect(halted.view.steps[4]).toMatchObject({ status: 'interrupted', note: expect.stringContaining('长篇记忆没有整理成') });
+    const plan = async () => value(await app.planningView()).chapters.find((c) => c.chapter.id === chapter.id)?.plan;
+    expect(await plan()).toMatchObject({ status: 'written', progress: { done: 1, segments: [['叩门', '验玉', '认出来历', '离开']] } });
+    // 继续：不再开写手运行（以前这里被“已经写过”拒绝），整理记忆并审核，这一步完成。
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟当玉，钱四认出来历。', cast: [], foreshadows: [], openThreads: [] })));
+    const finished = value(await app.advanceWorkflow(run.run.id, { hooks: writer.hooks }));
+    expect(finished.view.steps[4]).toMatchObject({ status: 'done', note: expect.stringContaining('情节点都已由推演写出，没有要写手补的') });
+    expect(finished.view.state).toBe('done');
+    expect(writer.calls).toEqual([]);
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === chapter.id)?.memory?.summary).toBe('林舟当玉，钱四认出来历。');
+    // 回退写手写入：正文回到接着写之前（采纳后的样子），计划回到待写。
+    value(await app.rollbackWriter(chapter.id));
+    expect(value(await app.openChapter(chapter.id)).saved.map((p) => p.text)).toEqual(['雨下得更紧了。他没有回头。']);
+    expect(await plan()).toMatchObject({ status: 'todo', progress: null });
+  });
+
   it('没有章节计划的章：建场景一步说明原因，不保存场景', async () => {
     const { app } = await simSetup();
     const bare = value(await app.createChapter('第四章 空')).chapters.find((c) => c.title === '第四章 空')!;
@@ -1293,13 +1322,27 @@ describe('推演整书（B86）', () => {
     expect(value(await app.chapterEventLinks(c1.id)).length).toBeGreaterThan(0);
     expect(value(await app.listFacts()).map((f) => f.kind)).toEqual(draft.beliefs.map(() => 'belief'));
     expect((await app.adoptSceneBookChapter(run.run.id, c1.id, { events: [], worldFacts: [], beliefs: [], reviewed: [], confirmLocked: false })).ok).toBe(false);
-    // 一键采纳其余的：第三章按默认勾选采纳（自动接受的裁决一并视为已复核）；这一步完成。
+    // 一键采纳其余的：第三章涉及锁定设定（林舟锁定、一键采纳不勾核对）时没采纳成，这一步仍等作者（以前整步标为完成，单章复核被拒）。
     const note = value(await app.stepConfirmNote(run.run.id, 2));
     expect(note).toContain('一键采纳会把其余 1 章的草案按默认勾选记为故事事件与视角人物的认知');
+    const lin = value(await app.listEntities()).find((e) => e.name === '林舟')!;
+    value(await app.setEntityLocked(lin, true));
+    const partly = value(await app.adoptWorkflowStep(run.run.id, 2));
+    expect(partly.steps[2]).toMatchObject({ status: 'awaiting_author', note: expect.stringContaining('没有采纳成：《第三章 当铺》') });
+    expect(partly.steps[2]?.note).toContain('锁定设定');
+    expect(sceneBookAdoptionOf(partly.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'failed']);
+    expect(partly.state).not.toBe('done');
+    // 单章复核照常可用：作者核对过锁定设定后采纳第三章；之后一键采纳没有待采纳的，这一步完成。
+    const third = sceneBookAdoptionOf(partly.steps[2]!)!.chapters[1]!;
+    const thirdDraft = value(await app.adoptionDraft(third.candidateId, { written: true }));
+    const reviewedThird = value(await app.adoptSceneBookChapter(run.run.id, c3.id, { events: thirdDraft.events.filter((e) => e.seenByPov).map((e) => e.key), worldFacts: [], beliefs: thirdDraft.beliefs.map((b) => b.ref), reviewed: thirdDraft.reviews.map((r) => r.requestId), confirmLocked: true }));
+    expect(sceneBookAdoptionOf(reviewedThird.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'adopted']);
+    expect(value(await app.stepConfirmNote(run.run.id, 2))).toBeNull();
     const adoptedAll = value(await app.adoptWorkflowStep(run.run.id, 2));
-    expect(adoptedAll.steps[2]).toMatchObject({ status: 'done', note: expect.stringMatching(/^采纳了 1 章的草案：记下 \d+ 件事、\d+ 条事实/) });
+    expect(adoptedAll.steps[2]).toMatchObject({ status: 'done', note: expect.stringContaining('各章的推演草案都已处理') });
     expect(sceneBookAdoptionOf(adoptedAll.steps[2]!)?.chapters.map((c) => c.status)).toEqual(['adopted', 'adopted']);
     expect(adoptedAll.state).toBe('done');
+    value(await app.setEntityLocked(value(await app.listEntities()).find((e) => e.name === '林舟')!, false));
     const events = value(await app.storyEvents());
     expect(events.length).toBeGreaterThan(0);
     expect(value(await app.chapterEventLinks(c3.id)).length).toBeGreaterThan(0);
@@ -1311,6 +1354,10 @@ describe('推演整书（B86）', () => {
     value(await app.rollbackWriter(c1.id));
     expect(value(await app.openChapter(c1.id)).saved.map((p) => p.text)).toEqual(['']);
     expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c1.id)?.plan?.status).toBe('todo');
+    // 情节点都由推演写出的第三章（没开写手运行）同样记了进度与写入前的快照：回退回到推演正文写入之前。
+    value(await app.rollbackWriter(c3.id));
+    expect(value(await app.openChapter(c3.id)).saved.map((p) => p.text)).toEqual(['']);
+    expect(value(await app.planningView()).chapters.find((c) => c.chapter.id === c3.id)?.plan).toMatchObject({ status: 'todo', progress: null });
   });
 
   it('中断后继续：推演中途停下时这一步中断、记下运行；继续时前面写完的章不再调用、这一章接着推同一次到结束', async () => {

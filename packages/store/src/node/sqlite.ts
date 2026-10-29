@@ -13,6 +13,7 @@ import {
   type Migration,
   type OpenError,
   type OpenReport,
+  type Query,
   type Row,
   type SqlError,
   type SqlPort,
@@ -189,6 +190,25 @@ function port(writer: Database.Database, reader: Database.Database): ProjectDb {
         return Promise.resolve(ok(run(reader, { sql, ...(params && { params }) }, 0).rows));
       } catch (error) {
         return Promise.resolve(err(mapError(error, 0)));
+      }
+    },
+
+    // 一个读事务（BEGIN 不取写锁）：第一条查询起读到的都是同一个快照，与同时进行的写入互不影响。
+    read(queries: readonly Query[]) {
+      let index = 0;
+      try {
+        reader.exec('BEGIN');
+        const results: (readonly Row[])[] = [];
+        for (const q of queries) {
+          if (!reader.prepare(q.sql).readonly) throw new Failure({ code: 'readonly', detail: 'read 只接受只读语句' });
+          results.push(run(reader, { sql: q.sql, ...(q.params && { params: q.params }) }, index).rows);
+          index++;
+        }
+        reader.exec('COMMIT');
+        return Promise.resolve(ok(results));
+      } catch (error) {
+        if (reader.inTransaction) reader.exec('ROLLBACK');
+        return Promise.resolve(err(mapError(error, index)));
       }
     },
 

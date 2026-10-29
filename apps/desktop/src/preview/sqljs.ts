@@ -1,7 +1,7 @@
 // 浏览器预览（只在开发时用，不随产品发布）：用 sql.js（WASM 的 SQLite）实现 SqlPort，执行与桌面端相同的迁移，
 // 让界面在浏览器里用真实的用例与演示数据运行，便于看界面、截图。sql.js 没有 FTS5，跳过全文索引的迁移（查找在预览里不可用）。
 import { err, ok, type Result } from '@fudiao/shared';
-import type { Row, SqlError, SqlPort, SqlValue, Statement, StatementResult } from '@fudiao/store';
+import type { Query, Row, SqlError, SqlPort, SqlValue, Statement, StatementResult } from '@fudiao/store';
 import type { Database, SqlJsStatic } from 'sql.js';
 
 const PROJECT_MIGRATIONS = import.meta.glob<string>('../../../../packages/store/migrations/*.sql', { query: '?raw', import: 'default', eager: true });
@@ -50,6 +50,21 @@ export function sqljsPort(db: Database): SqlPort {
       } catch (error) {
         return Promise.resolve(err(toError(error, 0)));
       }
+    },
+    // 同一连接上没有别的写入会交错，一个读事务里依次执行即可。
+    read(queries: readonly Query[]): Promise<Result<readonly (readonly Row[])[], SqlError>> {
+      db.exec('BEGIN');
+      const results: (readonly Row[])[] = [];
+      for (const [index, q] of queries.entries()) {
+        try {
+          results.push(rows(db, q.sql, q.params ?? []));
+        } catch (error) {
+          db.exec('ROLLBACK');
+          return Promise.resolve(err(toError(error, index)));
+        }
+      }
+      db.exec('COMMIT');
+      return Promise.resolve(ok(results));
     },
     transaction(statements: readonly Statement[]): Promise<Result<readonly StatementResult[], SqlError>> {
       db.exec('BEGIN IMMEDIATE');

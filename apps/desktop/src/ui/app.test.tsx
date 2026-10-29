@@ -3615,3 +3615,31 @@ describe('推演整书的界面（B86）', () => {
     expect(within(form).getByRole('button', { name: '开始' }).matches(':disabled')).toBe(true);
   });
 });
+
+describe('从备份恢复与后台写入（审查后的修正，2026-10-29）', () => {
+  it('写手写到一半时恢复备份：先停下写手并等它停下，恢复后正文回到备份、计划回到待写，写手不再写入', async () => {
+    const { user, service, store, deps } = start();
+    await createWork(user, '当铺夜谈');
+    await addChapter(user, '第一章 夜叩');
+    const first = store.getState().work?.chapters[0]?.id ?? '';
+    expect((await service.savePlan(first, { goal: '林舟当玉', castIds: [], beats: ['叩门', '压价', '起疑', '离开'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000 })).ok).toBe(true);
+    await addTestedModel(service, deps);
+    const backup = await service.createBackup();
+    if (!backup.ok) throw new Error('备份失败');
+    // 第一段写完，第二段的回复挂起（模型一直不返回）。
+    deps.llmResponses.push(reply('林舟又叩响了门。'), { chunks: openaiChunks('m', { text: ['钱四'], end: 'stop' }, { stopAfterText: true }), hang: true });
+    void store.getState().writeChapters([first], {});
+    await waitFor(() => expect(store.getState().writerJob).toMatchObject({ chapterId: first, done: 1 }));
+    await store.getState().restoreBackup(backup.value.name);
+    expect(store.getState().writerJob).toBeNull();
+    expect(store.getState().writerJobs).toEqual([]);
+    expect(store.getState().tasks.find((t) => t.kind === 'writer')?.status).toBe('cancelled');
+    expect(store.getState().message).toBeNull();
+    const content = await service.openChapter(first);
+    expect(content.ok && content.value.saved).toEqual([]);
+    const planning = await service.planningView();
+    expect(planning.ok && planning.value.chapters[0]?.plan).toMatchObject({ status: 'todo', progress: null });
+    // 恢复前发出的请求只有那两次，之后没有新的请求。
+    expect(deps.llmRequests.filter((r) => JSON.stringify(r.body).includes('你是一位中文长篇小说的写手'))).toHaveLength(2);
+  });
+});

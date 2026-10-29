@@ -8,6 +8,8 @@ import { err, ok, type Result, type SkillStage } from '@fudiao/shared';
 import {
   chapterLengths,
   listChapterPlans,
+  type CastPresence,
+  type CastPresenceFields,
   type Chapter,
   type ChapterTarget,
   type Entity,
@@ -36,6 +38,7 @@ import type { BeatSheetRequest, BeatSheetView } from './narration';
 import { ACTION_LABELS, INJURY_LABELS } from './sim-describe';
 import type { SceneDraft, SceneDraftRequest, SimRunDetail, SimRunOptions, SimRunView } from './simulation';
 import type { AppliedDraft, PlanningView } from './planning';
+import type { CastPresenceView } from './relation-changes';
 import type { RelationsView } from './relations';
 import type { SkillsView } from './writing-skills';
 import type { BatchRevisionEvents, BatchRevisionOutcome, ReviewIssueView, ReviewOutcome, RevisionOutcome, RevisionQuote, RevisionScope } from './review';
@@ -171,6 +174,11 @@ export type AssistantHost = {
   createFact(input: FactInput, status: FactStatus): Promise<Result<unknown, AppError>>;
   deleteFact(fact: Fact): Promise<Result<unknown, AppError>>;
   relationsView(): Promise<Result<RelationsView, AppError>>;
+  /** 出场退场与关系图上的位置：助手没有动作改它们，撤销删除人物时据此重建级联删掉的记录。 */
+  castPresenceView(): Promise<Result<CastPresenceView, AppError>>;
+  saveCastPresence(current: CastPresence | null, fields: CastPresenceFields): Promise<Result<unknown, AppError>>;
+  deleteCastPresence(current: CastPresence): Promise<Result<unknown, AppError>>;
+  setRelationPosition(entityId: string, at: { readonly x: number; readonly y: number } | null): Promise<Result<unknown, AppError>>;
   listWritingSkills(): Promise<Result<SkillsView, AppError>>;
   addCustomSkill(name: string, instruction: string, description?: string, key?: string, stages?: readonly SkillStage[]): Promise<Result<SkillsView, AppError>>;
   updateWritingSkill(skill: SkillsView['skills'][number]['skill'], patch: { readonly enabled?: boolean; readonly instruction?: string }): Promise<Result<SkillsView, AppError>>;

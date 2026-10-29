@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager, Window};
 use super::{
     backup::{self, BackupInfo},
     migrate::{APP_EMBEDDED, EMBEDDED},
-    Database, OpenError, OpenReport, Row, SqlError, Statement, StatementResult, APP_DB_FILE,
+    Database, OpenError, OpenReport, Query, Row, SqlError, Statement, StatementResult, APP_DB_FILE,
 };
 
 /// 各窗口打开的作品库，键是窗口的标签。
@@ -235,6 +235,22 @@ pub async fn db_query(
         })?
 }
 
+/// 一批只读查询在同一个读事务里执行（导出作品包等要几张表彼此一致的读取）。
+#[tauri::command]
+pub async fn db_read(
+    window: Window,
+    state: State<'_, DbState>,
+    queries: Vec<Query>,
+) -> Result<Vec<Vec<Row>>, SqlError> {
+    let db = state.current(window.label())?;
+    tauri::async_runtime::spawn_blocking(move || db.read(&queries))
+        .await
+        .map_err(|e| SqlError::SqlError {
+            index: 0,
+            detail: e.to_string(),
+        })?
+}
+
 #[tauri::command]
 pub async fn db_tx(
     window: Window,
@@ -384,6 +400,20 @@ pub async fn app_db_query(
 ) -> Result<Vec<Row>, SqlError> {
     let db = state.current()?;
     tauri::async_runtime::spawn_blocking(move || db.query(&sql, &params.unwrap_or_default()))
+        .await
+        .map_err(|e| SqlError::SqlError {
+            index: 0,
+            detail: e.to_string(),
+        })?
+}
+
+#[tauri::command]
+pub async fn app_db_read(
+    state: State<'_, AppDbState>,
+    queries: Vec<Query>,
+) -> Result<Vec<Vec<Row>>, SqlError> {
+    let db = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || db.read(&queries))
         .await
         .map_err(|e| SqlError::SqlError {
             index: 0,

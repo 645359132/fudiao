@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { openaiChunks } from '@fudiao/llm/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fsDeps, type TestDeps } from '../testing/fs-deps';
-import { STALE_REASON } from './candidates';
+import { STALE_DURING_REASON, STALE_REASON } from './candidates';
 import { createAppService } from './service';
 import type { EditorSelection } from './writing-context';
 
@@ -120,6 +120,23 @@ describe('候选稿', () => {
     );
     expect(done.result.outcome).toBe('cancelled');
     expect(done.candidate).toBeNull();
+    expect(value(await app.listCandidates(chapterId))).toEqual([]);
+  });
+});
+
+describe('生成期间原文被改过（审查后的修正，2026-10-29）', () => {
+  it('候选稿的依据是发起调用时的原文与版本；模型返回后即标为过期，不能接受，作者的修改保留', async () => {
+    const { deps, app, chapterId } = await setup(['他推开门。']);
+    // 模型生成期间作者把“推开”改成“关上”。
+    deps.beforeLlm.push(async () => {
+      const content = value(await app.openChapter(chapterId));
+      value(await app.saveChapter(chapterId, content.saved, [{ id: 'p0', text: '他关上门。', source: 'handwritten' }], { splits: [], merges: [] }));
+    });
+    deps.llmResponses.push({ chunks: openaiChunks('m', { text: ['轻轻推开'], end: 'stop' }) });
+    const done = value(await app.runSelectionOperation({ chapterId, selection: sel('p0', 1, 3), operation: 'rewrite', instruction: '', overrides: NONE }));
+    expect(done.candidate).toMatchObject({ baseText: '推开', baseVersions: { p0: 1 }, generated: '轻轻推开', status: 'stale', statusReason: STALE_DURING_REASON });
+    expect(await app.acceptCandidate(done.candidate?.id ?? '')).toMatchObject({ ok: false, error: { detail: '这份候选稿已经处理过了' } });
+    expect(value(await app.openChapter(chapterId)).saved[0]?.text).toBe('他关上门。');
     expect(value(await app.listCandidates(chapterId))).toEqual([]);
   });
 });

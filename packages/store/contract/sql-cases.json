@@ -1,5 +1,5 @@
 {
-  "$comment": "SqlPort 的契约用例。Node 实现（Vitest）与 Rust 实现（cargo test）各跑一遍，保证两端行为一致。每个用例在新建的库上执行 setup 后运行；error 只比较列出的字段。",
+  "$comment": "SqlPort 的契约用例。Node 实现（Vitest）与 Rust 实现（cargo test）各跑一遍，保证两端行为一致。每个用例在新建的库上执行 setup 后运行（query 为一条只读查询，read 为一批只读查询，tx 为一个事务）；error 只比较列出的字段。",
   "setup": [
     "CREATE TABLE item (id TEXT PRIMARY KEY, title TEXT NOT NULL, score REAL, count INTEGER, version INTEGER NOT NULL DEFAULT 1)",
     "CREATE TABLE child (id TEXT PRIMARY KEY, item_id TEXT NOT NULL REFERENCES item(id))",
@@ -93,6 +93,31 @@
       "name": "一次只能执行一条语句",
       "query": { "sql": "SELECT 1; SELECT 2" },
       "expect": { "error": { "code": "sql_error", "index": 0 } }
+    },
+    {
+      "name": "批量读取：一批只读查询各自返回行",
+      "read": [
+        { "sql": "SELECT id, title FROM item" },
+        { "sql": "SELECT count(*) AS c FROM child WHERE item_id = ?", "params": ["a"] },
+        { "sql": "SELECT ? AS t", "params": ["第一章：雨夜"] }
+      ],
+      "expect": { "results": [[{ "id": "a", "title": "甲" }], [{ "c": 0 }], [{ "t": "第一章：雨夜" }]] }
+    },
+    {
+      "name": "批量读取拒绝写语句，什么也不改",
+      "read": [{ "sql": "SELECT id FROM item" }, { "sql": "DELETE FROM item" }],
+      "expect": { "error": { "code": "readonly" } },
+      "after": { "sql": "SELECT count(*) AS c FROM item", "rows": [{ "c": 1 }] }
+    },
+    {
+      "name": "批量读取中一条出错时整批失败",
+      "read": [{ "sql": "SELECT 1 AS one" }, { "sql": "SELECT nope FROM item" }],
+      "expect": { "error": { "code": "sql_error", "index": 1 } }
+    },
+    {
+      "name": "空的批量读取",
+      "read": [],
+      "expect": { "results": [] }
     },
     {
       "name": "参数个数不符",

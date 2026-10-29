@@ -99,6 +99,7 @@ import { castCompletionUseCases } from './cast-completion';
 import { benchmarkUseCases } from './benchmark';
 import { asChangeEntries, captureWork, chapterDigest, diffWork, undoChanges } from './assistant-undo';
 import { polishUseCases } from './polish';
+import { guardedPort, type GuardedPort } from './port-guard';
 import { reviewUseCases, reviewWithRetry } from './review';
 import { simEvaluationUseCases } from './sim-evaluation';
 import { simulationUseCases } from './simulation';
@@ -144,7 +145,8 @@ export function createAppService(deps: AppDeps) {
   /** 作品列表文件写回时撞上别的窗口在写，最多重读再改几次。 */
   const MODIFY_ATTEMPTS = 5;
   let file: LibraryFile = EMPTY_LIBRARY;
-  let session: { entry: WorkEntry; port: SqlPort } | null = null;
+  /** 当前作品：端口经代次守卫包装（从备份恢复时换一个，raw 是打开时拿到的端口）。 */
+  let session: { entry: WorkEntry; port: SqlPort; raw: SqlPort; guard: GuardedPort } | null = null;
   const ctx = () => ({ now: deps.clock.now() });
 
   function parseLibrary(text: string | null): Result<LibraryFile, AppError> {
@@ -266,7 +268,8 @@ export function createAppService(deps: AppDeps) {
       await deps.opener.close();
       return saved;
     }
-    session = { entry, port };
+    const guard = guardedPort(port);
+    session = { entry, port: guard.port, raw: port, guard };
     // 写作工作流（B78）：上次没做完就关掉（或崩溃）的步骤标为中断，作者继续时从这一步重做。读不了也不妨碍打开作品。
     await interruptRunningSteps(port, ctx());
     // 扫榜拆书的样章（B79，别人的作品）用完即删：上次崩溃或停在对标分析处没有回来的，这里删掉。
@@ -486,6 +489,9 @@ export function createAppService(deps: AppDeps) {
       const length = targetLength(request.operation, parts.selection);
       const prompt = renderSelectionEdit({ operation: request.operation, ...parts, length, instruction: request.instruction });
       if (!prompt.ok) return err({ code: 'settings', detail: prompt.error });
+      // 候选稿的依据（原文与段落版本）在发起调用之前记下：生成期间作者改了原文，候选稿要标为过期，不能把改后的当作依据。
+      const base = await candidates.prepareCandidate({ chapterId: request.chapterId, selection: request.selection, operation: request.operation });
+      if (!base.ok) return base;
       const result = await runner.text({ prompt: prompt.value, maxOutputTokens: maxOutputTokens(length), effort: 'medium' }, options);
       if (!result.ok) return result;
       // 费用来自调用记录（价格未配置时为未知）；没有打开作品时不记录，费用也未知。
@@ -494,7 +500,7 @@ export function createAppService(deps: AppDeps) {
       const cost = call?.ok === true ? (call.value?.cost ?? null) : null;
       // 完整生成（含达到输出上限）的结果存为候选稿；取消与拒答只显示在界面上。
       if ((outcome !== 'completed' && outcome !== 'truncated') || text.trim() === '') return ok({ result: result.value, manifest: manifest.value, candidate: null, cost });
-      const candidate = await candidates.saveCandidate({ chapterId: request.chapterId, selection: request.selection, operation: request.operation, text, requestHash });
+      const candidate = await candidates.saveCandidate(base.value, text, requestHash);
       return candidate.ok ? ok({ result: result.value, manifest: manifest.value, candidate: candidate.value, cost }) : candidate;
     },
 
@@ -807,12 +813,23 @@ export function createAppService(deps: AppDeps) {
       return stats.ok ? stats : err(repo(stats.error));
     },
 
-    /** 恢复到备份（现稿先存为恢复前备份），重新读取作品。 */
+    /**
+     * 恢复到备份（现稿先存为恢复前备份），重新读取作品。状态层恢复前先停下并等齐后台工作；这里再守两道：
+     * 写手还在写（写章、修订、推演成章的补全）就不恢复；恢复前发起、还拿着旧端口的操作在之后写入时被拒绝（代次守卫）。
+     */
     async restoreBackup(name: string): Promise<Result<WorkView, AppError>> {
       if (session === null) return err({ code: 'no_work' });
       if (assistant.assistantBusy()) return err({ code: 'settings', detail: 'AI 助手正在处理一句话：等它说完或先停止，再恢复备份' });
+      if (writer.writingChapters().length > 0) return err({ code: 'settings', detail: '写手正在写：等它写完，或在“任务”里停下以后再恢复备份' });
+      const { guard, raw } = session;
+      guard.revoke();
       const restored = await deps.backups.restore(name, deps.clock.now());
-      if (!restored.ok) return err({ code: 'library', detail: restored.error });
+      if (!restored.ok) {
+        guard.reinstate();
+        return err({ code: 'library', detail: restored.error });
+      }
+      const renewed = guardedPort(raw);
+      session = { ...session, port: renewed.port, guard: renewed };
       assistant.resetAssistantConversation();
       // 作品列表里的书名与封面是缓存：恢复后按作品库更新，不然列表里还是恢复前的。
       const project = await getProject(session.port);

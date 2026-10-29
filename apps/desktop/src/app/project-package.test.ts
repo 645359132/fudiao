@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChapter, createProject, exportData, importData, saveChapterParagraphs, TABLES, trashChapter, type ExportedData } from '@fudiao/store';
+import { createChapter, createProject, exportData, importData, saveChapterParagraphs, TABLES, trashChapter, type ExportedData, type SqlPort } from '@fudiao/store';
 import { loadMigrations, openProjectDb, type ProjectDb } from '@fudiao/store/node';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildPackage, parsePackage, withProjectId } from './project-package';
@@ -83,6 +83,38 @@ describe('作品包', () => {
     // 封面（B76）跟着换成新的作品标识。
     expect(after.tables['cover']?.map((row) => row['project_id'])).toEqual(['P2']);
     expect({ ...after.tables, project: [], cover: after.tables['cover']?.map((row) => ({ ...row, project_id: 'P1' })) }).toEqual({ ...before.tables, project: [] });
+  });
+
+  it('后台写作期间导出：章节 Markdown、manifest 与各表读自同一个快照，读过章节表之后写入的章与段落不进包', async () => {
+    const db = await sample();
+    // 模拟写手在导出期间写入：读过章节表之后新建一章并写一段。
+    let interleaved = false;
+    const write = async () => {
+      interleaved = true;
+      value(await createChapter(db, { id: 'c9', title: '第九章' }, ctx));
+      value(await saveChapterParagraphs(db, 'c9', [], [{ id: 'z', text: '写手写的。', source: 'ai_generated' }], { splits: [], merges: [] }, ctx));
+    };
+    const racing: SqlPort = {
+      async query(sql, params) {
+        const rows = await db.query(sql, params);
+        if (!interleaved && /FROM chapter\b/.test(sql)) await write();
+        return rows;
+      },
+      async read(queries) {
+        const rows = await db.read(queries);
+        if (!interleaved && queries.some((q) => /FROM chapter\b/.test(q.sql))) await write();
+        return rows;
+      },
+      transaction: (statements) => db.transaction(statements),
+    };
+    const files = value(await buildPackage(racing, ctx.now));
+    expect(interleaved).toBe(true);
+    expect(files.filter((f) => f.path.startsWith('chapters/')).map((f) => f.path)).toEqual(['chapters/0001-第一章 雨夜.md', 'chapters/0002-第二章：当铺.md']);
+    expect(JSON.parse(files[0]?.content ?? '')).toMatchObject({ chapters: 2 });
+    const parsed = value(parsePackage(files));
+    expect(parsed.data.tables['chapter']?.map((r) => r['id'])).toEqual(['c1', 'c2', 'c3']);
+    expect(parsed.data.tables['paragraph']?.map((r) => r['id'])).toEqual(['a', 'b']);
+    value(await importData(fresh(), parsed.data));
   });
 
   it('拒绝不是复调作品包的文件、更新的格式版本与坏行', () => {

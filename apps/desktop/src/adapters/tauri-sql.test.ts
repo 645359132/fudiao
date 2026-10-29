@@ -23,16 +23,19 @@ describe('SqlPort 的 Tauri 适配', () => {
   it('查询与事务的参数按 Rust 命令的参数名传递', async () => {
     const { invoke, calls } = fakeInvoke({
       db_query: () => [{ id: 'a' }],
+      db_read: () => [[{ id: 'a' }], [{ c: 2 }]],
       db_tx: () => [{ changes: 1, rows: [] }],
     });
     const port = tauriSqlPort(invoke);
     expect(await port.query('SELECT id FROM item WHERE id = ?', ['a'])).toEqual({ ok: true, value: [{ id: 'a' }] });
+    expect(await port.read([{ sql: 'SELECT id FROM item' }, { sql: 'SELECT count(*) AS c FROM child WHERE item_id = ?', params: ['a'] }])).toEqual({ ok: true, value: [[{ id: 'a' }], [{ c: 2 }]] });
     expect(await port.transaction([{ sql: 'UPDATE item SET title = ? WHERE version = ?', params: ['乙', 1], expectChanges: 1 }])).toEqual({
       ok: true,
       value: [{ changes: 1, rows: [] }],
     });
     expect(calls).toEqual([
       { command: 'db_query', args: { sql: 'SELECT id FROM item WHERE id = ?', params: ['a'] } },
+      { command: 'db_read', args: { queries: [{ sql: 'SELECT id FROM item', params: [] }, { sql: 'SELECT count(*) AS c FROM child WHERE item_id = ?', params: ['a'] }] } },
       { command: 'db_tx', args: { statements: [{ sql: 'UPDATE item SET title = ? WHERE version = ?', params: ['乙', 1], expectChanges: 1 }] } },
     ]);
   });

@@ -663,6 +663,8 @@ export function createAppStore(service: AppService): AppStore {
     const taskAborts = new Map<string, AbortController>();
     let taskSeq = 0;
     let writerAbort: AbortController | null = null;
+    /** 正在进行的写手队列（关闭作品、从备份恢复前等它停下）。 */
+    let writerLoop: Promise<unknown> | null = null;
     /** 写手队列已占位（writerJob 在第一章开始前才设上）。 */
     let writerRunning = false;
     /**
@@ -677,6 +679,8 @@ export function createAppStore(service: AppService): AppStore {
       return single === undefined ? null : `写手正在后台写《${chapter(single.chapterId)?.title ?? ''}》`;
     };
     let reviewQueueAbort: AbortController | null = null;
+    /** 正在进行的依次审核（关闭作品、从备份恢复前等它停下）。 */
+    let reviewLoop: Promise<unknown> | null = null;
     /** 一键修订审核问题：取消、正在做的那一批（关闭作品时等它停下）与它登记的任务（现状里不再另列一遍）。 */
     let reviseAbort: AbortController | null = null;
     let reviseLoop: Promise<unknown> | null = null;
@@ -846,6 +850,8 @@ export function createAppStore(service: AppService): AppStore {
     const task = (event: TaskEvent) => set({ tasks: reduceTasks(get().tasks, event) });
     /** AI 助手交给后台的单章任务（M5-23）的取消。 */
     const assistantJobAborts = new Map<string, { readonly kind: 'writing' | 'review' | 'revise'; readonly abort: AbortController }>();
+    /** 正在进行的后台单章任务（关闭作品、从备份恢复前等它们停下）。 */
+    const assistantJobLoops = new Set<Promise<void>>();
     let assistantJobSeq = 0;
 
     /** 计划页开着时在后台重新读计划视图（写手每写一段、每整理一章记忆、每审完一章都要刷新看板），见 coalesced；没开着时不读（打开时会读）。 */
@@ -877,6 +883,28 @@ export function createAppStore(service: AppService): AppStore {
       if (entities.ok) set({ entities: entities.value });
       await refreshRelations();
     }
+    /**
+     * 停下并等齐所有后台工作（关闭作品、从备份恢复之前）：写手队列（已写入的段保留，下次可以接着写）、AI 助手交给后台的
+     * 单章任务、依次审核、一键修订（正在改的那一条不写入）、关系扫描、写作工作流（停在当前这一步，之后可以继续）、推演
+     * （停在当前这一步之后，事件都在作品库里），以及其余登记为任务的模型调用（整理记忆、选区操作、场景草稿、节拍表……）。
+     * 等到各条循环结束、任务登记表清空（取消后各用例很快返回；兜底最多等 15 秒）才返回：从备份恢复时，恢复前发出的
+     * 模型请求返回后旧文字才不会写进恢复后的作品库。AI 助手正在说的那一轮不在这里停（调用方先确认它不在处理）。
+     */
+    async function stopBackground(): Promise<void> {
+      writerAbort?.abort();
+      for (const j of assistantJobAborts.values()) j.abort.abort();
+      assistantJobAborts.clear();
+      reviewQueueAbort?.abort();
+      reviseAbort?.abort();
+      relationScanAbort?.abort();
+      workflowAbort?.abort();
+      simAbort?.abort();
+      for (const abort of taskAborts.values()) if (abort !== assistantAbort) abort.abort();
+      await Promise.allSettled([writerLoop, reviewLoop, reviseLoop, workflowLoop, simLoop, ...assistantJobLoops]);
+      const pending = () => [...taskAborts.values()].some((abort) => abort !== assistantAbort);
+      for (let waited = 0; pending() && waited < 15_000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
     /** 写完一章后自动找出关系变化（偏好，默认开）。 */
     const autoRelations = () => get().library?.preferences.autoRelationChanges ?? true;
     const polishOn = () => get().library?.preferences.polishAfterWriting ?? false;
@@ -913,7 +941,24 @@ export function createAppStore(service: AppService): AppStore {
      * 写手依次写这些章（成书进度的按钮与 AI 助手的后台写作都经这里）。调用方保证同一时间只有一批。
      * 返回这一批怎样结束的一句话（AI 助手据此在之后的现状里告诉模型）。
      */
-    async function writeQueue(
+    function writeQueue(
+      chapterIds: readonly string[],
+      options: { readonly review?: boolean; readonly listen?: CallOptions },
+    ): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean }> {
+      const loop = writeQueueRun(chapterIds, options);
+      writerLoop = loop;
+      void loop.then(
+        () => {
+          if (writerLoop === loop) writerLoop = null;
+        },
+        () => {
+          if (writerLoop === loop) writerLoop = null;
+        },
+      );
+      return loop;
+    }
+
+    async function writeQueueRun(
       chapterIds: readonly string[],
       options: { readonly review?: boolean; readonly listen?: CallOptions },
     ): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean }> {
@@ -1091,8 +1136,22 @@ export function createAppStore(service: AppService): AppStore {
      * 依次审核这些章（成书进度、AI 助手的后台审核与写作工作流都经这里），同一时间只有一批；已有一批时返回 null。
      * listen：写作工作流交来的一批，它停下时这一批也停下，用量一并报给它。返回怎样结束的一句话与是否全部审完。
      */
-    async function reviewQueueRun(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean } | null> {
-      if (reviewQueueAbort !== null || chapterIds.length === 0) return null;
+    function reviewQueueRun(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean } | null> {
+      if (reviewQueueAbort !== null || chapterIds.length === 0) return Promise.resolve(null);
+      const loop = reviewQueueLoop(chapterIds, listen);
+      reviewLoop = loop;
+      void loop.then(
+        () => {
+          if (reviewLoop === loop) reviewLoop = null;
+        },
+        () => {
+          if (reviewLoop === loop) reviewLoop = null;
+        },
+      );
+      return loop;
+    }
+
+    async function reviewQueueLoop(chapterIds: readonly string[], listen?: CallOptions): Promise<{ readonly summary: string; readonly complete: boolean; readonly cancelled: boolean }> {
       const abort = new AbortController();
       reviewQueueAbort = abort;
       if (listen?.signal?.aborted === true) abort.abort();
@@ -1527,7 +1586,7 @@ export function createAppStore(service: AppService): AppStore {
             const t = startTask(job.kind === 'review' ? 'review' : 'writer', job.title, job.chapterId, abort);
             assistantJobAborts.set(id, { kind: job.kind, abort });
             set({ assistantJobs: [...get().assistantJobs, { id, kind: job.kind, chapterId: job.chapterId }] });
-            void (async () => {
+            const loop = (async () => {
               let wrote = false;
               try {
                 const outcome = await job.work(t.options());
@@ -1544,6 +1603,8 @@ export function createAppStore(service: AppService): AppStore {
               // 助手在后台写完一章（长篇记忆随之整理）：与写手队列一样找人物关系的变化，找不成只记在任务里。
               if (wrote && autoRelations() && !abort.signal.aborted) await relationTask(job.chapterId, abort);
             })();
+            assistantJobLoops.add(loop);
+            void loop.then(() => assistantJobLoops.delete(loop));
             return null;
           },
           workflow: (runId, onEnd) => get().continueWorkflow(runId, onEnd),
@@ -1776,22 +1837,7 @@ export function createAppStore(service: AppService): AppStore {
       },
       async closeWork() {
         if (!(await get().leaveChapter())) return;
-        // 关闭作品时停下写手；已写入的段保留在作品里，下次打开可以接着写。
-        writerAbort?.abort();
-        // AI 助手交给后台的单章任务也停下：不然在这个窗口里接着打开的另一本书会以为写手还在写。
-        for (const j of assistantJobAborts.values()) j.abort.abort();
-        assistantJobAborts.clear();
-        reviewQueueAbort?.abort();
-        // 一键修订停下：正在改的那一条不写入，等它停下再关作品库。
-        reviseAbort?.abort();
-        await reviseLoop;
-        relationScanAbort?.abort();
-        // 写作工作流停在当前这一步（下次打开为中断，可以继续）。
-        workflowAbort?.abort();
-        await workflowLoop;
-        // 推演同样停在当前这一步之后；事件都在作品库里，下次打开可以继续。
-        simAbort?.abort();
-        await simLoop;
+        await stopBackground();
         await service.closeWork();
         set({ writerJob: null, writerJobs: [], assistantJobs: [], reviseQueue: null, reviseResult: null, memoryBuilding: null, review: null, reviewingChapterId: null, simScenes: null, simSceneId: null, sceneDraft: null, sceneDrafting: false, simTab: 'config', simRuns: [], simRunId: null, simRun: null, simAdvancing: false, simVerification: null, beatSheets: [], narrationBusy: false, narrationNote: null, simEvaluation: null, work: null, cover: undefined, selectedChapterId: null, chapterContent: null, entities: [], selectedEntityId: null, drawer: null, facts: [], relations: null, relationPending: 0, relationScan: null, castPresence: null, selectedFactId: null, sourceStats: null, skills: null, planning: null, quickBook: null, workflows: null, workflowId: null, workflowSim: null, sceneBookStage: null, planDraft: null, planUnmatched: [], usage: null, searchQuery: '', searchResult: null, reveal: null, writingContext: null, contextSelection: null, contextOverrides: {}, aiWrite: null, candidates: [], adoption: null });
         await get().init();
@@ -2064,13 +2110,35 @@ export function createAppStore(service: AppService): AppStore {
         if (await run(service.createBackup(), () => ({}))) await run(service.listBackups(), (backups) => ({ backups }));
       },
       async restoreBackup(name) {
+        if (get().assistantRunning) {
+          set({ message: 'AI 助手正在处理一句话：等它说完或先停止，再恢复备份' });
+          return;
+        }
         if (!(await get().leaveChapter())) return;
+        // 恢复前停下并等齐后台写入（写手、修订、工作流、推演……）：不然恢复前发出的模型请求返回后，旧文字会写进恢复后的作品库。
+        await stopBackground();
         const ok = await run(service.restoreBackup(name), (work) => ({
           work,
           chapterContent: null,
           contentRevision: get().contentRevision + 1,
           selectedChapterId: work.chapters.some((c) => c.id === get().selectedChapterId) ? get().selectedChapterId : (work.chapters[0]?.id ?? null),
-          // 各页缓存的是恢复前的数据：丢掉，打开时重新读取。
+          // 后台工作都已停下；各页缓存的是恢复前的数据：丢掉，打开时重新读取。
+          writerJob: null,
+          writerJobs: [],
+          assistantJobs: [],
+          reviseQueue: null,
+          reviseResult: null,
+          reviewQueue: null,
+          memoryBuilding: null,
+          review: null,
+          reviewingChapterId: null,
+          simRuns: [],
+          simRunId: null,
+          simRun: null,
+          simAdvancing: false,
+          workflowId: null,
+          workflowSim: null,
+          sceneBookStage: null,
           cover: undefined,
           relations: null,
           castPresence: null,
@@ -3082,12 +3150,21 @@ export function createAppStore(service: AppService): AppStore {
         if (result.ok) {
           const { outcome, text, refusal } = result.value.result;
           const candidate = result.value.candidate;
-          if (candidate !== null) set({ candidates: [candidate, ...get().candidates] });
+          // 生成期间原文改过的候选稿一建立就是过期的：不进待处理的列表，结果照常显示，可以复制或重新生成。
+          const pending = candidate !== null && candidate.status === 'pending' ? candidate : null;
+          if (pending !== null) set({ candidates: [pending, ...get().candidates] });
           update({
-            candidateId: candidate?.id ?? null,
+            candidateId: pending?.id ?? null,
             text,
             status: outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done',
-            error: outcome === 'refused' ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}` : outcome === 'truncated' ? '输出达到上限，结果可能不完整' : null,
+            error:
+              outcome === 'refused'
+                ? `模型拒绝了这个请求${refusal?.explanation ? `：${refusal.explanation}` : ''}`
+                : outcome === 'truncated'
+                  ? '输出达到上限，结果可能不完整'
+                  : candidate !== null && candidate.status === 'stale'
+                    ? `候选稿已过期：${candidate.statusReason ?? ''}，可以复制结果或重新生成`
+                    : null,
           });
           t.finish(outcome === 'cancelled' ? 'cancelled' : outcome === 'refused' ? 'failed' : 'done', { text, cost: result.value.cost, error: outcome === 'refused' ? '模型拒绝了这个请求' : null });
         } else {

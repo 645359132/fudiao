@@ -170,6 +170,63 @@ describe('撤销 AI 助手一轮的改动（M5-20）', () => {
     expect(await titles()).toEqual([]);
   });
 
+  it('删掉的人物连同级联删掉的出场退场与关系图位置一并重建；待确认的关系变化建议不重建，说明里如实写明（审查后的修正 2026-10-29）', async () => {
+    const { deps, app } = await setup();
+    const lin = value(await app.createEntity('character', '林舟')).created;
+    value(await app.createEntity('character', '钱四'));
+    const chapter = value(await app.createChapter('第一章 夜叩')).chapters[0]!;
+    const opened = value(await app.openChapter(chapter.id));
+    value(await app.saveChapter(chapter.id, opened.saved, [{ id: 'p1', text: '林舟叩门，钱四验玉。', source: 'handwritten' }], { splits: [], merges: [] }));
+    value(await app.saveCastPresence(null, { entityId: lin.id, chapterId: chapter.id, kind: 'exit', note: '远走西域' }));
+    value(await app.setRelationPosition(lin.id, { x: 120, y: 40 }));
+    // 一条待确认的关系变化建议（从这一章的长篇记忆找出），两端都是有卡片的人物。
+    deps.llmResponses.push(reply(JSON.stringify({ summary: '林舟叩门。', cast: [{ name: '林舟', state: '叩门' }], foreshadows: [], openThreads: [] })));
+    value(await app.buildMemory(chapter.id));
+    deps.llmResponses.push(reply(JSON.stringify({ relations: [{ chapter: 'C1', kind: 'add', relation: '', from: '林舟', to: '钱四', category: 'ally', label: '旧识', mutual: true, description: '', secret: false, reason: '' }], cast: [] })));
+    expect(value(await app.findRelationChanges([chapter.id]))).toMatchObject({ added: 1 });
+    expect(value(await app.relationSuggestionCount())).toBe(1);
+    deps.llmRequests.length = 0;
+
+    step(deps, { message: '要删掉林舟，请确认。', actions: [{ tool: 'delete_entity', entity: '林舟' }], done: false });
+    value(await app.sendToAssistant('删掉林舟'));
+    step(deps, { message: '删了。', actions: [], done: true });
+    value(await app.resolveAssistantPending(true));
+    expect(value(await app.castPresenceView()).records).toEqual([]);
+    expect(value(await app.relationsView()).positions).toEqual([]);
+    expect(value(await app.relationSuggestionCount())).toBe(0);
+
+    const undone = value(await app.undoAssistantTurn());
+    expect(value(await app.listEntities()).map((e) => e.name)).toEqual(['林舟', '钱四']);
+    expect(value(await app.castPresenceView()).records.map((r) => [r.entityId, r.chapterId, r.kind, r.note])).toEqual([[lin.id, chapter.id, 'exit', '远走西域']]);
+    expect(value(await app.relationsView()).positions).toEqual([{ entityId: lin.id, x: 120, y: 40 }]);
+    expect(value(await app.relationSuggestionCount())).toBe(0);
+    const report = lastUndo(undone.items)?.report ?? '';
+    expect(report).toContain('“林舟”在《第一章 夜叩》的退场');
+    expect(report).toContain('“林舟”在关系图上的位置');
+    expect(report).toContain('待确认的关系变化“林舟与钱四：旧识”（待确认的关系变化不重建');
+  });
+
+  it('只改节奏目标的章节计划也记为改动，撤销时改回（审查后的修正 2026-10-29）', async () => {
+    const { deps, app } = await setup();
+    value(await app.updateWorkInfo({ outline: '林舟深夜当玉，掌柜起疑。' }));
+    const chapter = value(await app.createChapter('第一章 夜叩')).chapters[0]!;
+    const rhythm = { type: 'confrontation', dialogue: 'high', ending: 'dialogue' } as const;
+    value(await app.savePlan(chapter.id, { goal: '当玉', castIds: [], beats: ['叩门'], foreshadowPlant: [], foreshadowPayoff: [], treatment: '', targetWords: 3000, rhythm }));
+    // 助手按大纲重新生成计划：草稿与现有计划只差节奏目标。
+    step(deps, { message: '要重新生成计划，请确认。', actions: [{ tool: 'plan_chapters', count: 1, wordsPerChapter: null }], done: false });
+    value(await app.sendToAssistant('重新生成计划'));
+    deps.llmResponses.push(
+      reply(JSON.stringify({ chapters: [{ title: '第一章 夜叩', goal: '当玉', cast: [], beats: ['叩门'], plant: [], payoff: [], treatment: '', targetWords: 3000, rhythm: { type: 'transition', dialogue: 'low', ending: 'quiet' } }], foreshadows: [] })),
+    );
+    step(deps, { message: '生成了。', actions: [], done: true });
+    value(await app.resolveAssistantPending(true));
+    const planOf = async () => value(await app.planningView()).chapters.find((c) => c.chapter.id === chapter.id)?.plan;
+    expect((await planOf())?.rhythm).toEqual({ type: 'transition', dialogue: 'low', ending: 'quiet' });
+    const undone = value(await app.undoAssistantTurn());
+    expect(lastUndo(undone.items)?.report).toContain('改动的《第一章 夜叩》的章节计划');
+    expect((await planOf())?.rhythm).toEqual(rhythm);
+  });
+
   it('助手改过之后又被作者改过的不动，在说明里写明；锁定的设定不改回', async () => {
     const { deps, app } = await setup();
     const lin = value(await app.createEntity('character', '林舟')).created;

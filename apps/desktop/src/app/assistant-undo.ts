@@ -5,20 +5,26 @@
 // 写手修订在执行前先存一个快照，撤销时恢复它。候选稿、审核结果、长篇记忆、推演记录等不改作品内容的，照旧保留。
 import { err, ok, type Result } from '@fudiao/shared';
 import {
+  listCastPresence,
   listChapterPlans,
   listEntities,
   listForeshadows,
+  listRelationPositions,
   listRelationships,
+  listRelationSuggestions,
   type Entity,
   type EntityKind,
   type FactStatus,
   type ForeshadowFields,
   type PlanFields,
+  type PresenceKind,
   type RelationshipFields,
   type SqlPort,
+  type SuggestionKind,
 } from '@fudiao/store';
 import type { AssistantHost } from './assistant-tools';
 import type { AppError } from './errors';
+import { PRESENCE_KIND_LABEL } from './labels';
 
 type ProjectImage = { readonly title: string; readonly genre: string; readonly synopsis: string; readonly outline: string };
 type VolumeImage = { readonly title: string; readonly summary: string; readonly after: string | null };
@@ -27,6 +33,12 @@ type EntityImage = { readonly kind: EntityKind; readonly name: string; readonly 
 type SkillImage = { readonly name: string; readonly enabled: boolean; readonly instruction: string; readonly custom: boolean };
 type AvoidImage = { readonly custom: boolean; readonly phrases: readonly string[] };
 type FactImage = { readonly status: FactStatus; readonly content: string };
+/** 人物的出场、退场与回归（随人物级联删除，撤销删除人物时重建）。 */
+type PresenceImage = { readonly entityId: string; readonly chapterId: string; readonly kind: PresenceKind; readonly note: string };
+/** 关系图上拖定的位置（按人物，随人物级联删除）。 */
+type PositionImage = { readonly x: number; readonly y: number };
+/** 待确认的关系与人物变化（派生结论，随人物级联删除；撤销时不重建，只在说明里写明）。 */
+type SuggestionImage = { readonly kind: SuggestionKind; readonly chapterId: string; readonly fromName: string; readonly toName: string; readonly label: string };
 
 /** 每类记录的样子（撤销时比较与改回用）。 */
 type Images = {
@@ -35,6 +47,9 @@ type Images = {
   readonly chapter: ChapterImage;
   readonly entity: EntityImage;
   readonly relationship: RelationshipFields;
+  readonly presence: PresenceImage;
+  readonly position: PositionImage;
+  readonly suggestion: SuggestionImage;
   readonly plan: PlanFields;
   readonly foreshadow: ForeshadowFields;
   readonly skill: SkillImage;
@@ -57,7 +72,7 @@ export type ChangeEntry =
   /** 写手修订了这一章：撤销即恢复修订前存的快照。digest 同上。 */
   | { readonly kind: 'text'; readonly id: string; readonly title: string; readonly snapshotId: string; readonly digest?: string };
 
-export const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeEntry['kind']>(['project', 'volume', 'chapter', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact', 'writer', 'text']);
+export const CHANGE_KINDS: ReadonlySet<string> = new Set<ChangeEntry['kind']>(['project', 'volume', 'chapter', 'entity', 'relationship', 'presence', 'position', 'suggestion', 'plan', 'foreshadow', 'skill', 'avoid', 'fact', 'writer', 'text']);
 
 /** 存起来的改动读回时只认得撤销格式里的种类，别的丢弃（数据来自作品库，结构由写入方保证）。 */
 export const asChangeEntries = (value: readonly unknown[]): ChangeEntry[] =>
@@ -104,7 +119,7 @@ export function textUndoSummary(groups: readonly (readonly ChangeEntry[])[]): st
 /** 取作品的结构化现状。没有打开作品时为 null。 */
 export async function captureWork(host: UndoHost, port: SqlPort | null): Promise<WorkImage | null> {
   if (port === null) return null;
-  const [work, entities, relationships, plans, foreshadows, skills, facts] = await Promise.all([
+  const [work, entities, relationships, plans, foreshadows, skills, facts, presence, positions, suggestions] = await Promise.all([
     host.reloadWork(),
     listEntities(port),
     listRelationships(port),
@@ -112,8 +127,11 @@ export async function captureWork(host: UndoHost, port: SqlPort | null): Promise
     listForeshadows(port),
     host.listWritingSkills(),
     host.listFacts(),
+    listCastPresence(port),
+    listRelationPositions(port),
+    listRelationSuggestions(port, 'pending'),
   ]);
-  if (!work.ok || !entities.ok || !relationships.ok || !plans.ok || !foreshadows.ok || !skills.ok || !facts.ok) return null;
+  if (!work.ok || !entities.ok || !relationships.ok || !plans.ok || !foreshadows.ok || !skills.ok || !facts.ok || !presence.ok || !positions.ok || !suggestions.ok) return null;
   const w = work.value;
   const volume: Record<string, VolumeImage> = {};
   w.volumes.forEach((v, i) => {
@@ -143,10 +161,15 @@ export async function captureWork(host: UndoHost, port: SqlPort | null): Promise
       validFromChapterId: r.validFromChapterId,
       validToChapterId: r.validToChapterId,
     })),
+    // 出场退场、位置与待确认的建议随人物级联删除：记在现状里，撤销删除人物时前两类重建，建议写明没有重建。
+    presence: by(presence.value, (r) => ({ entityId: r.entityId, chapterId: r.chapterId, kind: r.kind, note: r.note })),
+    position: Object.fromEntries(positions.value.map((p) => [p.entityId, { x: p.x, y: p.y }])),
+    suggestion: by(suggestions.value, (s) => ({ kind: s.kind, chapterId: s.chapterId, fromName: s.fromName, toName: s.toName, label: s.label })),
+    // 节奏目标（B87）也是计划的一部分：只改节奏的采用同样记为改动、撤销时改回。
     plan: Object.fromEntries(
       plans.value.map((p) => [
         p.chapterId,
-        { goal: p.goal, castIds: p.castIds, beats: p.beats, foreshadowPlant: p.foreshadowPlant, foreshadowPayoff: p.foreshadowPayoff, treatment: p.treatment, targetWords: p.targetWords },
+        { goal: p.goal, castIds: p.castIds, beats: p.beats, foreshadowPlant: p.foreshadowPlant, foreshadowPayoff: p.foreshadowPayoff, treatment: p.treatment, targetWords: p.targetWords, rhythm: p.rhythm },
       ]),
     ),
     foreshadow: by(foreshadows.value, (f) => ({
@@ -166,7 +189,7 @@ export async function captureWork(host: UndoHost, port: SqlPort | null): Promise
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const KINDS: readonly Kind[] = ['project', 'volume', 'chapter', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact'];
+const KINDS: readonly Kind[] = ['project', 'volume', 'chapter', 'entity', 'relationship', 'presence', 'position', 'suggestion', 'plan', 'foreshadow', 'skill', 'avoid', 'fact'];
 
 /** 卷与章节的样子去掉位置（排在谁后面）：别的章节进出时它也会变。 */
 const withoutPosition = (x: unknown): unknown => (x !== null && typeof x === 'object' && 'after' in x ? { ...x, after: null } : x);
@@ -187,6 +210,8 @@ export function diffWork(before: WorkImage, after: WorkImage, moved: ReadonlySet
       if (same(was, now)) continue;
       if (was !== null && now !== null && !moved.has(id) && same(withoutPosition(was), withoutPosition(now))) continue;
       if (now === null && (kind === 'plan' || kind === 'foreshadow')) continue;
+      // 待确认的建议只记级联删掉的（撤销时写明没有重建）：后台写作在助手动作期间找出的新建议、作者采用或忽略的都不算助手的改动。
+      if (kind === 'suggestion' && now !== null) continue;
       out.push({ kind, id, before: was, after: now } as ChangeEntry);
     }
   }
@@ -215,6 +240,17 @@ function nameOf(entry: ChangeEntry, image: WorkImage | null): string {
       if (r === null) return '关系';
       const name = (id: string) => image?.entity[id]?.name ?? '';
       return `关系“${name(r.fromId)}${r.mutual ? '与' : '是'}${name(r.toId)}${r.mutual ? '：' : '的'}${r.label}”`;
+    }
+    case 'presence': {
+      const p = entry.after ?? entry.before;
+      if (p === null) return '出场退场';
+      return `“${image?.entity[p.entityId]?.name ?? ''}”在《${image?.chapter[p.chapterId]?.title ?? ''}》的${PRESENCE_KIND_LABEL[p.kind]}`;
+    }
+    case 'position':
+      return `“${image?.entity[entry.id]?.name ?? ''}”在关系图上的位置`;
+    case 'suggestion': {
+      const s = entry.after ?? entry.before;
+      return s === null ? '待确认的关系变化' : `待确认的关系变化“${s.fromName}${s.toName === '' ? '' : `与${s.toName}`}${s.label === '' ? '' : `：${s.label}`}”`;
     }
     case 'plan':
       return `《${image?.chapter[entry.id]?.title ?? ''}》的章节计划`;
@@ -257,17 +293,21 @@ export async function undoChanges(
     const now = await captureWork(host, project());
     if (now === null) return err({ code: 'no_work' });
     // 先改回改动的，再删掉新建的，最后重建删掉的；删除与重建按依赖排序。
-    const order: readonly ChangeEntry['kind'][] = ['writer', 'text', 'project', 'chapter', 'volume', 'entity', 'relationship', 'plan', 'foreshadow', 'skill', 'avoid', 'fact'];
+    const order: readonly ChangeEntry['kind'][] = ['writer', 'text', 'project', 'chapter', 'volume', 'entity', 'relationship', 'presence', 'position', 'plan', 'foreshadow', 'skill', 'avoid', 'fact'];
     // 计划在伏笔之前：计划里要埋或要收的伏笔不能删。
-    const deleteOrder: readonly ChangeEntry['kind'][] = ['relationship', 'plan', 'foreshadow', 'fact', 'chapter', 'volume', 'entity', 'skill'];
-    const recreateOrder: readonly ChangeEntry['kind'][] = ['entity', 'volume', 'chapter', 'relationship'];
+    const deleteOrder: readonly ChangeEntry['kind'][] = ['presence', 'position', 'relationship', 'plan', 'foreshadow', 'fact', 'chapter', 'volume', 'entity', 'skill'];
+    // 人物沿用原来的标识重建，随它级联删掉的关系、出场退场与位置接着重建。
+    const recreateOrder: readonly ChangeEntry['kind'][] = ['entity', 'volume', 'chapter', 'relationship', 'presence', 'position', 'suggestion'];
     const rank = (list: readonly string[], kind: string) => (list.includes(kind) ? list.indexOf(kind) : list.length);
     const modified = group.filter((e) => e.kind === 'writer' || e.kind === 'text' || (e.before !== null && e.after !== null)).sort((a, b) => rank(order, a.kind) - rank(order, b.kind));
     const created = group.filter((e) => e.kind !== 'writer' && e.kind !== 'text' && e.before === null).sort((a, b) => rank(deleteOrder, a.kind) - rank(deleteOrder, b.kind));
     const removed = group.filter((e) => e.kind !== 'writer' && e.kind !== 'text' && e.after === null).sort((a, b) => rank(recreateOrder, a.kind) - rank(recreateOrder, b.kind));
 
+    // 给作者看的名字：删掉的设定此刻不在现状里，名字取这一组记下的删除前的样子（它的关系、出场退场与位置的名字也靠它）。
+    const deletedEntities: Record<string, EntityImage> = Object.fromEntries(group.flatMap((e): [string, EntityImage][] => (e.kind === 'entity' && e.before !== null ? [[e.id, e.before]] : [])));
+    const labels: WorkImage = { ...now, entity: { ...deletedEntities, ...now.entity } };
     for (const entry of [...modified, ...created, ...removed]) {
-      const label = `${verb(entry)}${nameOf(entry, now)}`;
+      const label = `${verb(entry)}${nameOf(entry, labels)}`;
       const done = await undoOne(host, entry, now, remap);
       if (done === null) undone.push(entry.kind === 'chapter' && entry.before === null ? `${label}（移入了回收站）` : label);
       else skipped.push(`${label}（${done}）`);
@@ -283,6 +323,7 @@ class Remapper {
   volume = (v: VolumeImage): VolumeImage => ({ ...v, after: this.id(v.after) });
   chapter = (c: ChapterImage): ChapterImage => ({ ...c, volumeId: this.id(c.volumeId) });
   relationship = (x: RelationshipFields): RelationshipFields => ({ ...x, fromId: this.id(x.fromId) ?? x.fromId, toId: this.id(x.toId) ?? x.toId });
+  presence = (p: PresenceImage): PresenceImage => ({ ...p, entityId: this.id(p.entityId) ?? p.entityId });
   plan = (p: PlanFields): PlanFields => ({ ...p, castIds: p.castIds.map((c) => this.id(c) ?? c) });
   /** 改动后的样子（比较用）。 */
   any(entry: Exclude<ChangeEntry, { readonly kind: 'writer' | 'text' }>): unknown {
@@ -294,10 +335,14 @@ class Remapper {
         return this.chapter(entry.after);
       case 'relationship':
         return this.relationship(entry.after);
+      case 'presence':
+        return this.presence(entry.after);
       case 'plan':
         return this.plan(entry.after);
       case 'project':
       case 'entity':
+      case 'position':
+      case 'suggestion':
       case 'foreshadow':
       case 'skill':
       case 'avoid':
@@ -426,6 +471,21 @@ async function undoOne(host: UndoHost, entry: ChangeEntry, now: WorkImage, remap
       }
       return rel === undefined ? gone : failed(await host.updateRelationship(rel, b));
     }
+    case 'presence': {
+      const view = await host.castPresenceView();
+      if (!view.ok) return describeError(view.error);
+      const record = view.value.records.find((x) => x.id === key);
+      if (entry.before === null) return record === undefined ? gone : failed(await host.deleteCastPresence(record));
+      const b = r.presence(entry.before);
+      // 级联删掉的重建（同一人物同一章同种已有时改它的说明）；改过的改回。
+      if (entry.after === null) return failed(await host.saveCastPresence(null, b));
+      return record === undefined ? gone : failed(await host.saveCastPresence(record, b));
+    }
+    case 'position':
+      return failed(await host.setRelationPosition(key, entry.before === null ? null : { x: entry.before.x, y: entry.before.y }));
+    case 'suggestion':
+      // 派生结论，依据的长篇记忆版本与调用记录都已随人物删掉：不重建，作者可以从已写的章节重新找出。
+      return '待确认的关系变化不重建：可以在人物关系页从已写的章节重新找出';
     case 'plan':
       if (entry.before === null) return failed(await host.deletePlan(key));
       return failed(await host.savePlan(key, r.plan(entry.before)));

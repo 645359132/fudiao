@@ -28,6 +28,17 @@ import type { AppDeps } from './ports';
 import type { EditorSelection } from './writing-context';
 
 export const STALE_REASON = '原文在生成之后被修改过';
+/** 发起调用到模型返回之间原文被改过（审查后的修正，2026-10-29）：候选稿一建立就标为过期。 */
+export const STALE_DURING_REASON = '原文在生成期间被修改过';
+
+/** 发起调用之前记下的依据：要替换的范围、原文与相关段落的版本。模型返回后按它建候选稿，生成期间的改动据此判为过期。 */
+export type CandidateBase = {
+  readonly chapterId: string;
+  readonly operation: CandidateOperation;
+  readonly target: TextRange;
+  readonly baseText: string;
+  readonly baseVersions: Readonly<Record<string, number>>;
+};
 
 /** 候选稿要替换的范围：有选区时为选区；没有时为本章末尾（续写）。 */
 export function candidateRange(paragraphs: readonly SavedParagraph[], selection: EditorSelection | null): TextRange | null {
@@ -75,15 +86,19 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
     return p === null ? err({ code: 'no_work' }) : ok(p);
   };
 
+  /** 候选稿依据的段落此刻的版本与原文，与记下的是否相同。 */
+  const unchanged = (paragraphs: readonly SavedParagraph[], base: CandidateBase): boolean => {
+    const current = candidateVersions(paragraphs, base);
+    const sameVersions = Object.keys(current).length === Object.keys(base.baseVersions).length && Object.entries(base.baseVersions).every(([id, v]) => current[id] === v);
+    return sameVersions && textInRange(paragraphs, base.target) === base.baseText;
+  };
+
   return {
-    /** 把一次选区操作的结果存为候选稿；记下原文与相关段落的版本，接受时据此检查。 */
-    async saveCandidate(input: {
-      readonly chapterId: string;
-      readonly selection: EditorSelection | null;
-      readonly operation: CandidateOperation;
-      readonly text: string;
-      readonly requestHash: string;
-    }): Promise<Result<Candidate, AppError>> {
+    /**
+     * 发起调用之前记下候选稿的依据（范围、原文与相关段落的版本）。在模型返回后才记会把生成期间作者的修改当作生成依据：
+     * 作者把“他推开门”改成“他关上门”，候选稿记下“关上”，接受时查不出过期，直接覆盖作者的新修改。
+     */
+    async prepareCandidate(input: { readonly chapterId: string; readonly selection: EditorSelection | null; readonly operation: CandidateOperation }): Promise<Result<CandidateBase, AppError>> {
       const p = port();
       if (!p.ok) return p;
       const paragraphs = await listParagraphs(p.value, input.chapterId);
@@ -91,23 +106,37 @@ export function candidateUseCases(deps: AppDeps, project: () => SqlPort | null) 
       const range = candidateRange(paragraphs.value, input.selection);
       const baseText = range === null ? null : textInRange(paragraphs.value, range);
       if (range === null || baseText === null) return err(settings('找不到原文的位置，请重新选择'));
-      const call = await findCallByRequestHash(p.value, input.requestHash);
+      return ok({ chapterId: input.chapterId, operation: input.operation, target: range, baseText, baseVersions: candidateVersions(paragraphs.value, { operation: input.operation, target: range }) });
+    },
+
+    /**
+     * 把一次选区操作的结果存为候选稿：依据是发起调用前记下的；生成期间原文改过的，一建立就标为过期（作者可以复制结果、重新生成）。
+     */
+    async saveCandidate(base: CandidateBase, text: string, requestHash: string): Promise<Result<Candidate, AppError>> {
+      const p = port();
+      if (!p.ok) return p;
+      const call = await findCallByRequestHash(p.value, requestHash);
       const created = await createCandidate(
         p.value,
         {
           id: deps.ids.next(),
-          chapterId: input.chapterId,
-          operation: input.operation,
-          target: range,
-          baseText,
-          baseVersions: candidateVersions(paragraphs.value, { operation: input.operation, target: range }),
+          chapterId: base.chapterId,
+          operation: base.operation,
+          target: base.target,
+          baseText: base.baseText,
+          baseVersions: base.baseVersions,
           // 与写手写入的正文一样规范标点（B74）。
-          generated: normalizePunctuation(input.text.trim()),
+          generated: normalizePunctuation(text.trim()),
           llmCallId: call.ok ? (call.value?.id ?? null) : null,
         },
         ctx(),
       );
-      return created.ok ? created : err(repo(created.error));
+      if (!created.ok) return err(repo(created.error));
+      const paragraphs = await listParagraphs(p.value, base.chapterId);
+      if (!paragraphs.ok) return err(repo(paragraphs.error));
+      if (unchanged(paragraphs.value, base)) return created;
+      const stale = await setCandidateStatus(p.value, created.value, 'stale', STALE_DURING_REASON, ctx());
+      return stale.ok ? stale : err(repo(stale.error));
     },
 
     async listCandidates(chapterId: string): Promise<Result<Candidate[], AppError>> {

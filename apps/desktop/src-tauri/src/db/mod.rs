@@ -49,6 +49,14 @@ pub struct StatementResult {
     pub rows: Vec<Row>,
 }
 
+/// 批量读取里的一条只读查询（与 SqlPort 的 Query 对应）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct Query {
+    pub sql: String,
+    #[serde(default)]
+    pub params: Vec<Value>,
+}
+
 /// 与 packages/store/src/sql.ts 的 SqlError 对应。detail 只含 SQLite 的错误信息，不含参数，避免正文进入日志。
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "code", rename_all = "snake_case")]
@@ -177,6 +185,28 @@ impl Database {
         }
         drop(stmt);
         Ok(run(&conn, sql, params, 0)?.rows)
+    }
+
+    /// 在只读连接的一个读事务（BEGIN DEFERRED，不取写锁）里依次执行一批只读查询：各条读到的是同一个快照，
+    /// 与同时进行的写入互不影响。写语句返回 readonly 错误，一条出错整批失败。
+    pub fn read(&self, queries: &[Query]) -> Result<Vec<Vec<Row>>, SqlError> {
+        let mut conn = self.reader();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .map_err(|e| map_error(e, 0))?;
+        let mut results = Vec::with_capacity(queries.len());
+        for (index, q) in queries.iter().enumerate() {
+            let stmt = tx.prepare(&q.sql).map_err(|e| map_error(e, index))?;
+            if !stmt.readonly() {
+                return Err(SqlError::Readonly {
+                    detail: "read 只接受只读语句".into(),
+                });
+            }
+            drop(stmt);
+            results.push(run(&tx, &q.sql, &q.params, index)?.rows);
+        }
+        tx.commit().map_err(|e| map_error(e, queries.len()))?;
+        Ok(results)
     }
 
     /// 在写连接上以 BEGIN IMMEDIATE 执行一个事务；任一语句出错或守卫不满足即回滚。

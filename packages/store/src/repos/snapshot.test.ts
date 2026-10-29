@@ -6,7 +6,7 @@ import { exportData, importData } from '../data-export';
 import { loadMigrations, openProjectDb, type ProjectDb } from '../node/sqlite';
 import { createChapter } from './chapter';
 import { listParagraphs, saveChapterParagraphs } from './paragraph';
-import type { SqlValue, Statement } from '../sql';
+import type { Query, SqlValue, Statement } from '../sql';
 import type { CurrentParagraph, SavedParagraph } from './paragraph-plan';
 import { createSnapshot, getSnapshot, listSnapshots, restoreSnapshot } from './snapshot';
 
@@ -123,6 +123,7 @@ describe('章节快照', () => {
     value(await saveChapterParagraphs(db, 'c1', saved, [cur('a', '甲改'), cur('b', '乙')], NONE, t1));
     const racing = (statement: string) => ({
       query: (sql: string, params?: readonly SqlValue[]) => db.query(sql, params),
+      read: (queries: readonly Query[]) => db.read(queries),
       transaction: async (statements: readonly Statement[]) => {
         value(await db.transaction([{ sql: statement }]));
         return db.transaction(statements);
