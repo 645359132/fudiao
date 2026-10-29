@@ -65,6 +65,13 @@
     "cv": 0.6328599613846789
   },
   "mtldMedian": 161.51851149861005,
+  "dialogueSentences": {
+    "sentences": 90,
+    "question": 23,
+    "exclamation": 1,
+    "unfinished": 14,
+    "declarative": 52
+  },
   "endings": {
     "dialogue": 0,
     "question": 0,

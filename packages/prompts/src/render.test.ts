@@ -1039,6 +1039,7 @@ describe('写手的节奏目标、风格账本与第二遍修订（B87）', () =
     const text = fullText(unwrap(renderWriterChapter({ ...base, rhythm: { type: '对峙或谈判', dialogueTarget: '40%', endingStyle: '一句对白', endingHint: '以人物的一句话收尾' } })));
     expect(text).toContain('- 胡掌柜：当铺掌柜\n  外貌与特征：外貌：矮胖');
     expect(text).toContain('出场人物的外貌与特征按设定写，前后一致，不要改');
+    expect(text).toContain('人说话带情绪：有问有叹');
     expect(text).toContain('本章的节奏：对峙或谈判；对话约占 40%（人物说出来的话，按引号里的字算）；章尾收法：一句对白（以人物的一句话收尾）');
     expect(text).toContain('写到本章结束，章尾用“一句对白”的收法。');
     const plain = fullText(unwrap(renderWriterChapter({ ...base, cast: [{ name: '胡掌柜', description: '当铺掌柜', state: '' }] })));
@@ -1068,7 +1069,8 @@ describe('写手的节奏目标、风格账本与第二遍修订（B87）', () =
         paragraphs: [{ label: 'P1', text: '生铁冷得刺骨。' }, { label: 'P2', text: '他没有说话。' }],
       }),
     );
-    expect(prompt.template).toEqual({ id: 'writer_polish', version: '1' });
+    expect(prompt.template).toEqual({ id: 'writer_polish', version: '2' });
+    expect(fullText(prompt)).toContain('对白几乎都是陈述句时让人物问、叹');
     expect(prompt.task).toBe('writer');
     expect(prompt.output).toBeUndefined();
     const text = fullText(prompt);

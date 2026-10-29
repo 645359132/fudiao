@@ -1031,7 +1031,8 @@ M8 的依据（2026-10-28 查阅；出处按 arXiv 编号与会议，可核对�
 | P15 | McCarthy, Jarvis. *MTLD, vocd-D, and HD-D: A validation study of sophisticated approaches to lexical diversity assessment.* Behavior Research Methods 2010 | MTLD 是唯一不随文本长度变化的词汇多样性指标 | 用 MTLD（中文按字计）而不是原始 TTR |
 | P16 | Ismayilzada, Stevenson, van der Plas. *Evaluating Creative Short Story Generation in Humans and LLMs.* arXiv:2411.02316；Guo et al. *Benchmarking Linguistic Diversity of LLMs.* TACL 2025, arXiv:2412.10271 | 模型词汇与语义多样性、新颖性与意外都低于普通人；故事任务上模型的多样性最低 | 度量基线的参照方向 |
 | P17 | Lin, Zheng, Wang. *WebNovelBench: Placing LLM Novelists on the Web Novel Distribution.* EACL 2026 Findings, arXiv:2505.14818 | 用 4,000 余部中文网文作为人写分布，把模型作品映射成百分位 | 中文网文是参照体裁；对话占比 25%–45% 是作者给的行业经验，没有论文直接给出这个区间 |
-| P18 | Guo et al. *How Close is ChatGPT to Human Experts? (HC3).* arXiv:2301.07597 | 中英对照语料：ChatGPT 回答更正式、少口语、少情绪表达 | 对白口语化、人物各有说话方式 |
+| P18 | Guo et al. *How Close is ChatGPT to Human Experts? (HC3).* arXiv:2301.07597 | 中英对照语料：ChatGPT 回答更正式、中性、条理清楚，人更口语、主观、带情绪，感叹号、问号与省略号用得多；中文语料里人的词汇量 75,483 对 ChatGPT 的 45,168 | 对白口语化、人物各有说话方式；对白的句型分布（问、叹、没说完的占比） |
+| P19 | Jannai, Meron, Lenz, Levine, Shoham. *Human or Not? A Gamified Approach to the Turing Test.* arXiv:2305.20010（2023，150 万人参加） | 读者凭错字、俚语、粗话、情绪与不客气来认人，太礼貌的反而被当成 AI（礼貌的玩家只有 69% 被认出是人）；总体只有 68% 猜对、对面是 AI 时 60% | 不加错字；人物说话要有情绪与粗粝，不一律客气周到（`dialogue` 技能版本 4、写手模板版本 10、审核查“对白几乎都是陈述句”） |
 
 M8-01 的设计（去 AI 味，B87，作者确认方案 2026-10-28）：
 
@@ -1040,6 +1041,7 @@ M8-01 的设计（去 AI 味，B87，作者确认方案 2026-10-28）：
 - `style-checks.ts`：`ProgramCheckInput.style`（名字、账本的说法与句首、前几章的章尾、本章的对话目标）→ 账本里的说法本章又用了（ai_tone 低）、本章高频实词（两字 ≥ max(8, 1.6/千字)、三字以上 ≥ max(3, 0.6/千字)）、固定搭配、句首模板（账本里的又用两次，或本章 ≥ max(6, 1.2/千字) 句）、对话占比低于目标六成（pacing 中，800 字以下不查）、叙述句长变异系数 <0.35（40 句以上）、连续三章同一收法、长对白 ≥120 字且含前情词（pacing 低）；每条规则一章最多 5 处。不加新的 IssueKind、不改审核问题表的 CHECK。
 - 节奏目标：`packages/shared` 的 `CHAPTER_TYPES`、`DIALOGUE_LEVELS`、`ENDING_STYLES`、`DIALOGUE_TARGET`、中文名与写法说明；迁移 0025 给 `chapter_plan` 加 `rhythm`（JSON 对象，取值不认得的整份当作没有），`PlanFields.rhythm` 省略时沿用现有的；`PlanDraftOutput.chapters[].rhythm`（default null，旧样本照旧）；`writeDraftPlans` 写入；计划页的表单三个下拉（不定 / 各取值）；`planVariety`（章名至少三种长度且同一长度不超过六成、字数变异系数 ≥0.15、连续三章同一收法、连着十章没有过渡或日常章；少于六章不查）在计划视图的 `variety` 与草稿列表里显示。
 - 写手：`chapter-materials.ts` 增加 `style`（`app/style-ledger.ts` 的 `recentStyle` 读最近 8 章的段落，正在写的章跳过）、`rhythm`、`names` 与 `cast[].attributes`；`writer_chapter` 版本 9 的规则（字数只是参考、对白不交代、战斗按情形、感官不堆叠、规避的说法不换同义词、属性不改）、出场人物的“外貌与特征”、每章变化的“本章的节奏”“最近几章的文风账本”“这些说法本章不要再用”，最后一段按收法收尾；块的顺序仍是不变 → 只追加 → 每章都变。
+- 对白的句型（作者提供 HC3 与 Human or Not? 后补，2026-10-29）：`style.ts` 的 `dialogueStats`（引号里的话按句末标点切成句：问、叹、没说完、陈述）与 `dialogueMood`（问、叹与没说完的占比），账本每章一行带上它（对白不足 5 句不写）；文风检查“对白几乎都是陈述句”（对白 ≥15 句且占比 <10%，pacing 低）；`prose-stats` 总览多一行、`--compare` 多一行；写手模板版本 10、`dialogue` 技能版本 4、`writer_polish` 版本 2 要求人说话有问有叹、有没说完的、不一律客气。
 - 审核：`review.ts` 的程序检查带 `style`（同一个 `recentStyle`，对话目标按计划的节奏、没有按“中”）；`chapter_review` 版本 5 加外貌等属性矛盾、对白交代剧情、打斗固定步骤、感官堆叠；审核的设定本来就带属性。
 - 第二遍修订（`app/polish.ts`）：`polishChapter` 在写手锁内——程序统计（与审核同一套 `styleChecks`）的问题说明就是反馈，没有反馈不调用；段落按约 1,500 字分组、带 [P1]… 标签交给 `writer_polish` 版本 1（只带 `polish` 技能与规避词）；输出按标签对回（段数、顺序对不上整组跳过），设定名集合、数字串或对白条数变了的段不写入（`sameSubstance`）；第一次写入前存“写手写入”快照，经 `planRangeReplace`/`applyRangeReplace` 写入、段落仍是 AI 来源；`quotePolish` 按字数估。状态层的写手队列在写完、整理记忆之前做（偏好 `polishAfterWriting`，默认关，成书进度看板的开关），没做成不挡住后面的章，结束的一句话列出；`quoteWorkflow` 的 `polish` 选项每写一章另计 2 次调用。AI 助手没有加动作。
 - 全书体检：报告一步加 `style`（`styleReport`：范围内各章合起来的对话占比、句长变异、章尾分布与用得太多的说法），成书页显示；较早的运行没有这一项。

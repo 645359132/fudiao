@@ -2,7 +2,7 @@
 // 句首模板、对话占比低于本章的目标、叙述句长太均匀、连续几章同一种收法、一段长对白在交代前情。
 // 都是读者一眼看出“AI 写的”的证据（两个模型对《长夜问刀》的判定），所以归为 ai_tone 或 pacing，严重程度低，对话占比为中。
 import { maskDialogue, MAX_HITS_PER_RULE, visibleLength } from './prose';
-import { chapterStyle, ENDING_KIND_LABEL, percent, type EndingKind } from './style';
+import { chapterStyle, dialogueMood, ENDING_KIND_LABEL, percent, type EndingKind } from './style';
 import type { IssueAnchor, ParagraphText, ProgramIssue } from './types';
 
 export type StyleCheckInput = {
@@ -30,6 +30,9 @@ export const DIALOGUE_MIN_WORDS = 800;
 /** 叙述句子的变异系数低于此、句子够多时算太均匀。 */
 export const SENTENCE_CV_MIN = 0.35;
 export const SENTENCE_MIN_COUNT = 40;
+/** 对白至少这么多句、问句感叹与没说完的话合起来不到这个比例时，对白像在交代。 */
+export const DIALOGUE_MOOD_SENTENCES = 15;
+export const DIALOGUE_MOOD_MIN = 0.1;
 /** 连续几章同一种收法。 */
 export const ENDING_RUN = 3;
 /** 一段对白长于这个字数、又带着交代前情的词时提示。 */
@@ -149,6 +152,19 @@ export function styleChecks(paragraphs: readonly ParagraphText[], input: StyleCh
   if (input.dialogueTarget !== null && words >= DIALOGUE_MIN_WORDS && style.dialogueRatio < input.dialogueTarget * DIALOGUE_FLOOR) {
     issues.push(
       issue('pacing', 'medium', whole(first), `本章对话只占 ${percent(style.dialogueRatio)}，低于本章的目标（约 ${percent(input.dialogueTarget)}）`, '把一部分叙述与心理描写改成人物之间的对话，让人物用自己的话推动情节'),
+    );
+  }
+  // 对白几乎都是陈述句（HC3：人的话里问、叹与省略号多；Human or Not?：读者凭情绪认人）。
+  const d = style.dialogue;
+  if (d.sentences >= DIALOGUE_MOOD_SENTENCES && dialogueMood(d) < DIALOGUE_MOOD_MIN) {
+    issues.push(
+      issue(
+        'pacing',
+        'low',
+        whole(first),
+        `对白几乎都是陈述句：${d.sentences} 句里只有 ${d.question + d.exclamation + d.unfinished} 句是问句、感叹或没说完的话`,
+        '让人物问、叹、说到一半被打断或答非所问；哪种情绪按人物与处境定，不堆感叹号',
+      ),
     );
   }
   // 句长太均匀。

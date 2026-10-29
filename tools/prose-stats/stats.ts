@@ -1,6 +1,6 @@
 // 整本书的“AI 味”统计（需求 B87）：复现两个模型对《长夜问刀》给出的证据——章字数的均值与标准差、章名字数分布、对话占比、
 // 高频实词与句首模板、章尾方式、句长方差、词汇多样性与跨章重复片段。数字由 packages/writing 的 style.ts 算，这里只汇总。
-import { chapterStyle, ENDING_KIND_LABEL, ENDING_KINDS, mergeTerms, sentenceStats, paragraphStats, stats, type EndingKind, type Stats, type OverusedTerm } from '@fudiao/writing';
+import { chapterStyle, ENDING_KIND_LABEL, ENDING_KINDS, mergeTerms, sentenceStats, paragraphStats, stats, type DialogueStats, type EndingKind, type Stats, type OverusedTerm } from '@fudiao/writing';
 import type { TextChapter } from './split';
 
 export type ChapterRow = {
@@ -31,6 +31,8 @@ export type BookStats = {
   readonly paragraphs: Stats;
   /** 各章 MTLD（按字）的中位数。 */
   readonly mtldMedian: number;
+  /** 全书对白的句型（问、叹、没说完、陈述各几句）。 */
+  readonly dialogueSentences: DialogueStats;
   readonly endings: Readonly<Record<EndingKind, number>>;
   readonly terms: readonly RatedTerm[];
   readonly openings: readonly RatedTerm[];
@@ -99,6 +101,16 @@ export function bookStats(chapters: readonly TextChapter[], options: StatsOption
     .slice(0, top);
 
   const all = chapters.flatMap((c) => [...c.paragraphs]);
+  const dialogueSentences = styles.reduce(
+    (sum, s) => ({
+      sentences: sum.sentences + s.dialogue.sentences,
+      question: sum.question + s.dialogue.question,
+      exclamation: sum.exclamation + s.dialogue.exclamation,
+      unfinished: sum.unfinished + s.dialogue.unfinished,
+      declarative: sum.declarative + s.dialogue.declarative,
+    }),
+    { sentences: 0, question: 0, exclamation: 0, unfinished: 0, declarative: 0 },
+  );
   return {
     chapters: chapters.length,
     words,
@@ -112,6 +124,7 @@ export function bookStats(chapters: readonly TextChapter[], options: StatsOption
     sentences: sentenceStats(all),
     paragraphs: paragraphStats(all),
     mtldMedian: median(rows.map((r) => r.mtld)),
+    dialogueSentences,
     endings,
     terms,
     openings,

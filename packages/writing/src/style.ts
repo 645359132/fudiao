@@ -32,6 +32,8 @@ export const STYLE_WINDOW = 8;
 export const MAX_OVERUSED = 20;
 /** 每章一行里最多列几个多用的词。 */
 const LINE_TERMS = 4;
+/** 对白至少这么多句才说它的句型。 */
+export const MOOD_MIN_SENTENCES = 5;
 /** 词汇多样性的 TTR 阈值（McCarthy & Jarvis 2010 的标准值）。 */
 export const MTLD_THRESHOLD = 0.72;
 
@@ -83,6 +85,45 @@ export const sentenceStats = (texts: readonly string[]): Stats => stats(narratio
 
 /** 段落长度（可见字数）的分布，空段不算。 */
 export const paragraphStats = (texts: readonly string[]): Stats => stats(texts.map(visibleLength).filter((n) => n > 0));
+
+/**
+ * 对白的句型：引号里的话按句末标点切成句，问句（？）、感叹（！）、没说完的话（……或——收尾）与陈述各几句。
+ * 人写的对话里问、叹与省略号多（HC3：人的回答比 ChatGPT 多用“！”“？”与省略号；Human or Not?：读者凭情绪与粗粝认人），
+ * 一章的对白几乎都是陈述句时像在交代而不是在说话。
+ */
+export type DialogueStats = {
+  readonly sentences: number;
+  readonly question: number;
+  readonly exclamation: number;
+  readonly unfinished: number;
+  readonly declarative: number;
+};
+
+const QUOTE = /[“「『]([^”」』]*)[”」』]/gu;
+const DIALOGUE_SPLIT = /(?<=[。！？!?…—])/u;
+
+export function dialogueStats(texts: readonly string[]): DialogueStats {
+  let question = 0;
+  let exclamation = 0;
+  let unfinished = 0;
+  let declarative = 0;
+  for (const t of texts) {
+    for (const m of t.matchAll(QUOTE)) {
+      for (const piece of (m[1] ?? '').split(DIALOGUE_SPLIT)) {
+        const s = piece.trim();
+        if (visibleLength(s) === 0) continue;
+        if (/[？?]$/u.test(s)) question += 1;
+        else if (/[！!]$/u.test(s)) exclamation += 1;
+        else if (/(?:…|—)$/u.test(s)) unfinished += 1;
+        else declarative += 1;
+      }
+    }
+  }
+  return { sentences: question + exclamation + unfinished + declarative, question, exclamation, unfinished, declarative };
+}
+
+/** 对白里问句、感叹与没说完的话合起来占几成；没有对白时为 0。 */
+export const dialogueMood = (d: DialogueStats): number => (d.sentences === 0 ? 0 : (d.question + d.exclamation + d.unfinished) / d.sentences);
 
 /**
  * 词汇多样性 MTLD（McCarthy & Jarvis 2010）：TTR 降到阈值以下算一个因子，正反各算一遍取均值；不随文本长度变化。
@@ -237,6 +278,8 @@ export type ChapterStyle = {
   readonly terms: readonly TermCount[];
   readonly openings: readonly TermCount[];
   readonly collocations: readonly TermCount[];
+  /** 对白的句型（B87 补充）。 */
+  readonly dialogue: DialogueStats;
 };
 
 export function chapterStyle(paragraphs: readonly string[], names: readonly string[]): ChapterStyle {
@@ -251,6 +294,7 @@ export function chapterStyle(paragraphs: readonly string[], names: readonly stri
     terms: termCounts(paragraphs, names),
     openings: openingTemplates(paragraphs, names),
     collocations: collocations(paragraphs, names),
+    dialogue: dialogueStats(paragraphs),
   };
 }
 
@@ -263,6 +307,8 @@ export type ChapterStyleLine = {
   readonly ending: EndingKind;
   /** 这一章用得最多的几个实词。 */
   readonly topTerms: readonly TermCount[];
+  /** 对白里问、叹与没说完的话的占比；对白不足几句时为 null。 */
+  readonly dialogueMood: number | null;
 };
 /** 最近几章里用得太多的说法：总次数与出现的章数。 */
 export type OverusedTerm = TermCount & { readonly chapters: number };
@@ -344,7 +390,15 @@ export function styleLedger(chapters: readonly LedgerChapter[], names: readonly 
   return {
     chapters: recent.map((c, i) => {
       const s = styles[i] as ChapterStyle;
-      return { title: c.title, words: s.words, dialogueRatio: s.dialogueRatio, sentenceCv: s.sentences.cv, ending: s.ending, topTerms: s.terms.filter((t) => t.count >= 2).slice(0, LINE_TERMS).map(plain) };
+      return {
+        title: c.title,
+        words: s.words,
+        dialogueRatio: s.dialogueRatio,
+        sentenceCv: s.sentences.cv,
+        ending: s.ending,
+        topTerms: s.terms.filter((t) => t.count >= 2).slice(0, LINE_TERMS).map(plain),
+        dialogueMood: s.dialogue.sentences >= MOOD_MIN_SENTENCES ? dialogueMood(s.dialogue) : null,
+      };
     }),
     overused,
     overusedOpenings,
@@ -371,7 +425,8 @@ export function describeLedger(ledger: StyleLedger): LedgerText {
   return {
     lines: ledger.chapters.map((c) => {
       const top = c.topTerms.length === 0 ? '' : `；多用：${c.topTerms.map((t) => `${t.term}×${t.count}`).join('、')}`;
-      return `《${c.title}》：${c.words.toLocaleString('en-US')} 字，对话 ${percent(c.dialogueRatio)}，句长变异 ${c.sentenceCv.toFixed(2)}，收尾：${ENDING_KIND_LABEL[c.ending]}${top}`;
+      const mood = c.dialogueMood === null ? '' : `（对白里问、叹与没说完的占 ${percent(c.dialogueMood)}）`;
+      return `《${c.title}》：${c.words.toLocaleString('en-US')} 字，对话 ${percent(c.dialogueRatio)}${mood}，句长变异 ${c.sentenceCv.toFixed(2)}，收尾：${ENDING_KIND_LABEL[c.ending]}${top}`;
     }),
     overused: [
       ...ledger.overused.map((t) => `“${t.term}”（${t.chapters} 章 ${t.count} 次）`),

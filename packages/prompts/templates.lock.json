@@ -128,12 +128,12 @@
     "sha256": "b22681f9529d04b5a95e68878351114114d15ce7ed4f382e9244a021400eaf5e"
   },
   "writer_chapter": {
-    "version": "9",
-    "sha256": "b30dd5a9bb5c0c1ee4a92d81e801cf68243049e394d5c4b8e9321d88a61c7198"
+    "version": "10",
+    "sha256": "a335c1b7d8936df658dc638f5a970a516f3d5084cf2b82296dbf198c69ee7761"
   },
   "writer_polish": {
-    "version": "1",
-    "sha256": "4ff7fbb2fa4e3ba8f862fbbf6a7d25ea92dabc55fc71b30c1781aa6d211e48fe"
+    "version": "2",
+    "sha256": "0174f72cb2f16f04e6e5efc41f7caebc11f0aae696dd083b53910a67406dc583"
   },
   "writer_revise": {
     "version": "1",
@@ -144,8 +144,8 @@
     "sha256": "b1cd6dfc17a5a1126425ffe1ed16c183a6044c2ce767dc84db843c4a6167974c"
   },
   "skill:dialogue": {
-    "version": "3",
-    "sha256": "77bf4506e21c0c903a25fe46f47d11c56fb15e44d5e597a7e5780462e4e68903"
+    "version": "4",
+    "sha256": "5a5623ac9f4963d5795756e8b5433dd0810323cb30931686f6223fc190073d44"
   },
   "skill:foreshadow": {
     "version": "2",

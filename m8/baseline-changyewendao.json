@@ -180,6 +180,13 @@
     "cv": 0.7157323777072051
   },
   "mtldMedian": 193.08632571996839,
+  "dialogueSentences": {
+    "sentences": 7286,
+    "question": 698,
+    "exclamation": 1345,
+    "unfinished": 993,
+    "declarative": 4250
+  },
   "endings": {
     "dialogue": 8,
     "question": 0,
@@ -513,123 +520,123 @@
   "openings": [
     {
       "term": "沈孤舟没有",
-      "count": 338,
-      "chapters": 122,
-      "perTenThousand": 3.5903019358950528
+      "count": 384,
+      "chapters": 168,
+      "perTenThousand": 4.078922909419232
     },
     {
       "term": "那是",
-      "count": 313,
-      "chapters": 111,
-      "perTenThousand": 3.3247470589797383
+      "count": 364,
+      "chapters": 162,
+      "perTenThousand": 3.86647900788698
     },
     {
       "term": "他的",
-      "count": 190,
-      "chapters": 67,
-      "perTenThousand": 2.0182170645563904
+      "count": 257,
+      "chapters": 134,
+      "perTenThousand": 2.7299041346894337
     },
     {
       "term": "断刀",
-      "count": 145,
-      "chapters": 51,
-      "perTenThousand": 1.5402182861088245
-    },
-    {
-      "term": "十年",
-      "count": 127,
-      "chapters": 46,
-      "perTenThousand": 1.349018774729798
+      "count": 191,
+      "chapters": 97,
+      "perTenThousand": 2.028839259633003
     },
     {
       "term": "没有",
-      "count": 105,
-      "chapters": 43,
-      "perTenThousand": 1.1153304830443211
+      "count": 169,
+      "chapters": 107,
+      "perTenThousand": 1.7951509679475264
+    },
+    {
+      "term": "十年",
+      "count": 165,
+      "chapters": 84,
+      "perTenThousand": 1.752662187641076
     },
     {
       "term": "他没",
-      "count": 80,
-      "chapters": 33,
-      "perTenThousand": 0.8497756061290066
-    },
-    {
-      "term": "林啸",
-      "count": 73,
-      "chapters": 8,
-      "perTenThousand": 0.7754202405927185
-    },
-    {
-      "term": "整座",
-      "count": 63,
-      "chapters": 23,
-      "perTenThousand": 0.6691982898265927
-    },
-    {
-      "term": "风雪",
-      "count": 62,
-      "chapters": 26,
-      "perTenThousand": 0.6585760947499801
-    },
-    {
-      "term": "司空",
-      "count": 56,
-      "chapters": 3,
-      "perTenThousand": 0.5948429242903046
-    },
-    {
-      "term": "岳长",
-      "count": 54,
-      "chapters": 5,
-      "perTenThousand": 0.5735985341370794
-    },
-    {
-      "term": "头顶",
-      "count": 52,
-      "chapters": 20,
-      "perTenThousand": 0.5523541439838543
-    },
-    {
-      "term": "照夜",
-      "count": 50,
-      "chapters": 13,
-      "perTenThousand": 0.5311097538306291
-    },
-    {
-      "term": "这一",
-      "count": 49,
-      "chapters": 19,
-      "perTenThousand": 0.5204875587540165
-    },
-    {
-      "term": "原本",
-      "count": 48,
-      "chapters": 19,
-      "perTenThousand": 0.509865363677404
+      "count": 159,
+      "chapters": 112,
+      "perTenThousand": 1.6889290171814004
     },
     {
       "term": "然而",
-      "count": 47,
-      "chapters": 19,
-      "perTenThousand": 0.4992431686007914
+      "count": 104,
+      "chapters": 76,
+      "perTenThousand": 1.1047082879677086
     },
     {
-      "term": "生铁",
-      "count": 45,
-      "chapters": 18,
-      "perTenThousand": 0.47799877844756616
+      "term": "原本",
+      "count": 103,
+      "chapters": 74,
+      "perTenThousand": 1.094086092891096
+    },
+    {
+      "term": "整座",
+      "count": 101,
+      "chapters": 61,
+      "perTenThousand": 1.0728417027378707
+    },
+    {
+      "term": "这一",
+      "count": 94,
+      "chapters": 64,
+      "perTenThousand": 0.9984863372015828
     },
     {
       "term": "他抬",
-      "count": 45,
-      "chapters": 21,
-      "perTenThousand": 0.47799877844756616
+      "count": 93,
+      "chapters": 69,
+      "perTenThousand": 0.9878641421249701
     },
     {
-      "term": "狂风",
-      "count": 44,
-      "chapters": 16,
-      "perTenThousand": 0.4673765833709536
+      "term": "头顶",
+      "count": 91,
+      "chapters": 59,
+      "perTenThousand": 0.966619751971745
+    },
+    {
+      "term": "紧接",
+      "count": 88,
+      "chapters": 71,
+      "perTenThousand": 0.9347531667419072
+    },
+    {
+      "term": "一声",
+      "count": 86,
+      "chapters": 64,
+      "perTenThousand": 0.913508776588682
+    },
+    {
+      "term": "两人",
+      "count": 84,
+      "chapters": 60,
+      "perTenThousand": 0.8922643864354569
+    },
+    {
+      "term": "生铁",
+      "count": 83,
+      "chapters": 56,
+      "perTenThousand": 0.8816421913588443
+    },
+    {
+      "term": "风雪",
+      "count": 81,
+      "chapters": 45,
+      "perTenThousand": 0.8603978012056192
+    },
+    {
+      "term": "他们",
+      "count": 79,
+      "chapters": 55,
+      "perTenThousand": 0.8391534110523939
+    },
+    {
+      "term": "就在",
+      "count": 78,
+      "chapters": 65,
+      "perTenThousand": 0.8285312159757814
     }
   ],
   "crossChapter": [

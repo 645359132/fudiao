@@ -61,9 +61,12 @@ describe('文风统计脚本（B87）', () => {
     const report = formatReport('测试', s);
     for (const heading of ['## 总览', '## 章名字数', '## 对话占比', '## 章尾方式', '## 高频实词', '## 句首模板', '## 跨章重复的片段']) expect(report).toContain(heading);
     expect(report).toContain('| 章数 | 3 |');
+    expect(s.dialogueSentences.sentences).toBeGreaterThan(0);
+    expect(report).toMatch(/\| 对白句型 问 \/ 叹 \/ 没说完 \/ 陈述（共 \d+ 句） \| [\d.%]+ \/ /u);
     const compare = compareReports(s, s);
     expect(compare).toContain('| 对话占比 |');
-    expect(compare.split('\n')).toHaveLength(12);
+    expect(compare.split('\n')).toHaveLength(13);
+    expect(compare).toContain('| 对白里问、叹与没说完的占比 |');
   });
 
   it('跨章重复的片段按出现的章数排列', () => {

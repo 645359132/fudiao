@@ -1,5 +1,5 @@
 // 统计结果写成 Markdown；两份结果并排比较。
-import { ENDING_KINDS } from '@fudiao/writing';
+import { ENDING_KINDS, type DialogueStats } from '@fudiao/writing';
 import { endingLabel, type BookStats } from './stats';
 
 const n = (value: number, digits = 0) => value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -17,6 +17,9 @@ export function formatReport(title: string, s: BookStats): string {
   lines.push(`| 叙述句长 均值 / 标准差 / 变异系数 | ${n(s.sentences.mean, 1)} / ${n(s.sentences.sd, 1)} / ${s.sentences.cv.toFixed(2)} |`);
   lines.push(`| 段落长 均值 / 变异系数；每章段数 | ${n(s.paragraphs.mean, 1)} / ${s.paragraphs.cv.toFixed(2)}；${s.chapters === 0 ? 0 : n(s.paragraphs.count / s.chapters, 1)} |`);
   lines.push(`| 词汇多样性 MTLD（按字，各章中位数） | ${n(s.mtldMedian, 1)} |`);
+  const d = s.dialogueSentences;
+  const share = (k: number) => (d.sentences === 0 ? '—' : pct(k / d.sentences));
+  lines.push(`| 对白句型 问 / 叹 / 没说完 / 陈述（共 ${n(d.sentences)} 句） | ${share(d.question)} / ${share(d.exclamation)} / ${share(d.unfinished)} / ${share(d.declarative)} |`);
   lines.push('');
 
   lines.push('## 章名字数', '');
@@ -70,6 +73,7 @@ export function compareReports(before: BookStats, after: BookStats): string {
     ['章名字数的种类', Object.keys(before.titleLengths).length, Object.keys(after.titleLengths).length, (v) => n(v)],
     ['最常见收法的占比', share(before), share(after), pct],
     ['前十高频词每万字合计', sumTop(before), sumTop(after), (v) => v.toFixed(1)],
+    ['对白里问、叹与没说完的占比', mood(before), mood(after), pct],
   ];
   const lines = ['| 指标 | 改前 | 改后 | 差 |', '| --- | --- | --- | --- |'];
   for (const [name, a, b, f] of rows) lines.push(`| ${name} | ${f(a)} | ${f(b)} | ${b - a >= 0 ? '+' : ''}${f(b - a)} |`);
@@ -82,3 +86,9 @@ function share(s: BookStats): number {
 }
 
 const sumTop = (s: BookStats) => s.terms.slice(0, 10).reduce((a, t) => a + t.perTenThousand, 0);
+
+/** 较早的 JSON 没有对白句型时按 0。 */
+function mood(s: BookStats): number {
+  const d = s.dialogueSentences as DialogueStats | undefined;
+  return d === undefined || d.sentences === 0 ? 0 : (d.question + d.exclamation + d.unfinished) / d.sentences;
+}

@@ -77,6 +77,15 @@ describe('文风的程序检查（B87）', () => {
     expect(found({}, `“${'他看着雪，'.repeat(20)}”`)).toEqual([]);
   });
 
+  it('对白几乎都是陈述句时提示一次；问、叹与没说完的够一成时不提示', () => {
+    const flat = Array.from({ length: 16 }, (_, i) => `“第${i}件事我已经办妥了。”他说。`);
+    expect(found({}, ...flat).map((i) => [i[0], i[3]])).toContainEqual(['pacing', '对白几乎都是陈述句：16 句里只有 0 句是问句、感叹或没说完的话']);
+    const lively = [...flat.slice(0, 14), '“你办妥了？”她问。', '“办妥了……”'];
+    expect(found({}, ...lively).filter((i) => i[3].startsWith('对白几乎'))).toEqual([]);
+    // 对白不足十五句不查。
+    expect(found({}, ...flat.slice(0, 10)).filter((i) => i[3].startsWith('对白几乎'))).toEqual([]);
+  });
+
   it('空的正文没有问题', () => {
     expect(found({ dialogueTarget: 0.3 }, '', ' ')).toEqual([]);
   });

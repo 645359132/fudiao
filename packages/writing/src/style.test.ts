@@ -3,7 +3,9 @@ import {
   chapterStyle,
   collocations,
   describeLedger,
+  dialogueMood,
   dialogueRatio,
+  dialogueStats,
   endingKind,
   maskNames,
   mtld,
@@ -52,6 +54,27 @@ describe('文风统计（B87）：基本数字', () => {
     expect(mtld(same)).toBeLessThan(10);
     expect(mtld('太短')).toBe(2);
     expect(mtld(varied, 'bigram')).toBeGreaterThan(mtld(same, 'bigram'));
+  });
+});
+
+describe('文风统计（B87 补充）：对白的句型', () => {
+  it('引号里的话按句末标点切成句：问、叹、没说完与陈述', () => {
+    const d = dialogueStats(['“你是谁？别过来！”他说。', '“我……”她没说完。', '“走吧。”“走哪儿去——”', '叙述里的问句？不算。']);
+    expect(d).toEqual({ sentences: 5, question: 1, exclamation: 1, unfinished: 2, declarative: 1 });
+    expect(dialogueMood(d)).toBeCloseTo(4 / 5);
+    expect(dialogueStats(['没有对白。'])).toEqual({ sentences: 0, question: 0, exclamation: 0, unfinished: 0, declarative: 0 });
+    expect(dialogueMood(dialogueStats([]))).toBe(0);
+    // 没有句末标点的一句算陈述；？！连用算问句。
+    expect(dialogueStats(['“来了”“真的吗？！”'])).toMatchObject({ declarative: 1, question: 1 });
+  });
+
+  it('账本的每章一行带对白里问、叹与没说完的占比；对白不足五句时不写', () => {
+    const chatty = Array.from({ length: 6 }, (_, i) => `“第${i}次问你，去不去？”他把碗一放。`);
+    const ledger = styleLedger([{ title: '一', paragraphs: chatty }, { title: '二', paragraphs: ['“走。”他说。', '雨停了。'] }], []);
+    expect(ledger.chapters.map((c) => c.dialogueMood)).toEqual([1, null]);
+    const text = describeLedger(ledger);
+    expect(text.lines[0]).toContain('（对白里问、叹与没说完的占 100%）');
+    expect(text.lines[1]).not.toContain('对白里问');
   });
 });
 
