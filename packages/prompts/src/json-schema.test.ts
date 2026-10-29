@@ -45,7 +45,7 @@ describe.each(Object.entries(all))('%s 的 JSON Schema', (_name, schema) => {
 
   it('不含结构化输出不支持的约束', () => {
     const text = JSON.stringify(json);
-    for (const key of ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'pattern', '$schema']) {
+    for (const key of ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'pattern', '$schema', 'default']) {
       expect(text).not.toContain(`"${key}"`);
     }
   });

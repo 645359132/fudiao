@@ -31,14 +31,17 @@ export function sceneDraftToSpec(draft: SceneDraftOutput): SceneSpecInput {
         emotionThreshold: optional(a.emotionThreshold),
         lossOfControl: optional(a.lossOfControl),
         speechStyle: optional(a.speechStyle),
-        initialKnowledge: a.knowledge.map((k) => ({
-          text: k.text,
-          modality: k.modality,
-          confidence: k.confidence,
-          about: k.about,
-          order: k.concerning === null ? 1 : 2,
-          ...(k.concerning !== null && { concerning: k.concerning }),
-        })),
+        // 内容为空的条目（模型省掉了 text 又没有别名）丢弃，不让它卡住校验。
+        initialKnowledge: a.knowledge
+          .filter((k) => k.text.trim() !== '')
+          .map((k) => ({
+            text: k.text,
+            modality: k.modality,
+            confidence: k.confidence,
+            about: k.about,
+            order: k.concerning === null ? 1 : 2,
+            ...(k.concerning !== null && { concerning: k.concerning }),
+          })),
       },
     })),
     items: draft.items.map((i) => ({

@@ -96,99 +96,125 @@ export const BeatSheetOutput = z.object({
 });
 export type BeatSheetOutput = z.infer<typeof BeatSheetOutput>;
 
-/** 场景配置草稿（B39）。结构比场景配置扁平，由 sceneDraftToSpec 转换后再经 parseScene 校验。 */
+/**
+ * 场景配置草稿里的一条初始认知。模型（尤其是兼容接口上的 Gemini）常把 null 与空数组的字段省掉、把 text 写成 content，
+ * 以前一律按不合格重试三次后暂停（作者反馈 2026-10-29）；现在发给模型的 schema 仍是全字段必填，本地解析时缺的按默认值补、
+ * text 的常见别名也认，内容为空的条目由 sceneDraftToSpec 丢弃。
+ */
+const KNOWLEDGE_TEXT_ALIASES = ['content', 'fact', 'statement', 'belief', 'knowledge', 'description'] as const;
+const DraftKnowledge = z
+  .looseObject({
+    text: z.string().default(''),
+    modality: z.enum(['observed', 'heard', 'inferred']).default('observed'),
+    confidence: Confidence.default(1),
+    about: z.array(z.string()).default([]),
+    concerning: z.string().nullable().default(null),
+  })
+  .transform((k) => {
+    const alias = KNOWLEDGE_TEXT_ALIASES.map((key) => k[key]).find((v): v is string => typeof v === 'string' && v.trim() !== '');
+    return { text: k.text.trim() !== '' ? k.text : (alias ?? ''), modality: k.modality, confidence: k.confidence, about: k.about, concerning: k.concerning };
+  });
+
+/**
+ * 场景配置草稿（B39）。结构比场景配置扁平，由 sceneDraftToSpec 转换后再经 parseScene 校验。
+ * 发给模型的 schema 全字段必填（modelJsonSchema 会把 default 去掉、全部列为 required）；本地解析时列表与可空的字段缺了按默认值补。
+ */
 export const SceneDraftOutput = z.object({
   zones: z.array(z.object({ id: z.string(), name: z.string() })),
-  edges: z.array(
-    z.object({
-      a: z.string(),
-      b: z.string(),
-      adjacent: z.boolean(),
-      visible: z.boolean(),
-      sound: z.number().int().min(0).nullable(),
-      requiresFlag: z.string().nullable(),
-    }),
-  ),
-  flags: z.array(z.object({ key: z.string(), value: z.boolean() })),
+  edges: z
+    .array(
+      z.object({
+        a: z.string(),
+        b: z.string(),
+        adjacent: z.boolean().default(true),
+        visible: z.boolean().default(false),
+        sound: z.number().int().min(0).nullable().default(null),
+        requiresFlag: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
+  flags: z.array(z.object({ key: z.string(), value: z.boolean() })).default([]),
   actors: z.array(
     z.object({
       id: z.string(),
       name: z.string(),
       zone: z.string(),
-      injury: InjuryLevel,
-      goal: z.string(),
-      bottomLine: z.string(),
-      traits: z.array(z.string()),
-      riskPreference: z.string(),
-      emotionThreshold: z.string(),
-      lossOfControl: z.string(),
-      speechStyle: z.string(),
-      knowledge: z.array(
-        z.object({
-          text: z.string(),
-          modality: z.enum(['observed', 'heard', 'inferred']),
-          confidence: Confidence,
-          about: z.array(z.string()),
-          concerning: z.string().nullable(),
-        }),
-      ),
+      injury: InjuryLevel.default('none'),
+      goal: z.string().default(''),
+      bottomLine: z.string().default(''),
+      traits: z.array(z.string()).default([]),
+      riskPreference: z.string().default(''),
+      emotionThreshold: z.string().default(''),
+      lossOfControl: z.string().default(''),
+      speechStyle: z.string().default(''),
+      knowledge: z.array(DraftKnowledge).default([]),
     }),
   ),
-  items: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      holder: z.string().nullable(),
-      zone: z.string().nullable(),
-      counters: z.array(z.object({ name: z.string(), value: z.number().int().min(0) })),
-      reach: z.enum(['melee', 'ranged']).nullable(),
-      noise: z.number().int().min(0).nullable(),
-      concealed: z.boolean(),
-    }),
-  ),
-  mechanisms: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      zone: z.string(),
-      exempt: z.array(z.string()),
-      injury: z.number().int().min(0),
-      loudness: z.number().int().min(0),
-      hidden: z.boolean(),
-    }),
-  ),
-  secrets: z.array(
-    z.object({ id: z.string(), text: z.string(), subjects: z.array(z.string()), knownBy: z.array(z.string()) }),
-  ),
-  exits: z.array(z.string()),
-  consumption: z.array(
-    z.object({
-      item: z.string(),
-      counter: z.string(),
-      kinds: z.array(ActionKind),
-      amount: z.number().int().min(1),
-      whenEmpty: z.enum(['reject', 'fail']),
-    }),
-  ),
-  injuryLimits: z.array(
-    z.object({
-      actor: z.string().nullable(),
-      atLeast: InjuryLevel,
-      forbidKinds: z.array(ActionKind),
-      forbidItems: z.array(z.string()),
-    }),
-  ),
-  requirements: z.array(
-    z.object({
-      target: z.string(),
-      kinds: z.array(ActionKind),
-      requiresHolding: z.string(),
-      whenMissing: z.enum(['reject', 'fail']),
-      setsFlag: z.string().nullable(),
-    }),
-  ),
-  contest: z.enum(['draw', 'ruling']),
-  narrativeRules: z.array(z.string()),
+  items: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        holder: z.string().nullable().default(null),
+        zone: z.string().nullable().default(null),
+        counters: z.array(z.object({ name: z.string(), value: z.number().int().min(0) })).default([]),
+        reach: z.enum(['melee', 'ranged']).nullable().default(null),
+        noise: z.number().int().min(0).nullable().default(null),
+        concealed: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+  mechanisms: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        zone: z.string(),
+        exempt: z.array(z.string()).default([]),
+        injury: z.number().int().min(0).default(0),
+        loudness: z.number().int().min(0).default(0),
+        hidden: z.boolean().default(true),
+      }),
+    )
+    .default([]),
+  secrets: z
+    .array(z.object({ id: z.string(), text: z.string(), subjects: z.array(z.string()).default([]), knownBy: z.array(z.string()).default([]) }))
+    .default([]),
+  exits: z.array(z.string()).default([]),
+  consumption: z
+    .array(
+      z.object({
+        item: z.string(),
+        counter: z.string(),
+        kinds: z.array(ActionKind).default([]),
+        amount: z.number().int().min(1).default(1),
+        whenEmpty: z.enum(['reject', 'fail']).default('reject'),
+      }),
+    )
+    .default([]),
+  injuryLimits: z
+    .array(
+      z.object({
+        actor: z.string().nullable().default(null),
+        atLeast: InjuryLevel,
+        forbidKinds: z.array(ActionKind).default([]),
+        forbidItems: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
+  requirements: z
+    .array(
+      z.object({
+        target: z.string(),
+        kinds: z.array(ActionKind).default([]),
+        requiresHolding: z.string(),
+        whenMissing: z.enum(['reject', 'fail']).default('reject'),
+        setsFlag: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
+  contest: z.enum(['draw', 'ruling']).default('ruling'),
+  narrativeRules: z.array(z.string()).default([]),
 });
 export type SceneDraftOutput = z.infer<typeof SceneDraftOutput>;
 

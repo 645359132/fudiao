@@ -2,8 +2,10 @@ import type { JsonValue } from '@fudiao/shared';
 import { z } from 'zod';
 
 // 结构化输出不支持的约束：从发给服务的 schema 中去掉，由结构化输出管线在本地用 Zod 校验。
+// default 也去掉：它只用于本地解析时补上模型省掉的字段（例如场景配置草稿），发给模型的 schema 里每个字段都必填。
 const UNSUPPORTED = new Set([
   '$schema',
+  'default',
   'minimum',
   'maximum',
   'exclusiveMinimum',

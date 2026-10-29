@@ -73,3 +73,26 @@ describe('场景配置草稿', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('模型省掉或改名的字段（作者反馈 2026-10-29：Gemini 的输出连续三次不合格）', () => {
+  it('知识条目的 text 写成 content 或 fact、about 与 concerning 省掉、各列表与可空字段省掉：本地解析按默认值补上，内容为空的条目丢弃', () => {
+    const loose = {
+      zones: [{ id: 'a', name: '甲' }],
+      actors: [{ id: 'x', name: '某', zone: 'a', knowledge: [{ content: '他知道的事', modality: 'heard', confidence: 0.5 }, { text: '' }, { fact: '另一件事' }] }],
+    };
+    const parsed = SceneDraftOutput.parse(loose);
+    expect(parsed.actors[0]?.knowledge).toEqual([
+      { text: '他知道的事', modality: 'heard', confidence: 0.5, about: [], concerning: null },
+      { text: '', modality: 'observed', confidence: 1, about: [], concerning: null },
+      { text: '另一件事', modality: 'observed', confidence: 1, about: [], concerning: null },
+    ]);
+    expect(parsed).toMatchObject({ edges: [], flags: [], items: [], mechanisms: [], secrets: [], exits: [], contest: 'ruling', narrativeRules: [] });
+    expect(parsed.actors[0]).toMatchObject({ injury: 'none', goal: '', traits: [] });
+    const spec = sceneDraftToSpec(parsed);
+    expect(spec.actors[0]?.card?.initialKnowledge?.map((k) => k.text)).toEqual(['他知道的事', '另一件事']);
+    expect(parseScene(spec).ok).toBe(true);
+    // 写全的输出照常；confidence 仍在本地校验。
+    expect(SceneDraftOutput.safeParse(draft()).success).toBe(true);
+    expect(SceneDraftOutput.safeParse({ ...loose, actors: [{ ...loose.actors[0], knowledge: [{ text: 'x', confidence: 2 }] }] }).success).toBe(false);
+  });
+});
