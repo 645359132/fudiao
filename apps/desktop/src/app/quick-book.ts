@@ -117,25 +117,33 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
     },
 
     /** 由一句话的想法生成作品骨架（不写入作品）。作品名不是新建时的默认名时沿用；已有的人物名一并给模型。 */
+    /**
+     * 由一句话的想法生成骨架；没写想法而作品已有大纲时，按已有的简介与大纲补出人物与关系（作品名、类型、简介、大纲沿用作品里的，
+     * 模型输出的这四项不用）。两样都没有时要先写想法。
+     */
     async draftBookSeed(request: BookSeedRequest, options: CallOptions = {}): Promise<Result<BookSeed, AppError>> {
       const port = project();
       if (port === null) return err({ code: 'no_work' });
-      if (request.idea.trim() === '') return err(settings('先写一句想法：主角是谁、遇到了什么事'));
       const work = await getProject(port);
       if (!work.ok) return err(repo(work.error));
+      const idea = request.idea.trim();
+      const outline = work.value?.outline.trim() ?? '';
+      if (idea === '' && outline === '') return err(settings('先写一句想法：主角是谁、遇到了什么事'));
+      const existing = idea === '' ? { synopsis: work.value?.synopsis ?? '', outline } : undefined;
       const entities = await listEntities(port);
       if (!entities.ok) return err(repo(entities.error));
       // 规划技能（B75），例如雪花写作法。
       const skills = await skillsForStage(port, 'planning', deps);
       if (!skills.ok) return err(repo(skills.error));
       const prompt = renderBookSeed({
-        idea: request.idea.trim(),
+        idea,
         genre: request.genre.trim() || (work.value?.genre ?? ''),
         title: work.value?.title ?? '',
         characters: entities.value.filter((e) => e.kind === 'character').map((e) => e.name),
         skills: skills.value.map((s) => ({ name: s.name, description: s.description, text: s.text })),
         chapterCount: request.chapterCount,
         wordsPerChapter: request.wordsPerChapter,
+        ...(existing !== undefined && { existing }),
       });
       if (!prompt.ok) return err(settings(prompt.error));
       const result = await runner.structured(
@@ -143,7 +151,11 @@ export function quickBookUseCases({ deps, project, runner, planningView, default
         BookSeedOutput,
         options,
       );
-      return result.ok ? ok(result.value.value) : result;
+      if (!result.ok) return result;
+      if (existing === undefined) return ok(result.value.value);
+      // 按大纲补人物：作品名、类型、简介与大纲沿用作品里的，草稿里显示的也是它们；采用时写回的还是原文（作者在草稿里改过的除外）。
+      const seed = result.value.value;
+      return ok({ ...seed, title: work.value?.title ?? seed.title, genre: (work.value?.genre ?? '').trim() || seed.genre, synopsis: existing.synopsis, outline: existing.outline });
     },
 
     /**

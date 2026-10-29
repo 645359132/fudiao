@@ -1283,9 +1283,11 @@ export type BookSeedInput = {
   readonly skills: readonly PlanningSkill[];
   readonly chapterCount: number;
   readonly wordsPerChapter: number;
+  /** 作者已有的简介与大纲（没写想法、按大纲补人物时）：模型只补人物与关系，这四项作品沿用原文。 */
+  readonly existing?: { readonly synopsis: string; readonly outline: string };
 };
 
-/** 作品骨架（B67）：作者侧的规划，材料只有作者的想法与已有的人物名。 */
+/** 作品骨架（B67）：作者侧的规划，材料只有作者的想法（或已有的简介与大纲）与已有的人物名。 */
 export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, string> {
   return renderTemplate('book_seed', {
     idea: input.idea,
@@ -1293,6 +1295,9 @@ export function renderBookSeed(input: BookSeedInput): Result<RenderedPrompt, str
     title: input.title,
     characters: input.characters.map((name) => ({ name })),
     hasCharacters: input.characters.length > 0,
+    hasExisting: input.existing !== undefined,
+    existingSynopsis: input.existing?.synopsis.trim() ?? '',
+    existingOutline: input.existing?.outline.trim() ?? '',
     ...skillsData(input.skills),
     chapterCount: input.chapterCount,
     wordsPerChapter: input.wordsPerChapter,

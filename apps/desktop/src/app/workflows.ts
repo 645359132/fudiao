@@ -564,24 +564,32 @@ function quickBook(host: WorkflowHost, project: () => SqlPort | null): WorkflowD
         kind: 'draft',
         output: BookSeedOutput,
         async run({ params, stepKey, options, onProgress }) {
-          onProgress('正在由想法生成作品名、简介、大纲与主要人物');
+          // 没写想法时按作品已有的大纲补人物与关系（大纲不动）；见 draftBookSeed。
+          onProgress(params.idea.trim() === '' ? '作品已有大纲：正在按它补出主要人物与人物关系' : '正在由想法生成作品名、简介、大纲与主要人物');
           const seed = await host.draftBookSeed({ idea: params.idea, genre: params.genre, chapterCount: params.chapters, wordsPerChapter: params.wordsPerChapter, stepKey }, options);
           if (!seed.ok) return seed;
           return ok({ output: seed.value, note: `《${seed.value.title}》：${seed.value.characters.length} 个主要人物` });
         },
-        async confirm() {
+        async confirm({ params }) {
+          // 按已有大纲补人物时草稿里的大纲就是作品的原文，采用不会换掉它。
+          if (params.idea.trim() === '') return null;
           const work = await host.reloadWork();
           return work.ok && work.value.project.outline.trim() !== '' ? '采用会替换作品已有的大纲（大纲没有历史版本）' : null;
         },
         async skipIf({ params }) {
           if (params.idea.trim() !== '') return null;
-          const work = await host.reloadWork();
-          return work.ok && work.value.project.outline.trim() !== '' ? '没有写想法，沿用作品已有的大纲与人物' : null;
+          // 只看大纲不够：AI 助手新建作品时常常只写了几句大纲、一个人物都没建，跳过之后章节计划就没有出场人物（作者反馈 2026-10-29）。
+          const status = await host.quickBookStatus();
+          return status.ok && status.value.outline && status.value.characters > 0 ? '没有写想法，沿用作品已有的大纲与人物' : null;
         },
-        async adopt(_ctx, seed) {
+        async adopt({ params }, seed) {
           const applied = await host.applyBookSeed(seed);
           if (!applied.ok) return applied;
-          return ok(`已写入作品信息与大纲，新建 ${applied.value.created} 个人物、${applied.value.relations} 条关系`);
+          return ok(
+            params.idea.trim() === ''
+              ? `已按作品的大纲新建 ${applied.value.created} 个人物、${applied.value.relations} 条关系，大纲不变`
+              : `已写入作品信息与大纲，新建 ${applied.value.created} 个人物、${applied.value.relations} 条关系`,
+          );
         },
       }),
       step<QuickBookParams, PlanDraft>({

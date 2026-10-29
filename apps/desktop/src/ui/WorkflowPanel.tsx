@@ -432,7 +432,7 @@ function StartForm({ info, modelReady, initialIdea = '', onStarted }: { readonly
             touched();
           }}
         />
-        <p className="muted">已有大纲时可以不写，开始后跳过“大纲与人物”这一步。</p>
+        <p className="muted">已有大纲时可以不写：作品里已有人物就跳过“大纲与人物”这一步，还没有人物时按大纲补出人物与关系、大纲不动。</p>
         <div className="form-row">
           <label>
             类型（可不填）

@@ -2365,8 +2365,9 @@ describe('写作工作流的界面（B78）', () => {
     const seedStep = await within(page).findByRole('region', { name: '第 2 步：大纲与人物' });
     await waitFor(() => expect(seedStep.textContent).toContain('先写一句想法'));
     expect(within(page).queryByRole('button', { name: '继续' })).toBeNull();
-    // 作者补上大纲，点顶部的“重试第 2 步”：这一步改为跳过，接着拆章节计划。
+    // 作者补上大纲与一个人物（只有大纲时这一步会按大纲补人物，不跳过），点顶部的“重试第 2 步”：这一步改为跳过，接着拆章节计划。
     expect((await service.updateWorkInfo({ outline: '开端：林舟当玉。结局：林舟得知身世。' })).ok).toBe(true);
+    expect((await service.createEntity('character', '林舟')).ok).toBe(true);
     const plan = { chapters: [{ title: '夜叩', goal: '林舟当玉', cast: [], beats: ['叩门'], plant: [], payoff: [], treatment: '', targetWords: 2000 }], foreshadows: [] };
     deps.llmResponses.push(reply(JSON.stringify(plan)));
     await user.click(within(page).getByRole('button', { name: '重试第 2 步' }));

@@ -362,12 +362,32 @@ describe('写作工作流（B78）', () => {
     expect(value(await app.listWorkflows()).map((v) => v.run.id)).toEqual([run.run.id]);
   });
 
-  it('没写想法而作品已有大纲时跳过“大纲与人物”；没有大纲时这一步说明要先写想法', async () => {
+  it('没写想法时：没有大纲说明要先写想法；只有大纲没有人物时按大纲补人物、大纲不动；大纲与人物都有才跳过“大纲与人物”', async () => {
     const { deps, app } = await setup();
     const none = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, idea: ' ' }, mode: 'step', budgetUsd: null }));
     const failed = value(await app.advanceWorkflow(none.run.id));
     expect(failed.view.steps[1]).toMatchObject({ status: 'failed', note: expect.stringContaining('先写一句想法') });
-    value(await app.updateWorkInfo({ outline: '开端：林舟当玉。结局：得知身世。' }));
+    value(await app.abandonWorkflow(none.run.id));
+
+    // 作品有大纲、没有人物（AI 助手新建作品时常常如此）：这一步照做，按大纲补人物，草稿里的大纲就是作品的原文，不要作者确认替换。
+    value(await app.updateWorkInfo({ synopsis: '林舟当玉遇旧主。', outline: '开端：林舟当玉。结局：得知身世。' }));
+    const fill = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, idea: '' }, mode: 'step', budgetUsd: null }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ ...seed, title: '模型拟的名', outline: '模型另写的大纲' })));
+    const filled = value(await app.advanceWorkflow(fill.run.id));
+    expect(filled.view.steps.map((s) => s.status)).toEqual(['done', 'awaiting_author', 'pending', 'pending', 'pending']);
+    const request = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    expect(request).toContain('作者已有的大纲：\\n开端：林舟当玉。结局：得知身世。');
+    expect(request).toContain('请按这份大纲补出主要人物与人物关系');
+    // 草稿里的作品名与大纲是作品的原文，不是模型写的。
+    expect(filled.view.steps[1]).toMatchObject({ note: '《新作品》：2 个主要人物', output: { title: '新作品', outline: '开端：林舟当玉。结局：得知身世。' } });
+    const adopted = value(await app.adoptWorkflowStep(fill.run.id, 1));
+    expect(adopted.steps[1]).toMatchObject({ status: 'done', note: '已按作品的大纲新建 2 个人物、0 条关系，大纲不变' });
+    expect(value(await app.reloadWork()).project).toMatchObject({ title: '新作品', synopsis: '林舟当玉遇旧主。', outline: '开端：林舟当玉。结局：得知身世。' });
+    expect(value(await app.listEntities()).map((e) => e.name).sort()).toEqual(['林舟', '钱四']);
+    value(await app.abandonWorkflow(fill.run.id));
+
+    // 大纲与人物都有了：跳过。
     const run = value(await app.startWorkflow({ workflow: 'quick_book', params: { ...params, idea: '' }, mode: 'step', budgetUsd: null }));
     deps.llmResponses.push(reply(JSON.stringify(draft)));
     const out = value(await app.advanceWorkflow(run.run.id));

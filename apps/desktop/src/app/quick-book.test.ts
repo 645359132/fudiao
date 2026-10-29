@@ -71,6 +71,19 @@ describe('快速成书（B67）', () => {
     expect(await app.draftBookSeed({ idea: ' ', genre: '', chapterCount: 5, wordsPerChapter: 2000 })).toMatchObject({ ok: false, error: { code: 'settings' } });
   });
 
+  it('没写想法而作品已有大纲时按大纲补人物：请求带简介与大纲、不带想法，结果的作品名、类型、简介与大纲沿用作品里的', async () => {
+    const { deps, app } = await setup();
+    await addTestedModel(app, deps);
+    value(await app.updateWorkInfo({ genre: '古风悬疑', synopsis: '林舟当玉遇旧主。', outline: '开端：林舟当玉。结局：得知身世。' }));
+    deps.llmRequests.length = 0;
+    deps.llmResponses.push(reply(JSON.stringify({ ...seed, title: '模型拟的名', genre: '武侠', synopsis: '模型写的简介', outline: '模型另写的大纲' })));
+    const drafted = value(await app.draftBookSeed({ idea: '', genre: '', chapterCount: 12, wordsPerChapter: 3000 }));
+    expect(drafted).toMatchObject({ title: '新作品', genre: '古风悬疑', synopsis: '林舟当玉遇旧主。', outline: '开端：林舟当玉。结局：得知身世。', characters: seed.characters });
+    const body = JSON.stringify(deps.llmRequests[0]?.body ?? {});
+    for (const part of ['作者已有的简介：林舟当玉遇旧主。', '作者已有的大纲：\\n开端：林舟当玉。结局：得知身世。', '请按这份大纲补出主要人物与人物关系', '四项照抄作者已有的']) expect(body).toContain(part);
+    expect(body).not.toContain('作者的想法');
+  });
+
   it('生成骨架时带上启用的规划技能（B75）：默认有雪花写作法，停用后不带；写章节的技能不带', async () => {
     const { deps, app } = await setup();
     await addTestedModel(app, deps);

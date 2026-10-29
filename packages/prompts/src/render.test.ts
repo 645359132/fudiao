@@ -566,7 +566,16 @@ describe('作品骨架（B67 快速成书）', () => {
     const text = fullText(prompt);
     for (const part of ['作者的想法：落魄书生当铺夜遇旧主', '类型：古风悬疑', '作品名：当铺夜谈', '已有的人物：林舟；', '约 12 章、每章约 3000 字', '计划写 12 章']) expect(text).toContain(part);
     const bare = fullText(unwrap(renderBookSeed({ idea: '雨夜道歉', genre: '', title: '', characters: [], skills: [], chapterCount: 5, wordsPerChapter: 2000 })));
-    for (const part of ['类型：', '作品名：', '已有的人物：', '规划技能']) expect(bare).not.toContain(part);
+    for (const part of ['类型：', '作品名：', '已有的人物：', '规划技能', '作者已有的大纲']) expect(bare).not.toContain(part);
+  });
+
+  it('按已有大纲补人物：带简介与大纲、不带想法，要求四项照抄、只写人物与关系', () => {
+    const text = fullText(unwrap(renderBookSeed({ idea: '', genre: '古风悬疑', title: '当铺夜谈', characters: [], skills: [], chapterCount: 12, wordsPerChapter: 3000, existing: { synopsis: ' 林舟当玉遇旧主。 ', outline: '开端：林舟当玉。\n结局：得知身世。' } })));
+    for (const part of ['已经写好的简介与大纲补成', '四项照抄作者已有的', '作者已有的简介：林舟当玉遇旧主。', '作者已有的大纲：\n开端：林舟当玉。\n结局：得知身世。', '请按这份大纲补出主要人物与人物关系']) expect(text).toContain(part);
+    for (const part of ['作者的想法', '一句话的想法展开', '篇幅要够拆成']) expect(text).not.toContain(part);
+    const noSynopsis = fullText(unwrap(renderBookSeed({ idea: '', genre: '', title: '', characters: [], skills: [], chapterCount: 5, wordsPerChapter: 2000, existing: { synopsis: '', outline: '只有大纲' } })));
+    expect(noSynopsis).not.toContain('作者已有的简介');
+    expect(noSynopsis).toContain('作者已有的大纲：\n只有大纲');
   });
 
   it('规划技能（B75）：启用的技能写在系统提示里，输出要求优先', () => {
